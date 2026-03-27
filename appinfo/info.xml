@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>teamhub</id>
+    <name>TeamHub</name>
+    <summary>Team collaboration hub — messaging, activity feed and app widgets for Nextcloud Teams</summary>
+    <description><![CDATA[TeamHub provides a unified collaboration workspace built on top of Nextcloud Teams (Circles).
+
+Each team gets a shared home with:
+- **Messages** — post announcements, questions and polls to your team
+- **Activity feed** — a single view of recent file, calendar, task and member changes across all shared resources
+- **App tabs** — quick-links to the team's shared Talk chat, Files folder, Calendar and Deck board
+- **Sidebar widgets** — upcoming calendar events, open Deck tasks, Pages, and the activity snapshot
+- **Team management** — invite members by user, group, email or federated account; manage roles and pending requests
+
+TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
+    <version>2.22.35</version>
+    <licence>agpl</licence>
+    <author>Justin Doek</author>
+    <namespace>TeamHub</namespace>
+    <category>organization</category>
+    <category>tools</category>
+    <website>https://github.com/zinloosg/Nextcloud-Teamhub</website>
+    <bugs>https://github.com/zinloosg/Nextcloud-Teamhub/issues</bugs>
+    <repository type="git">https://github.com/zinloosg/Nextcloud-Teamhub/teamhub.git</repository>
+    
+    <dependencies>
+        <nextcloud min-version="32" max-version="34"/>
+        <php min-version="8.1" max-version="8.4"/>
+    </dependencies>
+    
+    
+    
+    <navigations>
+        <navigation>
+            <name>TeamHub</name>
+            <route>teamhub.page.index</route>
+            <icon>app.svg</icon>
+            <order>5</order>
+        </navigation>
+    </navigations>
+
+    <settings>
+        <admin>OCA\TeamHub\Settings\AdminSettings</admin>
+        <admin-section>OCA\TeamHub\Settings\AdminSection</admin-section>
+    </settings>
+</info>

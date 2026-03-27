@@ -1,0 +1,11 @@
+-- =============================================================================
+-- TeamHub — MySQL / MariaDB schema reference
+-- =============================================================================
+-- This file exists for reference only.
+-- For development use: sql/dev-setup-mysql.sql
+-- For production use: lib/Migration/ (run via occ upgrade)
+-- =============================================================================
+
+-- See dev-setup-mysql.sql for the complete current schema.
+-- That file is kept up-to-date with every release and is safe to run
+-- repeatedly (it drops and recreates all tables).

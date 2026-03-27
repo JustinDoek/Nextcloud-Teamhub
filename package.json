@@ -1,0 +1,75 @@
+{
+  "name": "teamhub",
+  "version": "2.22.35",
+  "description": "Team collaboration hub for Nextcloud",
+  "scripts": {
+    "dev": "webpack --config webpack.config.js --mode=development",
+    "build": "webpack --config webpack.config.js --mode=production",
+    "watch": "webpack --config webpack.config.js --mode=development --watch"
+  },
+  "browserslist": [
+    "extends @nextcloud/browserslist-config"
+  ],
+  "dependencies": {
+    "@nextcloud/auth": "^2.4.0",
+    "@nextcloud/axios": "^2.5.1",
+    "@nextcloud/dialogs": "^5.3.7",
+    "@nextcloud/initial-state": "^2.2.0",
+    "@nextcloud/l10n": "^3.1.0",
+    "@nextcloud/router": "^3.0.1",
+    "@nextcloud/vue": "^8.20.0",
+    "linkifyjs": "^4.1.3",
+    "vue": "^2.7.16",
+    "vue-material-design-icons": "^5.3.0",
+    "vuex": "^3.6.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/preset-env": "^7.26.0",
+    "@nextcloud/browserslist-config": "^3.0.1",
+    "babel-loader": "^9.2.1",
+    "css-loader": "^7.1.2",
+    "sass": "^1.83.0",
+    "sass-loader": "^16.0.3",
+    "style-loader": "^4.0.0",
+    "vue-loader": "^15.11.1",
+    "vue-style-loader": "^4.1.3",
+    "vue-template-compiler": "^2.7.16",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^5.1.4",
+    "loader-utils": "2.0.4"
+  },
+  "overrides": {
+    "minimatch": "^10.0.0",
+    "postcss": "^8.4.49",
+    "vue": "^2.7.16",
+    "vue-template-compiler": "^2.7.16",
+    "semver": "^7.6.0",
+    "word-wrap": "^1.2.4",
+    "json5": "^2.2.3",
+    "tough-cookie": "^4.1.3",
+    "nth-check": "^2.1.1",
+    "braces": "^3.0.3",
+    "micromatch": "^4.0.8",
+    "ip": "^2.0.1",
+    "cross-spawn": "^7.0.6",
+    "path-to-regexp": "^0.1.12",
+    "cookie": "^0.7.0",
+    "send": "^0.19.0",
+    "serve-static": "^1.16.0",
+    "follow-redirects": "^1.15.6",
+    "node-domexception": "^1.0.0",
+    "ws": "^8.18.0",
+    "body-parser": "^1.20.3",
+    "express": "^4.21.1",
+    "nanoid": "^3.3.8",
+    "rollup": "^4.22.4",
+    "tar": "^6.2.1",
+    "serialize-javascript": "6.0.2",
+    "loader-utils": "2.0.4"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <style>
+      .cls-1 { fill: none; stroke: #000; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+  <g>
+    <circle class="cls-1" cx="11" cy="10" r="3"/>
+    <circle class="cls-1" cx="21" cy="10" r="3"/>
+    <circle class="cls-1" cx="16" cy="16" r="3"/>
+    <path class="cls-1" d="M7,20 C7,17 9,15 11,15 C13,15 15,17 15,20"/>
+    <path class="cls-1" d="M17,20 C17,17 19,15 21,15 C23,15 25,17 25,20"/>
+    <path class="cls-1" d="M11,26 C11,23 13,21 16,21 C19,21 21,23 21,26"/>
+    <rect class="cls-1" x="22" y="22" width="8" height="6" rx="1"/>
+    <path class="cls-1" d="M22,23 L26,26 L30,23"/>
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+/* TeamHub v2.6.2 — Global styles only. Component styles live in .vue files */
+
+/* Mount point */
+#teamhub-app {
+    height: 100%;
+    width: 100%;
+}
+
+/* Ensure NcContent fills viewport */
+.app-teamhub {
+    height: 100%;
+}
+
+/* Widget headings - bold and distinct color */
+.teamhub-widget-item > .app-navigation-entry__name {
+    font-weight: 700;
+    color: var(--color-primary-element);
+}

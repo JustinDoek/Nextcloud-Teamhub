@@ -1,0 +1,19 @@
+{
+    "n": "nextcloud/teamhub",
+    "description": "Team collaboration hub with messaging and widgets for Nextcloud",
+    "type": "project",
+    "license": "AGPL-3.0-or-later",
+    "authors": [
+        {
+            "n": "TeamHub Developers"
+        }
+    ],
+    "require": {
+        "php": "^8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "OCA\\TeamHub\\": "lib/"
+        }
+    }
+}
