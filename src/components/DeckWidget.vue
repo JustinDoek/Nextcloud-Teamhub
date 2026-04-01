@@ -3,10 +3,8 @@
         <div v-if="deckTasks.length === 0" class="deck-widget__empty">
             {{ t('teamhub', 'No upcoming tasks') }}
         </div>
-
         <ul v-else class="deck-widget__list">
             <li v-for="card in deckTasks" :key="card.id" class="deck-card">
-                <!-- Row 1: title + date -->
                 <div class="deck-card__row1">
                     <a
                         :href="cardUrl(card)"
@@ -19,8 +17,6 @@
                         {{ formatDate(card.duedate) }}
                     </span>
                 </div>
-
-                <!-- Row 2: assignee avatars -->
                 <div v-if="card.assignedUsers && card.assignedUsers.length" class="deck-card__assignees">
                     <NcAvatar
                         v-for="u in card.assignedUsers"
@@ -48,9 +44,6 @@ export default {
     components: { NcAvatar },
     computed: {
         ...mapState(['deckTasks', 'resources']),
-        deckUrl() {
-            return generateUrl('/apps/deck/board/' + (this.resources.deck?.board_id || ''))
-        },
     },
     methods: {
         t,
@@ -60,13 +53,12 @@ export default {
         formatDate(duedate) {
             const d = new Date(duedate)
             const now = new Date()
-            const sameYear = d.getFullYear() === now.getFullYear()
             return d.toLocaleString(undefined, {
                 month: 'short',
                 day: 'numeric',
                 hour: '2-digit',
                 minute: '2-digit',
-                year: sameYear ? undefined : 'numeric',
+                year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
             })
         },
     },
@@ -74,44 +66,18 @@ export default {
 </script>
 
 <style scoped>
-.deck-widget {
-    padding: 8px 16px 12px;
-    border-bottom: 1px solid var(--color-border-dark);
-}
-
-.deck-widget__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-}
-
-.deck-widget__title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
+.deck-widget { padding: 0 0 4px; }
 .deck-widget__empty {
     font-size: 13px;
     color: var(--color-text-maxcontrast);
-    padding: 4px 0;
+    padding: 8px 16px;
 }
-
-.deck-widget__list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+.deck-widget__list { list-style: none; padding: 0; margin: 0; }
+.deck-card {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--color-border-dark);
 }
-
+.deck-card:last-child { border-bottom: none; }
 .deck-card__row1 {
     display: flex;
     align-items: baseline;
@@ -119,7 +85,6 @@ export default {
     gap: 6px;
     min-width: 0;
 }
-
 .deck-card__title {
     flex: 1;
     min-width: 0;
@@ -131,23 +96,14 @@ export default {
     text-decoration: none;
     color: var(--color-main-text);
 }
-
 .deck-card__title:hover { color: var(--color-primary-element); }
-
 .deck-card__title--overdue { color: var(--color-error); }
-
 .deck-card__date {
     font-size: 11px;
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
     flex-shrink: 0;
 }
-
 .deck-card__date--overdue { color: var(--color-error); }
-
-.deck-card__assignees {
-    display: flex;
-    gap: 3px;
-    margin-top: 4px;
-}
+.deck-card__assignees { display: flex; gap: 3px; margin-top: 4px; }
 </style>

@@ -162,6 +162,18 @@
                     :open="true"
                     class="teamhub-widget-item">
                     <template #icon><Calendar :size="20" /></template>
+                    <template #actions>
+                        <NcActionButton
+                            v-if="resources.talk"
+                            @click="showScheduleMeeting = true">
+                            <template #icon><VideoIcon :size="20" /></template>
+                            {{ t('teamhub', 'Schedule meeting') }}
+                        </NcActionButton>
+                        <NcActionButton @click="showAddEvent = true">
+                            <template #icon><CalendarPlus :size="20" /></template>
+                            {{ t('teamhub', 'Add agenda item') }}
+                        </NcActionButton>
+                    </template>
                     <template #default>
                         <CalendarWidget />
                     </template>
@@ -175,6 +187,12 @@
                     :open="true"
                     class="teamhub-widget-item">
                     <template #icon><CardText :size="20" /></template>
+                    <template #actions>
+                        <NcActionButton @click="showAddTask = true">
+                            <template #icon><CheckboxMarkedOutline :size="20" /></template>
+                            {{ t('teamhub', 'Add task') }}
+                        </NcActionButton>
+                    </template>
                     <template #default>
                         <DeckWidget />
                     </template>
@@ -216,6 +234,25 @@
             :team-id="currentTeamId"
             @close="showInviteModal = false"
             @invited="$store.dispatch('fetchMembers', currentTeamId)" />
+
+        <!-- Schedule meeting modal -->
+        <ScheduleMeetingModal
+            v-if="showScheduleMeeting"
+            :team-id="currentTeamId"
+            @close="showScheduleMeeting = false; $store.dispatch('fetchMessages', currentTeamId)" />
+
+        <!-- Add agenda item modal -->
+        <AddEventModal
+            v-if="showAddEvent"
+            :team-id="currentTeamId"
+            @close="showAddEvent = false" />
+
+        <!-- Add task modal -->
+        <AddTaskModal
+            v-if="showAddTask"
+            :board-id="resources.deck && resources.deck.board_id"
+            @close="showAddTask = false"
+            @created="$store.dispatch('fetchDeckTasks', resources.deck && resources.deck.board_id)" />
     </div>
 </template>
 
@@ -231,7 +268,9 @@ import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Chat from 'vue-material-design-icons/Chat.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
+import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
 import CardText from 'vue-material-design-icons/CardText.vue'
+import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -242,6 +281,7 @@ import ExitToApp from 'vue-material-design-icons/ExitToApp.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import Cog from 'vue-material-design-icons/Cog.vue'
+import VideoIcon from 'vue-material-design-icons/Video.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -251,6 +291,9 @@ import ActivityWidget from './ActivityWidget.vue'
 import ActivityFeedView from './ActivityFeedView.vue'
 import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
+import ScheduleMeetingModal from './ScheduleMeetingModal.vue'
+import AddEventModal from './AddEventModal.vue'
+import AddTaskModal from './AddTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
 
 export default {
@@ -261,7 +304,9 @@ export default {
         NcAvatar,
         NcLoadingIcon,
         NcActionButton,
-        MessageOutline, Chat, Folder, Calendar, CardText, Plus, OpenInNew, InformationOutline, AccountGroup, ClockOutline, FileDocumentOutline, ExitToApp, Cog, ContentCopy, AccountPlus,
+        MessageOutline, Chat, Folder, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline,
+        Plus, OpenInNew, InformationOutline, AccountGroup, ClockOutline, FileDocumentOutline,
+        ExitToApp, Cog, ContentCopy, AccountPlus, VideoIcon,
         MessageStream,
         DeckWidget,
         CalendarWidget,
@@ -270,12 +315,18 @@ export default {
         ActivityFeedView,
         ManageLinksModal,
         InviteMemberModal,
+        ScheduleMeetingModal,
+        AddEventModal,
+        AddTaskModal,
         AppEmbed,
     },
     data() {
         return {
-            showManageLinks: false,
-            showInviteModal: false,
+            showManageLinks:     false,
+            showInviteModal:     false,
+            showScheduleMeeting: false,
+            showAddEvent:        false,
+            showAddTask:         false,
         }
     },
     computed: {

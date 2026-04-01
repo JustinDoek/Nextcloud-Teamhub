@@ -6,6 +6,9 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\MessageMapper;
 use OCP\App\IAppManager;
+use OCP\IConfig;
+use OCP\IDBConnection;
+use OCP\IURLGenerator;
 use OCP\IUserManager;
 use OCP\IUserSession;
 use OCP\Mail\IMailer;
@@ -23,6 +26,9 @@ class MessageService {
     private IUserManager $userManager;
     private ContainerInterface $container;
     private LoggerInterface $logger;
+    private IDBConnection $db;
+    private IConfig $config;
+    private IURLGenerator $urlGenerator;
 
     public function __construct(
         MessageMapper $messageMapper,
@@ -32,7 +38,10 @@ class MessageService {
         IMailer $mailer,
         IUserManager $userManager,
         ContainerInterface $container,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        IDBConnection $db,
+        IConfig $config,
+        IURLGenerator $urlGenerator
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -43,6 +52,9 @@ class MessageService {
         $this->container = $container;
         $this->circlesManager = null;
         $this->logger = $logger;
+        $this->db = $db;
+        $this->config = $config;
+        $this->urlGenerator = $urlGenerator;
     }
 
     private function getCirclesManager() {
@@ -56,10 +68,13 @@ class MessageService {
     }
 
     /**
-     * Get messages for a specific team with comment counts
+     * Get messages for a team. Returns ['pinned' => array|null, 'messages' => array].
      */
     public function getTeamMessages(string $teamId, int $limit = 50, int $offset = 0): array {
-        return $this->messageMapper->findByTeamId($teamId, $limit, $offset);
+        return [
+            'pinned'   => $this->messageMapper->findPinnedByTeamId($teamId),
+            'messages' => $this->messageMapper->findByTeamId($teamId, $limit, $offset),
+        ];
     }
 
     /**
@@ -79,22 +94,22 @@ class MessageService {
             $messageType = 'normal';
         }
 
-        $circlesManager = $this->getCirclesManager();
-
         try {
+            // Resolve team name via direct DB query — avoids probeCircles() which
+            // silently drops teams with non-zero config bitmasks (architectural decision #1).
+            $teamName = $this->getTeamNameById($teamId);
+            if ($teamName === null) {
+                throw new \Exception('Team not found');
+            }
+
+            // Verify membership via Circles API (individual getCircle still works).
+            $circlesManager = $this->getCirclesManager();
             $federatedUser = $circlesManager->getFederatedUser($user->getUID(), 1);
             $circlesManager->startSession($federatedUser);
-
-            $probeResult = $circlesManager->probeCircles();
-            $circles = is_array($probeResult) ? $probeResult : ($probeResult ? $probeResult->getCircles() : []);
-
-            $circle = null;
-            foreach ($circles as $c) {
-                $cId = method_exists($c, 'getSingleId') ? $c->getSingleId() : $c->getId();
-                if ($cId === $teamId) {
-                    $circle = $c;
-                    break;
-                }
+            try {
+                $circle = $circlesManager->getCircle($teamId);
+            } finally {
+                $circlesManager->stopSession();
             }
 
             if (!$circle) {
@@ -103,12 +118,12 @@ class MessageService {
 
             $messageData = $this->messageMapper->create($teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions);
 
-            // Send notifications to all members
-            $this->sendNotifications($teamId, $messageData['id'], $subject, $user->getDisplayName(), $circle);
+            // Send notifications using DB-resolved team name (not probeCircles).
+            $this->sendNotificationsWithName($teamId, $messageData['id'], $subject, $user->getDisplayName(), $teamName, $circle);
 
-            // Send email to all members if priority message
+            // Send email to all members if priority message.
             if ($priority === 'priority') {
-                $this->sendPriorityEmails($subject, $message, $user->getDisplayName(), $circle);
+                $this->sendPriorityEmailsWithName($subject, $message, $user->getDisplayName(), $teamName, $circle);
             }
 
             return $messageData;
@@ -177,12 +192,47 @@ class MessageService {
     }
 
     /**
-     * Send in-app notifications to all members
+     * Resolve a team display name from circles_circle directly (avoids probeCircles).
      */
-    private function sendNotifications(string $teamId, int $messageId, string $subject, string $authorName, $circle): void {
+    private function getTeamNameById(string $teamId): ?string {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('display_name')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1);
+        $result = $qb->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (string)$row['display_name'] : null;
+    }
+
+    /**
+     * Get the Circles member level integer for a user in a team (0 = not a member).
+     * Levels: 1 = member, 4 = moderator, 8 = admin, 9 = owner.
+     */
+    private function getMemberLevel(string $teamId, string $userId): int {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('level')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->setMaxResults(1);
+        $result = $qb->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (int)$row['level'] : 0;
+    }
+
+    /**
+     * Send in-app notifications to all members.
+     * Uses a pre-resolved $teamName string so we never need probeCircles().
+     */
+    private function sendNotificationsWithName(string $teamId, int $messageId, string $subject, string $authorName, string $teamName, $circle): void {
         try {
             $members = $circle->getMembers();
             $currentUser = $this->userSession->getUser();
+            $link = $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?team=' . urlencode($teamId);
 
             foreach ($members as $member) {
                 try {
@@ -195,10 +245,13 @@ class MessageService {
                         ->setDateTime(new \DateTime())
                         ->setObject('message', (string)$messageId)
                         ->setSubject('new_message', [
-                            'author' => $authorName,
-                            'subject' => $subject,
-                            'team' => $circle->getDisplayName(),
-                        ]);
+                            'author'   => $authorName,
+                            'authorId' => $currentUser->getUID(),
+                            'subject'  => $subject,
+                            'team'     => $teamName,
+                            'teamId'   => $teamId,
+                        ])
+                        ->setLink($link);
                     $this->notificationManager->notify($notification);
                 } catch (\Exception $e) {
                     $this->logger->error('Failed to notify member - ', ['exception' => $e, 'app' => Application::APP_ID]);
@@ -210,9 +263,9 @@ class MessageService {
     }
 
     /**
-     * Send priority emails to all members
+     * Send priority emails to all members.
      */
-    private function sendPriorityEmails(string $subject, string $message, string $authorName, $circle): void {
+    private function sendPriorityEmailsWithName(string $subject, string $message, string $authorName, string $teamName, $circle): void {
         try {
             $members = $circle->getMembers();
             $currentUser = $this->userSession->getUser();
@@ -232,25 +285,164 @@ class MessageService {
                     $mail->setSubject('[TeamHub] ' . $subject);
                     $mail->setTo([$email => $ncUser->getDisplayName()]);
                     $mail->setPlainBody(
-                        "New priority message from {$authorName} in team {$circle->getDisplayName()}:\n\n" .
+                        "New priority message from {$authorName} in team {$teamName}:\n\n" .
                         "Subject: {$subject}\n\n" .
                         $message
                     );
                     $mail->setHtmlBody(
                         "<p><strong>New priority message from {$authorName}</strong><br>" .
-                        "Team: {$circle->getDisplayName()}</p>" .
-                        "<h3>{$subject}</h3>" .
+                        "Team: " . htmlspecialchars($teamName) . "</p>" .
+                        "<h3>" . htmlspecialchars($subject) . "</h3>" .
                         "<p>" . nl2br(htmlspecialchars($message)) . "</p>"
                     );
 
                     $this->mailer->send($mail);
-                        } catch (\Exception $e) {
+                } catch (\Exception $e) {
                     $this->logger->error('Failed to send priority email - ', ['exception' => $e, 'app' => Application::APP_ID]);
                 }
             }
         } catch (\Exception $e) {
             $this->logger->error('Failed to send priority emails - ', ['exception' => $e, 'app' => Application::APP_ID]);
         }
+    }
+
+    /**
+     * Pin a message. Only callable by members meeting the configured minimum level.
+     * Enforces the one-pin-per-team limit by unpinning any existing pin first.
+     */
+    public function pinMessage(string $teamId, int $messageId): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('Not authenticated');
+        }
+
+        // Verify the message belongs to this team
+        $existing = $this->messageMapper->find($messageId);
+        if ($existing['team_id'] !== $teamId) {
+            throw new \Exception('Message does not belong to this team');
+        }
+
+        // Check caller's member level against the admin-configured threshold
+        $requiredLevel = $this->getPinMinLevel();
+        $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
+        if ($callerLevel < $requiredLevel) {
+            throw new \Exception('Insufficient permissions to pin messages');
+        }
+
+        // Unpin any existing pin, then pin the new one
+        $this->messageMapper->unpinAllForTeam($teamId);
+        return $this->messageMapper->pin($messageId);
+    }
+
+    /**
+     * Unpin a message. Same level requirement as pinning.
+     */
+    public function unpinMessage(string $teamId, int $messageId): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('Not authenticated');
+        }
+
+        $existing = $this->messageMapper->find($messageId);
+        if ($existing['team_id'] !== $teamId) {
+            throw new \Exception('Message does not belong to this team');
+        }
+
+        $requiredLevel = $this->getPinMinLevel();
+        $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
+        if ($callerLevel < $requiredLevel) {
+            throw new \Exception('Insufficient permissions to unpin messages');
+        }
+
+        return $this->messageMapper->unpin($messageId);
+    }
+
+    /**
+     * Return the pinned message for a team, or null.
+     */
+    public function getPinnedMessage(string $teamId): ?array {
+        return $this->messageMapper->findPinnedByTeamId($teamId);
+    }
+
+    /**
+     * Return the minimum Circles level required to pin, based on admin setting.
+     * Levels: member=1, moderator=4, admin=8.
+     */
+    private function getPinMinLevel(): int {
+        $setting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
+        return match($setting) {
+            'member'    => 1,
+            'admin'     => 8,
+            default     => 4, // moderator
+        };
+    }
+
+    /**
+     * Return the configured pinMinLevel string (for the admin API response).
+     */
+    public function getPinMinLevelSetting(): string {
+        return $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
+    }
+
+    /**
+     * Mark that the current user has seen a team's messages right now.
+     */
+    public function markTeamSeen(string $teamId): void {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('Not authenticated');
+        }
+        $userId = $user->getUID();
+        $now = time();
+
+        // UPSERT: update if exists, insert if not
+        $qb = $this->db->getQueryBuilder();
+        $result = $qb->select('user_id')
+            ->from('teamhub_last_seen')
+            ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $exists = (bool)$result->fetch();
+        $result->closeCursor();
+
+        if ($exists) {
+            $qb = $this->db->getQueryBuilder();
+            $qb->update('teamhub_last_seen')
+                ->set('last_seen_at', $qb->createNamedParameter($now, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+                ->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+                ->executeStatement();
+        } else {
+            $qb = $this->db->getQueryBuilder();
+            $qb->insert('teamhub_last_seen')
+                ->values([
+                    'user_id'      => $qb->createNamedParameter($userId),
+                    'team_id'      => $qb->createNamedParameter($teamId),
+                    'last_seen_at' => $qb->createNamedParameter($now, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
+                ])
+                ->executeStatement();
+        }
+    }
+
+    /**
+     * Return the last-seen timestamp for the current user + team (0 if never seen).
+     */
+    public function getTeamLastSeen(string $teamId): int {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            return 0;
+        }
+        $qb = $this->db->getQueryBuilder();
+        $result = $qb->select('last_seen_at')
+            ->from('teamhub_last_seen')
+            ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($user->getUID())))
+            ->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (int)$row['last_seen_at'] : 0;
     }
     
     /**

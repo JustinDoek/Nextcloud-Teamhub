@@ -33,40 +33,27 @@ import MapMarkerIcon from 'vue-material-design-icons/MapMarker.vue'
 
 export default {
     name: 'CalendarWidget',
-    components: {
-        NcLoadingIcon,
-        CalendarIcon,
-        MapMarkerIcon,
-    },
+    components: { NcLoadingIcon, CalendarIcon, MapMarkerIcon },
     data() {
-        return {
-            loading: false,
-            events: [],
-        }
+        return { loading: false, events: [] }
     },
     computed: {
         ...mapState(['currentTeamId']),
     },
     watch: {
-        currentTeamId: {
-            immediate: true,
-            handler() {
-                this.loadEvents()
-            },
-        },
+        currentTeamId: { immediate: true, handler() { this.loadEvents() } },
     },
     methods: {
         t,
         async loadEvents() {
             if (!this.currentTeamId) return
-            
             this.loading = true
             try {
-                const response = await axios.get(
+                const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/calendar/events`)
                 )
-                this.events = response.data || []
-            } catch (error) {
+                this.events = data || []
+            } catch {
                 this.events = []
             } finally {
                 this.loading = false
@@ -74,14 +61,12 @@ export default {
         },
         formatEventTime(start) {
             if (!start) return ''
-            
             const date = new Date(start)
             const now = new Date()
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
             const tomorrow = new Date(today)
             tomorrow.setDate(tomorrow.getDate() + 1)
             const eventDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-            
             let dateStr = ''
             if (eventDate.getTime() === today.getTime()) {
                 dateStr = t('teamhub', 'Today')
@@ -90,43 +75,26 @@ export default {
             } else {
                 dateStr = date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
             }
-            
-            const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            return `${dateStr} ${timeStr}`
+            return `${dateStr} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
         },
     },
 }
 </script>
 
 <style scoped>
-.calendar-widget {
-    padding: 0;
-}
-
+.calendar-widget { padding: 0; }
 .calendar-widget__loading,
 .calendar-widget__empty {
-    text-align: left !important;
     padding: 12px 16px;
-    text-align: center;
     color: var(--color-text-maxcontrast);
     font-size: 13px;
 }
-
-.calendar-widget__list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
+.calendar-widget__list { list-style: none; padding: 0; margin: 0; }
 .calendar-event {
     padding: 10px 16px;
     border-bottom: 1px solid var(--color-border-dark);
 }
-
-.calendar-event:last-child {
-    border-bottom: none;
-}
-
+.calendar-event:last-child { border-bottom: none; }
 .calendar-event__time {
     display: flex;
     align-items: center;
@@ -135,14 +103,11 @@ export default {
     color: var(--color-text-maxcontrast);
     margin-bottom: 4px;
 }
-
 .calendar-event__title {
     font-size: 14px;
     font-weight: 500;
     color: var(--color-main-text);
-    margin-bottom: 2px;
 }
-
 .calendar-event__location {
     display: flex;
     align-items: center;

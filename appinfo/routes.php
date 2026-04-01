@@ -23,8 +23,10 @@ return [
         ['name' => 'team#getTeamResources', 'url' => '/api/v1/teams/{teamId}/resources', 'verb' => 'GET'],
         ['name' => 'team#getTeamActivity',  'url' => '/api/v1/teams/{teamId}/activity',  'verb' => 'GET'],
         ['name' => 'team#getTeamCalendarEvents', 'url' => '/api/v1/teams/{teamId}/calendar/events', 'verb' => 'GET'],
+        ['name' => 'team#createCalendarEvent',   'url' => '/api/v1/teams/{teamId}/calendar/events', 'verb' => 'POST'],
         ['name' => 'team#requestJoinTeam', 'url' => '/api/v1/teams/{teamId}/join', 'verb' => 'POST'],
         ['name' => 'team#leaveTeam', 'url' => '/api/v1/teams/{teamId}/leave', 'verb' => 'POST'],
+        ['name' => 'team#markTeamSeen', 'url' => '/api/v1/teams/{teamId}/seen', 'verb' => 'POST'],
 
         // User search (for member picker)
         ['name' => 'team#searchUsers', 'url' => '/api/v1/users/search', 'verb' => 'GET'],
@@ -37,15 +39,19 @@ return [
         // Manage Team routes (admin/owner only)
         ['name' => 'team#updateTeamDescription', 'url' => '/api/v1/teams/{teamId}/description', 'verb' => 'PUT'],
         ['name' => 'team#removeMember', 'url' => '/api/v1/teams/{teamId}/members/{userId}', 'verb' => 'DELETE'],
+        ['name' => 'team#updateMemberLevel', 'url' => '/api/v1/teams/{teamId}/members/{userId}/level', 'verb' => 'PUT'],
         ['name' => 'team#getPendingRequests', 'url' => '/api/v1/teams/{teamId}/pending-requests', 'verb' => 'GET'],
         ['name' => 'team#approveRequest', 'url' => '/api/v1/teams/{teamId}/approve/{userId}', 'verb' => 'POST'],
         ['name' => 'team#rejectRequest', 'url' => '/api/v1/teams/{teamId}/reject/{userId}', 'verb' => 'POST'],
+        ['name' => 'team#canCreateTeam', 'url' => '/api/v1/user/can-create-team', 'verb' => 'GET'],
         
         // Message stream routes
         ['name' => 'message#listMessages', 'url' => '/api/v1/teams/{teamId}/messages', 'verb' => 'GET'],
         ['name' => 'message#createMessage', 'url' => '/api/v1/teams/{teamId}/messages', 'verb' => 'POST'],
         ['name' => 'message#updateMessage', 'url' => '/api/v1/teams/{teamId}/messages/{messageId}', 'verb' => 'PUT'],
         ['name' => 'message#deleteMessage', 'url' => '/api/v1/teams/{teamId}/messages/{messageId}', 'verb' => 'DELETE'],
+        ['name' => 'message#pinMessage', 'url' => '/api/v1/teams/{teamId}/messages/{messageId}/pin', 'verb' => 'POST'],
+        ['name' => 'message#unpinMessage', 'url' => '/api/v1/teams/{teamId}/messages/{messageId}/unpin', 'verb' => 'POST'],
         ['name' => 'message#getAggregatedMessages', 'url' => '/api/v1/messages/aggregated', 'verb' => 'GET'],
         ['name' => 'message#votePoll', 'url' => '/api/v1/messages/{messageId}/vote', 'verb' => 'POST'],
         ['name' => 'message#getPollResults', 'url' => '/api/v1/messages/{messageId}/poll-results', 'verb' => 'GET'],

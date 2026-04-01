@@ -34,24 +34,56 @@ class Notifier implements INotifier {
             throw new UnknownNotificationException('Unknown app');
         }
 
-        $l = $this->l10nFactory->get('teamhub', $languageCode);
-
         switch ($notification->getSubject()) {
             case 'new_message':
                 $params = $notification->getSubjectParameters();
-                $notification->setParsedSubject(
-                    $l->t('New message from {author} in {team}', [
-                        'author' => $params['author'],
-                        'team' => $params['team'],
-                    ])
+                $authorName = $params['author']  ?? 'Someone';
+                $teamName   = $params['team']    ?? 'a team';
+                $subject    = $params['subject'] ?? '';
+
+                // setRichSubject replaces {placeholder} tokens with the rich objects.
+                // This is the correct NC API — $l->t() with {foo} syntax does NOT interpolate.
+                $notification->setRichSubject(
+                    'New message from {author} in {team}',
+                    [
+                        'author' => [
+                            'type'  => 'user',
+                            'id'    => $params['authorId'] ?? $authorName,
+                            'name'  => $authorName,
+                        ],
+                        'team' => [
+                            'type'  => 'highlight',
+                            'id'    => $params['teamId'] ?? $teamName,
+                            'name'  => $teamName,
+                        ],
+                    ]
                 );
-                $notification->setParsedMessage($params['subject']);
+
+                // Fallback plain text for clients that don't render rich subjects
+                $notification->setParsedSubject(
+                    'New message from ' . $authorName . ' in ' . $teamName
+                );
+
+                // Show the message subject as the notification body
+                if ($subject !== '') {
+                    $notification->setRichMessage('{subject}', [
+                        'subject' => ['type' => 'highlight', 'id' => 'subject', 'name' => $subject],
+                    ]);
+                    $notification->setParsedMessage($subject);
+                }
+
                 $notification->setIcon($this->urlGenerator->getAbsoluteURL(
                     $this->urlGenerator->imagePath('teamhub', 'app.svg')
                 ));
-                $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
-                    'teamhub.page.index'
-                ));
+
+                // Link is set by MessageService with ?team= param — use it if present,
+                // otherwise fall back to the app root.
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+
                 return $notification;
 
             default:

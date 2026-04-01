@@ -16,46 +16,64 @@
             <NcLoadingIcon :size="32" />
         </div>
 
-        <!-- Empty state -->
-        <NcEmptyContent
-            v-else-if="messages.length === 0 && !showPostForm"
-            :name="t('teamhub', 'No messages yet')"
-            :description="t('teamhub', 'Be the first to post a message')">
-            <template #icon><MessageOutline :size="64" /></template>
-            <template #action>
-                <NcButton type="primary" @click="showPostForm = true">
-                    {{ t('teamhub', 'Post First Message') }}
-                </NcButton>
-            </template>
-        </NcEmptyContent>
+        <template v-else>
+            <!-- Pinned message — always shown above the stream when present -->
+            <div v-if="pinnedMessage" class="message-stream__pinned-wrapper">
+                <div class="message-stream__pinned-label">
+                    <Pin :size="14" />
+                    {{ t('teamhub', 'Pinned') }}
+                </div>
+                <MessageCard
+                    :message="pinnedMessage"
+                    :can-pin="canPin"
+                    :is-pinned-slot="true" />
+            </div>
 
-        <!-- Messages -->
-        <TransitionGroup v-else name="msg-list" tag="div" class="message-stream__list">
-            <MessageCard
-                v-for="msg in messages"
-                :key="msg.id"
-                :message="msg" />
-        </TransitionGroup>
+            <!-- Empty state -->
+            <NcEmptyContent
+                v-if="messages.length === 0 && !showPostForm && !pinnedMessage"
+                :name="t('teamhub', 'No messages yet')"
+                :description="t('teamhub', 'Be the first to post a message')">
+                <template #icon><MessageOutline :size="64" /></template>
+                <template #action>
+                    <NcButton type="primary" @click="showPostForm = true">
+                        {{ t('teamhub', 'Post First Message') }}
+                    </NcButton>
+                </template>
+            </NcEmptyContent>
+
+            <!-- Regular messages -->
+            <TransitionGroup v-if="messages.length > 0" name="msg-list" tag="div" class="message-stream__list">
+                <MessageCard
+                    v-for="msg in messages"
+                    :key="msg.id"
+                    :message="msg"
+                    :can-pin="canPin"
+                    :is-pinned-slot="false" />
+            </TransitionGroup>
+        </template>
     </div>
 </template>
 
 <script>
-import { mapState } from 'vuex'
+import { mapState, mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { NcButton, NcLoadingIcon, NcEmptyContent } from '@nextcloud/vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
+import Pin from 'vue-material-design-icons/Pin.vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import MessageCard from './MessageCard.vue'
 import PostMessageForm from './PostMessageForm.vue'
 
 export default {
     name: 'MessageStream',
-    components: { NcButton, NcLoadingIcon, NcEmptyContent, Plus, MessageOutline, MessageCard, PostMessageForm },
+    components: { NcButton, NcLoadingIcon, NcEmptyContent, Plus, Pin, MessageOutline, MessageCard, PostMessageForm },
     data() {
         return { showPostForm: false }
     },
     computed: {
-        ...mapState(['messages', 'loading']),
+        ...mapState(['messages', 'pinnedMessage', 'loading']),
+        ...mapGetters(['canPin']),
     },
     methods: { t },
 }
@@ -91,18 +109,35 @@ export default {
     padding: 60px 40px;
 }
 
+.message-stream__pinned-wrapper {
+    margin-bottom: 16px;
+}
+
+.message-stream__pinned-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-primary-element);
+    margin-bottom: 6px;
+    padding-left: 2px;
+}
+
 .message-stream__list {
     display: flex;
     flex-direction: column;
     gap: 16px;
 }
 
-.msg-list-enter-active, .msg-list-leave-active { 
-    transition: all 0.3s ease; 
+.msg-list-enter-active, .msg-list-leave-active {
+    transition: all 0.3s ease;
 }
 
-.msg-list-enter, .msg-list-leave-to { 
-    opacity: 0; 
-    transform: translateY(-10px); 
+.msg-list-enter, .msg-list-leave-to {
+    opacity: 0;
+    transform: translateY(-10px);
 }
 </style>

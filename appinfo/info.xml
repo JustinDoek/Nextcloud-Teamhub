@@ -14,15 +14,15 @@ Each team gets a shared home with:
 - **Team management** — invite members by user, group, email or federated account; manage roles and pending requests
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>2.22.35</version>
+    <version>2.24.0</version>
     <licence>agpl</licence>
     <author>Justin Doek</author>
     <namespace>TeamHub</namespace>
     <category>organization</category>
-    <category>tools</category>
-    <website>https://github.com/zinloosg/Nextcloud-Teamhub</website>
-    <bugs>https://github.com/zinloosg/Nextcloud-Teamhub/issues</bugs>
-    <repository type="git">https://github.com/zinloosg/Nextcloud-Teamhub/teamhub.git</repository>
+    <category>social</category>
+    <website>https://github.com/jdoek/teamhub</website>
+    <bugs>https://github.com/jdoek/teamhub/issues</bugs>
+    <repository type="git">https://github.com/jdoek/teamhub.git</repository>
     
     <dependencies>
         <nextcloud min-version="32" max-version="34"/>

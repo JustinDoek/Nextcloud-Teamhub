@@ -6,6 +6,7 @@
                 <div style="height: 44px; flex-shrink: 0;" />
 
                 <NcAppNavigationItem
+                    v-if="canCreateTeam"
                     :name="t('teamhub', 'New Team')"
                     @click="startCreateTeam">
                     <template #icon>
@@ -31,6 +32,9 @@
                     @click="selectTeamFromSidebar(team.id)">
                     <template #icon>
                         <AccountGroup :size="20" />
+                    </template>
+                    <template v-if="team.unread" #counter>
+                        <NcCounterBubble type="highlighted">1</NcCounterBubble>
                     </template>
                 </NcAppNavigationItem>
 
@@ -81,7 +85,9 @@
 <script>
 import { mapState, mapActions, mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
-import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent } from '@nextcloud/vue'
+import { generateUrl } from '@nextcloud/router'
+import axios from '@nextcloud/axios'
+import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Magnify from 'vue-material-design-icons/Magnify.vue'
@@ -93,14 +99,14 @@ import CreateTeamView from './components/CreateTeamView.vue'
 export default {
     name: 'App',
     components: {
-        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent,
+        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble,
         AccountGroup, Plus, Magnify,
         TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView,
     },
     data() {
         return {
-            // 'team' | 'create' | 'manage' | 'browse' | null
             activeView: null,
+            canCreateTeam: true, // default true; overwritten after mount
         }
     },
     computed: {
@@ -108,11 +114,24 @@ export default {
         ...mapGetters(['currentTeam']),
     },
     async mounted() {
-        await this.fetchTeams()
+        await Promise.all([
+            this.fetchTeams(),
+            this.fetchCanCreateTeam(),
+        ])
     },
     methods: {
         t,
         ...mapActions(['fetchTeams', 'selectTeam']),
+
+        async fetchCanCreateTeam() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/user/can-create-team'))
+                this.canCreateTeam = !!data.canCreate
+            } catch (e) {
+                // If the endpoint fails, default to showing the button
+                this.canCreateTeam = true
+            }
+        },
 
         showView(view) {
             this.activeView = view
@@ -149,7 +168,6 @@ export default {
         },
 
         async onTeamDeleted() {
-            // Remove from local list and navigate away
             this.$store.commit('SET_CURRENT_TEAM', null)
             await this.$store.dispatch('fetchTeams')
             this.activeView = 'default'

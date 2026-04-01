@@ -100,6 +100,7 @@ class TeamService {
                     'name'        => $name,
                     'description' => $row['description'] ?? '',
                     'members'     => $memberCount,
+                    'unread'      => $this->hasUnreadMessages($db, $row['unique_id'], $uid),
                 ];
             }
             $result->closeCursor();
@@ -113,9 +114,38 @@ class TeamService {
     }
 
     /**
+     * True if the team has at least one message posted after the user last visited it.
+     * Uses inline DB queries to avoid depending on MessageMapper here.
+     */
+    private function hasUnreadMessages(\OCP\IDBConnection $db, string $teamId, string $userId): bool {
+        // Get user's last-seen timestamp for this team
+        $qb = $db->getQueryBuilder();
+        $res = $qb->select('last_seen_at')
+            ->from('teamhub_last_seen')
+            ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+        $lastSeen = $row ? (int)$row['last_seen_at'] : 0;
+
+        // Get the latest message timestamp for this team
+        $qb2 = $db->getQueryBuilder();
+        $res2 = $qb2->select($qb2->createFunction('MAX(created_at) as latest'))
+            ->from('teamhub_messages')
+            ->where($qb2->expr()->eq('team_id', $qb2->createNamedParameter($teamId)))
+            ->executeQuery();
+        $row2 = $res2->fetch();
+        $res2->closeCursor();
+        $latest = (int)($row2['latest'] ?? 0);
+
+        // Unread if there are any messages and the latest is newer than last seen
+        return $latest > 0 && $latest > $lastSeen;
+    }
+
+    /**
      * Get a specific team by ID.
-     * Reads from DB directly for the base fields, uses Circles API only to
-     * verify the user has access (getCircle throws if they don't).
      */
     public function getTeam(string $teamId): array {
         $user = $this->userSession->getUser();
@@ -857,7 +887,88 @@ class TeamService {
     }
 
     /**
-     * Get all teams (including teams the user is NOT a member of).
+     * Create a calendar event on the team calendar via CalDAV.
+     */
+    public function createCalendarEvent(string $teamId, string $title, string $start, string $end, string $location = '', string $description = ''): void {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+
+        if (!$this->appManager->isInstalled('calendar')) {
+            throw new \Exception('Calendar app is not installed');
+        }
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // Find the calendar ID for this team
+        $qb = $db->getQueryBuilder();
+        $result = $qb->select('resourceid')
+            ->from('dav_shares')
+            ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
+            ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter('principals/circles/' . $teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+
+        if (!$row) {
+            throw new \Exception('No calendar connected to this team');
+        }
+        $calendarId = (int)$row['resourceid'];
+
+        // Find the calendar owner's principaluri (the creator — needed for CalDavBackend)
+        $ownerQb = $db->getQueryBuilder();
+        $ownerRes = $ownerQb->select('principaluri')
+            ->from('calendars')
+            ->where($ownerQb->expr()->eq('id', $ownerQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $ownerRow = $ownerRes->fetch();
+        $ownerRes->closeCursor();
+
+        if (!$ownerRow) {
+            throw new \Exception('Calendar not found');
+        }
+        $principalUri = $ownerRow['principaluri'];
+
+        // Build iCalendar VEVENT string
+        $uid       = strtoupper(bin2hex(random_bytes(16)));
+        $startDt   = new \DateTime($start);
+        $endDt     = new \DateTime($end);
+        $now       = new \DateTime();
+        $dtStamp   = $now->format('Ymd\\THis\\Z');
+        $dtStart   = $startDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z');
+        $dtEnd     = $endDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z');
+
+        $ical  = "BEGIN:VCALENDAR\r\n";
+        $ical .= "VERSION:2.0\r\n";
+        $ical .= "PRODID:-//TeamHub//TeamHub//EN\r\n";
+        $ical .= "BEGIN:VEVENT\r\n";
+        $ical .= "UID:{$uid}@teamhub\r\n";
+        $ical .= "DTSTAMP:{$dtStamp}\r\n";
+        $ical .= "DTSTART:{$dtStart}\r\n";
+        $ical .= "DTEND:{$dtEnd}\r\n";
+        $ical .= "SUMMARY:" . $this->escapeIcalText($title) . "\r\n";
+        if ($location !== '') {
+            $ical .= "LOCATION:" . $this->escapeIcalText($location) . "\r\n";
+        }
+        if ($description !== '') {
+            $ical .= "DESCRIPTION:" . $this->escapeIcalText($description) . "\r\n";
+        }
+        $ical .= "END:VEVENT\r\n";
+        $ical .= "END:VCALENDAR\r\n";
+
+        $caldav  = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
+        $objUri  = strtolower($uid) . '.ics';
+        $caldav->createCalendarObject($calendarId, $objUri, $ical);
+    }
+
+    private function escapeIcalText(string $text): string {
+        return str_replace(["\r\n", "\n", "\r", ',', ';', '\\'], ['\\n', '\\n', '\\n', '\\,', '\\;', '\\\\'], $text);
+    }
+
+    /**
      * Uses direct DB query — probeCircles() is unreliable on this instance.
      * Only returns circles with CFG_VISIBLE (bit 512) set, or where the
      * current user is already a member.
@@ -1108,6 +1219,100 @@ class TeamService {
         } finally {
             $manager->stopSession();
         }
+    }
+
+    /**
+     * Update a member's level in a team. Requires admin or owner level.
+     * Valid target levels: 1 (Member), 4 (Moderator), 8 (Admin).
+     * Owner (9) cannot be demoted through this endpoint.
+     * The caller cannot change their own level.
+     */
+    public function updateMemberLevel(string $teamId, string $userId, int $newLevel): array {
+        $caller = $this->userSession->getUser();
+        if (!$caller) {
+            throw new \Exception('User not authenticated');
+        }
+
+        if ($caller->getUID() === $userId) {
+            throw new \Exception('You cannot change your own level');
+        }
+
+        if (!in_array($newLevel, [1, 4, 8], true)) {
+            throw new \Exception('Invalid level. Must be 1 (Member), 4 (Moderator), or 8 (Admin)');
+        }
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // Look up caller's own level directly — no Circles session needed
+        $callerLevel = $this->getMemberLevelFromDb($db, $teamId, $caller->getUID());
+        if ($callerLevel < 8) {
+            throw new \Exception('Insufficient permissions. Admin or owner role required.');
+        }
+
+        // Look up target member's current level
+        $targetLevel = $this->getMemberLevelFromDb($db, $teamId, $userId);
+        if ($targetLevel === 0) {
+            throw new \Exception('Member not found in this team');
+        }
+        if ($targetLevel >= 9) {
+            throw new \Exception('Cannot change the level of the team owner');
+        }
+
+        // Only the owner can promote to admin
+        if ($newLevel >= 8 && $callerLevel < 9) {
+            throw new \Exception('Only the team owner can promote members to Admin');
+        }
+
+        // Write the new level directly to circles_member
+        $qb = $db->getQueryBuilder();
+        $qb->update('circles_member')
+            ->set('level', $qb->createNamedParameter($newLevel, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->executeStatement();
+
+        // Return refreshed member list (one Circles session total)
+        return $this->getTeamMembers($teamId);
+    }
+
+    /**
+     * Direct DB lookup for a member's level in a team (0 if not a member).
+     */
+    private function getMemberLevelFromDb(\OCP\IDBConnection $db, string $teamId, string $userId): int {
+        $qb = $db->getQueryBuilder();
+        $result = $qb->select('level')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (int)$row['level'] : 0;
+    }
+
+    /**
+     * Check whether the current user is allowed to create teams, based on
+     * the admin setting 'createTeamGroup'. If the setting is empty, everyone
+     * can create. Otherwise the user must be a member of the named NC group.
+     */
+    public function canCurrentUserCreateTeam(): bool {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            return false;
+        }
+
+        $config = $this->container->get(\OCP\IConfig::class);
+        $requiredGroup = trim($config->getAppValue(Application::APP_ID, 'createTeamGroup', ''));
+
+        if ($requiredGroup === '') {
+            return true; // no restriction set
+        }
+
+        $groupManager = $this->container->get(\OCP\IGroupManager::class);
+        return $groupManager->isInGroup($user->getUID(), $requiredGroup);
     }
 
     /**
@@ -1810,6 +2015,8 @@ class TeamService {
         return [
             'wizardDescription' => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
             'inviteTypes'       => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
+            'pinMinLevel'       => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
+            'createTeamGroup'   => $config->getAppValue(Application::APP_ID, 'createTeamGroup', ''),
         ];
     }
 
@@ -1822,17 +2029,26 @@ class TeamService {
             $config->setAppValue(Application::APP_ID, 'wizardDescription', (string)$settings['wizardDescription']);
         }
         if (isset($settings['inviteTypes'])) {
-            // Validate: only allow known type values
             $allowed = ['user', 'group', 'email', 'federated'];
             $types = array_filter(
                 array_map('trim', explode(',', (string)$settings['inviteTypes'])),
                 fn($t) => in_array($t, $allowed, true)
             );
-            // Always keep at least 'user'
             if (empty($types)) {
                 $types = ['user'];
             }
             $config->setAppValue(Application::APP_ID, 'inviteTypes', implode(',', $types));
+        }
+        if (isset($settings['pinMinLevel'])) {
+            $validLevels = ['member', 'moderator', 'admin'];
+            $level = in_array($settings['pinMinLevel'], $validLevels, true)
+                ? $settings['pinMinLevel']
+                : 'moderator';
+            $config->setAppValue(Application::APP_ID, 'pinMinLevel', $level);
+        }
+        if (array_key_exists('createTeamGroup', $settings)) {
+            // Allow empty string (meaning no restriction)
+            $config->setAppValue(Application::APP_ID, 'createTeamGroup', trim((string)$settings['createTeamGroup']));
         }
     }
 

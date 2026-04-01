@@ -97,8 +97,24 @@
                     </div>
                     <div class="member-info">
                         <span class="member-name">{{ member.displayName }}</span>
-                        <span class="member-role">{{ getMemberRoleLabel(member.level) }}</span>
                     </div>
+
+                    <!-- Role dropdown — disabled for owners and for the current user -->
+                    <select
+                        v-if="canChangeLevel(member)"
+                        :value="member.level"
+                        :disabled="changingLevel === member.userId"
+                        class="member-level-select"
+                        :aria-label="t('teamhub', 'Change role for {name}', { name: member.displayName })"
+                        @change="changeLevel(member, Number($event.target.value))">
+                        <option :value="1">{{ t('teamhub', 'Member') }}</option>
+                        <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
+                        <!-- Admin option only shown to owners -->
+                        <option v-if="currentUserIsOwner" :value="8">{{ t('teamhub', 'Admin') }}</option>
+                    </select>
+                    <!-- Static label for owners and current user -->
+                    <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
+
                     <NcButton
                         v-if="canRemoveMember(member)"
                         type="error"
@@ -187,20 +203,18 @@ import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
-const CFG_OPEN         = 1     // anyone can join without invitation
-const CFG_INVITE       = 2     // members can invite others
-const CFG_REQUEST      = 4     // membership requests require moderator approval
-const CFG_PROTECTED    = 16    // enforce password on files shared with this circle
-const CFG_VISIBLE      = 512   // circle appears in the public directory
-const CFG_SINGLE       = 1024  // prevent other teams from being a member
-// NOTE: bit 8 (CFG_HIDDEN) and bit 256 (CFG_PERSONAL) are managed internally
-// by Circles and must NEVER be set or cleared by TeamHub.
+const CFG_OPEN         = 1
+const CFG_INVITE       = 2
+const CFG_REQUEST      = 4
+const CFG_PROTECTED    = 16
+const CFG_VISIBLE      = 512
+const CFG_SINGLE       = 1024
 
 export default {
     name: 'ManageTeamView',
     components: {
-        NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, Delete, Delete, NcCheckboxRadioSwitch,
-        ContentSave, AccountRemove, Check, Close, CheckCircle,
+        NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch,
+        ContentSave, AccountRemove, Check, Close, CheckCircle, Delete,
     },
     props: {
         team: { type: Object, required: true },
@@ -217,6 +231,8 @@ export default {
             saving: false,
             configSaved: false,
             deleting: false,
+            // userId of the member whose level is currently being saved, or null
+            changingLevel: null,
             circleConfig: {
                 open: false,
                 invite: false,
@@ -242,19 +258,30 @@ export default {
         },
         privacyOptions() {
             return [
-                { key: 'visible',    label: t('teamhub', 'Visible to everyone') },
-                { key: 'protected',  label: t('teamhub', 'Enforce password protection on files shared with this team') },
+                { key: 'visible',   label: t('teamhub', 'Visible to everyone') },
+                { key: 'protected', label: t('teamhub', 'Enforce password protection on files shared with this team') },
             ]
         },
         configValue() {
             let v = 0
-            if (this.circleConfig.open)         v |= CFG_OPEN
-            if (this.circleConfig.invite)        v |= CFG_INVITE
-            if (this.circleConfig.request)       v |= CFG_REQUEST
-            if (this.circleConfig.visible)       v |= CFG_VISIBLE
-            if (this.circleConfig.protected)     v |= CFG_PROTECTED
-            if (this.circleConfig.singleMember)  v |= CFG_SINGLE
+            if (this.circleConfig.open)        v |= CFG_OPEN
+            if (this.circleConfig.invite)       v |= CFG_INVITE
+            if (this.circleConfig.request)      v |= CFG_REQUEST
+            if (this.circleConfig.visible)      v |= CFG_VISIBLE
+            if (this.circleConfig.protected)    v |= CFG_PROTECTED
+            if (this.circleConfig.singleMember) v |= CFG_SINGLE
             return v
+        },
+        currentUserId() {
+            return getCurrentUser()?.uid
+        },
+        // The caller's own level in this team
+        currentUserLevel() {
+            const me = this.members.find(m => m.userId === this.currentUserId)
+            return me ? (me.level || 1) : 1
+        },
+        currentUserIsOwner() {
+            return this.currentUserLevel >= 9
         },
     },
     watch: {
@@ -272,6 +299,47 @@ export default {
     },
     methods: {
         t,
+
+        getMemberRoleLabel(level) {
+            if (level >= 9) return t('teamhub', 'Owner')
+            if (level >= 8) return t('teamhub', 'Admin')
+            if (level >= 4) return t('teamhub', 'Moderator')
+            return t('teamhub', 'Member')
+        },
+
+        // Show the dropdown when the current user is admin/owner, the target is
+        // not the owner, and the target is not the current user themselves.
+        canChangeLevel(member) {
+            if (this.currentUserLevel < 8) return false
+            if (member.userId === this.currentUserId) return false
+            if (member.level >= 9) return false
+            return true
+        },
+
+        canRemoveMember(member) {
+            return member.userId !== this.currentUserId && member.level < 9
+        },
+
+        async changeLevel(member, newLevel) {
+            if (newLevel === member.level) return
+            this.changingLevel = member.userId
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/${member.userId}/level`),
+                    { level: newLevel }
+                )
+                // Backend returns the updated full member list
+                this.members = Array.isArray(data) ? data : this.members
+                showSuccess(t('teamhub', 'Role updated'))
+            } catch (error) {
+                const msg = error.response?.data?.error || ''
+                showError(t('teamhub', 'Failed to update role') + (msg ? `: ${msg}` : ''))
+                // Revert the dropdown visually by re-fetching
+                await this.loadMembers()
+            } finally {
+                this.changingLevel = null
+            }
+        },
 
         async saveDescription() {
             this.saving = true
@@ -329,7 +397,7 @@ export default {
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members`)
                 )
-                this.members = data
+                this.members = Array.isArray(data) ? data : []
             } catch {
                 showError(t('teamhub', 'Failed to load members'))
             } finally {
@@ -349,18 +417,6 @@ export default {
             } finally {
                 this.loadingPending = false
             }
-        },
-
-        getMemberRoleLabel(level) {
-            if (level >= 9) return t('teamhub', 'Owner')
-            if (level >= 8) return t('teamhub', 'Admin')
-            if (level >= 4) return t('teamhub', 'Moderator')
-            return t('teamhub', 'Member')
-        },
-
-        canRemoveMember(member) {
-            const currentUserId = getCurrentUser()?.uid
-            return member.userId !== currentUserId && member.level < 9
         },
 
         async confirmRemoveMember(member) {
@@ -442,11 +498,7 @@ export default {
 
 /* Settings */
 .manage-settings { display: flex; flex-direction: column; gap: 20px; }
-.manage-settings-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
+.manage-settings-group { display: flex; flex-direction: column; gap: 4px; }
 .manage-settings-group h4 {
     font-size: 12px;
     font-weight: 700;
@@ -455,9 +507,6 @@ export default {
     color: var(--color-text-maxcontrast);
     margin: 0 0 4px;
 }
-
-/* Settings group spacing */
-
 .manage-settings-saved {
     display: flex;
     align-items: center;
@@ -492,7 +541,28 @@ export default {
 }
 .member-info { flex: 1; display: flex; flex-direction: column; }
 .member-name { font-size: 14px; font-weight: 500; }
-.member-role { font-size: 12px; color: var(--color-text-maxcontrast); }
+
+/* Role dropdown */
+.member-level-select {
+    padding: 5px 8px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--color-border-dark);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+    cursor: pointer;
+    min-width: 110px;
+}
+.member-level-select:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+.member-role-static {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    min-width: 110px;
+    text-align: center;
+}
 
 /* Pending */
 .no-pending { font-size: 14px; color: var(--color-text-maxcontrast); }
@@ -512,27 +582,14 @@ export default {
 
 /* Danger zone */
 .manage-section--danger {
-    border: 1px solid var(--color-error);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-error);
     border-radius: var(--border-radius-large);
     padding: 20px 24px;
     margin-top: 8px;
     background: color-mix(in srgb, var(--color-error) 5%, transparent);
 }
 .manage-section--danger h3 { color: var(--color-error); }
-.manage-danger-desc {
-    font-size: 13px;
-    color: var(--color-text-maxcontrast);
-    margin: 0 0 16px;
-    line-height: 1.5;
-}
-.manage-section--danger {
-    border-color: var(--color-error);
-    border-left: 3px solid var(--color-error);
-    padding-left: 16px;
-}
-
-.manage-section--danger h3 { color: var(--color-error); }
-
 .manage-danger-row {
     display: flex;
     align-items: center;
@@ -540,14 +597,7 @@ export default {
     gap: 16px;
     flex-wrap: wrap;
 }
-
-.manage-danger-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1;
-}
-
+.manage-danger-info { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .manage-danger-title { font-size: 14px; font-weight: 500; }
 .manage-danger-desc { font-size: 13px; color: var(--color-text-maxcontrast); }
 </style>

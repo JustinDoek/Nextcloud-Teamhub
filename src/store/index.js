@@ -13,9 +13,11 @@ export default new Vuex.Store({
         currentView: 'msgstream',
         currentUser: getCurrentUser(),
         messages: [],
-        comments: {},        // { messageId: [comments] }
+        pinnedMessage: null,   // single pinned message for the current team, or null
+        pinMinLevel: 4,        // minimum Circles level to pin (loaded from admin settings)
+        comments: {},          // { messageId: [comments] }
         members: [],
-        resources: {},       // { talk, files, calendar, deck }
+        resources: {},         // { talk, files, calendar, deck }
         webLinks: [],
         deckTasks: [],
         intravoxAvailable: false,
@@ -32,6 +34,18 @@ export default new Vuex.Store({
     getters: {
         currentTeam: state => state.teams.find(t => t.id === state.currentTeamId) || null,
         commentsForMessage: state => id => state.comments[id] || [],
+
+        /**
+         * True if the current user's level meets the pinMinLevel threshold.
+         * members array rows have { userId, level } where level is the Circles integer.
+         */
+        canPin: state => {
+            const uid = state.currentUser?.uid
+            if (!uid) return false
+            const member = state.members.find(m => m.userId === uid)
+            if (!member) return false
+            return (member.level || 0) >= state.pinMinLevel
+        },
     },
 
     mutations: {
@@ -39,13 +53,44 @@ export default new Vuex.Store({
         SET_CURRENT_TEAM(state, id) { state.currentTeamId = id },
         SET_VIEW(state, view) { state.currentView = view },
         SET_MESSAGES(state, messages) { state.messages = messages },
+        SET_PINNED_MESSAGE(state, message) { state.pinnedMessage = message },
+        SET_PIN_MIN_LEVEL(state, level) { state.pinMinLevel = level },
         ADD_MESSAGE(state, message) { state.messages.unshift(message) },
-        REMOVE_MESSAGE(state, messageId) { 
+        REMOVE_MESSAGE(state, messageId) {
             state.messages = state.messages.filter(m => m.id !== messageId)
+            if (state.pinnedMessage && state.pinnedMessage.id === messageId) {
+                state.pinnedMessage = null
+            }
         },
         UPDATE_MESSAGE(state, message) {
+            // Update in the regular list
             const idx = state.messages.findIndex(m => m.id === message.id)
             if (idx !== -1) Vue.set(state.messages, idx, { ...state.messages[idx], ...message })
+            // Also sync the pinned slot if it's the same message
+            if (state.pinnedMessage && state.pinnedMessage.id === message.id) {
+                state.pinnedMessage = { ...state.pinnedMessage, ...message }
+            }
+        },
+        // Called after a successful pin: move the message out of the regular list
+        // and into the pinned slot, clearing any previous pin from the regular list.
+        PIN_MESSAGE(state, message) {
+            // Remove old pinned message from regular list if it ended up there
+            state.messages = state.messages.filter(m => m.id !== message.id)
+            // Unpin the previous pinned message back into the top of the regular list
+            if (state.pinnedMessage && state.pinnedMessage.id !== message.id) {
+                state.messages.unshift({ ...state.pinnedMessage, pinned: false })
+            }
+            state.pinnedMessage = message
+        },
+        // Called after a successful unpin: move the message back into the regular list.
+        UNPIN_MESSAGE(state, message) {
+            state.pinnedMessage = null
+            state.messages.unshift({ ...message, pinned: false })
+        },
+        // Mark a team as read in the sidebar list (optimistic update)
+        MARK_TEAM_SEEN(state, teamId) {
+            const team = state.teams.find(t => t.id === teamId)
+            if (team) Vue.set(team, 'unread', false)
         },
         UPDATE_COMMENT(state, { messageId, comment }) {
             const list = state.comments[messageId]
@@ -72,11 +117,9 @@ export default new Vuex.Store({
     actions: {
         async checkIntravox({ commit }) {
             try {
-                // Use server-side app check — reliable, no cross-app auth issues
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/apps/check'))
                 commit('SET_INTRAVOX_AVAILABLE', !!data.intravox)
             } catch (e) {
-                // Fallback: try the IntraVox API directly
                 try {
                     await axios.get(generateUrl('/apps/intravox/api/pages'), { timeout: 3000 })
                     commit('SET_INTRAVOX_AVAILABLE', true)
@@ -102,9 +145,14 @@ export default new Vuex.Store({
             commit('SET_CURRENT_TEAM', teamId)
             commit('SET_VIEW', 'msgstream')
             commit('SET_MESSAGES', [])
+            commit('SET_PINNED_MESSAGE', null)
             commit('SET_MEMBERS', [])
             commit('SET_RESOURCES', {})
             commit('SET_WEB_LINKS', [])
+
+            // Mark seen immediately (optimistic) + fire-and-forget to backend
+            commit('MARK_TEAM_SEEN', teamId)
+            dispatch('markTeamSeen', teamId)
 
             await Promise.all([
                 dispatch('fetchMessages', teamId),
@@ -118,7 +166,9 @@ export default new Vuex.Store({
             commit('SET_LOADING', { key: 'messages', value: true })
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages`))
-                commit('SET_MESSAGES', Array.isArray(data) ? data : [])
+                // Backend now returns { pinned: object|null, messages: array }
+                commit('SET_PINNED_MESSAGE', data.pinned || null)
+                commit('SET_MESSAGES', Array.isArray(data.messages) ? data.messages : [])
             } catch (e) {
                 commit('SET_ERROR', 'Failed to load messages')
             } finally {
@@ -151,6 +201,28 @@ export default new Vuex.Store({
             return data
         },
 
+        async pinMessage({ commit }, { teamId, messageId }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages/${messageId}/pin`)
+            )
+            commit('PIN_MESSAGE', data)
+        },
+
+        async unpinMessage({ commit }, { teamId, messageId }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages/${messageId}/unpin`)
+            )
+            commit('UNPIN_MESSAGE', data)
+        },
+
+        async markTeamSeen(_, teamId) {
+            try {
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/seen`))
+            } catch (e) {
+                // Non-critical — silently ignore
+            }
+        },
+
         async updateComment({ commit }, { messageId, commentId, comment }) {
             const { data } = await axios.put(
                 generateUrl(`/apps/teamhub/api/v1/comments/${commentId}`),
@@ -177,7 +249,6 @@ export default new Vuex.Store({
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/resources`))
                 commit('SET_RESOURCES', data || {})
-                // Fetch deck tasks if deck is configured
                 if (data?.deck?.board_id) {
                     dispatch('fetchDeckTasks', data.deck.board_id)
                 }
@@ -204,9 +275,7 @@ export default new Vuex.Store({
                     { headers: { 'OCS-APIRequest': 'true' } }
                 )
                 const now = new Date()
-                // Start of today — tasks overdue before today are excluded
                 const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-                // End of cutoff window — tasks due up to 14 days from now
                 const cutoff = new Date(todayStart)
                 cutoff.setDate(cutoff.getDate() + 14)
                 const cards = []
@@ -214,8 +283,6 @@ export default new Vuex.Store({
                     ;(stack.cards || []).forEach(card => {
                         if (!card.archived && !card.done && card.duedate) {
                             const due = new Date(card.duedate)
-                            // Only include tasks due from today onwards (no tasks overdue from previous days)
-                            // and within the 14-day window
                             if (due >= todayStart && due <= cutoff) {
                                 cards.push({
                                     id: card.id,
@@ -223,7 +290,7 @@ export default new Vuex.Store({
                                     duedate: card.duedate,
                                     assignedUsers: card.assignedUsers || [],
                                     boardId,
-                                    overdue: due < now, // past current time but still today
+                                    overdue: due < now,
                                 })
                             }
                         }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\TeamService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -18,6 +19,7 @@ class TeamController extends Controller {
         string $appName,
         IRequest $request,
         private TeamService $teamService,
+        private MessageService $messageService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -172,6 +174,21 @@ class TeamController extends Controller {
         }
     }
 
+    /**
+     * Mark that the current user has just seen this team's messages.
+     * Called whenever the user navigates to a team. Clears the unread indicator.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function markTeamSeen(string $teamId): JSONResponse {
+        try {
+            $this->messageService->markTeamSeen($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getTeamActivity(string $teamId): JSONResponse {
@@ -194,6 +211,27 @@ class TeamController extends Controller {
             return new JSONResponse($events);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    #[NoAdminRequired]
+    public function createCalendarEvent(string $teamId): JSONResponse {
+        try {
+            $body        = $this->request->getParams();
+            $title       = trim($body['title']       ?? '');
+            $start       = trim($body['start']        ?? '');
+            $end         = trim($body['end']          ?? '');
+            $location    = trim($body['location']    ?? '');
+            $description = trim($body['description'] ?? '');
+
+            if ($title === '' || $start === '' || $end === '') {
+                return new JSONResponse(['error' => 'title, start and end are required'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $this->teamService->createCalendarEvent($teamId, $title, $start, $end, $location, $description);
+            return new JSONResponse(['success' => true], Http::STATUS_CREATED);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
 
@@ -243,6 +281,27 @@ class TeamController extends Controller {
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function updateMemberLevel(string $teamId, string $userId): JSONResponse {
+        try {
+            $body = $this->request->getParams();
+            if (!isset($body['level'])) {
+                return new JSONResponse(['error' => 'level is required'], Http::STATUS_BAD_REQUEST);
+            }
+            $members = $this->teamService->updateMemberLevel($teamId, $userId, (int)$body['level']);
+            return new JSONResponse($members);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function canCreateTeam(): JSONResponse {
+        return new JSONResponse(['canCreate' => $this->teamService->canCurrentUserCreateTeam()]);
     }
 
     #[NoAdminRequired]
@@ -375,11 +434,9 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function saveAdminSettings(): JSONResponse {
         try {
-            // getParams() only reads form/query params — for JSON body use getContent()
-            $raw  = $this->request->getContent();
-            $body = $raw ? json_decode($raw, true) : [];
+            $body = $this->request->getParams();
             if (!is_array($body)) {
-                $body = $this->request->getParams(); // fallback for form POST
+                $body = [];
             }
             $this->teamService->saveAdminSettings($body);
             return new JSONResponse(['success' => true]);

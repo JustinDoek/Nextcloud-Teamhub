@@ -1,7 +1,8 @@
 <template>
-    <div class="message-card" :class="{ 
+    <div class="message-card" :class="{
         'message-card--priority': isPriority,
-        'message-card--question-solved': isQuestionSolved 
+        'message-card--question-solved': isQuestionSolved,
+        'message-card--pinned': isPinnedSlot,
     }">
         <!-- Header -->
         <div class="message-card__header">
@@ -18,10 +19,28 @@
             <span v-if="isPriority" class="message-card__priority-badge">
                 🔴 {{ t('teamhub', 'Priority') }}
             </span>
-            <!-- Question badge - subtle, next to delete -->
+            <!-- Question badge -->
             <span v-if="message.messageType === 'question'" class="message-card__question-badge-subtle">
                 <HelpCircleOutline :size="16" />
             </span>
+            <!-- Unpin button — shown on the pinned slot to users with pin rights -->
+            <NcButton
+                v-if="canPin && isPinnedSlot"
+                type="tertiary"
+                :aria-label="t('teamhub', 'Unpin message')"
+                :title="t('teamhub', 'Unpin message')"
+                @click="doUnpin">
+                <template #icon><PinOff :size="16" /></template>
+            </NcButton>
+            <!-- Pin button — shown on regular messages to users with pin rights -->
+            <NcButton
+                v-else-if="canPin && !isPinnedSlot"
+                type="tertiary"
+                :aria-label="t('teamhub', 'Pin message')"
+                :title="t('teamhub', 'Pin message')"
+                @click="doPin">
+                <template #icon><Pin :size="16" /></template>
+            </NcButton>
             <NcButton
                 v-if="isAuthor"
                 type="tertiary"
@@ -171,6 +190,8 @@ import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Lock from 'vue-material-design-icons/Lock.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
+import Pin from 'vue-material-design-icons/Pin.vue'
+import PinOff from 'vue-material-design-icons/PinOff.vue'
 import CommentsSection from './CommentsSection.vue'
 
 // Extract all URLs from message text (markdown links + bare URLs)
@@ -210,21 +231,25 @@ function renderMarkdown(text) {
 
 export default {
     name: 'MessageCard',
-    components: { 
-        NcAvatar, 
+    components: {
+        NcAvatar,
         NcButton,
         NcLoadingIcon,
-        CommentOutline, 
-        ClipboardCheckOutline, 
+        CommentOutline,
+        ClipboardCheckOutline,
         HelpCircleOutline,
         CheckCircle,
         Lock,
         Delete,
         Pencil,
-        CommentsSection 
+        Pin,
+        PinOff,
+        CommentsSection,
     },
     props: {
-        message: { type: Object, required: true },
+        message:      { type: Object,  required: true },
+        canPin:       { type: Boolean, default: false },
+        isPinnedSlot: { type: Boolean, default: false },
     },
     data() {
         return {
@@ -280,6 +305,28 @@ export default {
     },
     methods: {
         t,
+        async doPin() {
+            try {
+                await this.$store.dispatch('pinMessage', {
+                    teamId: this.$store.state.currentTeamId,
+                    messageId: this.message.id,
+                })
+                showSuccess(t('teamhub', 'Message pinned'))
+            } catch (e) {
+                showError(t('teamhub', 'Failed to pin message'))
+            }
+        },
+        async doUnpin() {
+            try {
+                await this.$store.dispatch('unpinMessage', {
+                    teamId: this.$store.state.currentTeamId,
+                    messageId: this.message.id,
+                })
+                showSuccess(t('teamhub', 'Message unpinned'))
+            } catch (e) {
+                showError(t('teamhub', 'Failed to unpin message'))
+            }
+        },
         async loadPreviews() {
             const urls = extractUrls(this.message.message || '')
             if (!urls.length) return
@@ -480,6 +527,11 @@ export default {
 .message-card--question-solved {
     border-left: 4px solid var(--color-success);
     background: color-mix(in srgb, var(--color-success) 2%, var(--color-main-background));
+}
+
+.message-card--pinned {
+    border-left: 4px solid var(--color-primary-element);
+    background: color-mix(in srgb, var(--color-primary-element) 3%, var(--color-main-background));
 }
 
 .message-card__header {

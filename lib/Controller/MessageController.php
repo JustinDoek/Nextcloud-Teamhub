@@ -23,12 +23,15 @@ class MessageController extends Controller {
         parent::__construct($appName, $request);
     }
 
+    /**
+     * Returns { pinned: object|null, messages: array }
+     */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function listMessages(string $teamId, int $limit = 50, int $offset = 0): JSONResponse {
         try {
-            $messages = $this->messageService->getTeamMessages($teamId, $limit, $offset);
-            return new JSONResponse($messages);
+            $result = $this->messageService->getTeamMessages($teamId, $limit, $offset);
+            return new JSONResponse($result);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
@@ -45,17 +48,17 @@ class MessageController extends Controller {
     ): JSONResponse {
         try {
             $this->logger->debug('Creating message', [
-                'teamId' => $teamId,
-                'subject' => $subject,
+                'teamId'      => $teamId,
+                'subject'     => $subject,
                 'messageType' => $messageType,
-                'app' => Application::APP_ID,
+                'app'         => Application::APP_ID,
             ]);
             $newMessage = $this->messageService->createMessage($teamId, $subject, $message, $priority, $messageType, $pollOptions);
             return new JSONResponse($newMessage, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to create message', [
                 'exception' => $e,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
@@ -92,6 +95,34 @@ class MessageController extends Controller {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Pin
+    // -------------------------------------------------------------------------
+
+    #[NoAdminRequired]
+    public function pinMessage(string $teamId, int $messageId): JSONResponse {
+        try {
+            $message = $this->messageService->pinMessage($teamId, $messageId);
+            return new JSONResponse($message);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    public function unpinMessage(string $teamId, int $messageId): JSONResponse {
+        try {
+            $message = $this->messageService->unpinMessage($teamId, $messageId);
+            return new JSONResponse($message);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Polls
+    // -------------------------------------------------------------------------
+
     #[NoAdminRequired]
     public function votePoll(int $messageId, int $optionIndex): JSONResponse {
         try {
@@ -118,7 +149,7 @@ class MessageController extends Controller {
         try {
             $this->logger->debug('Close poll request received', [
                 'messageId' => $messageId,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             $updatedMessage = $this->messageService->closePoll($messageId);
             return new JSONResponse($updatedMessage);
@@ -126,11 +157,15 @@ class MessageController extends Controller {
             $this->logger->error('Close poll failed in controller', [
                 'exception' => $e->getMessage(),
                 'messageId' => $messageId,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Questions
+    // -------------------------------------------------------------------------
 
     #[NoAdminRequired]
     public function markQuestionSolved(int $messageId, int $commentId): JSONResponse {
@@ -138,7 +173,7 @@ class MessageController extends Controller {
             $this->logger->debug('Mark question solved request received', [
                 'messageId' => $messageId,
                 'commentId' => $commentId,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             $updatedMessage = $this->messageService->markQuestionSolved($messageId, $commentId);
             return new JSONResponse($updatedMessage);
@@ -147,7 +182,7 @@ class MessageController extends Controller {
                 'exception' => $e->getMessage(),
                 'messageId' => $messageId,
                 'commentId' => $commentId,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
@@ -158,7 +193,7 @@ class MessageController extends Controller {
         try {
             $this->logger->debug('Unmark question solved request received', [
                 'messageId' => $messageId,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             $updatedMessage = $this->messageService->unmarkQuestionSolved($messageId);
             return new JSONResponse($updatedMessage);
@@ -166,7 +201,7 @@ class MessageController extends Controller {
             $this->logger->error('Unmark question solved failed in controller', [
                 'exception' => $e->getMessage(),
                 'messageId' => $messageId,
-                'app' => Application::APP_ID,
+                'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
