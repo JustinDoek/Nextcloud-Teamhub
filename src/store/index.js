@@ -20,7 +20,8 @@ export default new Vuex.Store({
         resources: {},         // { talk, files, calendar, deck }
         webLinks: [],
         deckTasks: [],
-        teamWidgets: [],        // enabled widgets for the current team (from widget registry)
+        teamWidgets: [],        // enabled sidebar widgets for the current team
+        teamMenuItems: [],      // enabled menu_item integrations for the current team
         intravoxAvailable: false,
         loading: {
             teams: false,
@@ -111,6 +112,7 @@ export default new Vuex.Store({
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
         SET_TEAM_WIDGETS(state, widgets) { state.teamWidgets = widgets },
+        SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
         SET_LOADING(state, { key, value }) { Vue.set(state.loading, key, value) },
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },
@@ -152,6 +154,7 @@ export default new Vuex.Store({
             commit('SET_RESOURCES', {})
             commit('SET_WEB_LINKS', [])
             commit('SET_TEAM_WIDGETS', [])
+            commit('SET_TEAM_MENU_ITEMS', [])
 
             // Mark seen immediately (optimistic) + fire-and-forget to backend
             commit('MARK_TEAM_SEEN', teamId)
@@ -162,7 +165,7 @@ export default new Vuex.Store({
                 dispatch('fetchMembers', teamId),
                 dispatch('fetchResources', teamId),
                 dispatch('fetchWebLinks', teamId),
-                dispatch('fetchTeamWidgets', teamId),
+                dispatch('fetchTeamIntegrations', teamId),
             ])
         },
 
@@ -284,6 +287,7 @@ export default new Vuex.Store({
             } catch (e) {
                 // Non-fatal — widget support is optional.
                 commit('SET_TEAM_WIDGETS', [])
+            commit('SET_TEAM_MENU_ITEMS', [])
             }
         },
 

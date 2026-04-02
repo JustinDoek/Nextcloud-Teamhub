@@ -11,9 +11,9 @@
                 {{ t('teamhub', 'Home') }}
             </button>
 
-        <!-- App tabs — load in iframe -->
+        <!-- Built-in app tabs — rendered when resource exists AND team has it enabled -->
             <button
-                v-if="resources.talk && resources.talk.token"
+                v-if="isBuiltinEnabled('spreed') && resources.talk && resources.talk.token"
                 class="teamhub-tab"
                 :class="{ active: currentView === 'talk' }"
                 @click="setView('talk')">
@@ -21,7 +21,7 @@
                 {{ t('teamhub', 'Chat') }}
             </button>
             <button
-                v-if="resources.files && resources.files.path"
+                v-if="isBuiltinEnabled('files') && resources.files && resources.files.path"
                 class="teamhub-tab"
                 :class="{ active: currentView === 'files' }"
                 @click="setView('files')">
@@ -29,7 +29,7 @@
                 {{ t('teamhub', 'Files') }}
             </button>
             <button
-                v-if="resources.calendar"
+                v-if="isBuiltinEnabled('calendar') && resources.calendar"
                 class="teamhub-tab"
                 :class="{ active: currentView === 'calendar' }"
                 @click="setView('calendar')">
@@ -37,12 +37,23 @@
                 {{ t('teamhub', 'Calendar') }}
             </button>
             <button
-                v-if="resources.deck && resources.deck.board_id"
+                v-if="isBuiltinEnabled('deck') && resources.deck && resources.deck.board_id"
                 class="teamhub-tab"
                 :class="{ active: currentView === 'deck' }"
                 @click="setView('deck')">
                 <CardText :size="16" />
                 {{ t('teamhub', 'Deck') }}
+            </button>
+
+            <!-- External app menu_item tabs (non-builtin, ordered by sort_order) -->
+            <button
+                v-for="menuItem in externalMenuItems"
+                :key="'mi-' + menuItem.registry_id"
+                class="teamhub-tab"
+                :class="{ active: currentView === 'ext-' + menuItem.registry_id }"
+                @click="setView('ext-' + menuItem.registry_id)">
+                <component :is="resolveTabIcon(menuItem.icon)" :size="16" />
+                {{ menuItem.title }}
             </button>
 
             <!-- Custom web links (open in new tab) -->
@@ -88,6 +99,14 @@
                     v-else-if="currentView === 'deck' && resources.deck"
                     :url="deckUrl"
                     :label="t('teamhub', 'Deck')" />
+                <!-- External menu_item integrations — sandboxed iframe in main canvas -->
+                <template v-for="menuItem in externalMenuItems">
+                    <AppEmbed
+                        v-if="currentView === 'ext-' + menuItem.registry_id && menuItem.iframe_url"
+                        :key="'ext-canvas-' + menuItem.registry_id"
+                        :url="menuItemUrl(menuItem)"
+                        :label="menuItem.title" />
+                </template>
             </div>
 
             <!-- Right sidebar — only on Home and Activity views -->
@@ -223,11 +242,11 @@
                     </template>
                 </NcAppNavigationItem>
 
-                <!-- External widgets registered by other apps (ordered by sort_order) -->
-                <ExternalWidgetItem
+                <!-- External sidebar widgets — data fetched server-side, rendered natively -->
+                <IntegrationWidget
                     v-for="widget in teamWidgets"
-                    :key="'ext-widget-' + widget.registry_id"
-                    :widget="widget"
+                    :key="'int-widget-' + widget.registry_id"
+                    :integration="widget"
                     :team-id="currentTeamId" />
             </aside>
         </div>
@@ -289,13 +308,14 @@ import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import Cog from 'vue-material-design-icons/Cog.vue'
 import VideoIcon from 'vue-material-design-icons/Video.vue'
+import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
 import CalendarWidget from './CalendarWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
-import ExternalWidgetItem from './ExternalWidgetItem.vue'
+import IntegrationWidget from './IntegrationWidget.vue'
 import ActivityFeedView from './ActivityFeedView.vue'
 import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
@@ -315,12 +335,13 @@ export default {
         MessageOutline, Chat, Folder, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline,
         Plus, OpenInNew, InformationOutline, AccountGroup, ClockOutline, FileDocumentOutline,
         ExitToApp, Cog, ContentCopy, AccountPlus, VideoIcon,
+        Puzzle,
         MessageStream,
         DeckWidget,
         CalendarWidget,
         IntravoxWidget,
         ActivityWidget,
-        ExternalWidgetItem,
+        IntegrationWidget,
         ActivityFeedView,
         ManageLinksModal,
         InviteMemberModal,
@@ -339,7 +360,7 @@ export default {
         }
     },
     computed: {
-        ...mapState(['currentTeamId', 'currentView', 'resources', 'webLinks', 'members', 'loading', 'intravoxAvailable', 'teamWidgets']),
+        ...mapState(['currentTeamId', 'currentView', 'resources', 'webLinks', 'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems']),
         ...mapGetters(['currentTeam']),
         team() { return this.currentTeam || {} },
         
@@ -382,6 +403,14 @@ export default {
             const id = this.resources.deck?.board_id
             return generateUrl('/apps/deck') + (id ? '/#/board/' + id : '/')
         },
+
+        /**
+         * External (non-builtin) menu_item integrations enabled for this team.
+         * These get their own tab and open a sandboxed iframe in the canvas.
+         */
+        externalMenuItems() {
+            return (this.teamMenuItems || []).filter(item => !item.is_builtin)
+        },
     },
     mounted() {
         this.$store.dispatch('checkIntravox')
@@ -390,9 +419,45 @@ export default {
         t,
         ...mapActions(['selectTeam']),
         ...mapMutations(['SET_VIEW']),
-        setView(view) { this.SET_VIEW(view) },
-        
-        
+        setView(view) {
+            this.SET_VIEW(view)
+        },
+
+        /**
+         * Check whether a built-in integration (by app_id) is enabled for this team.
+         * Falls back to true when teamMenuItems is empty (no integrations loaded yet)
+         * so that built-in tabs are visible before the integration data arrives.
+         */
+        isBuiltinEnabled(appId) {
+            if (!this.teamMenuItems || this.teamMenuItems.length === 0) {
+                // No data yet — show all built-ins by default.
+                return true
+            }
+            return this.teamMenuItems.some(item => item.app_id === appId && item.is_builtin)
+        },
+
+        /**
+         * Resolve an MDI icon component name for a menu_item tab.
+         * Falls back to Puzzle when the registered icon is not in the supported set.
+         */
+        resolveTabIcon(iconName) {
+            const supported = [
+                'Message', 'Folder', 'Calendar', 'CardText', 'ViewDashboard',
+                'AccountGroup', 'ChartBar', 'Bell', 'FileDocument', 'Puzzle',
+            ]
+            return supported.includes(iconName) ? iconName : 'Puzzle'
+        },
+
+        /**
+         * Build the iframe URL for an external menu_item integration.
+         * Appends teamId as a query parameter so the external app can scope its view.
+         */
+        menuItemUrl(menuItem) {
+            if (!menuItem.iframe_url) { return '' }
+            const sep = menuItem.iframe_url.includes('?') ? '&' : '?'
+            return menuItem.iframe_url + sep + 'teamId=' + encodeURIComponent(this.currentTeamId)
+        },
+
         openManageTeam() {
             // Open manage team view in main canvas
             this.$emit('show-manage-team')

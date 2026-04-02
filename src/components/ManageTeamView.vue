@@ -165,55 +165,106 @@
             </div>
         </div>
 
-        <!-- Widgets -->
+        <!-- Integrations -->
         <div class="manage-section">
-            <h3>{{ t('teamhub', 'Widgets') }}</h3>
+            <h3>{{ t('teamhub', 'Integrations') }}</h3>
+            <p class="manage-section-desc">
+                {{ t('teamhub', 'Enable or disable integrations for this team. Sidebar widgets show data in the right panel. Menu items add a tab to the tab bar.') }}
+            </p>
 
             <div v-if="loadingWidgets" class="section-loading">
                 <NcLoadingIcon :size="32" />
             </div>
 
-            <div v-else-if="widgetRegistry.length === 0" class="no-pending">
-                {{ t('teamhub', 'No widgets are registered. Install a compatible app to add widgets to this team.') }}
-            </div>
-
-            <!-- Widget list with drag-to-reorder for enabled widgets -->
-            <div v-else class="widgets-list">
-                <div
-                    v-for="widget in widgetRegistry"
-                    :key="widget.registry_id"
-                    class="widget-item"
-                    :class="{ 'widget-item--enabled': widget.enabled }">
-
-                    <!-- Drag handle — only shown when widget is enabled -->
-                    <span
-                        v-if="widget.enabled"
-                        class="widget-drag-handle"
-                        :draggable="true"
-                        :aria-label="t('teamhub', 'Drag to reorder')"
-                        @dragstart="onDragStart($event, widget)"
-                        @dragover.prevent
-                        @drop="onDrop($event, widget)">
-                        <DragVertical :size="18" />
-                    </span>
-                    <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
-
-                    <div class="widget-info">
-                        <span class="widget-title">{{ widget.title }}</span>
-                        <span v-if="widget.description" class="widget-description">{{ widget.description }}</span>
-                        <span class="widget-app-id">{{ widget.app_id }}</span>
+            <template v-else>
+                <!-- Menu items (tabs) -->
+                <div class="integrations-group">
+                    <h4 class="integrations-group-title">{{ t('teamhub', 'Tab bar items') }}</h4>
+                    <div v-if="menuItemIntegrations.length === 0" class="no-pending">
+                        {{ t('teamhub', 'No tab bar integrations available.') }}
                     </div>
+                    <div v-else class="widgets-list">
+                        <div
+                            v-for="item in menuItemIntegrations"
+                            :key="item.registry_id"
+                            class="widget-item"
+                            :class="{ 'widget-item--enabled': item.enabled }">
 
-                    <NcCheckboxRadioSwitch
-                        :checked="widget.enabled"
-                        :disabled="togglingWidget === widget.registry_id"
-                        type="checkbox"
-                        :aria-label="t('teamhub', 'Enable {title}', { title: widget.title })"
-                        @update:checked="toggleWidget(widget, $event)">
-                        {{ widget.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                    </NcCheckboxRadioSwitch>
+                            <span
+                                v-if="item.enabled && !item.is_builtin"
+                                class="widget-drag-handle"
+                                :draggable="true"
+                                :aria-label="t('teamhub', 'Drag to reorder')"
+                                @dragstart="onDragStart($event, item)"
+                                @dragover.prevent
+                                @drop="onDrop($event, item)">
+                                <DragVertical :size="18" />
+                            </span>
+                            <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
+
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    {{ item.title }}
+                                    <span v-if="item.is_builtin" class="widget-badge">{{ t('teamhub', 'Built-in') }}</span>
+                                </span>
+                                <span v-if="item.description" class="widget-description">{{ item.description }}</span>
+                            </div>
+
+                            <NcCheckboxRadioSwitch
+                                :checked="item.enabled"
+                                :disabled="togglingWidget === item.registry_id"
+                                type="checkbox"
+                                :aria-label="t('teamhub', 'Enable {title}', { title: item.title })"
+                                @update:checked="toggleIntegration(item, $event)">
+                                {{ item.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+                    </div>
                 </div>
-            </div>
+
+                <!-- Sidebar widgets -->
+                <div class="integrations-group">
+                    <h4 class="integrations-group-title">{{ t('teamhub', 'Sidebar widgets') }}</h4>
+                    <div v-if="widgetIntegrations.length === 0" class="no-pending">
+                        {{ t('teamhub', 'No sidebar widgets registered. Install a compatible app to add widgets to this team.') }}
+                    </div>
+                    <div v-else class="widgets-list">
+                        <div
+                            v-for="widget in widgetIntegrations"
+                            :key="widget.registry_id"
+                            class="widget-item"
+                            :class="{ 'widget-item--enabled': widget.enabled }">
+
+                            <span
+                                v-if="widget.enabled"
+                                class="widget-drag-handle"
+                                :draggable="true"
+                                :aria-label="t('teamhub', 'Drag to reorder')"
+                                @dragstart="onDragStart($event, widget)"
+                                @dragover.prevent
+                                @drop="onDrop($event, widget)">
+                                <DragVertical :size="18" />
+                            </span>
+                            <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
+
+                            <div class="widget-info">
+                                <span class="widget-title">{{ widget.title }}</span>
+                                <span v-if="widget.description" class="widget-description">{{ widget.description }}</span>
+                                <span class="widget-app-id">{{ widget.app_id }}</span>
+                            </div>
+
+                            <NcCheckboxRadioSwitch
+                                :checked="widget.enabled"
+                                :disabled="togglingWidget === widget.registry_id"
+                                type="checkbox"
+                                :aria-label="t('teamhub', 'Enable {title}', { title: widget.title })"
+                                @update:checked="toggleIntegration(widget, $event)">
+                                {{ widget.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+                    </div>
+                </div>
+            </template>
         </div>
 
         <!-- Danger zone: Delete Team -->
@@ -293,11 +344,11 @@ export default {
                 protected: false,
                 singleMember: false,
             },
-            // Widgets tab
-            widgetRegistry: [],     // [{ registry_id, app_id, title, description, icon, enabled, sort_order }]
+            // Integrations tab (merged widget + menu_item registry)
+            integrationRegistry: [], // full list from /integrations/registry with enabled state
             loadingWidgets: false,
-            togglingWidget: null,   // registry_id currently being toggled, or null
-            dragSourceWidget: null, // widget row being dragged
+            togglingWidget: null,    // registry_id currently being toggled, or null
+            dragSourceWidget: null,  // integration row being dragged
         }
     },
     computed: {
@@ -340,6 +391,21 @@ export default {
         currentUserIsOwner() {
             return this.currentUserLevel >= 9
         },
+
+        /** All integrations — alias kept for drag/drop logic */
+        widgetRegistry() {
+            return this.integrationRegistry
+        },
+
+        /** Only menu_item integrations (built-in tab bar entries + external mini apps) */
+        menuItemIntegrations() {
+            return this.integrationRegistry.filter(i => i.integration_type === 'menu_item')
+        },
+
+        /** Only sidebar widget integrations (external data-driven widgets) */
+        widgetIntegrations() {
+            return this.integrationRegistry.filter(i => i.integration_type === 'widget')
+        },
     },
     watch: {
         'team.id'() {
@@ -347,14 +413,14 @@ export default {
             this.loadMembers()
             this.loadPendingRequests()
             this.loadConfig()
-            this.loadWidgetRegistry()
+            this.loadIntegrationRegistry()
         },
     },
     mounted() {
         this.loadMembers()
         this.loadPendingRequests()
         this.loadConfig()
-        this.loadWidgetRegistry()
+        this.loadIntegrationRegistry()
     },
     methods: {
         t,
@@ -528,71 +594,74 @@ export default {
         },
 
         // ------------------------------------------------------------------
-        // Widgets tab
+        // Integrations tab
         // ------------------------------------------------------------------
 
-        async loadWidgetRegistry() {
+        async loadIntegrationRegistry() {
             this.loadingWidgets = true
             try {
                 const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/widget-registry`)
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/integrations/registry`)
                 )
-                this.widgetRegistry = Array.isArray(data) ? data : []
-            } catch {
-                this.widgetRegistry = []
+                this.integrationRegistry = Array.isArray(data) ? data : []
+            } catch (e) {
+                this.integrationRegistry = []
             } finally {
                 this.loadingWidgets = false
             }
         },
 
-        async toggleWidget(widget, enabled) {
-            this.togglingWidget = widget.registry_id
+        async toggleIntegration(integration, enabled) {
+            this.togglingWidget = integration.registry_id
             try {
                 const { data } = await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/widget-registry/${widget.registry_id}/toggle`),
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/integrations/${integration.registry_id}/toggle`),
                     { enable: enabled }
                 )
-                this.widgetRegistry = Array.isArray(data) ? data : this.widgetRegistry
+                this.integrationRegistry = Array.isArray(data) ? data : this.integrationRegistry
                 showSuccess(
                     enabled
-                        ? t('teamhub', '{title} enabled for this team', { title: widget.title })
-                        : t('teamhub', '{title} disabled for this team', { title: widget.title })
+                        ? t('teamhub', '{title} enabled for this team', { title: integration.title })
+                        : t('teamhub', '{title} disabled for this team', { title: integration.title })
                 )
             } catch (error) {
                 const msg = error.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to update widget') + (msg ? `: ${msg}` : ''))
+                showError(t('teamhub', 'Failed to update integration') + (msg ? `: ${msg}` : ''))
             } finally {
                 this.togglingWidget = null
             }
         },
 
-        onDragStart(event, widget) {
-            this.dragSourceWidget = widget
+        onDragStart(event, integration) {
+            this.dragSourceWidget = integration
             event.dataTransfer.effectAllowed = 'move'
         },
 
-        async onDrop(event, targetWidget) {
+        async onDrop(event, targetIntegration) {
             event.preventDefault()
-            if (!this.dragSourceWidget || this.dragSourceWidget.registry_id === targetWidget.registry_id) {
+            if (!this.dragSourceWidget || this.dragSourceWidget.registry_id === targetIntegration.registry_id) {
                 this.dragSourceWidget = null
                 return
             }
 
-            // Build new ordered array of registry IDs for enabled widgets only,
-            // swapping source into target's position.
-            const enabled = this.widgetRegistry
-                .filter(w => w.enabled)
-                .map(w => w.registry_id)
+            // Only reorder within the same type group.
+            if (this.dragSourceWidget.integration_type !== targetIntegration.integration_type) {
+                this.dragSourceWidget = null
+                return
+            }
+
+            const enabled = this.integrationRegistry
+                .filter(i => i.enabled && i.integration_type === this.dragSourceWidget.integration_type)
+                .map(i => i.registry_id)
 
             const srcIdx = enabled.indexOf(this.dragSourceWidget.registry_id)
-            const tgtIdx = enabled.indexOf(targetWidget.registry_id)
+            const tgtIdx = enabled.indexOf(targetIntegration.registry_id)
 
             if (srcIdx === -1 || tgtIdx === -1) {
                 this.dragSourceWidget = null
                 return
             }
 
-            // Reorder in-place.
             enabled.splice(srcIdx, 1)
             enabled.splice(tgtIdx, 0, this.dragSourceWidget.registry_id)
 
@@ -600,31 +669,27 @@ export default {
 
             try {
                 const { data } = await axios.put(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/widget-registry/reorder`),
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/integrations/reorder`),
                     { order: enabled }
                 )
-                // Merge updated sort_order back into widgetRegistry while preserving
-                // disabled widgets (they are not in the reorder response).
                 if (Array.isArray(data)) {
                     const sortMap = {}
-                    data.forEach(w => { sortMap[w.registry_id] = w.sort_order })
-                    this.widgetRegistry = this.widgetRegistry.map(w =>
-                        w.enabled && sortMap[w.registry_id] !== undefined
-                            ? { ...w, sort_order: sortMap[w.registry_id] }
-                            : w
+                    data.forEach(i => { sortMap[i.registry_id] = i.sort_order })
+                    this.integrationRegistry = this.integrationRegistry.map(i =>
+                        i.enabled && sortMap[i.registry_id] !== undefined
+                            ? { ...i, sort_order: sortMap[i.registry_id] }
+                            : i
                     )
-                    // Re-sort enabled widgets visually.
-                    this.widgetRegistry.sort((a, b) => {
+                    this.integrationRegistry.sort((a, b) => {
                         if (a.enabled && b.enabled) return a.sort_order - b.sort_order
                         if (a.enabled) return -1
                         if (b.enabled) return 1
                         return 0
                     })
                 }
-            } catch {
-                showError(t('teamhub', 'Failed to save widget order'))
-                // Reload to get canonical order from backend.
-                await this.loadWidgetRegistry()
+            } catch (e) {
+                showError(t('teamhub', 'Failed to save order'))
+                await this.loadIntegrationRegistry()
             }
         },
     },
@@ -832,5 +897,45 @@ export default {
     color: var(--color-text-maxcontrast);
     font-family: monospace;
     opacity: 0.7;
+}
+.widget-app-id {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    font-family: monospace;
+}
+
+.integrations-group {
+    margin-bottom: 24px;
+}
+
+.integrations-group-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.manage-section-desc {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    margin: -8px 0 16px;
+}
+
+.widget-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--color-primary-element-light);
+    color: var(--color-primary-element);
+    border-radius: var(--border-radius-pill);
+    padding: 1px 6px;
+    margin-left: 6px;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 </style>
