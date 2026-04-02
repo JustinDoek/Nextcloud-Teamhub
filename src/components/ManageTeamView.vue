@@ -165,6 +165,57 @@
             </div>
         </div>
 
+        <!-- Widgets -->
+        <div class="manage-section">
+            <h3>{{ t('teamhub', 'Widgets') }}</h3>
+
+            <div v-if="loadingWidgets" class="section-loading">
+                <NcLoadingIcon :size="32" />
+            </div>
+
+            <div v-else-if="widgetRegistry.length === 0" class="no-pending">
+                {{ t('teamhub', 'No widgets are registered. Install a compatible app to add widgets to this team.') }}
+            </div>
+
+            <!-- Widget list with drag-to-reorder for enabled widgets -->
+            <div v-else class="widgets-list">
+                <div
+                    v-for="widget in widgetRegistry"
+                    :key="widget.registry_id"
+                    class="widget-item"
+                    :class="{ 'widget-item--enabled': widget.enabled }">
+
+                    <!-- Drag handle — only shown when widget is enabled -->
+                    <span
+                        v-if="widget.enabled"
+                        class="widget-drag-handle"
+                        :draggable="true"
+                        :aria-label="t('teamhub', 'Drag to reorder')"
+                        @dragstart="onDragStart($event, widget)"
+                        @dragover.prevent
+                        @drop="onDrop($event, widget)">
+                        <DragVertical :size="18" />
+                    </span>
+                    <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
+
+                    <div class="widget-info">
+                        <span class="widget-title">{{ widget.title }}</span>
+                        <span v-if="widget.description" class="widget-description">{{ widget.description }}</span>
+                        <span class="widget-app-id">{{ widget.app_id }}</span>
+                    </div>
+
+                    <NcCheckboxRadioSwitch
+                        :checked="widget.enabled"
+                        :disabled="togglingWidget === widget.registry_id"
+                        type="checkbox"
+                        :aria-label="t('teamhub', 'Enable {title}', { title: widget.title })"
+                        @update:checked="toggleWidget(widget, $event)">
+                        {{ widget.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                    </NcCheckboxRadioSwitch>
+                </div>
+            </div>
+        </div>
+
         <!-- Danger zone: Delete Team -->
         <div class="manage-section manage-section--danger">
             <h3>{{ t('teamhub', 'Danger Zone') }}</h3>
@@ -201,6 +252,7 @@ import Check from 'vue-material-design-icons/Check.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
+import DragVertical from 'vue-material-design-icons/DragVertical.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -214,7 +266,7 @@ export default {
     name: 'ManageTeamView',
     components: {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch,
-        ContentSave, AccountRemove, Check, Close, CheckCircle, Delete,
+        ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
     },
     props: {
         team: { type: Object, required: true },
@@ -241,6 +293,11 @@ export default {
                 protected: false,
                 singleMember: false,
             },
+            // Widgets tab
+            widgetRegistry: [],     // [{ registry_id, app_id, title, description, icon, enabled, sort_order }]
+            loadingWidgets: false,
+            togglingWidget: null,   // registry_id currently being toggled, or null
+            dragSourceWidget: null, // widget row being dragged
         }
     },
     computed: {
@@ -290,12 +347,14 @@ export default {
             this.loadMembers()
             this.loadPendingRequests()
             this.loadConfig()
+            this.loadWidgetRegistry()
         },
     },
     mounted() {
         this.loadMembers()
         this.loadPendingRequests()
         this.loadConfig()
+        this.loadWidgetRegistry()
     },
     methods: {
         t,
@@ -467,6 +526,107 @@ export default {
                 this.deleting = false
             }
         },
+
+        // ------------------------------------------------------------------
+        // Widgets tab
+        // ------------------------------------------------------------------
+
+        async loadWidgetRegistry() {
+            this.loadingWidgets = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/widget-registry`)
+                )
+                this.widgetRegistry = Array.isArray(data) ? data : []
+            } catch {
+                this.widgetRegistry = []
+            } finally {
+                this.loadingWidgets = false
+            }
+        },
+
+        async toggleWidget(widget, enabled) {
+            this.togglingWidget = widget.registry_id
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/widget-registry/${widget.registry_id}/toggle`),
+                    { enable: enabled }
+                )
+                this.widgetRegistry = Array.isArray(data) ? data : this.widgetRegistry
+                showSuccess(
+                    enabled
+                        ? t('teamhub', '{title} enabled for this team', { title: widget.title })
+                        : t('teamhub', '{title} disabled for this team', { title: widget.title })
+                )
+            } catch (error) {
+                const msg = error.response?.data?.error || ''
+                showError(t('teamhub', 'Failed to update widget') + (msg ? `: ${msg}` : ''))
+            } finally {
+                this.togglingWidget = null
+            }
+        },
+
+        onDragStart(event, widget) {
+            this.dragSourceWidget = widget
+            event.dataTransfer.effectAllowed = 'move'
+        },
+
+        async onDrop(event, targetWidget) {
+            event.preventDefault()
+            if (!this.dragSourceWidget || this.dragSourceWidget.registry_id === targetWidget.registry_id) {
+                this.dragSourceWidget = null
+                return
+            }
+
+            // Build new ordered array of registry IDs for enabled widgets only,
+            // swapping source into target's position.
+            const enabled = this.widgetRegistry
+                .filter(w => w.enabled)
+                .map(w => w.registry_id)
+
+            const srcIdx = enabled.indexOf(this.dragSourceWidget.registry_id)
+            const tgtIdx = enabled.indexOf(targetWidget.registry_id)
+
+            if (srcIdx === -1 || tgtIdx === -1) {
+                this.dragSourceWidget = null
+                return
+            }
+
+            // Reorder in-place.
+            enabled.splice(srcIdx, 1)
+            enabled.splice(tgtIdx, 0, this.dragSourceWidget.registry_id)
+
+            this.dragSourceWidget = null
+
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/widget-registry/reorder`),
+                    { order: enabled }
+                )
+                // Merge updated sort_order back into widgetRegistry while preserving
+                // disabled widgets (they are not in the reorder response).
+                if (Array.isArray(data)) {
+                    const sortMap = {}
+                    data.forEach(w => { sortMap[w.registry_id] = w.sort_order })
+                    this.widgetRegistry = this.widgetRegistry.map(w =>
+                        w.enabled && sortMap[w.registry_id] !== undefined
+                            ? { ...w, sort_order: sortMap[w.registry_id] }
+                            : w
+                    )
+                    // Re-sort enabled widgets visually.
+                    this.widgetRegistry.sort((a, b) => {
+                        if (a.enabled && b.enabled) return a.sort_order - b.sort_order
+                        if (a.enabled) return -1
+                        if (b.enabled) return 1
+                        return 0
+                    })
+                }
+            } catch {
+                showError(t('teamhub', 'Failed to save widget order'))
+                // Reload to get canonical order from backend.
+                await this.loadWidgetRegistry()
+            }
+        },
     },
 }
 </script>
@@ -600,4 +760,77 @@ export default {
 .manage-danger-info { display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .manage-danger-title { font-size: 14px; font-weight: 500; }
 .manage-danger-desc { font-size: 13px; color: var(--color-text-maxcontrast); }
+
+/* Widgets section */
+.widgets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.widget-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark);
+    transition: background 0.15s ease;
+}
+
+.widget-item--enabled {
+    background: color-mix(in srgb, var(--color-primary-element) 6%, var(--color-background-dark));
+}
+
+.widget-drag-handle {
+    display: flex;
+    align-items: center;
+    color: var(--color-text-maxcontrast);
+    flex-shrink: 0;
+    width: 20px;
+}
+
+.widget-drag-handle:not(.widget-drag-handle--placeholder) {
+    cursor: grab;
+}
+
+.widget-drag-handle:not(.widget-drag-handle--placeholder):active {
+    cursor: grabbing;
+}
+
+.widget-drag-handle--placeholder {
+    pointer-events: none;
+    opacity: 0;
+}
+
+.widget-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.widget-title {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.widget-description {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.widget-app-id {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    font-family: monospace;
+    opacity: 0.7;
+}
 </style>

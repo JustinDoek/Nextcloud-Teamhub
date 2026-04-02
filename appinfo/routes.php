@@ -69,5 +69,17 @@ return [
         ['name' => 'comment#listComments', 'url' => '/api/v1/messages/{messageId}/comments', 'verb' => 'GET'],
         ['name' => 'comment#createComment', 'url' => '/api/v1/messages/{messageId}/comments', 'verb' => 'POST'],
         ['name' => 'comment#updateComment', 'url' => '/api/v1/comments/{commentId}', 'verb' => 'PUT'],
+
+        // Widget registry — external-app registration endpoints
+        ['name' => 'widget#registerWidget',   'url' => '/api/v1/ext/widgets/register',    'verb' => 'POST'],
+        ['name' => 'widget#deregisterWidget', 'url' => '/api/v1/ext/widgets/{appId}',      'verb' => 'DELETE'],
+
+        // Widget — sidebar (fetched on team select)
+        ['name' => 'widget#getEnabledWidgets', 'url' => '/api/v1/teams/{teamId}/widgets', 'verb' => 'GET'],
+
+        // Widget — Manage Team → Widgets tab
+        ['name' => 'widget#getWidgetRegistry', 'url' => '/api/v1/teams/{teamId}/widget-registry',                         'verb' => 'GET'],
+        ['name' => 'widget#toggleWidget',      'url' => '/api/v1/teams/{teamId}/widget-registry/{registryId}/toggle',     'verb' => 'POST'],
+        ['name' => 'widget#reorderWidgets',    'url' => '/api/v1/teams/{teamId}/widget-registry/reorder',                 'verb' => 'PUT'],
     ],
 ];

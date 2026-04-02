@@ -222,6 +222,13 @@
                         <ActivityWidget @show-more="setView('activity')" />
                     </template>
                 </NcAppNavigationItem>
+
+                <!-- External widgets registered by other apps (ordered by sort_order) -->
+                <ExternalWidgetItem
+                    v-for="widget in teamWidgets"
+                    :key="'ext-widget-' + widget.registry_id"
+                    :widget="widget"
+                    :team-id="currentTeamId" />
             </aside>
         </div>
 
@@ -288,6 +295,7 @@ import DeckWidget from './DeckWidget.vue'
 import CalendarWidget from './CalendarWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
+import ExternalWidgetItem from './ExternalWidgetItem.vue'
 import ActivityFeedView from './ActivityFeedView.vue'
 import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
@@ -312,6 +320,7 @@ export default {
         CalendarWidget,
         IntravoxWidget,
         ActivityWidget,
+        ExternalWidgetItem,
         ActivityFeedView,
         ManageLinksModal,
         InviteMemberModal,
@@ -330,7 +339,7 @@ export default {
         }
     },
     computed: {
-        ...mapState(['currentTeamId', 'currentView', 'resources', 'webLinks', 'members', 'loading', 'intravoxAvailable']),
+        ...mapState(['currentTeamId', 'currentView', 'resources', 'webLinks', 'members', 'loading', 'intravoxAvailable', 'teamWidgets']),
         ...mapGetters(['currentTeam']),
         team() { return this.currentTeam || {} },
         

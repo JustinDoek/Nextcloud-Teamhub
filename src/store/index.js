@@ -20,6 +20,7 @@ export default new Vuex.Store({
         resources: {},         // { talk, files, calendar, deck }
         webLinks: [],
         deckTasks: [],
+        teamWidgets: [],        // enabled widgets for the current team (from widget registry)
         intravoxAvailable: false,
         loading: {
             teams: false,
@@ -109,6 +110,7 @@ export default new Vuex.Store({
         SET_RESOURCES(state, resources) { state.resources = resources },
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
+        SET_TEAM_WIDGETS(state, widgets) { state.teamWidgets = widgets },
         SET_LOADING(state, { key, value }) { Vue.set(state.loading, key, value) },
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },
@@ -149,6 +151,7 @@ export default new Vuex.Store({
             commit('SET_MEMBERS', [])
             commit('SET_RESOURCES', {})
             commit('SET_WEB_LINKS', [])
+            commit('SET_TEAM_WIDGETS', [])
 
             // Mark seen immediately (optimistic) + fire-and-forget to backend
             commit('MARK_TEAM_SEEN', teamId)
@@ -159,6 +162,7 @@ export default new Vuex.Store({
                 dispatch('fetchMembers', teamId),
                 dispatch('fetchResources', teamId),
                 dispatch('fetchWebLinks', teamId),
+                dispatch('fetchTeamWidgets', teamId),
             ])
         },
 
@@ -265,6 +269,21 @@ export default new Vuex.Store({
                 commit('SET_WEB_LINKS', Array.isArray(data) ? data : [])
             } catch (e) {
                 commit('SET_WEB_LINKS', [])
+            }
+        },
+
+        /**
+         * Fetch the enabled external widgets for a team.
+         * Silently degrades to an empty list when no widgets are registered —
+         * most installs will have none initially.
+         */
+        async fetchTeamWidgets({ commit }, teamId) {
+            try {
+                const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/widgets`))
+                commit('SET_TEAM_WIDGETS', Array.isArray(data) ? data : [])
+            } catch (e) {
+                // Non-fatal — widget support is optional.
+                commit('SET_TEAM_WIDGETS', [])
             }
         },
 

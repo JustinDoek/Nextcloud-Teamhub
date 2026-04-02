@@ -4,7 +4,10 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\ActivityService;
+use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
+use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TeamService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -19,6 +22,9 @@ class TeamController extends Controller {
         string $appName,
         IRequest $request,
         private TeamService $teamService,
+        private MemberService $memberService,
+        private ResourceService $resourceService,
+        private ActivityService $activityService,
         private MessageService $messageService,
         private LoggerInterface $logger,
     ) {
@@ -102,7 +108,7 @@ class TeamController extends Controller {
             if (strlen($q) < 2) {
                 return new JSONResponse([]);
             }
-            $users = $this->teamService->searchUsers($q, 10);
+            $users = $this->memberService->searchUsers($q, 10);
             return new JSONResponse($users);
         } catch (\Throwable $e) {
             return new JSONResponse([], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -113,7 +119,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamMembers(string $teamId): JSONResponse {
         try {
-            $members = $this->teamService->getTeamMembers($teamId);
+            $members = $this->memberService->getTeamMembers($teamId);
             return new JSONResponse($members);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to get team members', [
@@ -129,7 +135,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamResources(string $teamId): JSONResponse {
         try {
-            $resources = $this->teamService->getTeamResources($teamId);
+            $resources = $this->resourceService->getTeamResources($teamId);
             return new JSONResponse($resources);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to get team resources', [
@@ -167,7 +173,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function leaveTeam(string $teamId): JSONResponse {
         try {
-            $this->teamService->leaveTeam($teamId);
+            $this->memberService->leaveTeam($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -196,7 +202,7 @@ class TeamController extends Controller {
             $limit = (int)($this->request->getParam('limit', 25));
             $limit = max(1, min(100, $limit));
             $since = (int)($this->request->getParam('since', 0));
-            $items = $this->teamService->getTeamActivity($teamId, $limit, $since);
+            $items = $this->activityService->getTeamActivity($teamId, $limit, $since);
             return new JSONResponse(['activities' => $items]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -207,7 +213,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamCalendarEvents(string $teamId): JSONResponse {
         try {
-            $events = $this->teamService->getTeamCalendarEvents($teamId);
+            $events = $this->activityService->getTeamCalendarEvents($teamId);
             return new JSONResponse($events);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -228,7 +234,7 @@ class TeamController extends Controller {
                 return new JSONResponse(['error' => 'title, start and end are required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $this->teamService->createCalendarEvent($teamId, $title, $start, $end, $location, $description);
+            $this->activityService->createCalendarEvent($teamId, $title, $start, $end, $location, $description);
             return new JSONResponse(['success' => true], Http::STATUS_CREATED);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -250,7 +256,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function requestJoinTeam(string $teamId): JSONResponse {
         try {
-            $this->teamService->requestJoinTeam($teamId);
+            $this->memberService->requestJoinTeam($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -276,7 +282,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function removeMember(string $teamId, string $userId): JSONResponse {
         try {
-            $this->teamService->removeMember($teamId, $userId);
+            $this->memberService->removeMember($teamId, $userId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -291,7 +297,7 @@ class TeamController extends Controller {
             if (!isset($body['level'])) {
                 return new JSONResponse(['error' => 'level is required'], Http::STATUS_BAD_REQUEST);
             }
-            $members = $this->teamService->updateMemberLevel($teamId, $userId, (int)$body['level']);
+            $members = $this->memberService->updateMemberLevel($teamId, $userId, (int)$body['level']);
             return new JSONResponse($members);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -301,14 +307,14 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function canCreateTeam(): JSONResponse {
-        return new JSONResponse(['canCreate' => $this->teamService->canCurrentUserCreateTeam()]);
+        return new JSONResponse(['canCreate' => $this->memberService->canCurrentUserCreateTeam()]);
     }
 
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getPendingRequests(string $teamId): JSONResponse {
         try {
-            $requests = $this->teamService->getPendingRequests($teamId);
+            $requests = $this->memberService->getPendingRequests($teamId);
             return new JSONResponse($requests);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -319,7 +325,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function approveRequest(string $teamId, string $userId): JSONResponse {
         try {
-            $this->teamService->approveRequest($teamId, $userId);
+            $this->memberService->approveRequest($teamId, $userId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -330,7 +336,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function rejectRequest(string $teamId, string $userId): JSONResponse {
         try {
-            $this->teamService->rejectRequest($teamId, $userId);
+            $this->memberService->rejectRequest($teamId, $userId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -344,7 +350,7 @@ class TeamController extends Controller {
         try {
             $body = $this->request->getParams();
             $members = isset($body['members']) && is_array($body['members']) ? $body['members'] : [];
-            $results = $this->teamService->inviteMembers($teamId, $members);
+            $results = $this->memberService->inviteMembers($teamId, $members);
             return new JSONResponse($results);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -358,7 +364,7 @@ class TeamController extends Controller {
             $body = $this->request->getParams();
             $apps = isset($body['apps']) && is_array($body['apps']) ? $body['apps'] : [];
             $teamName = isset($body['teamName']) ? (string)$body['teamName'] : '';
-            $results = $this->teamService->createTeamResources($teamId, $apps, $teamName);
+            $results = $this->resourceService->createTeamResources($teamId, $apps, $teamName);
             // Always 200 — per-app errors are in the results payload, not HTTP status
             return new JSONResponse($results);
         } catch (\Throwable $e) {
@@ -428,7 +434,7 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getAllowedInviteTypes(): JSONResponse {
-        return new JSONResponse(['types' => $this->teamService->getAllowedInviteTypes()]);
+        return new JSONResponse(['types' => $this->memberService->getAllowedInviteTypes()]);
     }
 
     #[NoCSRFRequired]
@@ -455,7 +461,7 @@ class TeamController extends Controller {
             $teamId   = $body['teamId']   ?? '';
             $app      = $body['app']      ?? 'calendar';
             $teamName = $body['teamName'] ?? 'Test Team';
-            $results  = $this->teamService->createTeamResources($teamId, [$app], $teamName);
+            $results  = $this->resourceService->createTeamResources($teamId, [$app], $teamName);
             return new JSONResponse(['result' => $results, 'success' => true]);
         } catch (\Throwable $e) {
             return new JSONResponse([
@@ -470,7 +476,7 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function checkApps(): JSONResponse {
-        return new JSONResponse($this->teamService->checkInstalledApps());
+        return new JSONResponse($this->resourceService->checkInstalledApps());
     }
 
 
