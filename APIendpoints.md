@@ -1,490 +1,160 @@
-# TeamHub API Endpoints — v2.27.0
+# TeamHub API Endpoints — v2.31.0
 
-All endpoints are prefixed with `/apps/teamhub`. Authentication is required for all endpoints (NC session cookie or app password). All responses are JSON unless noted.
+All endpoints are prefixed with `/apps/teamhub`. Authentication via Nextcloud session cookie (CSRF required unless noted). All responses are JSON.
 
 ---
 
 ## Teams
 
-### GET /api/v1/teams
-List all teams the current user is a member of.
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams` | User | List teams the current user belongs to |
+| POST | `/api/v1/teams` | User | Create a new team (Circle) |
+| GET | `/api/v1/teams/browse` | User | Browse all visible/joinable teams |
+| GET | `/api/v1/teams/{teamId}` | User | Get a single team |
+| PUT | `/api/v1/teams/{teamId}` | User | Update team description or config bitmask |
+| DELETE | `/api/v1/teams/{teamId}` | Owner | Delete team (owner only) |
 
-**Response:** `Array<Team>`
-```json
-[{ "id": "circle-uuid", "name": "My Team", "description": "...", "unread": 0, "member_count": 5 }]
-```
+## Team Members
 
-### GET /api/v1/teams/browse
-Browse all visible teams (for discovery / join requests).
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/members` | User | List team members with levels |
+| DELETE | `/api/v1/teams/{teamId}/members/{userId}` | Admin | Remove a member |
+| PUT | `/api/v1/teams/{teamId}/members/{userId}/level` | Admin | Change member role level |
+| GET | `/api/v1/teams/{teamId}/pending-requests` | User | List pending join requests |
+| POST | `/api/v1/teams/{teamId}/approve/{userId}` | Admin | Approve a join request |
+| POST | `/api/v1/teams/{teamId}/reject/{userId}` | Admin | Reject a join request |
 
-**Response:** `Array<Team>`
+## Team Config & Description
 
-### GET /api/v1/teams/{teamId}
-Get a single team by ID.
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/config` | User | Get Circles config bitmask |
+| PUT | `/api/v1/teams/{teamId}/config` | Admin | Update Circles config bitmask |
+| PUT | `/api/v1/teams/{teamId}/description` | Admin | Update team description |
 
-**Response:** `Team`
+## Team Resources
 
-### POST /api/v1/teams
-Create a new team.
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/resources` | User | Get Talk/Files/Calendar/Deck resource IDs |
+| POST | `/api/v1/teams/{teamId}/create-resources` | Admin | Provision resources for selected apps |
 
-**Body:** `{ "name": string, "description"?: string }`
-**Response:** `Team`
+## Team Apps (built-in app visibility per team)
 
-### PUT /api/v1/teams/{teamId}
-Update team name.
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/apps` | User | Get enabled/disabled state per app |
+| PUT | `/api/v1/teams/{teamId}/apps` | **Team Admin** | Toggle app on/off; creates or hard-deletes resource |
+| DELETE | `/api/v1/teams/{teamId}/resources/{app}` | **Team Admin** | Hard-delete a single resource (`spreed`, `files`, `calendar`, `deck`, `intravox`) |
 
-**Body:** `{ "name": string }`
-**Response:** `Team`
+> **Note:** Disabling an app via PUT /apps triggers full hard-deletion of the resource (Option B). All data is permanently removed.
 
-### DELETE /api/v1/teams/{teamId}
-Delete a team (owner only). Does not delete provisioned resources.
+## Team Actions
 
-**Response:** `{ "success": true }`
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/teams/{teamId}/join` | User | Request to join a team |
+| POST | `/api/v1/teams/{teamId}/leave` | User | Leave a team |
+| POST | `/api/v1/teams/{teamId}/seen` | User | Mark team messages as seen |
+| POST | `/api/v1/teams/{teamId}/invite-members` | Admin | Invite users/groups to team |
 
-### PUT /api/v1/teams/{teamId}/description
-Update team description.
+## Calendar
 
-**Body:** `{ "description": string }`
-**Response:** `{ "success": true }`
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/calendar/events` | User | Get upcoming calendar events |
+| POST | `/api/v1/teams/{teamId}/calendar/events` | User | Create calendar event |
 
-### GET /api/v1/teams/{teamId}/config
-Get team Circle configuration bitmask.
+## Activity
 
-**Response:** `{ "config": number }`
-
-### PUT /api/v1/teams/{teamId}/config
-Update team Circle configuration. Only MANAGED_BITS (1|2|4|16|512|1024) are written; other bits are preserved.
-
-**Body:** `{ "config": number }`
-**Response:** `{ "config": number }`
-
-### GET /api/v1/teams/{teamId}/apps
-Get which built-in apps are enabled for this team (legacy — Talk/Files/Cal/Deck).
-
-**Response:** `Array<{ app_id: string, enabled: boolean }>`
-
-### PUT /api/v1/teams/{teamId}/apps
-Update which built-in apps are enabled (legacy).
-
-**Body:** `{ "apps": [{ "app_id": string, "enabled": boolean }] }`
-**Response:** `Array<{ app_id: string, enabled: boolean }>`
-
----
-
-## Team members
-
-### GET /api/v1/teams/{teamId}/members
-Get all members of a team.
-
-**Response:** `Array<Member>`
-```json
-[{ "userId": "alice", "displayName": "Alice", "level": 4, "email": "alice@example.com" }]
-```
-
-Member levels: `1` = Member, `4` = Moderator, `8` = Admin, `9` = Owner.
-
-### PUT /api/v1/teams/{teamId}/members/{userId}/level
-Change a member's role. Requires Moderator (4) or above.
-
-**Body:** `{ "level": 1|4|8 }`
-**Response:** `Array<Member>` (full updated list)
-
-### DELETE /api/v1/teams/{teamId}/members/{userId}
-Remove a member. Cannot remove the owner.
-
-**Response:** `{ "success": true }`
-
-### POST /api/v1/teams/{teamId}/invite-members
-Invite one or more users/groups/emails.
-
-**Body:** `{ "invites": [{ "type": "user"|"group"|"email"|"federated", "id": string }] }`
-**Response:** `{ "success": true, "invited": number, "failed": [] }`
-
-### GET /api/v1/teams/{teamId}/pending-requests
-Get pending join requests (Moderator+ only).
-
-**Response:** `Array<Member>`
-
-### POST /api/v1/teams/{teamId}/approve/{userId}
-Approve a join request.
-
-**Response:** `{ "success": true }`
-
-### POST /api/v1/teams/{teamId}/reject/{userId}
-Reject a join request.
-
-**Response:** `{ "success": true }`
-
-### POST /api/v1/teams/{teamId}/join
-Request to join a team.
-
-**Response:** `{ "success": true }`
-
-### POST /api/v1/teams/{teamId}/leave
-Leave a team. Cannot leave if you are the owner.
-
-**Response:** `{ "success": true }`
-
----
-
-## Team resources
-
-### GET /api/v1/teams/{teamId}/resources
-Get all provisioned resources for a team (Talk token, Files path, Calendar token, Deck board ID).
-
-**Response:**
-```json
-{
-  "talk":     { "token": "abc123", "name": "Team Chat" },
-  "files":    { "path": "/TeamHub/MyTeam", "share_id": 42 },
-  "calendar": { "id": 7, "public_token": "xyz...", "name": "My Team" },
-  "deck":     { "board_id": 3, "name": "My Team" }
-}
-```
-Any key may be `null` if the app is not installed or the resource has not been provisioned.
-
-### POST /api/v1/teams/{teamId}/create-resources
-Provision missing resources (Talk room, Files folder, Calendar, Deck board). Idempotent.
-
-**Response:** Same shape as getTeamResources.
-
----
-
-## Activity & Calendar
-
-### GET /api/v1/teams/{teamId}/activity
-Get recent activity for all team resources. Returns up to 30 days.
-
-**Response:** `Array<ActivityItem>`
-```json
-[{ "id": 1, "type": "file_created", "subject": "Alice created report.pdf", "timestamp": 1712000000, "link": "..." }]
-```
-
-### GET /api/v1/teams/{teamId}/calendar/events
-Get upcoming calendar events for the team (next 14 days).
-
-**Response:** `Array<CalendarEvent>`
-```json
-[{ "id": "uid-123", "title": "Sprint Planning", "start": "2026-04-10T10:00:00Z", "end": "2026-04-10T11:00:00Z", "allDay": false }]
-```
-
-### POST /api/v1/teams/{teamId}/calendar/events
-Create a calendar event on the team calendar.
-
-**Body:** `{ "title": string, "start": ISO8601, "end": ISO8601, "allDay"?: boolean, "description"?: string }`
-**Response:** `CalendarEvent`
-
----
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/activity` | User | Get recent team activity |
 
 ## Messages
 
-### GET /api/v1/teams/{teamId}/messages
-List messages for a team.
-
-**Response:** `{ "pinned": Message|null, "messages": Array<Message> }`
-
-Message shape:
-```json
-{
-  "id": 1, "team_id": "circle-uuid", "author_id": "alice", "subject": "Announcement",
-  "message": "Body text", "priority": "normal", "message_type": "normal",
-  "pinned": false, "poll_options": null, "poll_closed": false,
-  "question_solved": false, "solved_comment_id": null,
-  "created_at": 1712000000, "updated_at": 1712000000
-}
-```
-
-`message_type`: `"normal"` | `"poll"` | `"question"`
-
-### POST /api/v1/teams/{teamId}/messages
-Post a message.
-
-**Body:** `{ "subject": string, "message": string, "priority"?: string, "messageType"?: string, "pollOptions"?: string[] }`
-**Response:** `Message`
-
-### PUT /api/v1/teams/{teamId}/messages/{messageId}
-Edit a message (author only).
-
-**Body:** `{ "subject": string, "message": string }`
-**Response:** `Message`
-
-### DELETE /api/v1/teams/{teamId}/messages/{messageId}
-Delete a message (author or Moderator+).
-
-**Response:** `{ "success": true }`
-
-### POST /api/v1/teams/{teamId}/messages/{messageId}/pin
-Pin a message (requires pinMinLevel).
-
-**Response:** `Message`
-
-### POST /api/v1/teams/{teamId}/messages/{messageId}/unpin
-Unpin the currently pinned message.
-
-**Response:** `{ "success": true }`
-
-### POST /api/v1/messages/{messageId}/vote
-Vote on a poll.
-
-**Body:** `{ "option_index": number }`
-**Response:** `{ "success": true }`
-
-### GET /api/v1/messages/{messageId}/poll-results
-Get poll vote counts.
-
-**Response:** `Array<{ option_index: number, count: number }>`
-
-### POST /api/v1/messages/{messageId}/close-poll
-Close a poll (author or Moderator+).
-
-**Response:** `Message`
-
-### POST /api/v1/messages/{messageId}/mark-solved
-Mark a question message as solved.
-
-**Body:** `{ "comment_id"?: number }`
-**Response:** `Message`
-
-### POST /api/v1/messages/{messageId}/unmark-solved
-Unmark a question as solved.
-
-**Response:** `Message`
-
-### GET /api/v1/messages/aggregated
-Get recent messages across all teams the user is a member of.
-
-**Response:** `Array<Message>`
-
----
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/messages` | User | List messages `{pinned, messages[]}` |
+| POST | `/api/v1/teams/{teamId}/messages` | User | Post a message |
+| PUT | `/api/v1/teams/{teamId}/messages/{messageId}` | Author | Edit a message |
+| DELETE | `/api/v1/teams/{teamId}/messages/{messageId}` | Author/Admin | Delete a message |
+| POST | `/api/v1/teams/{teamId}/messages/{messageId}/pin` | Admin | Pin a message |
+| POST | `/api/v1/teams/{teamId}/messages/{messageId}/unpin` | Admin | Unpin a message |
+| GET | `/api/v1/messages/aggregated` | User | Aggregated messages across all teams |
+| POST | `/api/v1/messages/{messageId}/vote` | User | Vote on a poll |
+| GET | `/api/v1/messages/{messageId}/poll-results` | User | Get poll results |
+| POST | `/api/v1/messages/{messageId}/close-poll` | Admin | Close a poll |
+| POST | `/api/v1/messages/{messageId}/mark-solved` | Admin | Mark question as solved |
+| POST | `/api/v1/messages/{messageId}/unmark-solved` | Admin | Unmark question as solved |
 
 ## Comments
 
-### GET /api/v1/messages/{messageId}/comments
-List comments on a message.
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/messages/{messageId}/comments` | User | List comments on a message |
+| POST | `/api/v1/messages/{messageId}/comments` | User | Post a comment |
+| PUT | `/api/v1/comments/{commentId}` | Author | Edit a comment |
 
-**Response:** `Array<Comment>`
-```json
-[{ "id": 1, "message_id": 1, "author_id": "alice", "comment": "Text", "created_at": 1712000000 }]
-```
+## Web Links
 
-### POST /api/v1/messages/{messageId}/comments
-Post a comment.
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/links` | User | List web links for a team |
+| POST | `/api/v1/teams/{teamId}/links` | User | Add a web link |
+| PUT | `/api/v1/teams/{teamId}/links/{linkId}` | User | Update a web link |
+| DELETE | `/api/v1/teams/{teamId}/links/{linkId}` | User | Delete a web link |
 
-**Body:** `{ "comment": string }`
-**Response:** `Comment`
+## Integration API (External Apps)
 
-### PUT /api/v1/comments/{commentId}
-Edit a comment (author only).
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/ext/integrations/register` | User | Register a widget or menu_item integration |
+| DELETE | `/api/v1/ext/integrations/{appId}` | **NC Admin** | Deregister an integration |
 
-**Body:** `{ "comment": string }`
-**Response:** `Comment`
+## Integration — Team Rendering
 
----
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/integrations` | User | Get enabled integrations `{widgets[], menu_items[]}` |
+| GET | `/api/v1/teams/{teamId}/integrations/widget-data/{registryId}` | User | Fetch server-side widget data |
+| GET | `/api/v1/teams/{teamId}/integrations/action/{registryId}` | User | Trigger widget action |
 
-## Web links
+## Integration — Manage Team
 
-Custom links shown in the tab bar (open in new browser tab).
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/teams/{teamId}/integrations/registry` | User | Full registry with per-team enabled state |
+| POST | `/api/v1/teams/{teamId}/integrations/{registryId}/toggle` | Admin | Enable/disable an integration for a team |
+| PUT | `/api/v1/teams/{teamId}/integrations/reorder` | Admin | Reorder integrations |
 
-### GET /api/v1/teams/{teamId}/links
-**Response:** `Array<WebLink>`
-```json
-[{ "id": 1, "team_id": "...", "title": "Our Wiki", "url": "https://wiki.example.com", "sort_order": 0 }]
-```
+## Admin
 
-### POST /api/v1/teams/{teamId}/links
-**Body:** `{ "title": string, "url": string }`
-**Response:** `WebLink`
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/admin/settings` | **NC Admin** | Get admin settings |
+| POST | `/api/v1/admin/settings` | **NC Admin** | Save admin settings |
+| GET | `/api/v1/admin/groups/search?q=` | **NC Admin** | Search NC groups for the group picker |
 
-### PUT /api/v1/teams/{teamId}/links/{linkId}
-**Body:** `{ "title"?: string, "url"?: string, "sort_order"?: number }`
-**Response:** `WebLink`
+## User / Utility
 
-### DELETE /api/v1/teams/{teamId}/links/{linkId}
-**Response:** `{ "success": true }`
-
----
-
-## Integrations
-
-### External-app registration
-
-#### POST /api/v1/ext/integrations/register
-Register or update an integration. The calling user must be authenticated and `app_id` must be an installed NC app.
-
-**Body:**
-```json
-{
-  "app_id":           "myapp",
-  "integration_type": "widget",
-  "title":            "My Widget",
-  "description":      "Shows recent items",
-  "icon":             "ChartBar",
-  "data_url":         "/apps/myapp/api/teamhub/data",
-  "action_url":       "/apps/myapp/api/teamhub/action",
-  "action_label":     "Create item"
-}
-```
-
-For `menu_item` instead of `widget`, replace the widget fields with:
-```json
-{
-  "iframe_url": "https://my-nc.example.com/apps/myapp/team-view"
-}
-```
-
-**Response:** `IntegrationRegistryEntry` (the upserted row)
-
-#### DELETE /api/v1/ext/integrations/{appId}
-Deregister an integration and cascade-delete all team opt-ins. NC admin required.
-
-**Response:** `{ "success": true }`
+| Method | URL | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/users/search?q=` | User | Search NC users (for invite picker) |
+| GET | `/api/v1/apps/check` | User | Check which optional apps are installed `{talk, calendar, deck, intravox}` |
+| GET | `/api/v1/user/can-create-team` | User | Whether current user may create teams |
+| GET | `/api/v1/invite-types` | User | Get allowed invite types from admin config |
 
 ---
 
-### Team render endpoints (called on team select)
+## Auth legend
 
-#### GET /api/v1/teams/{teamId}/integrations
-Returns all enabled integrations for a team, split by type.
-
-**Response:**
-```json
-{
-  "widgets": [
-    {
-      "id": 1, "registry_id": 3, "team_id": "circle-uuid",
-      "sort_order": 0, "enabled_at": 1712000000,
-      "app_id": "myapp", "integration_type": "widget",
-      "title": "My Widget", "icon": "ChartBar",
-      "data_url": "/apps/myapp/api/teamhub/data",
-      "action_url": "/apps/myapp/api/teamhub/action",
-      "action_label": "Create item",
-      "iframe_url": null, "is_builtin": false
-    }
-  ],
-  "menu_items": [
-    {
-      "registry_id": 1, "app_id": "spreed", "integration_type": "menu_item",
-      "title": "Talk", "icon": "Message", "iframe_url": null, "is_builtin": true
-    }
-  ]
-}
-```
-
-#### GET /api/v1/teams/{teamId}/integrations/widget-data/{registryId}
-Fetch widget data. TeamHub calls the widget's `data_url` server-side and returns the result.
-
-**Response:**
-```json
-{
-  "items": [
-    { "label": "Ticket #42", "value": "Open", "icon": "AlertCircle", "url": "https://..." }
-  ],
-  "error": "optional error message if data fetch failed"
-}
-```
-
-#### GET /api/v1/teams/{teamId}/integrations/action/{registryId}
-Get the action modal definition for a widget.
-
-**Response:**
-```json
-{
-  "title": "Create Ticket",
-  "submit_label": "Create",
-  "fields": [
-    { "name": "subject",  "label": "Subject",     "type": "text"     },
-    { "name": "body",     "label": "Description", "type": "textarea" }
-  ]
-}
-```
-
----
-
-### Manage Team → Integrations tab
-
-#### GET /api/v1/teams/{teamId}/integrations/registry
-Returns all registered integrations annotated with enabled state and sort_order for this team.
-
-**Response:** `Array<IntegrationRegistryEntry & { enabled: boolean, sort_order: number }>`
-
-#### POST /api/v1/teams/{teamId}/integrations/{registryId}/toggle
-Enable or disable an integration for a team.
-
-**Body:** `{ "enable": true|false }`
-**Response:** Same as `/integrations/registry` — full annotated list.
-
-#### PUT /api/v1/teams/{teamId}/integrations/reorder
-Persist drag-and-drop sort order.
-
-**Body:** `{ "order": [3, 1, 2] }` — registry IDs in desired display order.
-**Response:** Updated enabled integration list.
-
----
-
-## Users & utility
-
-### GET /api/v1/users/search
-Search NC users (for member picker).
-
-**Query:** `?term=alice`
-**Response:** `Array<{ id: string, displayName: string, email: string }>`
-
-### GET /api/v1/apps/check
-Check which optional apps (Intravox) are available.
-
-**Response:** `{ "intravox": boolean }`
-
-### GET /api/v1/invite-types
-Get allowed invite types from admin settings.
-
-**Response:** `{ "types": ["user", "group"] }`
-
-### GET /api/v1/user/can-create-team
-Check if the current user is allowed to create teams.
-
-**Response:** `{ "canCreate": true }`
-
-### POST /api/v1/teams/{teamId}/seen
-Mark a team as read (updates last_seen_at).
-
-**Response:** `{ "success": true }`
-
----
-
-## Admin settings
-
-### GET /api/v1/admin/settings
-Get current admin settings. NC admin required.
-
-**Response:**
-```json
-{
-  "wizardDescription": "",
-  "createTeamGroup":   "",
-  "inviteTypes":       "user,group",
-  "pinMinLevel":       "moderator"
-}
-```
-
-### POST /api/v1/admin/settings
-Save admin settings. NC admin required. Body is `application/x-www-form-urlencoded`.
-
-**Body fields:** `wizardDescription`, `createTeamGroup`, `inviteTypes`, `pinMinLevel`
-**Response:** `{ "success": true }`
-
----
-
-## Error responses
-
-All endpoints return JSON errors:
-
-```json
-{ "error": "Human-readable message" }
-```
-
-| HTTP Status | Meaning |
+| Label | Meaning |
 |---|---|
-| 400 | Validation error |
-| 403 | Forbidden (insufficient privilege) |
-| 404 | Resource not found |
-| 500 | Server error |
+| User | Any authenticated NC user |
+| Admin | Team admin or owner (level ≥ 8 in circles_member) |
+| Owner | Team owner only (level = 9) |
+| NC Admin | Nextcloud instance administrator |
+| Team Admin | Team admin/owner — enforced via `requireAdminLevel()` in MemberService |

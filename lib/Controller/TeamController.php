@@ -14,6 +14,7 @@ use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\IGroupManager;
 use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
@@ -26,6 +27,7 @@ class TeamController extends Controller {
         private ResourceService $resourceService,
         private ActivityService $activityService,
         private MessageService $messageService,
+        private IGroupManager $groupManager,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -154,19 +156,126 @@ class TeamController extends Controller {
             $apps = $this->teamService->getTeamApps($teamId);
             return new JSONResponse($apps);
         } catch (\Exception $e) {
+            $this->logger->error('[TeamController] getTeamApps failed', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Enable or disable a built-in app for a team.
+     *
+     * Payload: { apps: [{ app_id: string, enabled: bool }] }
+     *
+     * When enabling: creates the resource (Talk room / Deck board / etc.) and
+     * grants the circle access. When disabling: fully deletes the resource
+     * (Option B — hard delete, all data removed).
+     *
+     * Only team admins/owners may call this (enforced by MemberService level check).
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function updateTeamApps(string $teamId, array $apps): JSONResponse {
+        try {
+            // Only team admins and owners may enable/disable apps (hard-deletes data on disable)
+            $this->memberService->requireAdminLevel($teamId);
+
+            $team = $this->teamService->getTeam($teamId);
+            $teamName = $team['name'] ?? 'Team';
+            $results = [];
+
+            foreach ($apps as $app) {
+                $appId   = $app['app_id'] ?? null;
+                $enabled = isset($app['enabled']) ? (bool)$app['enabled'] : true;
+
+                if (!$appId) {
+                    continue;
+                }
+
+                $this->logger->debug('[TeamController] updateTeamApps processing', [
+                    'teamId' => $teamId,
+                    'appId'  => $appId,
+                    'enabled' => $enabled,
+                    'app'    => Application::APP_ID,
+                ]);
+
+                $resourceKey = $this->appIdToResourceKey($appId);
+
+                if ($enabled) {
+                    // Intravox manages its own pages — no resource to provision, flag only
+                    if ($resourceKey !== 'intravox') {
+                        $createResult = $this->resourceService->createTeamResources($teamId, [$resourceKey], $teamName);
+                        $results[$appId] = $createResult[$resourceKey] ?? ['error' => 'unknown'];
+                    } else {
+                        $results[$appId] = ['skipped' => 'intravox manages its own pages'];
+                    }
+                } else {
+                    if ($resourceKey !== 'intravox') {
+                        $deleteResult = $this->resourceService->deleteTeamResource($teamId, $resourceKey);
+                        $results[$appId] = $deleteResult;
+                    } else {
+                        $results[$appId] = ['skipped' => 'intravox manages its own pages'];
+                    }
+                }
+
+                // Persist the enabled flag regardless of resource op outcome
+                $this->teamService->updateTeamApps($teamId, [[
+                    'app_id'  => $appId,
+                    'enabled' => $enabled,
+                    'config'  => null,
+                ]]);
+            }
+
+            return new JSONResponse(['success' => true, 'results' => $results]);
+        } catch (\Exception $e) {
+            $this->logger->error('[TeamController] updateTeamApps failed', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
 
     #[NoAdminRequired]
     #[NoCSRFRequired]
-    public function updateTeamApps(string $teamId, array $apps): JSONResponse {
+    public function deleteTeamResource(string $teamId, string $app): JSONResponse {
+        // Allowlist valid app values — reject anything unexpected before it reaches the service
+        $allowed = ['spreed', 'files', 'calendar', 'deck', 'intravox'];
+        if (!in_array($app, $allowed, true)) {
+            return new JSONResponse(['error' => 'Invalid app identifier'], Http::STATUS_BAD_REQUEST);
+        }
+
         try {
-            $this->teamService->updateTeamApps($teamId, $apps);
-            return new JSONResponse(['success' => true]);
+            // Only team admins and owners may hard-delete resources
+            $this->memberService->requireAdminLevel($teamId);
+
+            $resourceKey = $this->appIdToResourceKey($app);
+            $result = $this->resourceService->deleteTeamResource($teamId, $resourceKey);
+            return new JSONResponse(['success' => true, 'result' => $result]);
         } catch (\Exception $e) {
+            $this->logger->error('[TeamController] deleteTeamResource failed', [
+                'teamId' => $teamId,
+                'app'    => $app,
+                'error'  => $e->getMessage(),
+                'app_id' => Application::APP_ID,
+            ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
+    }
+
+    /**
+     * Map a Vue-side app_id ('spreed', 'files', 'calendar', 'deck', 'intravox')
+     * to the resource key used by ResourceService ('talk', 'files', 'calendar', 'deck', 'intravox').
+     */
+    private function appIdToResourceKey(string $appId): string {
+        return match($appId) {
+            'spreed' => 'talk',
+            default  => $appId,
+        };
     }
 
     #[NoAdminRequired]
@@ -420,7 +529,6 @@ class TeamController extends Controller {
         }
     }
 
-    #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getAdminSettings(): JSONResponse {
         try {
@@ -447,6 +555,32 @@ class TeamController extends Controller {
             $this->teamService->saveAdminSettings($body);
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    #[NoCSRFRequired]
+    public function searchAdminGroups(): JSONResponse {
+        try {
+            $q     = trim((string)($this->request->getParam('q') ?? ''));
+            $limit = 20;
+
+            $groups = $this->groupManager->search($q, $limit);
+
+            $result = [];
+            foreach ($groups as $group) {
+                $result[] = [
+                    'id'          => $group->getGID(),
+                    'displayName' => $group->getDisplayName() ?: $group->getGID(),
+                ];
+            }
+
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamController] searchAdminGroups failed', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }

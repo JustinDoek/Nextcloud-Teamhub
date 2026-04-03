@@ -338,24 +338,383 @@ class ResourceService {
         ];
     }
 
+    /**
+     * Fully delete a team resource (Option B — hard delete, all data removed).
+     *
+     * Per app:
+     *   talk     — delete all talk_attendees rows for the room, then delete the talk_rooms row
+     *   files    — delete the Files share (IShare) then delete the folder node itself
+     *   calendar — delete the calendar via CalDavBackend (removes all events too)
+     *   deck     — delete the board via DB (cascade removes lists, cards, ACL)
+     *   intravox — remove the circle's ACL row from intravox tables (if table exists)
+     *
+     * Each app block is individually try/caught so one failure does not abort others.
+     *
+     * @param string $teamId  Circle single ID
+     * @param string $app     'talk' | 'files' | 'calendar' | 'deck' | 'intravox'
+     * @return array { deleted: bool, detail: string }
+     */
+    public function deleteTeamResource(string $teamId, string $app): array {
+        $this->logger->debug('[ResourceService] deleteTeamResource start', [
+            'teamId' => $teamId,
+            'app'    => $app,
+            'appId'  => Application::APP_ID,
+        ]);
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        switch ($app) {
+            case 'talk':
+                return $this->deleteTalkRoom($teamId, $db);
+            case 'files':
+                return $this->deleteSharedFolder($teamId, $db);
+            case 'calendar':
+                return $this->deleteCalendar($teamId, $db);
+            case 'deck':
+                return $this->deleteDeckBoard($teamId, $db);
+            case 'intravox':
+                return $this->deleteIntravoxAccess($teamId, $db);
+            default:
+                return ['deleted' => false, 'detail' => "Unknown app: {$app}"];
+        }
+    }
+
     // -------------------------------------------------------------------------
-    // Private provisioning helpers
+    // Private deletion helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Delete the Talk room that has this circle as an attendee.
+     * Deletes all attendees first, then the room row itself.
+     */
+    private function deleteTalkRoom(string $teamId, \OCP\IDBConnection $db): array {
+        try {
+            // Find the room_id via the circle attendee row
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('room_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('actor_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                $this->logger->info('[ResourceService] deleteTalkRoom: no room found for circle', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return ['deleted' => false, 'detail' => 'No Talk room found for this team'];
+            }
+
+            $roomId = (int)$row['room_id'];
+
+            // Delete all attendees for this room
+            $daqb = $db->getQueryBuilder();
+            $daqb->delete('talk_attendees')
+                ->where($daqb->expr()->eq('room_id', $daqb->createNamedParameter($roomId)))
+                ->executeStatement();
+
+            // Delete the room itself
+            $drqb = $db->getQueryBuilder();
+            $drqb->delete('talk_rooms')
+                ->where($drqb->expr()->eq('id', $drqb->createNamedParameter($roomId)))
+                ->executeStatement();
+
+            $this->logger->info('[ResourceService] deleteTalkRoom: deleted', [
+                'teamId' => $teamId, 'roomId' => $roomId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'detail' => "Talk room {$roomId} deleted"];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] deleteTalkRoom failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
+     * Delete the shared Files folder for this team.
+     * Removes the IShare record AND deletes the folder node itself.
+     */
+    private function deleteSharedFolder(string $teamId, \OCP\IDBConnection $db): array {
+        try {
+            // Find the share row: share_type=7 (TYPE_CIRCLE), share_with=teamId
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('id', 'uid_initiator', 'file_source')
+                ->from('share')
+                ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['deleted' => false, 'detail' => 'No Files share found for this team'];
+            }
+
+            $shareId   = (int)$row['id'];
+            $ownerUid  = $row['uid_initiator'];
+            $fileId    = (int)$row['file_source'];
+
+            // Delete the share via IManager (triggers proper cleanup)
+            try {
+                $shareManager = $this->container->get(\OCP\Share\IManager::class);
+                $share = $shareManager->getShareById('ocinternal:' . $shareId);
+                $shareManager->deleteShare($share);
+                $this->logger->debug('[ResourceService] deleteSharedFolder: share deleted via IManager', [
+                    'shareId' => $shareId, 'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                // Fallback: direct DB delete of the share row
+                $this->logger->warning('[ResourceService] deleteSharedFolder: IManager delete failed, using QB', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                $dqb = $db->getQueryBuilder();
+                $dqb->delete('share')
+                    ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId)))
+                    ->executeStatement();
+            }
+
+            // Delete the folder node itself
+            try {
+                $rootFolder = $this->container->get(\OCP\Files\IRootFolder::class);
+                $userFolder = $rootFolder->getUserFolder($ownerUid);
+                $nodes = $userFolder->getById($fileId);
+                if (!empty($nodes)) {
+                    $nodes[0]->delete();
+                    $this->logger->info('[ResourceService] deleteSharedFolder: folder node deleted', [
+                        'fileId' => $fileId, 'app' => Application::APP_ID,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] deleteSharedFolder: folder node delete failed', [
+                    'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            return ['deleted' => true, 'detail' => "Files folder {$fileId} and share deleted"];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] deleteSharedFolder failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
+     * Delete the calendar shared with this team circle.
+     * Uses CalDavBackend::deleteCalendar() which cascades all events.
+     */
+    private function deleteCalendar(string $teamId, \OCP\IDBConnection $db): array {
+        try {
+            // Find the calendar via dav_shares: principaluri = principals/circles/{teamId}
+            $principalUri = 'principals/circles/' . $teamId;
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('resourceid')
+                ->from('dav_shares')
+                ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['deleted' => false, 'detail' => 'No calendar found for this team'];
+            }
+
+            $calendarId = (int)$row['resourceid'];
+
+            // Delete via CalDavBackend (cascades events, attendees, alarms)
+            try {
+                $caldav = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
+                $caldav->deleteCalendar($calendarId, true);
+                $this->logger->info('[ResourceService] deleteCalendar: deleted via CalDavBackend', [
+                    'calendarId' => $calendarId, 'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                // Fallback: delete dav_shares row and calendarobjects manually
+                $this->logger->warning('[ResourceService] deleteCalendar: CalDavBackend failed, using QB', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                foreach (['dav_shares', 'calendarobjects', 'calendars'] as $tbl) {
+                    $col = ($tbl === 'dav_shares') ? 'resourceid' : 'calendarid';
+                    if ($tbl === 'calendars') {
+                        $col = 'id';
+                    }
+                    try {
+                        $dqb = $db->getQueryBuilder();
+                        $dqb->delete($tbl)
+                            ->where($dqb->expr()->eq($col, $dqb->createNamedParameter($calendarId)))
+                            ->executeStatement();
+                    } catch (\Throwable $inner) {
+                        $this->logger->warning('[ResourceService] deleteCalendar QB fallback failed', [
+                            'table' => $tbl, 'error' => $inner->getMessage(), 'app' => Application::APP_ID,
+                        ]);
+                    }
+                }
+            }
+
+            return ['deleted' => true, 'detail' => "Calendar {$calendarId} deleted"];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] deleteCalendar failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
+     * Delete the Deck board shared with this team circle.
+     * Cascades: deck_board_acl/deck_acl, deck_cards, deck_stacks, deck_boards.
+     */
+    private function deleteDeckBoard(string $teamId, \OCP\IDBConnection $db): array {
+        try {
+            // Find board_id via the circle ACL row (type=7 = circle)
+            $boardId = null;
+            foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+                try {
+                    $qb = $db->getQueryBuilder();
+                    $res = $qb->select('board_id')
+                        ->from($aclTable)
+                        ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
+                        ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    $row = $res->fetch();
+                    $res->closeCursor();
+                    if ($row) {
+                        $boardId = (int)$row['board_id'];
+                        break;
+                    }
+                } catch (\Throwable $e) {
+                    // Table doesn't exist — try next
+                }
+            }
+
+            if ($boardId === null) {
+                return ['deleted' => false, 'detail' => 'No Deck board found for this team'];
+            }
+
+            // Delete in dependency order: cards → stacks → ACL → board
+            foreach ([
+                ['deck_cards',     'stack_id',  'deck_stacks', 'board_id', $boardId],
+            ] as [$cardTbl, $cardCol, $stackTbl, $stackBoardCol, $bid]) {
+                // Get stack IDs for this board, then delete their cards
+                try {
+                    $sqb = $db->getQueryBuilder();
+                    $sres = $sqb->select('id')->from($stackTbl)
+                        ->where($sqb->expr()->eq($stackBoardCol, $sqb->createNamedParameter($bid)))
+                        ->executeQuery();
+                    while ($srow = $sres->fetch()) {
+                        $stackId = (int)$srow['id'];
+                        $cqb = $db->getQueryBuilder();
+                        $cqb->delete($cardTbl)
+                            ->where($cqb->expr()->eq($cardCol, $cqb->createNamedParameter($stackId)))
+                            ->executeStatement();
+                    }
+                    $sres->closeCursor();
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[ResourceService] deleteDeckBoard: card delete failed', [
+                        'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            // Delete stacks
+            foreach (['deck_stacks'] as $tbl) {
+                try {
+                    $dqb = $db->getQueryBuilder();
+                    $dqb->delete($tbl)
+                        ->where($dqb->expr()->eq('board_id', $dqb->createNamedParameter($boardId)))
+                        ->executeStatement();
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[ResourceService] deleteDeckBoard: stack delete failed', [
+                        'table' => $tbl, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            // Delete ACL rows
+            foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+                try {
+                    $aqb = $db->getQueryBuilder();
+                    $aqb->delete($aclTable)
+                        ->where($aqb->expr()->eq('board_id', $aqb->createNamedParameter($boardId)))
+                        ->executeStatement();
+                } catch (\Throwable $e) {
+                    // Table may not exist — not an error
+                }
+            }
+
+            // Delete the board itself
+            $bqb = $db->getQueryBuilder();
+            $bqb->delete('deck_boards')
+                ->where($bqb->expr()->eq('id', $bqb->createNamedParameter($boardId)))
+                ->executeStatement();
+
+            $this->logger->info('[ResourceService] deleteDeckBoard: deleted', [
+                'teamId' => $teamId, 'boardId' => $boardId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'detail' => "Deck board {$boardId} deleted"];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] deleteDeckBoard failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
+     * Remove the circle's access from Intravox (remove ACL/share row only —
+     * Intravox pages themselves are not deleted as they may be shared with others).
+     */
+    private function deleteIntravoxAccess(string $teamId, \OCP\IDBConnection $db): array {
+        try {
+            // Intravox stores circle shares in oc_share (share_type=7, item_type='page' or similar)
+            $qb = $db->getQueryBuilder();
+            $affected = $qb->delete('share')
+                ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('page')))
+                ->executeStatement();
+
+            $this->logger->info('[ResourceService] deleteIntravoxAccess done', [
+                'teamId' => $teamId, 'affected' => $affected, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'detail' => "Intravox access removed ({$affected} shares)"];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] deleteIntravoxAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
+        }
+    }
+
+
 
     /**
      * Create a Talk group room and add the circle as participant.
      *
-     * Uses the Talk OCS REST API (POST /ocs/v2.php/apps/spreed/api/v4/room) so we
-     * never touch Talk's DB directly — which avoids all schema/version issues.
+     * Strategy (in order):
+     *   1. Talk RoomService PHP API — cleanest, no HTTP involved.
+     *   2. Talk Manager PHP API    — older Talk versions.
+     *   3. Direct DB insert        — version-stable last resort; never triggers
+     *                                Nextcloud local-access-rules blocks.
      *
-     * The `participants.teams` field adds the circle to the room at creation time.
-     * We authenticate the loopback HTTP call with a single-use app token generated
-     * from ISecureRandom.
-     *
-     * Fallback: if the OCS call fails we return the error — no silent partial state.
+     * The previous implementation used a loopback HTTP call to the OCS API which
+     * fails on NC28+ when the server resolves to 127.0.0.1 / a private IP, because
+     * Nextcloud blocks outgoing requests to local addresses by default.
      */
     private function createTalkRoom(string $teamId, string $teamName, string $uid): array {
-        $this->logger->debug('[ResourceService] createTalkRoom', [
+        $this->logger->debug('[ResourceService] createTalkRoom start', [
             'teamId'   => $teamId,
             'teamName' => $teamName,
             'uid'      => $uid,
@@ -366,98 +725,261 @@ class ResourceService {
             return ['error' => 'Talk (spreed) app not installed'];
         }
 
+        // ── Strategy 1: Talk RoomService (Talk 17+) ───────────────────────────
         try {
-            $urlGenerator = $this->container->get(\OCP\IURLGenerator::class);
-            $clientService = $this->container->get(\OCP\Http\Client\IClientService::class);
-            $userManager   = $this->container->get(\OCP\IUserManager::class);
-
-            $user = $userManager->get($uid);
+            $roomService = $this->container->get(\OCA\Talk\Service\RoomService::class);
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+            $user        = $userManager->get($uid);
             if (!$user) {
                 throw new \Exception("User {$uid} not found");
             }
 
-            $ocsUrl = rtrim($urlGenerator->getAbsoluteURL('/'), '/')
-                    . '/ocs/v2.php/apps/spreed/api/v4/room';
+            // createConversation(type, name, actor): type 2 = TYPE_GROUP
+            $room = $roomService->createConversation(2, $teamName, $user);
 
-            // Generate a temporary app password so we can authenticate the loopback call
-            $tokenProvider = null;
-            $loginToken    = null;
+            // Add the circle as participant (Talk assigns participant_type=3/PARTICIPANT by default)
             try {
-                $tokenProvider = $this->container->get(\OC\Authentication\Token\IProvider::class);
-                $secureRandom  = $this->container->get(\OCP\Security\ISecureRandom::class);
-                $loginToken    = $secureRandom->generate(72);
-                $tokenProvider->generateToken(
-                    $loginToken,
-                    $uid,
-                    $uid,
-                    null,
-                    'TeamHub Talk room creation',
-                    \OC\Authentication\Token\IToken::PERMANENT_TOKEN
-                );
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $participantService->addCircle($room, $teamId);
+                $this->logger->debug('[ResourceService] Talk: circle added via ParticipantService', [
+                    'app' => Application::APP_ID,
+                ]);
             } catch (\Throwable $e) {
-                // Token provider unavailable — try without auth
-                $loginToken = null;
-                $this->logger->warning('[ResourceService] Talk: could not generate app token, trying without auth', [
+                // Non-fatal — room exists, circle invite may need manual step
+                $this->logger->warning('[ResourceService] Talk: ParticipantService::addCircle failed', [
                     'error' => $e->getMessage(),
                     'app'   => Application::APP_ID,
                 ]);
             }
 
-            $client  = $clientService->newClient();
-            $options = [
-                'headers' => [
-                    'OCS-APIRequest' => 'true',
-                    'Accept'         => 'application/json',
-                    'Content-Type'   => 'application/json',
-                ],
-                'json' => [
-                    'roomType' => 2,          // TYPE_GROUP
-                    'roomName' => $teamName,
-                    'participants' => [
-                        'teams' => [$teamId], // circle ID — adds circle with full membership
-                    ],
-                ],
-                'verify' => false,            // loopback — skip TLS cert check
-            ];
+            $token = $room->getToken();
 
-            if ($loginToken !== null) {
-                $options['auth'] = [$uid, $loginToken];
+            // Resolve room integer ID so we can promote the circle to moderator
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $idQb = $db->getQueryBuilder();
+            $idRes = $idQb->select('id')->from('talk_rooms')
+                ->where($idQb->expr()->eq('token', $idQb->createNamedParameter($token)))
+                ->setMaxResults(1)->executeQuery();
+            $idRow = $idRes->fetch();
+            $idRes->closeCursor();
+
+            if ($idRow) {
+                $this->promoteTalkCircleToModerator((int)$idRow['id'], $teamId, $db);
             }
 
-            $response = $client->post($ocsUrl, $options);
-            $body     = json_decode($response->getBody(), true);
-            $token    = $body['ocs']['data']['token'] ?? null;
-
-            // Clean up the temporary token
-            if ($loginToken !== null && $tokenProvider !== null) {
-                try {
-                    $tokens = $tokenProvider->getTokenByUser($uid);
-                    foreach ($tokens as $t) {
-                        if ($t->getName() === 'TeamHub Talk room creation') {
-                            $tokenProvider->invalidateToken($loginToken);
-                            break;
-                        }
-                    }
-                } catch (\Throwable $e) { /* non-fatal */ }
-            }
-
-            if (!$token) {
-                $ocsMsg = $body['ocs']['meta']['message'] ?? 'unknown error';
-                throw new \Exception("OCS response missing token: {$ocsMsg}");
-            }
-
-            $this->logger->info('[ResourceService] Talk: created room via OCS API', [
+            $this->logger->info('[ResourceService] Talk: room created via RoomService', [
                 'token' => $token,
                 'app'   => Application::APP_ID,
             ]);
             return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[ResourceService] Talk: OCS room creation failed', [
+            $this->logger->debug('[ResourceService] Talk: RoomService strategy failed, trying Manager', [
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,
             ]);
+        }
+
+        // ── Strategy 2: Talk Manager (Talk 13–16) ─────────────────────────────
+        try {
+            $manager = $this->container->get(\OCA\Talk\Manager::class);
+            // createRoom(type, name): type 2 = TYPE_GROUP
+            $room  = $manager->createRoom(2, $teamName);
+            $token = $room->getToken();
+
+            // Attempt to add the circle (Talk assigns participant_type=3/PARTICIPANT by default)
+            try {
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $participantService->addCircle($room, $teamId);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] Talk: Manager addCircle failed', [
+                    'error' => $e->getMessage(),
+                    'app'   => Application::APP_ID,
+                ]);
+            }
+
+            // Resolve room integer ID so we can promote the circle to moderator
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $idQb = $db->getQueryBuilder();
+            $idRes = $idQb->select('id')->from('talk_rooms')
+                ->where($idQb->expr()->eq('token', $idQb->createNamedParameter($token)))
+                ->setMaxResults(1)->executeQuery();
+            $idRow = $idRes->fetch();
+            $idRes->closeCursor();
+
+            if ($idRow) {
+                $this->promoteTalkCircleToModerator((int)$idRow['id'], $teamId, $db);
+            }
+
+            $this->logger->info('[ResourceService] Talk: room created via Manager', [
+                'token' => $token,
+                'app'   => Application::APP_ID,
+            ]);
+            return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
+
+        } catch (\Throwable $e) {
+            $this->logger->debug('[ResourceService] Talk: Manager strategy failed, trying direct DB', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+        }
+
+        // ── Strategy 3: Direct DB insert ──────────────────────────────────────
+        // Mirrors exactly what Talk does internally. Safe because we only write
+        // to talk_rooms and talk_attendees — the same tables we read in getTeamResources().
+        try {
+            $db           = $this->container->get(\OCP\IDBConnection::class);
+            $secureRandom = $this->container->get(\OCP\Security\ISecureRandom::class);
+            $token        = $secureRandom->generate(
+                32,
+                \OCP\Security\ISecureRandom::CHAR_HUMAN_READABLE
+            );
+            $now = time();
+
+            // Insert room — detect column set for cross-version compatibility
+            $roomCols = $this->getTableColumns('talk_rooms');
+            $qb = $db->getQueryBuilder();
+            $qb->insert('talk_rooms')
+               ->setValue('token',      $qb->createNamedParameter($token))
+               ->setValue('name',       $qb->createNamedParameter($teamName))
+               ->setValue('type',       $qb->createNamedParameter(2));       // TYPE_GROUP
+
+            foreach ([
+                'read_only'        => 0,
+                'listable'         => 0,
+                'active_guests'    => 0,
+                'active_since'     => null,
+                'last_activity'    => $now,
+                'last_message'     => 0,
+                'assigned_hpb'     => '',
+                'remote_server'    => '',
+                'remote_token'     => '',
+                'sip_enabled'      => 0,
+                'permissions'      => 0,
+                'default_permissions' => 0,
+                'call_permissions' => 0,
+                'call_flag'        => 0,
+                'breakout_room_mode'  => 0,
+                'breakout_room_status' => 0,
+                'lobby_state'      => 0,
+                'lobby_timer'      => null,
+                'mention_permissions' => 0,
+                'object_type'      => '',
+                'object_id'        => '',
+            ] as $col => $val) {
+                if (in_array($col, $roomCols, true)) {
+                    $qb->setValue($col, $qb->createNamedParameter($val));
+                }
+            }
+            $qb->executeStatement();
+
+            // Resolve the new room's integer ID
+            $roomQb = $db->getQueryBuilder();
+            $roomResult = $roomQb->select('id')
+                ->from('talk_rooms')
+                ->where($roomQb->expr()->eq('token', $roomQb->createNamedParameter($token)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $roomRow = $roomResult->fetch();
+            $roomResult->closeCursor();
+
+            if (!$roomRow) {
+                throw new \Exception('Inserted room not found after insert');
+            }
+            $roomId = (int)$roomRow['id'];
+
+            // Insert circle attendee as MODERATOR (participant_type=2).
+            // OWNER (1) is reserved for the human creator; circles should be MODERATOR
+            // so all team members inherit moderation rights when they join via the circle.
+            $attendeeCols = $this->getTableColumns('talk_attendees');
+            $aqb = $db->getQueryBuilder();
+            $aqb->insert('talk_attendees')
+                ->setValue('room_id',          $aqb->createNamedParameter($roomId))
+                ->setValue('actor_type',       $aqb->createNamedParameter('circles'))
+                ->setValue('actor_id',         $aqb->createNamedParameter($teamId))
+                ->setValue('display_name',     $aqb->createNamedParameter($teamName))
+                ->setValue('participant_type', $aqb->createNamedParameter(2));  // MODERATOR
+
+            foreach ([
+                'favorite'               => 0,
+                'notification_level'     => 0,
+                'notification_calls'     => 0,
+                'last_joined_call'       => 0,
+                'last_read_message'      => 0,
+                'last_mention_message'   => 0,
+                'last_mention_direct'    => 0,
+                'in_call'                => 0,
+                'permissions'            => 0,
+                'publishing_permissions' => 0,
+                'access_token'           => '',
+                'remote_id'              => '',
+                'phone_number'           => '',
+                'phone_states'           => '',
+            ] as $col => $val) {
+                if (in_array($col, $attendeeCols, true)) {
+                    $aqb->setValue($col, $aqb->createNamedParameter($val));
+                }
+            }
+            $aqb->executeStatement();
+
+            $this->logger->info('[ResourceService] Talk: room created via direct DB insert', [
+                'token'  => $token,
+                'roomId' => $roomId,
+                'app'    => Application::APP_ID,
+            ]);
+            return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] Talk: all strategies failed', [
+                'error' => $e->getMessage(),
+                'trace' => substr($e->getTraceAsString(), 0, 800),
+                'app'   => Application::APP_ID,
+            ]);
             return ['error' => 'Talk room creation failed: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Promote a circle attendee in a Talk room to MODERATOR (participant_type=2).
+     *
+     * Called after addCircle() in Strategies 1 & 2, which inserts the circle
+     * with Talk's default participant_type=3 (PARTICIPANT). Without this step,
+     * circle members join the room but have no moderation rights — they cannot
+     * rename the room, add participants, or change settings.
+     *
+     * participant_type values:
+     *   1 = OWNER      (reserved for the human who created the room)
+     *   2 = MODERATOR  (correct for a shared circle — all members inherit rights)
+     *   3 = PARTICIPANT (Talk default for addCircle — too low)
+     *
+     * Direct DB UPDATE is intentional: there is no cross-version Talk API for
+     * setting participant_type on a circle attendee without triggering
+     * participant-resolved individual rows.
+     */
+    private function promoteTalkCircleToModerator(int $roomId, string $teamId, \OCP\IDBConnection $db): void {
+        try {
+            $uqb = $db->getQueryBuilder();
+            $affected = $uqb->update('talk_attendees')
+                ->set('participant_type', $uqb->createNamedParameter(2)) // MODERATOR
+                ->where($uqb->expr()->eq('room_id',    $uqb->createNamedParameter($roomId)))
+                ->andWhere($uqb->expr()->eq('actor_type', $uqb->createNamedParameter('circles')))
+                ->andWhere($uqb->expr()->eq('actor_id',   $uqb->createNamedParameter($teamId)))
+                ->executeStatement();
+
+            $this->logger->info('[ResourceService] Talk: circle promoted to moderator', [
+                'roomId'   => $roomId,
+                'teamId'   => $teamId,
+                'affected' => $affected,
+                'app'      => Application::APP_ID,
+            ]);
+        } catch (\Throwable $e) {
+            // Non-fatal: room still works, but circle members won't have mod rights
+            $this->logger->warning('[ResourceService] Talk: promoteTalkCircleToModerator failed', [
+                'roomId' => $roomId,
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
         }
     }
 
@@ -645,47 +1167,114 @@ class ResourceService {
             $acl->setBoardId($boardId);
             $acl->setType(7);
             $acl->setParticipant($teamId);
-            $acl->setPermissionRead(true);
-            $acl->setPermissionEdit(true);
-            $acl->setPermissionManage(false);
+
+            // Deck 1.x used separate boolean setters; Deck 2.x (NC33+) uses a bitmask.
+            // Try both — setters that don't exist will throw, caught below.
+            if (method_exists($acl, 'setPermissionRead')) {
+                $acl->setPermissionRead(true);
+                $acl->setPermissionEdit(true);
+                $acl->setPermissionManage(false);
+            }
+            if (method_exists($acl, 'setPermissions')) {
+                // Deck 2.x bitmask: read=1, edit=2, manage=4 → 3 = read+edit
+                $acl->setPermissions(3);
+            }
+
             $aclMapper->insert($acl);
             $circleAdded = true;
+            $this->logger->info('[ResourceService] Deck: circle ACL added via AclMapper', [
+                'boardId' => $boardId,
+                'teamId'  => $teamId,
+                'app'     => Application::APP_ID,
+            ]);
         } catch (\Throwable $e) {
-            $this->logger->warning('[ResourceService] Deck AclMapper failed, using QB fallback', [
+            $this->logger->warning('[ResourceService] Deck AclMapper failed, trying PermissionService', [
                 'error' => $e->getMessage(),
+                'trace' => substr($e->getTraceAsString(), 0, 500),
                 'app'   => Application::APP_ID,
             ]);
         }
 
-        // ── Fallback: QB insert into deck_board_acl / deck_acl ───────────────
+        // ── Strategy 2: Deck PermissionService (Deck 2.x / NC33) ─────────────
+        // Deck 2.x introduced PermissionService / BoardService::addAcl() as the
+        // canonical way to share boards.
+        if (!$circleAdded) {
+            try {
+                // Try BoardService::addAcl if available (Deck 2.x)
+                $boardService = $this->container->get(\OCA\Deck\Service\BoardService::class);
+                if (method_exists($boardService, 'addAcl')) {
+                    $boardService->addAcl($boardId, 7, $teamId, true, true, false);
+                    $circleAdded = true;
+                    $this->logger->info('[ResourceService] Deck: circle ACL added via BoardService::addAcl', [
+                        'boardId' => $boardId,
+                        'teamId'  => $teamId,
+                        'app'     => Application::APP_ID,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] Deck BoardService::addAcl failed, trying QB fallback', [
+                    'error' => $e->getMessage(),
+                    'trace' => substr($e->getTraceAsString(), 0, 500),
+                    'app'   => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // ── Strategy 3: QB insert into deck_board_acl / deck_acl ─────────────
+        // Handles both Deck 1.x (boolean permission columns) and
+        // Deck 2.x (single `permissions` bitmask column, value 3 = read+edit).
         if (!$circleAdded) {
             foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
                 $aclCols = $this->getTableColumns($aclTable);
                 if (empty($aclCols)) {
                     continue;
                 }
+
                 try {
                     $qb = $db->getQueryBuilder();
                     $qb->insert($aclTable)
                        ->setValue('board_id',    $qb->createNamedParameter($boardId))
-                       ->setValue('type',        $qb->createNamedParameter(7))        // 7 = circle
+                       ->setValue('type',        $qb->createNamedParameter(7))
                        ->setValue('participant', $qb->createNamedParameter($teamId));
+
+                    // Deck 1.x: separate boolean columns
                     foreach (['permission_read' => 1, 'permission_edit' => 1, 'permission_manage' => 0] as $col => $val) {
                         if (in_array($col, $aclCols, true)) {
                             $qb->setValue($col, $qb->createNamedParameter($val));
                         }
                     }
+
+                    // Deck 2.x: single bitmask column (read=1, edit=2 → 3)
+                    if (in_array('permissions', $aclCols, true)) {
+                        $qb->setValue('permissions', $qb->createNamedParameter(3));
+                    }
+
                     $qb->executeStatement();
                     $circleAdded = true;
+                    $this->logger->info('[ResourceService] Deck: circle ACL added via QB', [
+                        'table'   => $aclTable,
+                        'boardId' => $boardId,
+                        'teamId'  => $teamId,
+                        'app'     => Application::APP_ID,
+                    ]);
                     break;
                 } catch (\Throwable $e) {
                     $this->logger->warning('[ResourceService] Deck ACL QB insert failed', [
                         'table' => $aclTable,
                         'error' => $e->getMessage(),
+                        'trace' => substr($e->getTraceAsString(), 0, 500),
                         'app'   => Application::APP_ID,
                     ]);
                 }
             }
+        }
+
+        if (!$circleAdded) {
+            $this->logger->error('[ResourceService] Deck: all circle ACL strategies failed', [
+                'boardId' => $boardId,
+                'teamId'  => $teamId,
+                'app'     => Application::APP_ID,
+            ]);
         }
 
         $this->logger->info('[ResourceService] createDeckBoard done', [

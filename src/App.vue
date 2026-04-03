@@ -5,7 +5,6 @@
                 <!-- Spacer to clear the show/hide sidebar toggle button -->
                 <div style="height: 44px; flex-shrink: 0;" />
 
-
                 <NcAppNavigationItem
                     v-if="canCreateTeam"
                     :name="t('teamhub', 'New Team')"
@@ -47,24 +46,16 @@
                         <AccountGroup :size="64" />
                     </template>
                 </NcEmptyContent>
-            </template>
 
-            <!-- Feedback / feature request link pinned to bottom of sidebar -->
-            <template #footer>
-                <div class="app-navigation-footer">
-                    <NcButton
-                        class="app-navigation-footer__feedback-btn"
-                        type="tertiary"
-                        :href="feedbackUrl"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        @click="openFeedbackForm">
-                        <template #icon>
-                            <MessageAlertIcon :size="18" />
-                        </template>
-                        {{ t('teamhub', 'Feedback & Feature Requests') }}
-                    </NcButton>
-                </div>
+                <!-- Feedback link at bottom of list, visually separated -->
+                <div class="teamhub-feedback-separator" />
+                <NcAppNavigationItem
+                    :name="t('teamhub', 'Feedback & Feature Requests')"
+                    @click="openFeedbackForm">
+                    <template #icon>
+                        <MessageAlertIcon :size="20" />
+                    </template>
+                </NcAppNavigationItem>
             </template>
         </NcAppNavigation>
 
@@ -106,7 +97,7 @@ import { mapState, mapActions, mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton } from '@nextcloud/vue'
+import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Magnify from 'vue-material-design-icons/Magnify.vue'
@@ -119,7 +110,7 @@ import CreateTeamView from './components/CreateTeamView.vue'
 export default {
     name: 'App',
     components: {
-        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton,
+        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble,
         AccountGroup, Plus, Magnify, MessageAlertIcon,
         TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView,
     },
@@ -127,7 +118,6 @@ export default {
         return {
             activeView: null,
             canCreateTeam: true, // default true; overwritten after mount
-            feedbackUrl: 'https://docs.google.com/forms/d/e/1FAIpQLSeq429Avzz5v-2FMGnjv51VXTmtQYhXVDw6fyut6rApzPCmEw/viewform?usp=publish-editor',
         }
     },
     computed: {
@@ -159,7 +149,9 @@ export default {
         },
 
         openFeedbackForm() {
-            window.open(this.feedbackUrl, '_blank', 'noopener,noreferrer')
+            // URL is a constant — never constructed from user input (rule #22)
+            const url = 'https://docs.google.com/forms/d/e/1FAIpQLSeq429Avzz5v-2FMGnjv51VXTmtQYhXVDw6fyut6rApzPCmEw/viewform?usp=publish-editor'
+            window.open(url, '_blank', 'noopener,noreferrer')
         },
 
         startCreateTeam() {
@@ -202,13 +194,10 @@ export default {
 </script>
 
 <style scoped lang="scss">
-.app-navigation-footer {
-    padding: 8px 12px;
-    border-top: 1px solid var(--color-border);
-
-    &__feedback-btn {
-        width: 100%;
-        justify-content: flex-start;
-    }
+// Visual separator above the feedback item at the bottom of the list.
+.teamhub-feedback-separator {
+    height: 1px;
+    margin: 4px 12px;
+    background-color: var(--color-border);
 }
 </style>

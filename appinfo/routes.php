@@ -19,6 +19,7 @@ return [
         // Admin settings
         ['name' => 'team#getAdminSettings',       'url' => '/api/v1/admin/settings',                         'verb' => 'GET'],
         ['name' => 'team#saveAdminSettings',      'url' => '/api/v1/admin/settings',                         'verb' => 'POST'],
+        ['name' => 'team#searchAdminGroups',      'url' => '/api/v1/admin/groups/search',                    'verb' => 'GET'],
         ['name' => 'team#getAllowedInviteTypes',  'url' => '/api/v1/invite-types',                            'verb' => 'GET'],
 
         // Team members
@@ -34,6 +35,11 @@ return [
         ['name' => 'team#getTeamActivity',        'url' => '/api/v1/teams/{teamId}/activity',                'verb' => 'GET'],
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
+
+        // Team apps (enable/disable per team)
+        ['name' => 'team#getTeamApps',            'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'GET'],
+        ['name' => 'team#updateTeamApps',         'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'PUT'],
+        ['name' => 'team#deleteTeamResource',     'url' => '/api/v1/teams/{teamId}/resources/{app}',         'verb' => 'DELETE'],
 
         // Team actions
         ['name' => 'team#requestJoinTeam',        'url' => '/api/v1/teams/{teamId}/join',                    'verb' => 'POST'],

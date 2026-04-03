@@ -420,7 +420,6 @@ export default {
                             { apps: appsSelected, teamName: team.name }
                         )
                         // Log full results so console shows which apps succeeded/failed
-                        console.log('[CreateTeam] create-resources results:', JSON.stringify(resourceResults))
                         const anyError = Object.values(resourceResults).some(r => r?.error)
                         this.setTask(i++, anyError ? 'error' : 'done')
                     } catch (e) {
@@ -490,7 +489,6 @@ export default {
                     || tplList.find(t => (t.title || '').toLowerCase().includes(this.form.teamType.toLowerCase()))
 
                 templateId = match?.id || null
-                console.log('[CreateTeam] IntraVox templateId resolved:', templateId, '(wanted:', wantedId + ')')
             } catch (e) {
                 console.warn('[CreateTeam] IntraVox templates API failed:', e?.message)
             }
@@ -507,7 +505,6 @@ export default {
                 templateId,
                 pageTitle: team.name,
             }
-            console.log('[CreateTeam] IntraVox POST /api/pages/from-template:', JSON.stringify(payload))
             await axios.post(generateUrl('/apps/intravox/api/pages/from-template'), payload)
         },
 

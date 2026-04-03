@@ -561,19 +561,41 @@ class TeamService {
 
     /**
      * Get admin-configured settings.
+     * createTeamGroups is returned as an array of { id, displayName } objects
+     * so the Vue picker can render chips immediately without a separate lookup.
+     * The raw stored value (createTeamGroup) is still a comma-separated string
+     * for backward-compat with canCreateTeam() checks.
      */
     public function getAdminSettings(): array {
-        $config = $this->container->get(\OCP\IConfig::class);
+        $config       = $this->container->get(\OCP\IConfig::class);
+        $groupManager = $this->container->get(\OCP\IGroupManager::class);
+
+        $rawGroups = $config->getAppValue(Application::APP_ID, 'createTeamGroup', '');
+
+        // Resolve each stored group ID to { id, displayName }
+        $createTeamGroups = [];
+        if ($rawGroups !== '') {
+            foreach (array_filter(array_map('trim', explode(',', $rawGroups))) as $gid) {
+                $group = $groupManager->get($gid);
+                $createTeamGroups[] = [
+                    'id'          => $gid,
+                    'displayName' => $group ? ($group->getDisplayName() ?: $gid) : $gid,
+                ];
+            }
+        }
+
         return [
             'wizardDescription' => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
             'inviteTypes'       => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
             'pinMinLevel'       => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
-            'createTeamGroup'   => $config->getAppValue(Application::APP_ID, 'createTeamGroup', ''),
+            'createTeamGroup'   => $rawGroups,           // legacy flat string — keep for canCreateTeam()
+            'createTeamGroups'  => $createTeamGroups,   // structured array for the picker
         ];
     }
 
     /**
      * Save admin settings. Requires server admin.
+     * createTeamGroup accepts either a comma-separated string or a JSON array of group IDs.
      */
     public function saveAdminSettings(array $settings): void {
         $this->logger->debug('[TeamService] saveAdminSettings', [
@@ -605,7 +627,23 @@ class TeamService {
             $config->setAppValue(Application::APP_ID, 'pinMinLevel', $level);
         }
         if (array_key_exists('createTeamGroup', $settings)) {
-            $config->setAppValue(Application::APP_ID, 'createTeamGroup', trim((string)$settings['createTeamGroup']));
+            $raw = $settings['createTeamGroup'];
+
+            // Accept JSON array sent from the multi-picker (e.g. '["admins","managers"]')
+            if (is_string($raw) && str_starts_with(trim($raw), '[')) {
+                $decoded = json_decode($raw, true);
+                if (is_array($decoded)) {
+                    $raw = implode(',', array_filter(array_map('trim', $decoded)));
+                }
+            }
+
+            // Sanitise: only printable, non-comma chars per group ID
+            $gids = array_filter(
+                array_map('trim', explode(',', (string)$raw)),
+                fn($g) => $g !== '' && preg_match('/^[^\s,]+$/', $g)
+            );
+
+            $config->setAppValue(Application::APP_ID, 'createTeamGroup', implode(',', $gids));
         }
     }
 

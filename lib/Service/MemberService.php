@@ -814,7 +814,8 @@ class MemberService {
     /**
      * Check whether the current user is allowed to create teams, based on
      * the admin setting 'createTeamGroup'. If the setting is empty, everyone
-     * can create. Otherwise the user must be a member of the named NC group.
+     * can create. Otherwise the user must be a member of at least one of the
+     * configured NC groups (stored as a comma-separated list).
      */
     public function canCurrentUserCreateTeam(): bool {
         $user = $this->userSession->getUser();
@@ -822,14 +823,22 @@ class MemberService {
             return false;
         }
 
-        $config        = $this->container->get(\OCP\IConfig::class);
-        $requiredGroup = trim($config->getAppValue(Application::APP_ID, 'createTeamGroup', ''));
+        $config   = $this->container->get(\OCP\IConfig::class);
+        $rawGroup = trim($config->getAppValue(Application::APP_ID, 'createTeamGroup', ''));
 
-        if ($requiredGroup === '') {
+        if ($rawGroup === '') {
             return true; // no restriction set
         }
 
         $groupManager = $this->container->get(\OCP\IGroupManager::class);
-        return $groupManager->isInGroup($user->getUID(), $requiredGroup);
+        $gids         = array_filter(array_map('trim', explode(',', $rawGroup)));
+
+        foreach ($gids as $gid) {
+            if ($groupManager->isInGroup($user->getUID(), $gid)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

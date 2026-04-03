@@ -75,6 +75,39 @@
             </div>
         </div>
 
+        <!-- Team Apps -->
+        <div class="manage-section">
+            <h3>{{ t('teamhub', 'Team Apps') }}</h3>
+            <p class="manage-section-desc">
+                {{ t('teamhub', 'Enable or disable Nextcloud apps for this team. Disabled apps are hidden from the tab bar.') }}
+            </p>
+            <div v-if="loadingApps" class="section-loading">
+                <NcLoadingIcon :size="24" />
+            </div>
+            <div v-else class="team-apps-list">
+                <div
+                    v-for="app in teamAppsList"
+                    :key="app.id"
+                    class="team-app-item">
+                    <div class="team-app-icon">
+                        <component :is="app.icon" :size="22" />
+                    </div>
+                    <div class="team-app-info">
+                        <span class="team-app-name">{{ app.label }}</span>
+                        <span class="team-app-desc">{{ app.description }}</span>
+                    </div>
+                    <NcCheckboxRadioSwitch
+                        :checked="app.enabled"
+                        :disabled="togglingApp === app.id || !app.installed"
+                        type="switch"
+                        :aria-label="t('teamhub', 'Enable {name}', { name: app.label })"
+                        @update:checked="toggleApp(app, $event)">
+                        {{ app.installed ? (app.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled')) : t('teamhub', 'Not installed') }}
+                    </NcCheckboxRadioSwitch>
+                </div>
+            </div>
+        </div>
+
         <!-- Members -->
         <div class="manage-section">
             <h3>{{ t('teamhub', 'Team Members') }} ({{ members.length }})</h3>
@@ -296,6 +329,7 @@ import { getCurrentUser } from '@nextcloud/auth'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
+import { mapState } from 'vuex'
 import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountRemove from 'vue-material-design-icons/AccountRemove.vue'
@@ -304,6 +338,11 @@ import Close from 'vue-material-design-icons/Close.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import DragVertical from 'vue-material-design-icons/DragVertical.vue'
+import MessageIcon from 'vue-material-design-icons/Message.vue'
+import FolderIcon from 'vue-material-design-icons/Folder.vue'
+import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
+import CardTextIcon from 'vue-material-design-icons/CardText.vue'
+import FileDocumentOutlineIcon from 'vue-material-design-icons/FileDocumentOutline.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -318,6 +357,7 @@ export default {
     components: {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
+        MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -349,9 +389,17 @@ export default {
             loadingWidgets: false,
             togglingWidget: null,    // registry_id currently being toggled, or null
             dragSourceWidget: null,  // integration row being dragged
+            // Team apps (Talk, Files, Calendar, Deck)
+            teamApps: [],          // rows from GET /api/v1/teams/{id}/apps
+            installedApps: {},     // { talk, calendar, deck } from /api/v1/apps/check
+            loadingApps: false,
+            togglingApp: null,     // app_id currently being toggled, or null
         }
     },
     computed: {
+        // Pull intravoxAvailable from Vuex — same source as TeamView uses
+        ...mapState(['intravoxAvailable']),
+
         invitationOptions() {
             return [
                 { key: 'open',    label: t('teamhub', 'Anyone can join (no invitation needed)') },
@@ -406,6 +454,67 @@ export default {
         widgetIntegrations() {
             return this.integrationRegistry.filter(i => i.integration_type === 'widget')
         },
+
+        /**
+         * Merged list of built-in apps with their installed + enabled state.
+         *
+         * app_id values must match what the TeamView's isBuiltinEnabled() uses
+         * ('spreed', 'files', 'calendar', 'deck', 'intravox').
+         *
+         * installedApps keys from checkInstalledApps(): talk, calendar, deck, intravox.
+         * Note: 'talk' maps to app_id 'spreed' — the NC app name for Talk.
+         *
+         * Intravox installed state comes from the Vuex store (intravoxAvailable)
+         * which uses the same dual-check as TeamView.
+         */
+        teamAppsList() {
+            const definitions = [
+                {
+                    id: 'spreed',
+                    label: t('teamhub', 'Talk'),
+                    description: t('teamhub', 'Team chat and video calls'),
+                    icon: 'MessageIcon',
+                    installed: !!this.installedApps.talk,   // key is 'talk' not 'spreed'
+                },
+                {
+                    id: 'files',
+                    label: t('teamhub', 'Files'),
+                    description: t('teamhub', 'Shared team folder'),
+                    icon: 'FolderIcon',
+                    installed: true, // Files is always available in NC core
+                },
+                {
+                    id: 'calendar',
+                    label: t('teamhub', 'Calendar'),
+                    description: t('teamhub', 'Team calendar and events'),
+                    icon: 'CalendarIcon',
+                    installed: !!this.installedApps.calendar,
+                },
+                {
+                    id: 'deck',
+                    label: t('teamhub', 'Deck'),
+                    description: t('teamhub', 'Kanban task board'),
+                    icon: 'CardTextIcon',
+                    installed: !!this.installedApps.deck,
+                },
+                {
+                    id: 'intravox',
+                    label: t('teamhub', 'Pages'),
+                    description: t('teamhub', 'Team wiki and pages (Intravox)'),
+                    icon: 'FileDocumentOutlineIcon',
+                    installed: !!this.intravoxAvailable,    // from Vuex store
+                },
+            ]
+
+            return definitions
+                .filter(def => def.installed) // hide apps that are not installed
+                .map(def => {
+                    const row = this.teamApps.find(a => a.app_id === def.id)
+                    // Default to enabled when no row exists (matches isBuiltinEnabled rule #20)
+                    const enabled = row ? row.enabled : true
+                    return { ...def, enabled }
+                })
+        },
     },
     watch: {
         'team.id'() {
@@ -413,6 +522,7 @@ export default {
             this.loadMembers()
             this.loadPendingRequests()
             this.loadConfig()
+            this.loadTeamApps()
             this.loadIntegrationRegistry()
         },
     },
@@ -420,6 +530,7 @@ export default {
         this.loadMembers()
         this.loadPendingRequests()
         this.loadConfig()
+        this.loadTeamApps()
         this.loadIntegrationRegistry()
     },
     methods: {
@@ -594,6 +705,80 @@ export default {
         },
 
         // ------------------------------------------------------------------
+        // Team apps (Talk / Files / Calendar / Deck)
+        // ------------------------------------------------------------------
+
+        async loadTeamApps() {
+            this.loadingApps = true
+            try {
+                const [appsRes, installedRes] = await Promise.all([
+                    axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`)),
+                    axios.get(generateUrl('/apps/teamhub/api/v1/apps/check')),
+                ])
+                this.teamApps     = Array.isArray(appsRes.data) ? appsRes.data : []
+                this.installedApps = installedRes.data || {}
+            } catch (e) {
+                this.teamApps     = []
+                this.installedApps = {}
+            } finally {
+                this.loadingApps = false
+            }
+        },
+
+        /**
+         * Toggle a built-in app on or off for this team.
+         *
+         * Enabling  → POST /teams/{id}/create-resources  (creates resource + grants access)
+         * Disabling → DELETE /teams/{id}/resources/{appId}  (hard-deletes resource, all data gone)
+         *
+         * The enabled flag is always saved to teamhub_team_apps via the backend,
+         * which now handles both the resource op and the flag upsert in one call
+         * via PUT /teams/{id}/apps.
+         */
+        async toggleApp(app, enabled) {
+            if (!app.installed) return
+            this.togglingApp = app.id
+
+            // Optimistic UI update
+            const existing = this.teamApps.find(a => a.app_id === app.id)
+            if (existing) {
+                existing.enabled = enabled
+            } else {
+                this.teamApps.push({ app_id: app.id, enabled })
+            }
+
+            try {
+                if (enabled) {
+                    // Create the resource and save the enabled flag (handled server-side in updateTeamApps)
+                    await axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`),
+                        { apps: [{ app_id: app.id, enabled: true }] }
+                    )
+                    showSuccess(t('teamhub', '{name} enabled for this team', { name: app.label }))
+                } else {
+                    // Hard-delete the resource (all data removed) and save the disabled flag
+                    await axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`),
+                        { apps: [{ app_id: app.id, enabled: false }] }
+                    )
+                    showSuccess(t('teamhub', '{name} and all its data have been removed from this team', { name: app.label }))
+                }
+            } catch (error) {
+                // Revert optimistic update
+                if (existing) {
+                    existing.enabled = !enabled
+                } else {
+                    this.teamApps = this.teamApps.filter(a => a.app_id !== app.id)
+                }
+                const msg = error.response?.data?.error || ''
+                showError(t('teamhub', 'Failed to update {name}', { name: app.label }) + (msg ? `: ${msg}` : ''))
+                await this.loadTeamApps()
+            } finally {
+                this.togglingApp = null
+            }
+        },
+
+        // ------------------------------------------------------------------
         // Integrations tab
         // ------------------------------------------------------------------
 
@@ -720,6 +905,52 @@ export default {
 /* Description */
 .manage-description-form { display: flex; flex-direction: column; gap: 12px; }
 .manage-description-actions { display: flex; justify-content: flex-end; }
+
+/* Team apps */
+.team-apps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.team-app-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark);
+}
+
+.team-app-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--border-radius);
+    background: var(--color-primary-element-light);
+    color: var(--color-primary-element);
+    flex-shrink: 0;
+}
+
+.team-app-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.team-app-name {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.team-app-desc {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+}
 
 /* Settings */
 .manage-settings { display: flex; flex-direction: column; gap: 20px; }
