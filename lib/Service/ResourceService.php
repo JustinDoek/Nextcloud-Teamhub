@@ -301,6 +301,9 @@ class ResourceService {
                     case 'deck':
                         $results['deck'] = $this->createDeckBoard($teamId, $teamName, $uid);
                         break;
+                    case 'intravox':
+                        $results['intravox'] = $this->createIntravoxPage($teamId, $teamName, $uid);
+                        break;
                     default:
                         $results[$app] = ['error' => 'Unknown app'];
                 }
@@ -672,23 +675,164 @@ class ResourceService {
     }
 
     /**
-     * Remove the circle's access from Intravox (remove ACL/share row only —
-     * Intravox pages themselves are not deleted as they may be shared with others).
+     * Create an Intravox page for this team using the Intravox REST API.
+     *
+     * Mirrors the CreateTeamView.vue logic exactly:
+     *   1. GET /apps/intravox/api/templates  — find a usable template
+     *   2. POST /apps/intravox/api/pages/from-template  — create the page
+     *
+     * Falls back to creating a blank page if no template matches.
+     * Returns ['page_created' => true] on success, ['error' => ...] on failure.
+     */
+    private function createIntravoxPage(string $teamId, string $teamName, string $uid): array {
+        $this->logger->debug('[ResourceService] createIntravoxPage start', [
+            'teamId' => $teamId, 'teamName' => $teamName, 'app' => Application::APP_ID,
+        ]);
+
+        if (!$this->appManager->isInstalled('intravox')) {
+            return ['error' => 'Intravox app not installed'];
+        }
+
+        try {
+            $client  = $this->container->get(\OCP\Http\Client\IClientService::class)->newClient();
+            $baseUrl = rtrim(\OC::$server->getURLGenerator()->getAbsoluteURL('/'), '/');
+
+            // 1. Fetch available templates
+            $templateId = null;
+            try {
+                $resp      = $client->get($baseUrl . '/apps/intravox/api/templates', [
+                    'headers' => ['OCS-APIREQUEST' => 'true'],
+                ]);
+                $templates = json_decode((string)$resp->getBody(), true);
+                $tplList   = is_array($templates) ? $templates : ($templates['templates'] ?? []);
+
+                // Prefer 'knowledge-base', then first available template
+                foreach (['knowledge-base', 'project', 'department'] as $preferred) {
+                    foreach ($tplList as $tpl) {
+                        if (($tpl['id'] ?? '') === $preferred || ($tpl['slug'] ?? '') === $preferred) {
+                            $templateId = $tpl['id'];
+                            break 2;
+                        }
+                    }
+                }
+                if ($templateId === null && !empty($tplList)) {
+                    $templateId = $tplList[0]['id'] ?? null;
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] createIntravoxPage: templates fetch failed', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            // 2. Create page from template (or blank)
+            $payload = ['pageTitle' => $teamName];
+            if ($templateId !== null) {
+                $payload['templateId'] = $templateId;
+                $endpoint = $baseUrl . '/apps/intravox/api/pages/from-template';
+            } else {
+                $endpoint = $baseUrl . '/apps/intravox/api/pages';
+            }
+
+            $resp = $client->post($endpoint, [
+                'headers' => [
+                    'Content-Type'    => 'application/json',
+                    'OCS-APIREQUEST'  => 'true',
+                ],
+                'body' => json_encode($payload),
+            ]);
+
+            $body = json_decode((string)$resp->getBody(), true);
+
+            $this->logger->info('[ResourceService] createIntravoxPage: page created', [
+                'teamId'     => $teamId,
+                'templateId' => $templateId,
+                'pageId'     => $body['id'] ?? 'unknown',
+                'app'        => Application::APP_ID,
+            ]);
+
+            return ['page_created' => true, 'page_id' => $body['id'] ?? null, 'template_id' => $templateId];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] createIntravoxPage failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['error' => 'Intravox page creation failed: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Delete the Intravox page created for this team.
+     *
+     * Strategy:
+     *   1. GET /apps/intravox/api/pages  — find page whose title matches the team name
+     *   2. DELETE /apps/intravox/api/pages/{id}  — remove it
+     *
+     * If no matching page is found, returns success (nothing to delete).
      */
     private function deleteIntravoxAccess(string $teamId, \OCP\IDBConnection $db): array {
-        try {
-            // Intravox stores circle shares in oc_share (share_type=7, item_type='page' or similar)
-            $qb = $db->getQueryBuilder();
-            $affected = $qb->delete('share')
-                ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
-                ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('page')))
-                ->executeStatement();
+        $this->logger->debug('[ResourceService] deleteIntravoxAccess start', [
+            'teamId' => $teamId, 'app' => Application::APP_ID,
+        ]);
 
-            $this->logger->info('[ResourceService] deleteIntravoxAccess done', [
-                'teamId' => $teamId, 'affected' => $affected, 'app' => Application::APP_ID,
+        if (!$this->appManager->isInstalled('intravox')) {
+            return ['deleted' => false, 'detail' => 'Intravox not installed'];
+        }
+
+        try {
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return ['deleted' => false, 'detail' => 'User not authenticated'];
+            }
+
+            $client  = $this->container->get(\OCP\Http\Client\IClientService::class)->newClient();
+            $baseUrl = rtrim(\OC::$server->getURLGenerator()->getAbsoluteURL('/'), '/');
+
+            // 1. List all pages to find the team's page by title
+            $pageId = null;
+            try {
+                $resp    = $client->get($baseUrl . '/apps/intravox/api/pages', [
+                    'headers' => ['OCS-APIREQUEST' => 'true'],
+                ]);
+                $pages   = json_decode((string)$resp->getBody(), true);
+                $pageList = is_array($pages) ? $pages : ($pages['pages'] ?? []);
+
+                // Find a page whose title matches the team ID stored in metadata or whose title == teamId
+                foreach ($pageList as $page) {
+                    $meta = $page['meta'] ?? [];
+                    if (
+                        ($meta['teamId'] ?? '') === $teamId ||
+                        ($page['teamId'] ?? '') === $teamId
+                    ) {
+                        $pageId = $page['id'];
+                        break;
+                    }
+                }
+
+                $this->logger->debug('[ResourceService] deleteIntravoxAccess: page search complete', [
+                    'teamId' => $teamId, 'pageId' => $pageId, 'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] deleteIntravoxAccess: page list failed', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            if ($pageId === null) {
+                $this->logger->info('[ResourceService] deleteIntravoxAccess: no page found for team, nothing to delete', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return ['deleted' => true, 'detail' => 'No Intravox page found for this team'];
+            }
+
+            // 2. Delete the page
+            $client->delete($baseUrl . '/apps/intravox/api/pages/' . $pageId, [
+                'headers' => ['OCS-APIREQUEST' => 'true'],
             ]);
-            return ['deleted' => true, 'detail' => "Intravox access removed ({$affected} shares)"];
+
+            $this->logger->info('[ResourceService] deleteIntravoxAccess: page deleted', [
+                'teamId' => $teamId, 'pageId' => $pageId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'detail' => "Intravox page {$pageId} deleted"];
 
         } catch (\Throwable $e) {
             $this->logger->error('[ResourceService] deleteIntravoxAccess failed', [
@@ -737,24 +881,9 @@ class ResourceService {
             // createConversation(type, name, actor): type 2 = TYPE_GROUP
             $room = $roomService->createConversation(2, $teamName, $user);
 
-            // Add the circle as participant (Talk assigns participant_type=3/PARTICIPANT by default)
-            try {
-                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $participantService->addCircle($room, $teamId);
-                $this->logger->debug('[ResourceService] Talk: circle added via ParticipantService', [
-                    'app' => Application::APP_ID,
-                ]);
-            } catch (\Throwable $e) {
-                // Non-fatal — room exists, circle invite may need manual step
-                $this->logger->warning('[ResourceService] Talk: ParticipantService::addCircle failed', [
-                    'error' => $e->getMessage(),
-                    'app'   => Application::APP_ID,
-                ]);
-            }
-
             $token = $room->getToken();
 
-            // Resolve room integer ID so we can promote the circle to moderator
+            // Resolve room integer ID — needed for attendee insert and moderator promotion
             $db = $this->container->get(\OCP\IDBConnection::class);
             $idQb = $db->getQueryBuilder();
             $idRes = $idQb->select('id')->from('talk_rooms')
@@ -762,16 +891,40 @@ class ResourceService {
                 ->setMaxResults(1)->executeQuery();
             $idRow = $idRes->fetch();
             $idRes->closeCursor();
+            $roomId = $idRow ? (int)$idRow['id'] : null;
 
-            if ($idRow) {
-                $this->promoteTalkCircleToModerator((int)$idRow['id'], $teamId, $db);
+            // Add the circle via ParticipantService (Talk default: participant_type=3/PARTICIPANT).
+            // When this fails — common on some Talk versions — fall back to a direct DB insert
+            // so the circle attendee row always exists before we promote it to MODERATOR.
+            $circleLinked = false;
+            try {
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $participantService->addCircle($room, $teamId);
+                $circleLinked = true;
+                $this->logger->debug('[ResourceService] Talk S1: circle added via ParticipantService', [
+                    'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] Talk S1: ParticipantService::addCircle failed — using direct DB fallback', [
+                    'error' => $e->getMessage(),
+                    'app'   => Application::APP_ID,
+                ]);
             }
 
-            $this->logger->info('[ResourceService] Talk: room created via RoomService', [
-                'token' => $token,
-                'app'   => Application::APP_ID,
+            if (!$circleLinked && $roomId !== null) {
+                $circleLinked = $this->insertTalkCircleAttendee($roomId, $teamId, $teamName, $db);
+            }
+
+            if ($roomId !== null && $circleLinked) {
+                $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
+            }
+
+            $this->logger->info('[ResourceService] Talk S1: room created via RoomService', [
+                'token'        => $token,
+                'circleLinked' => $circleLinked,
+                'app'          => Application::APP_ID,
             ]);
-            return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
+            return ['token' => $token, 'name' => $teamName, 'circle_added' => $circleLinked];
 
         } catch (\Throwable $e) {
             $this->logger->debug('[ResourceService] Talk: RoomService strategy failed, trying Manager', [
@@ -787,18 +940,7 @@ class ResourceService {
             $room  = $manager->createRoom(2, $teamName);
             $token = $room->getToken();
 
-            // Attempt to add the circle (Talk assigns participant_type=3/PARTICIPANT by default)
-            try {
-                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $participantService->addCircle($room, $teamId);
-            } catch (\Throwable $e) {
-                $this->logger->warning('[ResourceService] Talk: Manager addCircle failed', [
-                    'error' => $e->getMessage(),
-                    'app'   => Application::APP_ID,
-                ]);
-            }
-
-            // Resolve room integer ID so we can promote the circle to moderator
+            // Resolve room integer ID first so we can insert the attendee if needed
             $db = $this->container->get(\OCP\IDBConnection::class);
             $idQb = $db->getQueryBuilder();
             $idRes = $idQb->select('id')->from('talk_rooms')
@@ -806,9 +948,30 @@ class ResourceService {
                 ->setMaxResults(1)->executeQuery();
             $idRow = $idRes->fetch();
             $idRes->closeCursor();
+            $roomId = $idRow ? (int)$idRow['id'] : null;
 
-            if ($idRow) {
-                $this->promoteTalkCircleToModerator((int)$idRow['id'], $teamId, $db);
+            // Add circle via ParticipantService; fall back to direct DB insert on failure
+            $circleLinked = false;
+            try {
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $participantService->addCircle($room, $teamId);
+                $circleLinked = true;
+                $this->logger->debug('[ResourceService] Talk S2: circle added via ParticipantService', [
+                    'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ResourceService] Talk S2: Manager addCircle failed — using direct DB fallback', [
+                    'error' => $e->getMessage(),
+                    'app'   => Application::APP_ID,
+                ]);
+            }
+
+            if (!$circleLinked && $roomId !== null) {
+                $circleLinked = $this->insertTalkCircleAttendee($roomId, $teamId, $teamName, $db);
+            }
+
+            if ($roomId !== null && $circleLinked) {
+                $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
             }
 
             $this->logger->info('[ResourceService] Talk: room created via Manager', [
@@ -956,6 +1119,82 @@ class ResourceService {
      * setting participant_type on a circle attendee without triggering
      * participant-resolved individual rows.
      */
+
+    /**
+     * Insert a circle attendee row directly into talk_attendees.
+     *
+     * Used as a fallback when ParticipantService::addCircle() fails (Strategy 1 & 2).
+     * Inserts with participant_type=3 (PARTICIPANT) — promoteTalkCircleToModerator()
+     * upgrades it to MODERATOR immediately after.
+     *
+     * @return bool True when the row was inserted successfully.
+     */
+    private function insertTalkCircleAttendee(int $roomId, string $teamId, string $teamName, \OCP\IDBConnection $db): bool {
+        try {
+            // Skip if a circle attendee already exists for this room (idempotent)
+            $checkQb = $db->getQueryBuilder();
+            $checkRes = $checkQb->select('id')
+                ->from('talk_attendees')
+                ->where($checkQb->expr()->eq('room_id',    $checkQb->createNamedParameter($roomId)))
+                ->andWhere($checkQb->expr()->eq('actor_type', $checkQb->createNamedParameter('circles')))
+                ->andWhere($checkQb->expr()->eq('actor_id',   $checkQb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $existing = $checkRes->fetch();
+            $checkRes->closeCursor();
+
+            if ($existing) {
+                $this->logger->debug('[ResourceService] insertTalkCircleAttendee: row already exists', [
+                    'roomId' => $roomId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return true;
+            }
+
+            $attendeeCols = $this->getTableColumns('talk_attendees');
+            $aqb = $db->getQueryBuilder();
+            $aqb->insert('talk_attendees')
+                ->setValue('room_id',          $aqb->createNamedParameter($roomId))
+                ->setValue('actor_type',       $aqb->createNamedParameter('circles'))
+                ->setValue('actor_id',         $aqb->createNamedParameter($teamId))
+                ->setValue('display_name',     $aqb->createNamedParameter($teamName))
+                ->setValue('participant_type', $aqb->createNamedParameter(3)); // PARTICIPANT — promoted to MODERATOR next
+
+            foreach ([
+                'favorite'               => 0,
+                'notification_level'     => 0,
+                'notification_calls'     => 0,
+                'last_joined_call'       => 0,
+                'last_read_message'      => 0,
+                'last_mention_message'   => 0,
+                'last_mention_direct'    => 0,
+                'in_call'                => 0,
+                'permissions'            => 0,
+                'publishing_permissions' => 0,
+                'access_token'           => '',
+                'remote_id'              => '',
+                'phone_number'           => '',
+                'phone_states'           => '',
+            ] as $col => $val) {
+                if (in_array($col, $attendeeCols, true)) {
+                    $aqb->setValue($col, $aqb->createNamedParameter($val));
+                }
+            }
+            $aqb->executeStatement();
+
+            $this->logger->info('[ResourceService] insertTalkCircleAttendee: row inserted', [
+                'roomId' => $roomId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+            return true;
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[ResourceService] insertTalkCircleAttendee failed', [
+                'roomId' => $roomId, 'teamId' => $teamId,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
     private function promoteTalkCircleToModerator(int $roomId, string $teamId, \OCP\IDBConnection $db): void {
         try {
             $uqb = $db->getQueryBuilder();

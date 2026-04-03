@@ -132,8 +132,9 @@ class TeamIntegrationMapper {
     public function findAllWithEnabledStateForTeam(string $teamId): array {
 
         $qb = $this->db->getQueryBuilder();
+        // Use selectAlias() for aliased columns to avoid trailing-space issues
+        // that cause MySQL/MariaDB to reject 'ir.id   AS ir_id' as unknown column.
         $qb->select(
-                'ir.id          AS ir_id',
                 'ir.app_id',
                 'ir.integration_type',
                 'ir.title',
@@ -144,9 +145,10 @@ class TeamIntegrationMapper {
                 'ir.action_label',
                 'ir.iframe_url',
                 'ir.is_builtin',
-                'ir.created_at  AS ir_created_at',
-                'ti.sort_order  AS ti_sort_order',
             )
+            ->selectAlias('ir.id',         'ir_id')
+            ->selectAlias('ir.created_at', 'ir_created_at')
+            ->selectAlias('ti.sort_order', 'ti_sort_order')
             ->from('teamhub_integration_registry', 'ir')
             ->leftJoin(
                 'ir',

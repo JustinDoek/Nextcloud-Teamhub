@@ -1,72 +1,105 @@
 <template>
     <div class="teamhub-team-view">
-        <!-- Tab bar -->
+        <!-- ── Tab bar ─────────────────────────────────────────────── -->
         <div class="teamhub-tab-bar">
-            <!-- Home tab — in-page, always a button -->
+            <!--
+                Home tab is always first and excluded from the draggable set.
+            -->
             <button
                 class="teamhub-tab"
                 :class="{ active: currentView === 'msgstream' }"
                 @click="setView('msgstream')">
-                <component :is="'MessageOutline'" :size="16" />
+                <MessageOutline :size="16" />
                 {{ t('teamhub', 'Home') }}
             </button>
 
-        <!-- Built-in app tabs — rendered when resource exists AND team has it enabled -->
-            <button
-                v-if="isBuiltinEnabled('spreed') && resources.talk && resources.talk.token"
-                class="teamhub-tab"
-                :class="{ active: currentView === 'talk' }"
-                @click="setView('talk')">
-                <Chat :size="16" />
-                {{ t('teamhub', 'Chat') }}
-            </button>
-            <button
-                v-if="isBuiltinEnabled('files') && resources.files && resources.files.path"
-                class="teamhub-tab"
-                :class="{ active: currentView === 'files' }"
-                @click="setView('files')">
-                <Folder :size="16" />
-                {{ t('teamhub', 'Files') }}
-            </button>
-            <button
-                v-if="isBuiltinEnabled('calendar') && resources.calendar"
-                class="teamhub-tab"
-                :class="{ active: currentView === 'calendar' }"
-                @click="setView('calendar')">
-                <Calendar :size="16" />
-                {{ t('teamhub', 'Calendar') }}
-            </button>
-            <button
-                v-if="isBuiltinEnabled('deck') && resources.deck && resources.deck.board_id"
-                class="teamhub-tab"
-                :class="{ active: currentView === 'deck' }"
-                @click="setView('deck')">
-                <CardText :size="16" />
-                {{ t('teamhub', 'Deck') }}
-            </button>
+            <!--
+                vuedraggable wraps all other tabs.
+                Each rendered tab shows a six-dot handle on hover.
+            -->
+            <draggable
+                v-model="orderedTabs"
+                :animation="150"
+                ghost-class="teamhub-tab-ghost"
+                drag-class="teamhub-tab-dragging"
+                handle=".teamhub-tab-drag-handle"
+                class="teamhub-tab-draggable"
+                @end="onTabReorder">
+                <template v-for="tab in orderedTabs">
+                    <!-- Built-in: Talk -->
+                    <button
+                        v-if="tab.key === 'talk' && isBuiltinEnabled('spreed') && resources.talk && resources.talk.token"
+                        :key="'tab-talk'"
+                        class="teamhub-tab"
+                        :class="{ active: currentView === 'talk' }"
+                        @click="setView('talk')">
+                        <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                        <Chat :size="16" />
+                        {{ t('teamhub', 'Chat') }}
+                    </button>
 
-            <!-- External app menu_item tabs (non-builtin, ordered by sort_order) -->
-            <button
-                v-for="menuItem in externalMenuItems"
-                :key="'mi-' + menuItem.registry_id"
-                class="teamhub-tab"
-                :class="{ active: currentView === 'ext-' + menuItem.registry_id }"
-                @click="setView('ext-' + menuItem.registry_id)">
-                <component :is="resolveTabIcon(menuItem.icon)" :size="16" />
-                {{ menuItem.title }}
-            </button>
+                    <!-- Built-in: Files -->
+                    <button
+                        v-else-if="tab.key === 'files' && isBuiltinEnabled('files') && resources.files && resources.files.path"
+                        :key="'tab-files'"
+                        class="teamhub-tab"
+                        :class="{ active: currentView === 'files' }"
+                        @click="setView('files')">
+                        <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                        <Folder :size="16" />
+                        {{ t('teamhub', 'Files') }}
+                    </button>
 
-            <!-- Custom web links (open in new tab) -->
-            <a
-                v-for="link in webLinks"
-                :key="'link-' + link.id"
-                :href="link.url"
-                target="_blank"
-                rel="noopener"
-                class="teamhub-tab teamhub-tab--link">
-                <OpenInNew :size="14" />
-                {{ link.title }}
-            </a>
+                    <!-- Built-in: Calendar -->
+                    <button
+                        v-else-if="tab.key === 'calendar' && isBuiltinEnabled('calendar') && resources.calendar"
+                        :key="'tab-calendar'"
+                        class="teamhub-tab"
+                        :class="{ active: currentView === 'calendar' }"
+                        @click="setView('calendar')">
+                        <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                        <Calendar :size="16" />
+                        {{ t('teamhub', 'Calendar') }}
+                    </button>
+
+                    <!-- Built-in: Deck -->
+                    <button
+                        v-else-if="tab.key === 'deck' && isBuiltinEnabled('deck') && resources.deck && resources.deck.board_id"
+                        :key="'tab-deck'"
+                        class="teamhub-tab"
+                        :class="{ active: currentView === 'deck' }"
+                        @click="setView('deck')">
+                        <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                        <CardText :size="16" />
+                        {{ t('teamhub', 'Deck') }}
+                    </button>
+
+                    <!-- External app tabs -->
+                    <button
+                        v-else-if="tab.key.startsWith('ext-')"
+                        :key="'tab-' + tab.key"
+                        class="teamhub-tab"
+                        :class="{ active: currentView === tab.key }"
+                        @click="setView(tab.key)">
+                        <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                        <component :is="resolveTabIcon(tab.icon)" :size="16" />
+                        {{ tab.label }}
+                    </button>
+
+                    <!-- Web link tabs (open in new tab) -->
+                    <a
+                        v-else-if="tab.key.startsWith('link-')"
+                        :key="'tab-' + tab.key"
+                        :href="tab.url"
+                        target="_blank"
+                        rel="noopener"
+                        class="teamhub-tab teamhub-tab--link">
+                        <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                        <OpenInNew :size="14" />
+                        {{ tab.label }}
+                    </a>
+                </template>
+            </draggable>
 
             <NcButton
                 class="teamhub-tab-add"
@@ -75,205 +108,380 @@
                 @click="showManageLinks = true">
                 <template #icon><Plus :size="18" /></template>
             </NcButton>
+
+            <!-- Edit layout toggle — shown only on Home view -->
+            <NcButton
+                v-if="currentView === 'msgstream'"
+                class="teamhub-edit-layout-btn"
+                :type="editMode ? 'primary' : 'tertiary'"
+                :aria-label="editMode ? t('teamhub', 'Done editing layout') : t('teamhub', 'Edit layout')"
+                @click="toggleEditMode">
+                <template #icon><ViewDashboardEdit :size="18" /></template>
+                {{ editMode ? t('teamhub', 'Done') : t('teamhub', 'Edit layout') }}
+            </NcButton>
         </div>
 
-        <!-- Content + Sidebar -->
-        <div class="teamhub-layout">
-            <!-- Main content area -->
-            <div class="teamhub-main">
-                <ActivityFeedView v-if="currentView === 'activity'" />
-                <MessageStream v-else-if="currentView === 'msgstream'" />
-                <AppEmbed
-                    v-else-if="currentView === 'talk' && resources.talk"
-                    :url="talkUrl"
-                    :label="t('teamhub', 'Chat')" />
-                <AppEmbed
-                    v-else-if="currentView === 'files' && resources.files"
-                    :url="filesUrl"
-                    :label="t('teamhub', 'Files')" />
-                <AppEmbed
-                    v-else-if="currentView === 'calendar'"
-                    :url="calendarUrl"
-                    :label="t('teamhub', 'Calendar')" />
-                <AppEmbed
-                    v-else-if="currentView === 'deck' && resources.deck"
-                    :url="deckUrl"
-                    :label="t('teamhub', 'Deck')" />
-                <!-- External menu_item integrations — sandboxed iframe in main canvas -->
-                <template v-for="menuItem in externalMenuItems">
-                    <AppEmbed
-                        v-if="currentView === 'ext-' + menuItem.registry_id && menuItem.iframe_url"
-                        :key="'ext-canvas-' + menuItem.registry_id"
-                        :url="menuItemUrl(menuItem)"
-                        :label="menuItem.title" />
-                </template>
-            </div>
+        <!-- ── Content area ─────────────────────────────────────────── -->
+        <div class="teamhub-content">
 
-            <!-- Right sidebar — only on Home and Activity views -->
-            <aside v-if="currentView === 'msgstream' || currentView === 'activity'" class="teamhub-sidebar">
-                <!-- Team info with members and actions menu -->
-                <NcAppNavigationItem 
-                    :name="t('teamhub', 'Team Info')" 
-                    :allow-collapse="true" 
-                    :open="false"
-                    class="teamhub-team-info-widget">
-                    <template #icon><InformationOutline :size="20" /></template>
-                    <template #actions>
-                        <NcActionButton v-if="isTeamAdmin" @click="openManageTeam">
-                            <template #icon><Cog :size="20" /></template>
-                            {{ t('teamhub', 'Manage team') }}
-                        </NcActionButton>
-                        <NcActionButton @click="copyTeamLink">
-                            <template #icon><ContentCopy :size="20" /></template>
-                            {{ t('teamhub', 'Copy team link') }}
-                        </NcActionButton>
-                        <NcActionButton @click="inviteToTeam">
-                            <template #icon><AccountPlus :size="20" /></template>
-                            {{ t('teamhub', 'Invite user') }}
-                        </NcActionButton>
-                    </template>
-                    <template #default>
-                        <div class="teamhub-team-info-content">
-                            <p class="teamhub-team-description">{{ team.description || t('teamhub', 'No description') }}</p>
+            <!-- Home view — unified drag grid -->
+            <div
+                v-show="currentView === 'msgstream'"
+                class="teamhub-home-view"
+                :class="{ 'teamhub-home-view--editing': editMode }">
 
-                            <!-- Owner row -->
-                            <div v-if="teamOwner" class="teamhub-team-owner">
-                                <span class="teamhub-info-label">{{ t('teamhub', 'Owner') }}</span>
-                                <div class="teamhub-owner-row">
-                                    <NcAvatar
-                                        v-if="teamOwner.userId"
-                                        :user="teamOwner.userId"
-                                        :display-name="teamOwner.displayName"
-                                        :show-user-status="false"
-                                        :size="22" />
-                                    <span class="teamhub-owner-name">{{ teamOwner.displayName }}</span>
+                <!-- Edit mode hint banner -->
+                <div v-if="editMode" class="teamhub-edit-banner">
+                    <ViewDashboardEdit :size="16" />
+                    {{ t('teamhub', 'Drag widgets to rearrange. Drag the bottom-right corner of the message stream to resize it.') }}
+                </div>
+
+                <grid-layout
+                    v-if="layoutLoaded && gridLayout.length > 0"
+                    :layout.sync="gridLayout"
+                    :col-num="12"
+                    :row-height="80"
+                    :is-draggable="editMode"
+                    :is-resizable="editMode"
+                    :margin="[12, 12]"
+                    :use-css-transforms="true"
+                    :responsive="false"
+                    @layout-updated="onLayoutUpdated">
+
+                    <!-- Message stream — resizable only -->
+                    <grid-item
+                        v-if="getGridItem('msgstream')"
+                        v-bind="getGridItem('msgstream')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card teamhub-widget-card--stream">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Message stream') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <MessageOutline :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</span>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('msgstream') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('msgstream')">
+                                    <ChevronUp v-if="!isCollapsed('msgstream')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <MessageStream v-show="!isCollapsed('msgstream')" class="teamhub-widget-content" />
+                        </div>
+                    </grid-item>
+
+                    <!-- Team Info -->
+                    <grid-item
+                        v-if="getGridItem('widget-teaminfo')"
+                        v-bind="getGridItem('widget-teaminfo')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Team info') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <InformationOutline :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Team Info') }}</span>
+                                <NcActions class="teamhub-widget-actions">
+                                    <NcActionButton v-if="isTeamAdmin" @click="openManageTeam">
+                                        <template #icon><Cog :size="20" /></template>
+                                        {{ t('teamhub', 'Manage team') }}
+                                    </NcActionButton>
+                                    <NcActionButton @click="copyTeamLink">
+                                        <template #icon><ContentCopy :size="20" /></template>
+                                        {{ t('teamhub', 'Copy team link') }}
+                                    </NcActionButton>
+                                    <NcActionButton @click="inviteToTeam">
+                                        <template #icon><AccountPlus :size="20" /></template>
+                                        {{ t('teamhub', 'Invite user') }}
+                                    </NcActionButton>
+                                </NcActions>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-teaminfo') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-teaminfo')">
+                                    <ChevronUp v-if="!isCollapsed('widget-teaminfo')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-teaminfo')" class="teamhub-widget-content teamhub-widget-content--teaminfo">
+                                <p class="teamhub-team-description">{{ team.description || t('teamhub', 'No description') }}</p>
+                                <div v-if="teamOwner" class="teamhub-team-owner">
+                                    <span class="teamhub-info-label">{{ t('teamhub', 'Owner') }}</span>
+                                    <div class="teamhub-owner-row">
+                                        <NcAvatar
+                                            v-if="teamOwner.userId"
+                                            :user="teamOwner.userId"
+                                            :display-name="teamOwner.displayName"
+                                            :show-user-status="false"
+                                            :size="22" />
+                                        <span class="teamhub-owner-name">{{ teamOwner.displayName }}</span>
+                                    </div>
                                 </div>
                             </div>
+                        </div>
+                    </grid-item>
 
-                            <!-- Members row -->
-                            <div class="teamhub-team-members-compact">
-                                <span class="teamhub-info-label">{{ t('teamhub', 'Members') }} ({{ members.length }})</span>
+                    <!-- Members -->
+                    <grid-item
+                        v-if="getGridItem('widget-members')"
+                        v-bind="getGridItem('widget-members')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Members') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <AccountGroup :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ members.length }})</span>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-members') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-members')">
+                                    <ChevronUp v-if="!isCollapsed('widget-members')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content">
                                 <div class="teamhub-avatar-stack">
                                     <NcAvatar
-                                        v-for="member in members.slice(0, 8)"
+                                        v-for="member in members.slice(0, 10)"
                                         v-if="member.userId"
                                         :key="member.userId"
                                         :user="member.userId"
                                         :display-name="member.displayName"
                                         :show-user-status="false"
                                         :disable-menu="false"
-                                        :size="28"
+                                        :size="32"
                                         class="teamhub-stacked-avatar" />
-                                    <span v-if="members.length > 8" class="teamhub-more-members">
-                                        +{{ members.length - 8 }}
+                                    <span v-if="members.length > 10" class="teamhub-more-members">
+                                        +{{ members.length - 10 }}
                                     </span>
                                 </div>
                             </div>
                         </div>
-                    </template>
-                </NcAppNavigationItem>
+                    </grid-item>
 
-                <!-- Calendar widget (collapsible) -->
-                <NcAppNavigationItem 
-                    v-if="resources.calendar"
-                    :name="t('teamhub', 'Upcoming Events')" 
-                    :allow-collapse="true" 
-                    :open="true"
-                    class="teamhub-widget-item">
-                    <template #icon><Calendar :size="20" /></template>
-                    <template #actions>
-                        <NcActionButton
-                            v-if="resources.talk"
-                            @click="showScheduleMeeting = true">
-                            <template #icon><VideoIcon :size="20" /></template>
-                            {{ t('teamhub', 'Schedule meeting') }}
-                        </NcActionButton>
-                        <NcActionButton @click="showAddEvent = true">
-                            <template #icon><CalendarPlus :size="20" /></template>
-                            {{ t('teamhub', 'Add agenda item') }}
-                        </NcActionButton>
-                    </template>
-                    <template #default>
-                        <CalendarWidget />
-                    </template>
-                </NcAppNavigationItem>
+                    <!-- Calendar widget -->
+                    <grid-item
+                        v-if="resources.calendar && getGridItem('widget-calendar')"
+                        v-bind="getGridItem('widget-calendar')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Upcoming events') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <Calendar :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Events') }}</span>
+                                <NcActions class="teamhub-widget-actions">
+                                    <NcActionButton v-if="resources.talk" @click="showScheduleMeeting = true">
+                                        <template #icon><VideoIcon :size="20" /></template>
+                                        {{ t('teamhub', 'Schedule meeting') }}
+                                    </NcActionButton>
+                                    <NcActionButton @click="showAddEvent = true">
+                                        <template #icon><CalendarPlus :size="20" /></template>
+                                        {{ t('teamhub', 'Add agenda item') }}
+                                    </NcActionButton>
+                                </NcActions>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-calendar') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-calendar')">
+                                    <ChevronUp v-if="!isCollapsed('widget-calendar')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-calendar')" class="teamhub-widget-content">
+                                <CalendarWidget />
+                            </div>
+                        </div>
+                    </grid-item>
 
-                <!-- Deck widget (collapsible) -->
-                <NcAppNavigationItem 
-                    v-if="resources.deck"
-                    :name="t('teamhub', 'Upcoming Tasks')" 
-                    :allow-collapse="true" 
-                    :open="true"
-                    class="teamhub-widget-item">
-                    <template #icon><CardText :size="20" /></template>
-                    <template #actions>
-                        <NcActionButton @click="showAddTask = true">
-                            <template #icon><CheckboxMarkedOutline :size="20" /></template>
-                            {{ t('teamhub', 'Add task') }}
-                        </NcActionButton>
-                    </template>
-                    <template #default>
-                        <DeckWidget />
-                    </template>
-                </NcAppNavigationItem>
+                    <!-- Deck widget -->
+                    <grid-item
+                        v-if="resources.deck && getGridItem('widget-deck')"
+                        v-bind="getGridItem('widget-deck')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Upcoming tasks') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <CardText :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</span>
+                                <NcActions class="teamhub-widget-actions">
+                                    <NcActionButton @click="showAddTask = true">
+                                        <template #icon><CheckboxMarkedOutline :size="20" /></template>
+                                        {{ t('teamhub', 'Add task') }}
+                                    </NcActionButton>
+                                </NcActions>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-deck') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-deck')">
+                                    <ChevronUp v-if="!isCollapsed('widget-deck')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-deck')" class="teamhub-widget-content">
+                                <DeckWidget />
+                            </div>
+                        </div>
+                    </grid-item>
 
-                <!-- Pages widget (Intravox integration) -->
-                <NcAppNavigationItem 
-                    v-if="intravoxAvailable"
-                    :name="t('teamhub', 'Pages')" 
-                    :allow-collapse="true" 
-                    :open="true"
-                    class="teamhub-widget-item">
-                    <template #icon><FileDocumentOutline :size="20" /></template>
-                    <template #default>
-                        <IntravoxWidget />
-                    </template>
-                </NcAppNavigationItem>
+                    <!-- Activity widget -->
+                    <grid-item
+                        v-if="getGridItem('widget-activity')"
+                        v-bind="getGridItem('widget-activity')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Team activity') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <ClockOutline :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Team Activity') }}</span>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-activity') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-activity')">
+                                    <ChevronUp v-if="!isCollapsed('widget-activity')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-activity')" class="teamhub-widget-content">
+                                <ActivityWidget @show-more="setView('activity')" />
+                            </div>
+                        </div>
+                    </grid-item>
 
-                <!-- Activity widget (collapsible) -->
-                <NcAppNavigationItem
-                    :name="t('teamhub', 'Team Activity')"
-                    :allow-collapse="true"
-                    :open="true"
-                    class="teamhub-widget-item">
-                    <template #icon><ClockOutline :size="20" /></template>
-                    <template #default>
-                        <ActivityWidget @show-more="setView('activity')" />
-                    </template>
-                </NcAppNavigationItem>
+                    <!-- Pages / Intravox widget -->
+                    <grid-item
+                        v-if="intravoxAvailable && getGridItem('widget-pages')"
+                        v-bind="getGridItem('widget-pages')"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ t('teamhub', 'Pages') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <FileDocumentOutline :size="18" />
+                                <span class="teamhub-widget-title">{{ t('teamhub', 'Pages') }}</span>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-pages') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-pages')">
+                                    <ChevronUp v-if="!isCollapsed('widget-pages')" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-pages')" class="teamhub-widget-content">
+                                <IntravoxWidget />
+                            </div>
+                        </div>
+                    </grid-item>
 
-                <!-- External sidebar widgets — data fetched server-side, rendered natively -->
-                <IntegrationWidget
-                    v-for="widget in teamWidgets"
-                    :key="'int-widget-' + widget.registry_id"
-                    :integration="widget"
-                    :team-id="currentTeamId" />
-            </aside>
+                    <!-- External integration widgets (dynamic) -->
+                    <grid-item
+                        v-for="widget in teamWidgets"
+                        :key="'grid-int-' + widget.registry_id"
+                        v-bind="getOrCreateIntegrationItem(widget.registry_id)"
+                        class="teamhub-grid-item"
+                        :class="{ 'teamhub-grid-item--editing': editMode }">
+                        <div class="teamhub-widget-card">
+                            <div v-if="editMode" class="teamhub-widget-drag-handle">
+                                <DragVariant :size="16" />
+                                <span>{{ widget.title || t('teamhub', 'Widget') }}</span>
+                            </div>
+                            <div class="teamhub-widget-header">
+                                <Puzzle :size="18" />
+                                <span class="teamhub-widget-title">{{ widget.title }}</span>
+                                <button
+                                    class="teamhub-widget-collapse-btn"
+                                    :aria-label="isCollapsed('widget-int-' + widget.registry_id) ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                                    @click.stop="toggleCollapse('widget-int-' + widget.registry_id)">
+                                    <ChevronUp v-if="!isCollapsed('widget-int-' + widget.registry_id)" :size="16" />
+                                    <ChevronDown v-else :size="16" />
+                                </button>
+                            </div>
+                            <div v-show="!isCollapsed('widget-int-' + widget.registry_id)" class="teamhub-widget-content">
+                                <IntegrationWidget
+                                    :integration="widget"
+                                    :team-id="currentTeamId" />
+                            </div>
+                        </div>
+                    </grid-item>
+
+                </grid-layout>
+            </div>
+
+            <!-- Activity feed (full canvas) -->
+            <ActivityFeedView v-if="currentView === 'activity'" />
+
+            <!-- Embedded NC app views — full canvas, no grid -->
+            <AppEmbed
+                v-if="currentView === 'talk' && resources.talk"
+                :url="talkUrl"
+                :label="t('teamhub', 'Chat')" />
+            <AppEmbed
+                v-if="currentView === 'files' && resources.files"
+                :url="filesUrl"
+                :label="t('teamhub', 'Files')" />
+            <AppEmbed
+                v-if="currentView === 'calendar'"
+                :url="calendarUrl"
+                :label="t('teamhub', 'Calendar')" />
+            <AppEmbed
+                v-if="currentView === 'deck' && resources.deck"
+                :url="deckUrl"
+                :label="t('teamhub', 'Deck')" />
+
+            <!-- External menu_item integrations — sandboxed iframe -->
+            <template v-for="menuItem in externalMenuItems">
+                <AppEmbed
+                    v-if="currentView === 'ext-' + menuItem.registry_id && menuItem.iframe_url"
+                    :key="'ext-canvas-' + menuItem.registry_id"
+                    :url="menuItemUrl(menuItem)"
+                    :label="menuItem.title" />
+            </template>
         </div>
 
-        <!-- Manage links modal -->
+        <!-- ── Modals ─────────────────────────────────────────────── -->
         <ManageLinksModal v-if="showManageLinks" @close="showManageLinks = false" />
 
-        <!-- Invite member modal -->
         <InviteMemberModal
             v-if="showInviteModal"
             :team-id="currentTeamId"
             @close="showInviteModal = false"
             @invited="$store.dispatch('fetchMembers', currentTeamId)" />
 
-        <!-- Schedule meeting modal -->
         <ScheduleMeetingModal
             v-if="showScheduleMeeting"
             :team-id="currentTeamId"
             @close="showScheduleMeeting = false; $store.dispatch('fetchMessages', currentTeamId)" />
 
-        <!-- Add agenda item modal -->
         <AddEventModal
             v-if="showAddEvent"
             :team-id="currentTeamId"
             @close="showAddEvent = false" />
 
-        <!-- Add task modal -->
         <AddTaskModal
             v-if="showAddTask"
             :board-id="resources.deck && resources.deck.board_id"
@@ -288,8 +496,11 @@ import { translate as t } from '@nextcloud/l10n'
 import { getCurrentUser } from '@nextcloud/auth'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { showError, showSuccess, showInfo } from '@nextcloud/dialogs'
-import { NcButton, NcAppNavigationItem, NcAvatar, NcLoadingIcon, NcActionButton } from '@nextcloud/vue'
+import { showError, showSuccess } from '@nextcloud/dialogs'
+import { NcButton, NcAvatar, NcActionButton, NcActions } from '@nextcloud/vue'
+import { GridLayout, GridItem } from 'vue-grid-layout'
+import draggable from 'vuedraggable'
+
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Chat from 'vue-material-design-icons/Chat.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
@@ -303,12 +514,15 @@ import InformationOutline from 'vue-material-design-icons/InformationOutline.vue
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
-import ExitToApp from 'vue-material-design-icons/ExitToApp.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import Cog from 'vue-material-design-icons/Cog.vue'
 import VideoIcon from 'vue-material-design-icons/Video.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
+import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
+import DragVariant from 'vue-material-design-icons/DragVariant.vue'
+import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
+import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -324,34 +538,52 @@ import AddEventModal from './AddEventModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
 
+/** Debounce: call fn at most once per {delay}ms after the last invocation. */
+function debounce(fn, delay) {
+    let timer = null
+    return function (...args) {
+        clearTimeout(timer)
+        timer = setTimeout(() => fn.apply(this, args), delay)
+    }
+}
+
 export default {
     name: 'TeamView',
+
     components: {
         NcButton,
-        NcAppNavigationItem,
         NcAvatar,
-        NcLoadingIcon,
         NcActionButton,
-        MessageOutline, Chat, Folder, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline,
-        Plus, OpenInNew, InformationOutline, AccountGroup, ClockOutline, FileDocumentOutline,
-        ExitToApp, Cog, ContentCopy, AccountPlus, VideoIcon,
-        Puzzle,
-        MessageStream,
-        DeckWidget,
-        CalendarWidget,
-        IntravoxWidget,
-        ActivityWidget,
-        IntegrationWidget,
-        ActivityFeedView,
-        ManageLinksModal,
-        InviteMemberModal,
-        ScheduleMeetingModal,
-        AddEventModal,
-        AddTaskModal,
-        AppEmbed,
+        NcActions,
+        GridLayout,
+        GridItem,
+        draggable,
+        MessageOutline, Chat, Folder, Calendar, CalendarPlus, CardText,
+        CheckboxMarkedOutline, Plus, OpenInNew, InformationOutline,
+        AccountGroup, ClockOutline, FileDocumentOutline,
+        ContentCopy, AccountPlus, Cog, VideoIcon, Puzzle,
+        ViewDashboardEdit, DragVariant, ChevronUp, ChevronDown,
+        MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
+        ActivityWidget, IntegrationWidget, ActivityFeedView,
+        ManageLinksModal, InviteMemberModal, ScheduleMeetingModal,
+        AddEventModal, AddTaskModal, AppEmbed,
     },
+
     data() {
         return {
+            // ── Layout ────────────────────────────────────────────────
+            /** vue-grid-layout layout array — each item: {i, x, y, w, h, minW, minH, isResizable, collapsed, hSaved} */
+            gridLayout: [],
+            /** Ordered tab descriptors: {key, label, icon?, url?} */
+            orderedTabs: [],
+            /** True while in rearrange mode */
+            editMode: false,
+            /** Guard: don't save until the initial load completes */
+            layoutLoaded: false,
+            /** Assigned in created() — prevents save-spam during drag */
+            _debouncedSave: null,
+
+            // ── Modals ────────────────────────────────────────────────
             showManageLinks:     false,
             showInviteModal:     false,
             showScheduleMeeting: false,
@@ -359,87 +591,311 @@ export default {
             showAddTask:         false,
         }
     },
+
     computed: {
-        ...mapState(['currentTeamId', 'currentView', 'resources', 'webLinks', 'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems']),
+        ...mapState([
+            'currentTeamId', 'currentView', 'resources', 'webLinks',
+            'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
+        ]),
         ...mapGetters(['currentTeam']),
+
         team() { return this.currentTeam || {} },
-        
+
         teamOwner() {
             if (!this.members || !Array.isArray(this.members)) return null
             return this.members.find(m => m.level >= 9) || null
         },
 
         isTeamAdmin() {
-            // Check if current user is admin (level >= 8) or owner (level >= 9)
-            if (!this.members || !Array.isArray(this.members) || this.members.length === 0) {
-                return false
-            }
-            const currentUser = getCurrentUser()?.uid
-            if (!currentUser) return false
-            const currentMember = this.members.find(m => m.userId === currentUser)
-            return currentMember && currentMember.level >= 8
+            if (!this.members || !Array.isArray(this.members) || !this.members.length) return false
+            const uid = getCurrentUser()?.uid
+            if (!uid) return false
+            const m = this.members.find(m => m.userId === uid)
+            return m && m.level >= 8
         },
 
-        // Talk: /call/{token} opens the conversation directly
         talkUrl() {
             const token = this.resources.talk?.token
             return token ? generateUrl('/call/' + token) : generateUrl('/apps/spreed')
         },
-        // Files: deep-link directly into the shared folder by path
         filesUrl() {
             const path = this.resources.files?.path || '/'
             return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
         },
-        // Calendar: /apps/calendar/p/{token} is the public embed URL
         calendarUrl() {
             const cal = this.resources.calendar
-            if (cal?.public_token) {
-                return generateUrl('/apps/calendar/p/' + cal.public_token)
-            }
-            return generateUrl('/apps/calendar')
+            return cal?.public_token
+                ? generateUrl('/apps/calendar/p/' + cal.public_token)
+                : generateUrl('/apps/calendar')
         },
-        // Deck: /apps/deck/#/board/{id} is the correct SPA hash route
         deckUrl() {
             const id = this.resources.deck?.board_id
             return generateUrl('/apps/deck') + (id ? '/#/board/' + id : '/')
         },
 
-        /**
-         * External (non-builtin) menu_item integrations enabled for this team.
-         * These get their own tab and open a sandboxed iframe in the canvas.
-         */
         externalMenuItems() {
             return (this.teamMenuItems || []).filter(item => !item.is_builtin)
         },
     },
+
+    watch: {
+        /** Reload layout whenever the active team changes. */
+        currentTeamId(newId) {
+            if (newId) {
+                this.gridLayout = []
+                this.orderedTabs = []
+                this.layoutLoaded = false
+                this.editMode = false
+                this.loadLayout(newId)
+            }
+        },
+        /** Sync link tabs when web links change. */
+        webLinks() {
+            this.syncLinkTabs()
+        },
+        /** Sync external tabs when integrations change. */
+        externalMenuItems() {
+            this.syncExtTabs()
+        },
+    },
+
+    created() {
+        this._debouncedSave = debounce(this.saveLayout, 1200)
+    },
+
     mounted() {
         this.$store.dispatch('checkIntravox')
+        if (this.currentTeamId) {
+            this.loadLayout(this.currentTeamId)
+        }
     },
+
     methods: {
         t,
         ...mapActions(['selectTeam']),
         ...mapMutations(['SET_VIEW']),
+
         setView(view) {
             this.SET_VIEW(view)
         },
 
-        /**
-         * Check whether a built-in integration (by app_id) is enabled for this team.
-         * Falls back to true when teamMenuItems is empty (no integrations loaded yet)
-         * so that built-in tabs are visible before the integration data arrives.
-         */
-        isBuiltinEnabled(appId) {
-            if (!this.teamMenuItems || this.teamMenuItems.length === 0) {
-                // No data yet — show all built-ins by default.
-                return true
+        // ── Edit mode ─────────────────────────────────────────────────
+
+        toggleEditMode() {
+            this.editMode = !this.editMode
+        },
+
+        // ── Layout load ───────────────────────────────────────────────
+
+        async loadLayout(teamId) {
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`),
+                )
+
+                this.gridLayout = Array.isArray(data.layout) ? data.layout : []
+                this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
+                this.layoutLoaded = true
+            } catch (err) {
+                console.error('[TeamHub] TeamView: loadLayout error', err)
+                this.gridLayout = []
+                this.buildOrderedTabs([])
+                this.layoutLoaded = true
             }
-            return this.teamMenuItems.some(item => item.app_id === appId && item.is_builtin)
+        },
+
+        // ── Layout save ───────────────────────────────────────────────
+
+        async saveLayout() {
+            if (!this.currentTeamId || !this.layoutLoaded) {
+                return
+            }
+            const tabOrder = this.orderedTabs.map(t => t.key)
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
+                    { layout: this.gridLayout, tabOrder },
+                )
+            } catch (err) {
+                console.error('[TeamHub] TeamView: saveLayout error', err)
+            }
+        },
+
+        // ── Grid event handlers ───────────────────────────────────────
+
+        onLayoutUpdated(newLayout) {
+            this.gridLayout = newLayout
+            if (this.editMode && this.layoutLoaded) {
+                this._debouncedSave()
+            }
+        },
+
+        // ── Tab reorder ───────────────────────────────────────────────
+
+        onTabReorder() {
+            if (this.layoutLoaded) {
+                this._debouncedSave()
+            }
+        },
+
+        // ── Grid item lookup / creation ───────────────────────────────
+
+        /**
+         * Return the layout item for a given widget id, or null.
+         */
+        getGridItem(id) {
+            return this.gridLayout.find(item => item.i === id) || null
         },
 
         /**
-         * Resolve an MDI icon component name for a menu_item tab.
-         * Falls back to Puzzle when the registered icon is not in the supported set.
+         * Return the layout item for an integration widget, creating a default
+         * position at the bottom of the grid if it doesn't exist yet.
+         * This handles newly-enabled integrations gracefully.
          */
+        getOrCreateIntegrationItem(registryId) {
+            const id = 'widget-int-' + registryId
+            const existing = this.gridLayout.find(item => item.i === id)
+            if (existing) return existing
+
+            const maxBottom = this.gridLayout.reduce(
+                (acc, item) => Math.max(acc, (item.y || 0) + (item.h || 3)), 0,
+            )
+            const newItem = {
+                i: id,
+                x: 9, y: maxBottom,
+                w: 3, h: 3,
+                minW: 2, minH: 1,
+                isResizable: true,
+                collapsed: false,
+                hSaved: 3,
+            }
+            this.gridLayout.push(newItem)
+            return newItem
+        },
+
+        // ── Collapse ──────────────────────────────────────────────────
+
+        /**
+         * Returns true when the widget with the given id is currently collapsed.
+         */
+        isCollapsed(id) {
+            const item = this.gridLayout.find(g => g.i === id)
+            return item ? !!item.collapsed : false
+        },
+
+        /**
+         * Toggle collapsed state for a widget.
+         * When collapsing: save current h to hSaved, force h to 1.
+         * When expanding:  restore h from hSaved.
+         * Persisted via the normal debounced save.
+         */
+        toggleCollapse(id) {
+            const item = this.gridLayout.find(g => g.i === id)
+            if (!item) return
+            if (item.collapsed) {
+                item.h = item.hSaved || 3
+                item.collapsed = false
+            } else {
+                item.hSaved = item.h
+                item.h = 1
+                item.collapsed = true
+            }
+            this.$set(this.gridLayout, this.gridLayout.indexOf(item), { ...item })
+            if (this.layoutLoaded) {
+                this._debouncedSave()
+            }
+        },
+
+        // ── Tab list helpers ──────────────────────────────────────────
+
+        /**
+         * Build orderedTabs from a saved key array.
+         * Unknown saved keys are dropped; new keys not in the saved list are appended.
+         */
+        buildOrderedTabs(savedOrder) {
+            const all = this.buildAllTabDescriptors()
+            const allMap = Object.fromEntries(all.map(t => [t.key, t]))
+
+            let ordered = []
+            if (savedOrder.length > 0) {
+                // Restore saved order, skipping stale keys.
+                savedOrder.forEach(key => {
+                    if (allMap[key]) ordered.push(allMap[key])
+                })
+                // Append any new tabs not yet in the saved list.
+                all.forEach(tab => {
+                    if (!ordered.find(t => t.key === tab.key)) ordered.push(tab)
+                })
+            } else {
+                ordered = all
+            }
+
+            this.orderedTabs = ordered
+        },
+
+        buildAllTabDescriptors() {
+            const tabs = []
+
+            // Built-in tabs (always in the list even if conditionally hidden in template).
+            ;[
+                { key: 'talk',     label: t('teamhub', 'Chat'),     icon: 'Chat' },
+                { key: 'files',    label: t('teamhub', 'Files'),    icon: 'Folder' },
+                { key: 'calendar', label: t('teamhub', 'Calendar'), icon: 'Calendar' },
+                { key: 'deck',     label: t('teamhub', 'Deck'),     icon: 'CardText' },
+            ].forEach(b => tabs.push(b))
+
+            // External integration tabs.
+            ;(this.teamMenuItems || [])
+                .filter(item => !item.is_builtin)
+                .forEach(item => tabs.push({
+                    key:   'ext-' + item.registry_id,
+                    label: item.title,
+                    icon:  item.icon || 'Puzzle',
+                }))
+
+            // Web link tabs.
+            ;(this.webLinks || []).forEach(link => tabs.push({
+                key:   'link-' + link.id,
+                label: link.title,
+                url:   link.url,
+            }))
+
+            return tabs
+        },
+
+        syncLinkTabs() {
+            const linkTabs = (this.webLinks || []).map(link => ({
+                key:   'link-' + link.id,
+                label: link.title,
+                url:   link.url,
+            }))
+            this.orderedTabs = [
+                ...this.orderedTabs.filter(t => !t.key.startsWith('link-')),
+                ...linkTabs,
+            ]
+        },
+
+        syncExtTabs() {
+            const extTabs = (this.teamMenuItems || [])
+                .filter(item => !item.is_builtin)
+                .map(item => ({
+                    key:   'ext-' + item.registry_id,
+                    label: item.title,
+                    icon:  item.icon || 'Puzzle',
+                }))
+            this.orderedTabs = [
+                ...this.orderedTabs.filter(t => !t.key.startsWith('ext-')),
+                ...extTabs,
+            ]
+        },
+
+        // ── isBuiltinEnabled ──────────────────────────────────────────
+
+        isBuiltinEnabled(appId) {
+            if (!this.teamMenuItems || !this.teamMenuItems.length) return true
+            return this.teamMenuItems.some(item => item.app_id === appId && item.is_builtin)
+        },
+
         resolveTabIcon(iconName) {
             const supported = [
                 'Message', 'Folder', 'Calendar', 'CardText', 'ViewDashboard',
@@ -448,111 +904,53 @@ export default {
             return supported.includes(iconName) ? iconName : 'Puzzle'
         },
 
-        /**
-         * Build the iframe URL for an external menu_item integration.
-         * Appends teamId as a query parameter so the external app can scope its view.
-         */
         menuItemUrl(menuItem) {
-            if (!menuItem.iframe_url) { return '' }
+            if (!menuItem.iframe_url) return ''
             const sep = menuItem.iframe_url.includes('?') ? '&' : '?'
             return menuItem.iframe_url + sep + 'teamId=' + encodeURIComponent(this.currentTeamId)
         },
 
+        // ── Team actions ──────────────────────────────────────────────
+
         openManageTeam() {
-            // Open manage team view in main canvas
             this.$emit('show-manage-team')
         },
-        
+
         copyTeamLink() {
-            // Copy the TeamHub URL for this team
-            const teamUrl = window.location.origin + generateUrl(`/apps/teamhub?team=${this.currentTeamId}`)
-            
-            // Use modern clipboard API if available
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(teamUrl).then(() => {
-                    showSuccess(t('teamhub', 'Team link copied to clipboard'))
-                }).catch(() => {
-                    // Fallback
-                    this.fallbackCopy(teamUrl)
-                })
+            const url = window.location.origin + generateUrl(`/apps/teamhub?team=${this.currentTeamId}`)
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(url)
+                    .then(() => showSuccess(t('teamhub', 'Team link copied to clipboard')))
+                    .catch(() => this.fallbackCopy(url))
             } else {
-                this.fallbackCopy(teamUrl)
+                this.fallbackCopy(url)
             }
         },
-        
+
         fallbackCopy(text) {
-            const textArea = document.createElement('textarea')
-            textArea.value = text
-            textArea.style.position = 'fixed'
-            textArea.style.left = '-999999px'
-            document.body.appendChild(textArea)
-            textArea.select()
+            const ta = document.createElement('textarea')
+            ta.value = text
+            ta.style.cssText = 'position:fixed;left:-999999px'
+            document.body.appendChild(ta)
+            ta.select()
             try {
                 document.execCommand('copy')
                 showSuccess(t('teamhub', 'Team link copied to clipboard'))
-            } catch (err) {
+            } catch {
                 showError(t('teamhub', 'Could not copy link'))
             }
-            document.body.removeChild(textArea)
+            document.body.removeChild(ta)
         },
-        
+
         inviteToTeam() {
             this.showInviteModal = true
-        },
-        
-        openContactsApp() {
-            // Open Contacts app team page for advanced management
-            const url = generateUrl(`/apps/contacts/circle/${this.currentTeamId}`)
-            window.open(url, '_blank')
-        },
-        
-        async confirmLeaveTeam() {
-            const teamName = this.team.name || t('teamhub', 'this team')
-            
-            // Use Nextcloud's confirmation dialog
-            const confirmed = await new Promise(resolve => {
-                if (typeof OC !== 'undefined' && OC.dialogs && OC.dialogs.confirm) {
-                    OC.dialogs.confirm(
-                        t('teamhub', 'Are you sure you want to leave "{team}"? You will lose access to all team resources.', { team: teamName }),
-                        t('teamhub', 'Leave Team'),
-                        confirmed => resolve(confirmed),
-                        true
-                    )
-                } else {
-                    // Fallback to native confirm
-                    resolve(confirm(t('teamhub', 'Are you sure you want to leave "{team}"?', { team: teamName })))
-                }
-            })
-            
-            if (!confirmed) return
-            
-            await this.leaveTeam()
-        },
-        
-        async leaveTeam() {
-            try {
-                await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/leave`),
-                    {},
-                    
-                )
-                
-                showSuccess(t('teamhub', 'You have left the team'))
-                
-                // Refresh teams list and select first available team
-                await this.fetchTeams()
-                if (this.$store.state.teams.length > 0) {
-                    await this.selectTeam(this.$store.state.teams[0].id)
-                }
-            } catch (error) {
-                showError(t('teamhub', 'Failed to leave team: {error}', { error: error.response?.data?.error || error.message }))
-            }
         },
     },
 }
 </script>
 
 <style scoped>
+/* ── Outer shell ─────────────────────────────────────────────────── */
 .teamhub-team-view {
     display: flex;
     flex-direction: column;
@@ -560,6 +958,7 @@ export default {
     overflow: hidden;
 }
 
+/* ── Tab bar ─────────────────────────────────────────────────────── */
 .teamhub-tab-bar {
     display: flex;
     gap: 4px;
@@ -568,13 +967,22 @@ export default {
     background: var(--color-main-background);
     flex-shrink: 0;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.teamhub-tab-bar::-webkit-scrollbar { display: none; }
+
+/* The draggable wrapper renders as inline content, not a block. */
+.teamhub-tab-draggable {
+    display: contents;
 }
 
 .teamhub-tab {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     padding: 6px 14px;
     border-radius: var(--border-radius-pill);
     border: none;
@@ -586,6 +994,7 @@ export default {
     transition: background 0.15s, color 0.15s;
     text-decoration: none;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .teamhub-tab:hover {
@@ -603,81 +1012,196 @@ export default {
     border: 1px solid var(--color-border);
 }
 
-.teamhub-tab--app {
-    text-decoration: none;
+/* Six-dot drag handle — only visible on hover */
+.teamhub-tab-drag-handle {
+    cursor: grab;
+    opacity: 0;
+    transition: opacity 0.12s;
+    font-size: 13px;
+    line-height: 1;
     color: var(--color-text-maxcontrast);
+    user-select: none;
 }
 
-.teamhub-tab--app:hover {
+.teamhub-tab:hover .teamhub-tab-drag-handle {
+    opacity: 0.55;
+}
+
+.teamhub-tab-ghost {
+    opacity: 0.35;
     background: var(--color-background-hover);
-    color: var(--color-main-text);
+}
+
+.teamhub-tab-dragging {
+    cursor: grabbing;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    border-radius: var(--border-radius-pill);
 }
 
 .teamhub-tab-add {
-    margin-left: auto;
+    flex-shrink: 0;
 }
 
-.teamhub-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
-    gap: 0;
+.teamhub-edit-layout-btn {
+    flex-shrink: 0;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+/* ── Content area ────────────────────────────────────────────────── */
+.teamhub-content {
     flex: 1;
     overflow: hidden;
     min-height: 0;
+    position: relative;
 }
 
-.teamhub-main {
+/* ── Home view (grid) ────────────────────────────────────────────── */
+.teamhub-home-view {
+    height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
-    min-width: 0;
-    padding: 16px;
+    padding: 12px;
+    box-sizing: border-box;
+    background: #f4f4f4;
+}
+
+/* Subtle row-grid hint in edit mode */
+.teamhub-home-view--editing {
+    background-image: repeating-linear-gradient(
+        180deg,
+        transparent 0px,
+        transparent 79px,
+        var(--color-border) 79px,
+        var(--color-border) 80px
+    );
+}
+
+/* Edit mode hint banner */
+.teamhub-edit-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background: var(--color-background-info, var(--color-background-hover));
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    font-size: 13px;
+    color: var(--color-main-text);
+}
+
+/* ── Grid items ──────────────────────────────────────────────────── */
+.teamhub-grid-item {
+    touch-action: none; /* required for vue-grid-layout touch support */
+}
+
+.teamhub-grid-item--editing {
+    cursor: move;
+}
+
+/* ── Widget cards ────────────────────────────────────────────────── */
+.teamhub-widget-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    overflow: hidden;
     box-sizing: border-box;
 }
 
-.teamhub-sidebar {
-    overflow-y: auto;
-    border-left: 1px solid var(--color-border);
-    padding: 8px 0;
-    background: var(--color-main-background);
+/* Drag handle bar at top of card — shown only in edit mode (v-if) */
+.teamhub-widget-drag-handle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: var(--color-background-hover);
+    border-bottom: 1px solid var(--color-border);
+    cursor: grab;
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    flex-shrink: 0;
+    user-select: none;
 }
 
-.teamhub-widget-item {
-    margin-top: 10px;
+.teamhub-widget-drag-handle:active {
+    cursor: grabbing;
 }
 
-.teamhub-widget-item :deep(.app-navigation-entry__name) {
-    font-weight: 600;
+/* Widget header: icon + title + actions — no background, primary colour text */
+.teamhub-widget-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+
+/* Icons inside the header use the primary colour */
+.teamhub-widget-header :deep(svg) {
     color: var(--color-primary-element);
+    fill: var(--color-primary-element);
 }
 
-.teamhub-team-info-widget {
-    border-bottom: 1px solid var(--color-border-dark);
-    padding-bottom: 10px;
+.teamhub-widget-title {
+    font-weight: 600;
+    font-size: 18px;
+    color: var(--color-primary-element);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
+.teamhub-widget-actions {
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* Collapse toggle button */
+.teamhub-widget-collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--color-primary-element);
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    opacity: 0.8;
+    transition: opacity 0.15s, background 0.15s;
+    flex-shrink: 0;
+}
+
+.teamhub-widget-collapse-btn:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* Widget body — scrollable */
+.teamhub-widget-content {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.teamhub-widget-content--teaminfo {
+    padding: 0 12px 10px;
+}
+
+/* ── Team info internals ─────────────────────────────────────────── */
 .teamhub-team-description {
-    padding: 8px 16px;
+    padding: 8px 0 4px;
     color: var(--color-text-maxcontrast);
     font-size: 13px;
     margin: 0;
-}
-
-@media (max-width: 1024px) {
-    .teamhub-layout {
-        grid-template-columns: 1fr;
-    }
-    .teamhub-sidebar {
-        border-left: none;
-        border-top: 1px solid var(--color-border);
-    }
-}
-
-.teamhub-team-info-content {
-    padding: 0 16px 8px;
-}
-
-.teamhub-team-members-compact {
-    margin-top: 12px;
 }
 
 .teamhub-info-label {
@@ -685,14 +1209,11 @@ export default {
     font-size: 11px;
     color: var(--color-text-maxcontrast);
     text-transform: uppercase;
-    margin-bottom: 6px;
-    font-weight: 400;
+    margin-bottom: 4px;
     letter-spacing: 0.04em;
 }
 
-.teamhub-team-owner {
-    margin-bottom: 12px;
-}
+.teamhub-team-owner { margin-top: 12px; }
 
 .teamhub-owner-row {
     display: flex;
@@ -705,10 +1226,13 @@ export default {
     color: var(--color-main-text);
 }
 
+/* ── Members widget ──────────────────────────────────────────────── */
 .teamhub-avatar-stack {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    padding: 10px 12px;
 }
 
 .teamhub-stacked-avatar {
@@ -716,16 +1240,32 @@ export default {
 }
 
 .teamhub-more-members {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-text-maxcontrast);
-    margin-left: 4px;
 }
 
-.teamhub-empty-small,
-.teamhub-loading-small {
-    padding: 12px 16px;
-    text-align: center;
-    color: var(--color-text-maxcontrast);
-    font-size: 13px;
+/* ── vue-grid-layout overrides ───────────────────────────────────── */
+/* Resize handle — only the message stream gets isResizable=true */
+:deep(.vue-resizable-handle) {
+    width: 18px;
+    height: 18px;
+    bottom: 3px;
+    right: 3px;
+    background-image: none;
+    border-right: 2px solid var(--color-primary-element);
+    border-bottom: 2px solid var(--color-primary-element);
+    opacity: 0.5;
+    border-radius: 0 0 6px 0;
+    transition: opacity 0.15s;
+}
+
+:deep(.vue-resizable-handle:hover) { opacity: 1; }
+
+/* Drop placeholder */
+:deep(.vue-grid-placeholder) {
+    background: var(--color-primary-element-light, var(--color-background-hover));
+    border: 2px dashed var(--color-primary-element);
+    border-radius: var(--border-radius-large);
+    opacity: 0.4;
 }
 </style>

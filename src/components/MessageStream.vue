@@ -81,8 +81,6 @@ export default {
 
 <style scoped>
 .message-stream {
-    background: var(--color-background-dark);
-    border-radius: var(--border-radius-large);
     padding: 20px;
     min-height: 100%;
 }

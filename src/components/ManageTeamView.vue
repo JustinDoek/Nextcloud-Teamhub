@@ -320,6 +320,36 @@
                 </NcButton>
             </div>
         </div>
+        <!-- Hard-delete confirmation dialog (shown when user toggles an app OFF) -->
+        <NcDialog
+            v-if="pendingDisableApp"
+            :name="t('teamhub', 'Permanently delete {name} data?', { name: pendingDisableApp.label })"
+            :open="true"
+            @update:open="cancelDisableApp">
+            <template #default>
+                <p style="margin: 0 0 8px;">
+                    {{ t('teamhub', 'Disabling {name} will permanently delete all data associated with this team:', { name: pendingDisableApp.label }) }}
+                </p>
+                <ul style="margin: 0 0 12px; padding-left: 20px;">
+                    <li v-if="pendingDisableApp.id === 'spreed'">{{ t('teamhub', 'The Talk chat room and all messages') }}</li>
+                    <li v-if="pendingDisableApp.id === 'files'">{{ t('teamhub', 'The shared team folder and all files inside it') }}</li>
+                    <li v-if="pendingDisableApp.id === 'calendar'">{{ t('teamhub', 'The team calendar and all events') }}</li>
+                    <li v-if="pendingDisableApp.id === 'deck'">{{ t('teamhub', 'The Deck board and all cards') }}</li>
+                    <li v-if="pendingDisableApp.id === 'intravox'">{{ t('teamhub', 'The Intravox team page') }}</li>
+                </ul>
+                <p style="margin: 0; font-weight: 600; color: var(--color-error);">
+                    {{ t('teamhub', 'This action cannot be undone.') }}
+                </p>
+            </template>
+            <template #actions>
+                <NcButton type="tertiary" @click="cancelDisableApp">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton type="error" @click="confirmDisableApp">
+                    {{ t('teamhub', 'Yes, permanently delete') }}
+                </NcButton>
+            </template>
+        </NcDialog>
     </div>
 </template>
 
@@ -330,7 +360,7 @@ import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { mapState } from 'vuex'
-import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountRemove from 'vue-material-design-icons/AccountRemove.vue'
 import Check from 'vue-material-design-icons/Check.vue'
@@ -355,7 +385,7 @@ const CFG_SINGLE       = 1024
 export default {
     name: 'ManageTeamView',
     components: {
-        NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch,
+        NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
     },
@@ -394,6 +424,7 @@ export default {
             installedApps: {},     // { talk, calendar, deck } from /api/v1/apps/check
             loadingApps: false,
             togglingApp: null,     // app_id currently being toggled, or null
+            pendingDisableApp: null, // app awaiting hard-delete confirmation, or null
         }
     },
     computed: {
@@ -468,40 +499,41 @@ export default {
          * which uses the same dual-check as TeamView.
          */
         teamAppsList() {
+            // Icons must be component references, not strings — <component :is="..."> requires an object
             const definitions = [
                 {
                     id: 'spreed',
                     label: t('teamhub', 'Talk'),
                     description: t('teamhub', 'Team chat and video calls'),
-                    icon: 'MessageIcon',
+                    icon: MessageIcon,
                     installed: !!this.installedApps.talk,   // key is 'talk' not 'spreed'
                 },
                 {
                     id: 'files',
                     label: t('teamhub', 'Files'),
                     description: t('teamhub', 'Shared team folder'),
-                    icon: 'FolderIcon',
+                    icon: FolderIcon,
                     installed: true, // Files is always available in NC core
                 },
                 {
                     id: 'calendar',
                     label: t('teamhub', 'Calendar'),
                     description: t('teamhub', 'Team calendar and events'),
-                    icon: 'CalendarIcon',
+                    icon: CalendarIcon,
                     installed: !!this.installedApps.calendar,
                 },
                 {
                     id: 'deck',
                     label: t('teamhub', 'Deck'),
                     description: t('teamhub', 'Kanban task board'),
-                    icon: 'CardTextIcon',
+                    icon: CardTextIcon,
                     installed: !!this.installedApps.deck,
                 },
                 {
                     id: 'intravox',
                     label: t('teamhub', 'Pages'),
                     description: t('teamhub', 'Team wiki and pages (Intravox)'),
-                    icon: 'FileDocumentOutlineIcon',
+                    icon: FileDocumentOutlineIcon,
                     installed: !!this.intravoxAvailable,    // from Vuex store
                 },
             ]
@@ -737,6 +769,34 @@ export default {
          */
         async toggleApp(app, enabled) {
             if (!app.installed) return
+
+            // Disabling = hard delete of all app data. Show confirmation before proceeding.
+            if (!enabled) {
+                this.pendingDisableApp = app
+                return
+            }
+
+            // Enable path: go straight to the API call
+            await this._executeToggleApp(app, true)
+        },
+
+        /** Called when the user confirms the hard-delete warning dialog. */
+        async confirmDisableApp() {
+            const app = this.pendingDisableApp
+            this.pendingDisableApp = null
+            if (!app) return
+            await this._executeToggleApp(app, false)
+        },
+
+        cancelDisableApp() {
+            // Revert the switch back to enabled visually
+            const existing = this.teamApps.find(a => a.app_id === this.pendingDisableApp?.id)
+            if (existing) existing.enabled = true
+            this.pendingDisableApp = null
+        },
+
+        /** Internal: execute the actual API call after confirmation (or for enable). */
+        async _executeToggleApp(app, enabled) {
             this.togglingApp = app.id
 
             // Optimistic UI update
@@ -748,19 +808,13 @@ export default {
             }
 
             try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`),
+                    { apps: [{ app_id: app.id, enabled }] }
+                )
                 if (enabled) {
-                    // Create the resource and save the enabled flag (handled server-side in updateTeamApps)
-                    await axios.put(
-                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`),
-                        { apps: [{ app_id: app.id, enabled: true }] }
-                    )
                     showSuccess(t('teamhub', '{name} enabled for this team', { name: app.label }))
                 } else {
-                    // Hard-delete the resource (all data removed) and save the disabled flag
-                    await axios.put(
-                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`),
-                        { apps: [{ app_id: app.id, enabled: false }] }
-                    )
                     showSuccess(t('teamhub', '{name} and all its data have been removed from this team', { name: app.label }))
                 }
             } catch (error) {
@@ -771,6 +825,7 @@ export default {
                     this.teamApps = this.teamApps.filter(a => a.app_id !== app.id)
                 }
                 const msg = error.response?.data?.error || ''
+                console.error('[ManageTeamView] toggleApp failed:', error?.response?.data)
                 showError(t('teamhub', 'Failed to update {name}', { name: app.label }) + (msg ? `: ${msg}` : ''))
                 await this.loadTeamApps()
             } finally {

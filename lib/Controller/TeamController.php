@@ -205,20 +205,13 @@ class TeamController extends Controller {
                 $resourceKey = $this->appIdToResourceKey($appId);
 
                 if ($enabled) {
-                    // Intravox manages its own pages — no resource to provision, flag only
-                    if ($resourceKey !== 'intravox') {
-                        $createResult = $this->resourceService->createTeamResources($teamId, [$resourceKey], $teamName);
-                        $results[$appId] = $createResult[$resourceKey] ?? ['error' => 'unknown'];
-                    } else {
-                        $results[$appId] = ['skipped' => 'intravox manages its own pages'];
-                    }
+                    // All apps including intravox now provision a resource on enable
+                    $createResult = $this->resourceService->createTeamResources($teamId, [$resourceKey], $teamName);
+                    $results[$appId] = $createResult[$resourceKey] ?? ['error' => 'unknown'];
                 } else {
-                    if ($resourceKey !== 'intravox') {
-                        $deleteResult = $this->resourceService->deleteTeamResource($teamId, $resourceKey);
-                        $results[$appId] = $deleteResult;
-                    } else {
-                        $results[$appId] = ['skipped' => 'intravox manages its own pages'];
-                    }
+                    // All apps including intravox delete their resource on disable
+                    $deleteResult = $this->resourceService->deleteTeamResource($teamId, $resourceKey);
+                    $results[$appId] = $deleteResult;
                 }
 
                 // Persist the enabled flag regardless of resource op outcome

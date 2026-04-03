@@ -90,6 +90,12 @@ return [
         ['name' => 'comment#updateComment',       'url' => '/api/v1/comments/{commentId}',                   'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
+        // Layout — per-user, per-team Home-view grid + tab order
+        // ----------------------------------------------------------------
+        ['name' => 'layout#getLayout',  'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'GET'],
+        ['name' => 'layout#saveLayout', 'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
         // Integration API — external-app registration
         // ----------------------------------------------------------------
         ['name' => 'integration#registerIntegration',   'url' => '/api/v1/ext/integrations/register',       'verb' => 'POST'],
