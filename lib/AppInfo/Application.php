@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\AppInfo;
 
+use OCA\TeamHub\Listener\AppDisabledListener;
 use OCA\TeamHub\Notification\Notifier;
 use OCA\TeamHub\Service\IntegrationService;
+use OCP\App\Events\AppDisabledEvent;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
@@ -20,6 +22,11 @@ class Application extends App implements IBootstrap {
     public function register(IRegistrationContext $context): void {
         // Register notification notifier.
         $context->registerNotifierService(Notifier::class);
+
+        // Auto-deregister any integration whose app is disabled or removed.
+        // AppDisabledEvent fires for both occ app:disable and App Store removal.
+        $context->registerEventListener(AppDisabledEvent::class, AppDisabledListener::class);
+
         // Note: Admin settings panel is registered via appinfo/info.xml <settings> block.
         // Do NOT call $context->registerSettings() here — that method does not exist
         // on NC32's IRegistrationContext and causes a fatal on every page load.
@@ -28,7 +35,6 @@ class Application extends App implements IBootstrap {
     public function boot(IBootContext $context): void {
         // Seed built-in integrations (Talk, Files, Calendar, Deck) into the
         // integration registry. Idempotent — safe to call on every boot.
-        // DEBUG: log boot entry
         try {
             $container = $context->getAppContainer();
             /** @var IntegrationService $integrationService */

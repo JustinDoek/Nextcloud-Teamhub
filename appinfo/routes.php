@@ -96,10 +96,11 @@ return [
         ['name' => 'layout#saveLayout', 'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
-        // Integration API — external-app registration
+        // Integration API — external-app registration (NC admin required)
         // ----------------------------------------------------------------
-        ['name' => 'integration#registerIntegration',   'url' => '/api/v1/ext/integrations/register',       'verb' => 'POST'],
-        ['name' => 'integration#deregisterIntegration', 'url' => '/api/v1/ext/integrations/{appId}',         'verb' => 'DELETE'],
+        ['name' => 'integration#listRegisteredIntegrations', 'url' => '/api/v1/ext/integrations',          'verb' => 'GET'],
+        ['name' => 'integration#registerIntegration',        'url' => '/api/v1/ext/integrations/register', 'verb' => 'POST'],
+        ['name' => 'integration#deregisterIntegration',      'url' => '/api/v1/ext/integrations/{appId}',  'verb' => 'DELETE'],
 
         // Integration — team render endpoints (called on team select)
         ['name' => 'integration#getEnabledIntegrations', 'url' => '/api/v1/teams/{teamId}/integrations',                              'verb' => 'GET'],

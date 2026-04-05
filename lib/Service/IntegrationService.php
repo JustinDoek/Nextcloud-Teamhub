@@ -128,39 +128,58 @@ class IntegrationService {
      * Register or update an integration for an external app.
      *
      * Security rules:
-     *   1. Caller must be authenticated.
-     *   2. app_id must match an installed and enabled NC app.
-     *   3. app_id must not be a built-in (Talk/Files/Calendar/Deck).
-     *   4. integration_type must be 'widget' or 'menu_item'.
-     *   5. For widget: data_url required; action_url/action_label optional.
-     *   6. For menu_item: iframe_url required, must be https://.
-     *   7. title required, max 255 chars.
+     *   When called via HTTP controller ($calledInProcess = false, default):
+     *     1. Caller must be an authenticated NC admin (defence-in-depth; controller has no NoAdminRequired).
+     *   When called in-process from another app's boot() ($calledInProcess = true):
+     *     1. Session check is skipped — no web session exists during NC bootstrap.
+     *        Security is provided by the fact that only server-side PHP can call this directly.
+     *   In both cases:
+     *     2. app_id must match an installed and enabled NC app.
+     *     3. app_id must not be a built-in (Talk/Files/Calendar/Deck).
+     *     4. integration_type must be 'widget' or 'menu_item'.
+     *     5. For widget: data_url required; action_url/action_label optional.
+     *     6. For menu_item: iframe_url required, must be https://.
+     *     7. title required, max 255 chars.
      *
+     * @param bool $calledInProcess Set true when calling from Application::boot() — skips session check.
      * @throws \Exception On any validation failure.
      */
     public function registerIntegration(
         string  $appId,
         string  $integrationType,
         string  $title,
-        ?string $description   = null,
-        ?string $icon          = null,
-        ?string $dataUrl       = null,
-        ?string $actionUrl     = null,
-        ?string $actionLabel   = null,
-        ?string $iframeUrl     = null,
+        ?string $description      = null,
+        ?string $icon             = null,
+        ?string $dataUrl          = null,
+        ?string $actionUrl        = null,
+        ?string $actionLabel      = null,
+        ?string $iframeUrl        = null,
+        bool    $calledInProcess  = false,
     ): array {
 
-        // 1. Authenticated.
-        $user = $this->userSession->getUser();
-        if (!$user) {
-            throw new \Exception('Not authenticated');
+        // 1. Auth + admin check.
+        //    When called via HTTP the NC framework already requires a session (NoCSRFRequired only,
+        //    no NoAdminRequired), but we also check here as defence-in-depth.
+        //    When called in-process (boot context), no web session exists — skip the session gate
+        //    and rely on the fact that only server PHP can invoke this method directly.
+        if (!$calledInProcess) {
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                throw new \Exception('Not authenticated');
+            }
+            if (!$this->groupManager->isAdmin($user->getUID())) {
+                throw new \Exception('NC admin privilege required to register an integration');
+            }
+            $callerLabel = $user->getUID();
+        } else {
+            $callerLabel = 'in-process';
         }
 
         // 2. App must be installed and enabled.
         if (!$this->appManager->isInstalled($appId)) {
             $this->logger->warning('IntegrationService::registerIntegration — app_id not installed', [
                 'app_id'    => $appId,
-                'called_by' => $user->getUID(),
+                'called_by' => $callerLabel,
             ]);
             throw new \Exception("App '{$appId}' is not installed or not enabled on this instance");
         }
@@ -247,11 +266,15 @@ class IntegrationService {
      *
      * @throws \Exception When caller is not NC admin or app is built-in.
      */
-    public function deregisterIntegration(string $appId): void {
+    public function deregisterIntegration(string $appId, bool $calledInProcess = false): void {
 
-        $user = $this->userSession->getUser();
-        if (!$user || !$this->groupManager->isAdmin($user->getUID())) {
-            throw new \Exception('NC admin privilege required to deregister an integration');
+        // Session gate: skip when called in-process (boot/CLI) — no web session exists.
+        // HTTP callers are gated at the controller level (no NoAdminRequired attribute).
+        if (!$calledInProcess) {
+            $user = $this->userSession->getUser();
+            if (!$user || !$this->groupManager->isAdmin($user->getUID())) {
+                throw new \Exception('NC admin privilege required to deregister an integration');
+            }
         }
 
         if (in_array($appId, IntegrationRegistryMapper::BUILTIN_APP_IDS, true)) {
@@ -274,6 +297,20 @@ class IntegrationService {
             'app_id'      => $appId,
             'registry_id' => $existing['id'],
         ]);
+    }
+
+    // ------------------------------------------------------------------
+    // Admin — full registry view
+    // ------------------------------------------------------------------
+
+    /**
+     * Return all registry entries (built-ins first, then external, ordered by created_at).
+     * Used by the Admin Settings → Integrations tab via GET /api/v1/ext/integrations.
+     *
+     * @return array<int, array>
+     */
+    public function getFullRegistry(): array {
+        return $this->registryMapper->findAll();
     }
 
     // ------------------------------------------------------------------

@@ -167,7 +167,7 @@ class TeamIntegrationMapper {
         while ($row = $result->fetch()) {
             $isEnabled = $row['ti_sort_order'] !== null;
             $out[] = [
-                'id'               => (int)$row['ir_id'],
+                'registry_id'      => (int)$row['ir_id'],
                 'app_id'           => (string)$row['app_id'],
                 'integration_type' => (string)$row['integration_type'],
                 'title'            => (string)$row['title'],

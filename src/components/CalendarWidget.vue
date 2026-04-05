@@ -4,7 +4,8 @@
             <NcLoadingIcon :size="20" />
         </div>
         <div v-else-if="events.length === 0" class="calendar-widget__empty">
-            {{ t('teamhub', 'No upcoming events') }}
+            <CalendarIcon :size="36" class="calendar-widget__empty-icon" />
+            <span>{{ t('teamhub', 'No upcoming events') }}</span>
         </div>
         <ul v-else class="calendar-widget__list">
             <li v-for="event in events" :key="event.id" class="calendar-event">
@@ -83,12 +84,30 @@ export default {
 
 <style scoped>
 .calendar-widget { padding: 0; }
-.calendar-widget__loading,
-.calendar-widget__empty {
-    padding: 12px 16px;
-    color: var(--color-text-maxcontrast);
-    font-size: 13px;
+.calendar-widget__loading {
+    padding: 20px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
+
+.calendar-widget__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px 16px;
+    color: var(--color-text-maxcontrast);
+    font-size: 15px;
+    text-align: center;
+}
+
+.calendar-widget__empty-icon {
+    opacity: 0.35;
+    color: var(--color-primary-element);
+}
+
 .calendar-widget__list { list-style: none; padding: 0; margin: 0; }
 .calendar-event {
     padding: 10px 16px;
@@ -104,7 +123,7 @@ export default {
     margin-bottom: 4px;
 }
 .calendar-event__title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     color: var(--color-main-text);
 }

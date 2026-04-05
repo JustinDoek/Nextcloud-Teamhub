@@ -150,6 +150,75 @@
             </NcSettingsSection>
         </div>
 
+        <!-- ── Tab: Integrations ─────────────────────────────────────────── -->
+        <div
+            v-show="activeTab === 'integrations'"
+            id="tab-panel-integrations"
+            role="tabpanel"
+            class="teamhub-admin-panel">
+
+            <NcSettingsSection
+                :name="t('teamhub', 'Registered integrations')"
+                :description="t('teamhub', 'Integrations registered by installed apps via the TeamHub API. Registration and deregistration require NC admin access and are done via the REST API or the app\'s own settings.')">
+
+                <div v-if="integrationsLoading" class="admin-integrations-loading">
+                    <NcLoadingIcon :size="24" />
+                    <span>{{ t('teamhub', 'Loading integrations…') }}</span>
+                </div>
+
+                <div v-else-if="integrationsError" class="admin-integrations-error">
+                    {{ integrationsError }}
+                </div>
+
+                <!--
+                    Only show EXTERNAL (non-builtin) integrations.
+                    Built-in NC apps (Talk, Files, Calendar, Deck) are seeded into
+                    the registry automatically and did not register via the API.
+                    They are not third-party integrations and must not appear here.
+                -->
+                <div v-else-if="externalIntegrations.length === 0" class="admin-integrations-empty">
+                    {{ t('teamhub', 'No third-party integrations registered yet.') }}
+                </div>
+
+                <div v-else class="admin-integrations-list">
+                    <div
+                        v-for="item in externalIntegrations"
+                        :key="item.id"
+                        class="admin-integration-row">
+
+                        <div class="admin-integration-row__body">
+                            <div class="admin-integration-row__header">
+                                <!-- App icon — svg → png → hide fallback -->
+                                <img
+                                    :src="appIconUrl(item.app_id)"
+                                    :alt="item.app_id"
+                                    class="admin-integration-row__icon"
+                                    @error="onAppIconError($event, item)" />
+                                <span class="admin-integration-row__title">{{ item.title }}</span>
+                                <span class="admin-integration-row__appid">{{ item.app_id }}</span>
+                                <span
+                                    class="admin-integration-row__badge"
+                                    :class="'admin-integration-row__badge--' + item.integration_type">
+                                    {{ item.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Tab') }}
+                                </span>
+                            </div>
+                            <div v-if="item.description" class="admin-integration-row__desc">
+                                {{ item.description }}
+                            </div>
+                            <div class="admin-integration-row__urls">
+                                <span v-if="item.data_url">
+                                    <strong>{{ t('teamhub', 'Data URL:') }}</strong> {{ item.data_url }}
+                                </span>
+                                <span v-if="item.iframe_url">
+                                    <strong>{{ t('teamhub', 'iFrame URL:') }}</strong> {{ item.iframe_url }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </NcSettingsSection>
+        </div>
+
         <!-- ── Save row (always visible) ─────────────────────────────────── -->
         <div class="admin-save-row">
             <NcButton
@@ -180,13 +249,14 @@ import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
 import EmailSendIcon from 'vue-material-design-icons/EmailArrowRight.vue'
 import MessageTextIcon from 'vue-material-design-icons/MessageText.vue'
+import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
 
 export default {
     name: 'AdminSettings',
     components: {
         NcSettingsSection, NcButton, NcLoadingIcon,
         NcTextField, NcTextArea, NcCheckboxRadioSwitch,
-        ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon,
+        ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
     },
     data() {
         return {
@@ -209,15 +279,37 @@ export default {
             groupResults: [],
             groupSearching: false,
             groupSearchTimer: null,
+            // Integrations tab
+            integrations: [],
+            integrationsLoading: false,
+            integrationsError: null,
         }
     },
     computed: {
         tabs() {
             return [
-                { id: 'creation',    label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
-                { id: 'invitations', label: this.t('teamhub', 'Invitations'),   icon: 'EmailSendIcon'   },
-                { id: 'messages',    label: this.t('teamhub', 'Messages'),       icon: 'MessageTextIcon' },
+                { id: 'creation',      label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
+                { id: 'invitations',   label: this.t('teamhub', 'Invitations'),   icon: 'EmailSendIcon'   },
+                { id: 'messages',      label: this.t('teamhub', 'Messages'),       icon: 'MessageTextIcon' },
+                { id: 'integrations',  label: this.t('teamhub', 'Integrations'),  icon: 'PuzzleIcon'      },
             ]
+        },
+
+        /**
+         * Only external (non-builtin) integrations.
+         * Built-in NC apps (Talk, Files, Calendar, Deck) are seeded automatically
+         * into the registry as is_builtin=true. They did NOT register via the
+         * integration API and must not appear in this admin list.
+         */
+        externalIntegrations() {
+            return this.integrations.filter(i => !i.is_builtin)
+        },
+    },
+    watch: {
+        activeTab(tab) {
+            if (tab === 'integrations' && this.integrations.length === 0 && !this.integrationsLoading) {
+                this.loadIntegrations()
+            }
         },
     },
     mounted() {
@@ -246,6 +338,46 @@ export default {
                 this.saveError = this.t('teamhub', 'Failed to load settings')
             } finally {
                 this.loading = false
+            }
+        },
+
+        // ── Integrations tab ──────────────────────────────────────────────
+
+        async loadIntegrations() {
+            this.integrationsLoading = true
+            this.integrationsError = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/ext/integrations'))
+                this.integrations = Array.isArray(data) ? data : []
+            } catch (e) {
+                const msg = e?.response?.data?.error || e.message || 'unknown error'
+                console.error('[AdminSettings] loadIntegrations — failed', msg)
+                this.integrationsError = this.t('teamhub', 'Failed to load integrations: {error}', { error: msg })
+            } finally {
+                this.integrationsLoading = false
+            }
+        },
+
+        /**
+         * NC app icon URL — /apps/{app_id}/img/app.svg
+         * Mirrors TeamView.appIconUrl() and IntegrationWidget.appIconUrl().
+         */
+        appIconUrl(appId) {
+            return generateUrl(`/apps/${appId}/img/app.svg`)
+        },
+
+        /**
+         * Fallback: svg → png → hide.
+         * We store the app_id on the img via data attribute so we can track
+         * which fallback stage we are in without extra component state.
+         */
+        onAppIconError(event, item) {
+            const img = event.target
+            if (img.src.endsWith('.svg')) {
+                img.src = generateUrl(`/apps/${item.app_id}/img/app.png`)
+            } else {
+                // Both svg and png failed — hide the img entirely
+                img.style.display = 'none'
             }
         },
 
@@ -509,7 +641,99 @@ export default {
     border-color: var(--color-primary-element);
 }
 
-/* ── Save row ────────────────────────────────────────────────────────────── */
+/* ── Integrations list ───────────────────────────────────────────────────── */
+.admin-integrations-loading,
+.admin-integrations-error,
+.admin-integrations-empty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--color-text-maxcontrast);
+    padding: 8px 0;
+}
+
+.admin-integrations-error { color: var(--color-error); }
+
+.admin-integrations-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.admin-integration-row {
+    padding: 12px 14px;
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark);
+}
+
+.admin-integration-row__body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.admin-integration-row__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* App icon — inline before the title, same size as a small avatar */
+.admin-integration-row__icon {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.admin-integration-row__title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.admin-integration-row__appid {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    font-family: monospace;
+}
+
+.admin-integration-row__desc {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+}
+
+.admin-integration-row__urls {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    word-break: break-all;
+}
+
+.admin-integration-row__badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: var(--border-radius-pill);
+    padding: 1px 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.admin-integration-row__badge--widget {
+    background: color-mix(in srgb, var(--color-primary-element) 15%, transparent);
+    color: var(--color-primary-element);
+}
+
+.admin-integration-row__badge--menu_item,
+.admin-integration-row__badge--tab {
+    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    color: var(--color-success, #46ba61);
+}
 .admin-save-row {
     display: flex;
     align-items: center;

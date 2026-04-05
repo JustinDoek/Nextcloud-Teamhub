@@ -77,10 +77,12 @@ class MessageController extends Controller {
     #[NoAdminRequired]
     public function deleteMessage(string $teamId, int $messageId): JSONResponse {
         try {
-            $this->messageService->deleteMessage($messageId);
+            $this->messageService->deleteMessage($teamId, $messageId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 

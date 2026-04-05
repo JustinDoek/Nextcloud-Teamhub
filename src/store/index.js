@@ -276,18 +276,21 @@ export default new Vuex.Store({
         },
 
         /**
-         * Fetch the enabled external widgets for a team.
-         * Silently degrades to an empty list when no widgets are registered —
-         * most installs will have none initially.
+         * Fetch all enabled integrations for a team (widgets + menu_items).
+         * Called by selectTeam. Silently degrades — most installs start with none.
+         * Response shape: { widgets: [...], menu_items: [...] }
          */
-        async fetchTeamWidgets({ commit }, teamId) {
+        async fetchTeamIntegrations({ commit }, teamId) {
             try {
-                const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/widgets`))
-                commit('SET_TEAM_WIDGETS', Array.isArray(data) ? data : [])
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/integrations`)
+                )
+                commit('SET_TEAM_WIDGETS',    Array.isArray(data.widgets)    ? data.widgets    : [])
+                commit('SET_TEAM_MENU_ITEMS', Array.isArray(data.menu_items) ? data.menu_items : [])
             } catch (e) {
-                // Non-fatal — widget support is optional.
+                // Non-fatal — integrations are optional.
                 commit('SET_TEAM_WIDGETS', [])
-            commit('SET_TEAM_MENU_ITEMS', [])
+                commit('SET_TEAM_MENU_ITEMS', [])
             }
         },
 

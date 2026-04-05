@@ -52,54 +52,86 @@ Content-Type: application/json
 |---|---|---|---|
 | `iframe_url` | string | ✅ | URL loaded in the sandboxed canvas iframe. Must be `https://` |
 
+### How to call the registration endpoint
+
+> ⚠️ **Do not use `IClientService` (HTTP) to call TeamHub from within PHP.**
+> Nextcloud 28+ blocks HTTP requests that resolve to `127.0.0.1` (loopback guard). Any `$client->post('http://localhost/…')` call will fail with a connection error.
+
+Register by calling TeamHub's `IntegrationService` **directly in-process** via constructor injection. Do this from your app's `Application::boot()` or a dedicated `IBootstrap` implementation.
+
 ### Example — registering a widget
 
 ```php
-// In your app's setup or settings save handler:
-$client = \OC::$server->get(\OCP\Http\Client\IClientService::class)->newClient();
-$client->post(
-    \OCP\Server::get(\OCP\IURLGenerator::class)->getAbsoluteURL(
-        '/apps/teamhub/api/v1/ext/integrations/register'
-    ),
-    [
-        'json' => [
-            'app_id'          => 'myapp',
-            'integration_type'=> 'widget',
-            'title'           => 'My Widget',
-            'description'     => 'Shows recent items from My App',
-            'icon'            => 'ChartBar',
-            'data_url'        => '/apps/myapp/api/teamhub/widget-data',
-            'action_url'      => '/apps/myapp/api/teamhub/widget-action',
-            'action_label'    => 'Create item',
-        ],
-    ]
-);
+// lib/AppInfo/Application.php in your app
+namespace OCA\MyApp\AppInfo;
+
+use OCP\AppFramework\App;
+use OCP\AppFramework\Bootstrap\IBootContext;
+use OCP\AppFramework\Bootstrap\IBootstrap;
+use OCP\AppFramework\Bootstrap\IRegistrationContext;
+
+class Application extends App implements IBootstrap {
+
+    public function __construct() {
+        parent::__construct('myapp');
+    }
+
+    public function register(IRegistrationContext $context): void {
+        // Register your own services here.
+    }
+
+    public function boot(IBootContext $context): void {
+        // Resolve TeamHub's IntegrationService directly — no HTTP call needed.
+        try {
+            /** @var \OCA\TeamHub\Service\IntegrationService $teamhubService */
+            $teamhubService = $context->getServerContainer()->get(
+                \OCA\TeamHub\Service\IntegrationService::class
+            );
+
+            $teamhubService->registerIntegration(
+                appId:           'myapp',
+                integrationType: 'widget',
+                title:           'My Widget',
+                description:     'Shows recent items from My App',
+                icon:            'ChartBar',
+                dataUrl:         '/apps/myapp/api/teamhub/widget-data',
+                actionUrl:       '/apps/myapp/api/teamhub/widget-action',
+                actionLabel:     'Create item',
+                calledInProcess: true,  // required — no web session exists during boot()
+            );
+        } catch (\Throwable $e) {
+            // TeamHub may not be installed — fail silently.
+            \OC::$server->get(\Psr\Log\LoggerInterface::class)->debug(
+                'MyApp: TeamHub integration registration skipped: ' . $e->getMessage()
+            );
+        }
+    }
+}
 ```
 
 ### Example — registering a menu item
 
 ```php
-$client->post($registerUrl, [
-    'json' => [
-        'app_id'          => 'myapp',
-        'integration_type'=> 'menu_item',
-        'title'           => 'My App',
-        'description'     => 'Open My App for this team',
-        'icon'            => 'ViewDashboard',
-        'iframe_url'      => 'https://my-nextcloud.example.com/apps/myapp/team-view',
-    ],
-]);
+$teamhubService->registerIntegration(
+    appId:           'myapp',
+    integrationType: 'menu_item',
+    title:           'My App',
+    description:     'Open My App for this team',
+    icon:            'ViewDashboard',
+    iframeUrl:       'https://my-nextcloud.example.com/apps/myapp/team-view',
+    calledInProcess: true,  // required — no web session exists during boot()
+);
 ```
 
 ### Deregistering
 
-When your app is uninstalled or the integration is removed, call:
+Call `deregisterIntegration()` the same way — in-process from your app's uninstall hook or `occ` command. Do **not** make an HTTP DELETE request.
 
-```
-DELETE /apps/teamhub/api/v1/ext/integrations/{appId}
+```php
+$teamhubService->deregisterIntegration('myapp', calledInProcess: true);
 ```
 
-Requires the calling user to be a Nextcloud admin. This cascade-deletes all per-team opt-ins.
+This cascade-deletes all per-team opt-ins. The `calledInProcess: true` parameter bypasses the web-session admin check — the same in-process security model applies.
 
 ---
 
@@ -282,7 +314,7 @@ HTTP status codes:
 |---|---|
 | 200 | Success (including upsert on re-registration) |
 | 400 | Validation error (see `error` field) |
-| 403 | Forbidden (admin required for deregister) |
+| 403 | Forbidden (NC admin required for register and deregister) |
 | 500 | Server error |
 
 ---

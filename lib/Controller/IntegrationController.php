@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\IntegrationService;
+use OCA\TeamHub\Service\MemberService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -16,20 +17,20 @@ use Psr\Log\LoggerInterface;
 /**
  * HTTP controller for TeamHub's unified integration API.
  *
- * External-app registration:
- *   POST   /api/v1/ext/integrations/register          — register or update an integration
- *   DELETE /api/v1/ext/integrations/{appId}            — deregister (NC admin required)
+ * External-app registration — NC admin required (no #[NoAdminRequired]):
+ *   GET    /api/v1/ext/integrations                    — list all registered integrations (admin UI)
+ *   POST   /api/v1/ext/integrations/register           — register or update an integration
+ *   DELETE /api/v1/ext/integrations/{appId}            — deregister (cascade-deletes team opt-ins)
  *
- * Team render endpoints (called on team select):
+ * Team render endpoints (any authenticated user):
  *   GET    /api/v1/teams/{teamId}/integrations          — all enabled integrations split by type
  *   GET    /api/v1/teams/{teamId}/integrations/widget-data/{registryId}  — fetch widget data
  *   GET    /api/v1/teams/{teamId}/integrations/action/{registryId}       — get action modal def
  *
- * Manage Team → Integrations tab:
+ * Manage Team → Integrations tab (team admin required):
  *   GET    /api/v1/teams/{teamId}/integrations/registry                  — full list + enabled state
  *   POST   /api/v1/teams/{teamId}/integrations/{registryId}/toggle       — enable/disable
  *   PUT    /api/v1/teams/{teamId}/integrations/reorder                   — persist drag order
- *
  */
 class IntegrationController extends Controller {
 
@@ -37,57 +38,44 @@ class IntegrationController extends Controller {
         string $appName,
         IRequest $request,
         private IntegrationService $integrationService,
+        private MemberService $memberService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
     }
 
     // ------------------------------------------------------------------
-    // External-app registration
+    // External-app registration (NC admin required — no #[NoAdminRequired])
     // ------------------------------------------------------------------
 
-    /**
-     * POST /api/v1/ext/integrations/register
-     *
-     * Body params:
-     *   app_id           string  required
-     *   integration_type string  required  'widget' | 'menu_item'
-     *   title            string  required
-     *   description      string  optional
-     *   icon             string  optional  MDI icon name
-     *
-     *   For widget:
-     *     data_url       string  required  TeamHub calls this server-side
-     *     action_url     string  optional  Opens action modal
-     *     action_label   string  optional  3-dot menu label
-     *
-     *   For menu_item:
-     *     iframe_url     string  required  https:// URL for canvas iframe
-     */
-    #[NoAdminRequired]
+    /** GET /api/v1/ext/integrations — NC admin required. */
+    #[NoCSRFRequired]
+    public function listRegisteredIntegrations(): JSONResponse {
+        try {
+            return new JSONResponse($this->integrationService->getFullRegistry());
+        } catch (\Throwable $e) {
+            $this->logger->error('IntegrationController::listRegisteredIntegrations — failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /** POST /api/v1/ext/integrations/register — NC admin required. */
     #[NoCSRFRequired]
     public function registerIntegration(): JSONResponse {
-
         try {
             $body = $this->request->getParams();
 
             $appId           = isset($body['app_id'])           ? trim((string)$body['app_id'])           : '';
             $integrationType = isset($body['integration_type']) ? trim((string)$body['integration_type']) : '';
             $title           = isset($body['title'])            ? trim((string)$body['title'])            : '';
-            $description     = isset($body['description'])      ? trim((string)$body['description'])      : null;
-            $icon            = isset($body['icon'])             ? trim((string)$body['icon'])             : null;
-            $dataUrl         = isset($body['data_url'])         ? trim((string)$body['data_url'])         : null;
-            $actionUrl       = isset($body['action_url'])       ? trim((string)$body['action_url'])       : null;
-            $actionLabel     = isset($body['action_label'])     ? trim((string)$body['action_label'])     : null;
-            $iframeUrl       = isset($body['iframe_url'])       ? trim((string)$body['iframe_url'])       : null;
-
-            // Normalise empty optionals to null.
-            $description = ($description === '') ? null : $description;
-            $icon        = ($icon === '')        ? null : $icon;
-            $dataUrl     = ($dataUrl === '')     ? null : $dataUrl;
-            $actionUrl   = ($actionUrl === '')   ? null : $actionUrl;
-            $actionLabel = ($actionLabel === '') ? null : $actionLabel;
-            $iframeUrl   = ($iframeUrl === '')   ? null : $iframeUrl;
+            $description     = ($body['description'] ?? '') !== '' ? trim((string)$body['description']) : null;
+            $icon            = ($body['icon']        ?? '') !== '' ? trim((string)$body['icon'])        : null;
+            $dataUrl         = ($body['data_url']    ?? '') !== '' ? trim((string)$body['data_url'])    : null;
+            $actionUrl       = ($body['action_url']  ?? '') !== '' ? trim((string)$body['action_url'])  : null;
+            $actionLabel     = ($body['action_label']?? '') !== '' ? trim((string)$body['action_label']): null;
+            $iframeUrl       = ($body['iframe_url']  ?? '') !== '' ? trim((string)$body['iframe_url'])  : null;
 
             if ($appId === '' || $integrationType === '' || $title === '') {
                 return new JSONResponse(
@@ -102,33 +90,22 @@ class IntegrationController extends Controller {
             );
 
             $this->logger->info('IntegrationController::registerIntegration — success', [
-                'app_id'      => $appId,
-                'type'        => $integrationType,
-                'registry_id' => $result['id'],
-                'app'         => Application::APP_ID,
+                'app_id' => $appId, 'type' => $integrationType, 'app' => Application::APP_ID,
             ]);
 
             return new JSONResponse($result, Http::STATUS_OK);
 
         } catch (\Exception $e) {
             $this->logger->warning('IntegrationController::registerIntegration — failed', [
-                'error' => $e->getMessage(),
-                'app'   => Application::APP_ID,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
 
-    /**
-     * DELETE /api/v1/ext/integrations/{appId}
-     *
-     * Deregisters an integration and cascade-deletes all team opt-ins.
-     * Idempotent. NC admin required.
-     */
-    #[NoAdminRequired]
+    /** DELETE /api/v1/ext/integrations/{appId} — NC admin required. */
     #[NoCSRFRequired]
     public function deregisterIntegration(string $appId): JSONResponse {
-
         $appId = trim($appId);
         if ($appId === '' || strlen($appId) > 64 || !preg_match('/^[a-zA-Z0-9_\-]+$/', $appId)) {
             return new JSONResponse(['error' => 'Invalid app_id'], Http::STATUS_BAD_REQUEST);
@@ -136,12 +113,13 @@ class IntegrationController extends Controller {
 
         try {
             $this->integrationService->deregisterIntegration($appId);
+            $this->logger->info('IntegrationController::deregisterIntegration — success', [
+                'app_id' => $appId, 'app' => Application::APP_ID,
+            ]);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             $this->logger->error('IntegrationController::deregisterIntegration — failed', [
-                'app_id'    => $appId,
-                'exception' => $e,
-                'app'       => Application::APP_ID,
+                'app_id' => $appId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
             $status = str_contains($e->getMessage(), 'admin') ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
             return new JSONResponse(['error' => $e->getMessage()], $status);
@@ -149,150 +127,100 @@ class IntegrationController extends Controller {
     }
 
     // ------------------------------------------------------------------
-    // Team render endpoints
+    // Team render endpoints (any authenticated user)
     // ------------------------------------------------------------------
 
-    /**
-     * GET /api/v1/teams/{teamId}/integrations
-     *
-     * Returns enabled integrations split by type:
-     *   { "widgets": [...], "menu_items": [...] }
-     * Called by Vuex selectTeam action.
-     */
+    /** GET /api/v1/teams/{teamId}/integrations */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getEnabledIntegrations(string $teamId): JSONResponse {
-
         try {
-            $data = $this->integrationService->getEnabledIntegrations($teamId);
-            return new JSONResponse($data);
+            return new JSONResponse($this->integrationService->getEnabledIntegrations($teamId));
         } catch (\Throwable $e) {
             $this->logger->error('IntegrationController::getEnabledIntegrations — failed', [
-                'team_id'   => $teamId,
-                'exception' => $e,
-                'app'       => Application::APP_ID,
+                'team_id' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['widgets' => [], 'menu_items' => []], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
-    /**
-     * GET /api/v1/teams/{teamId}/integrations/widget-data/{registryId}
-     *
-     * TeamHub fetches data from the external app's data_url server-side and
-     * returns it to the Vue client. The Vue component renders it natively.
-     *
-     * Response: { "items": [ { "label", "value", "icon"?, "url"? } ], "error"? }
-     */
+    /** GET /api/v1/teams/{teamId}/integrations/widget-data/{registryId} */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getWidgetData(string $teamId, int $registryId): JSONResponse {
-
         try {
-            $data = $this->integrationService->fetchWidgetData($teamId, $registryId);
-            return new JSONResponse($data);
+            return new JSONResponse($this->integrationService->fetchWidgetData($teamId, $registryId));
         } catch (\Exception $e) {
             $this->logger->warning('IntegrationController::getWidgetData — failed', [
-                'team_id'     => $teamId,
-                'registry_id' => $registryId,
-                'error'       => $e->getMessage(),
-                'app'         => Application::APP_ID,
+                'team_id' => $teamId, 'registry_id' => $registryId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['items' => [], 'error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
 
-    /**
-     * GET /api/v1/teams/{teamId}/integrations/action/{registryId}
-     *
-     * Returns the action modal definition from the external app's action_url.
-     * Response: { "title", "fields": [ { "label", "type", "name", "value"? } ], "submit_label"? }
-     */
+    /** GET /api/v1/teams/{teamId}/integrations/action/{registryId} */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getWidgetAction(string $teamId, int $registryId): JSONResponse {
-
         try {
-            $data = $this->integrationService->triggerWidgetAction($teamId, $registryId);
-            return new JSONResponse($data);
+            return new JSONResponse($this->integrationService->triggerWidgetAction($teamId, $registryId));
         } catch (\Exception $e) {
             $this->logger->warning('IntegrationController::getWidgetAction — failed', [
-                'team_id'     => $teamId,
-                'registry_id' => $registryId,
-                'error'       => $e->getMessage(),
-                'app'         => Application::APP_ID,
+                'team_id' => $teamId, 'registry_id' => $registryId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
 
     // ------------------------------------------------------------------
-    // Manage Team → Integrations tab
+    // Manage Team → Integrations tab (team admin required)
     // ------------------------------------------------------------------
 
-    /**
-     * GET /api/v1/teams/{teamId}/integrations/registry
-     *
-     * Returns all integrations annotated with their enabled state for this team.
-     * Used by Manage Team → Integrations.
-     */
+    /** GET /api/v1/teams/{teamId}/integrations/registry */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getIntegrationRegistry(string $teamId): JSONResponse {
-
         try {
-            $data = $this->integrationService->getRegistryForTeam($teamId);
-            return new JSONResponse($data);
+            return new JSONResponse($this->integrationService->getRegistryForTeam($teamId));
         } catch (\Throwable $e) {
             $this->logger->error('IntegrationController::getIntegrationRegistry — failed', [
-                'team_id'   => $teamId,
-                'exception' => $e,
-                'app'       => Application::APP_ID,
+                'team_id' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
-    /**
-     * POST /api/v1/teams/{teamId}/integrations/{registryId}/toggle
-     *
-     * Body: { "enable": true|false }
-     *
-     * Returns the updated full registry list for the team.
-     */
+    /** POST /api/v1/teams/{teamId}/integrations/{registryId}/toggle — team admin required. */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function toggleIntegration(string $teamId, int $registryId): JSONResponse {
-
         try {
+            $this->memberService->requireAdminLevel($teamId);
+
             $body   = $this->request->getParams();
             $enable = isset($body['enable']) ? filter_var($body['enable'], FILTER_VALIDATE_BOOLEAN) : true;
 
-            $updated = $this->integrationService->toggleIntegration($teamId, $registryId, $enable);
-            return new JSONResponse($updated);
+            return new JSONResponse($this->integrationService->toggleIntegration($teamId, $registryId, $enable));
         } catch (\Exception $e) {
             $this->logger->warning('IntegrationController::toggleIntegration — failed', [
-                'team_id'     => $teamId,
-                'registry_id' => $registryId,
-                'error'       => $e->getMessage(),
-                'app'         => Application::APP_ID,
+                'team_id' => $teamId, 'registry_id' => $registryId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
-    /**
-     * PUT /api/v1/teams/{teamId}/integrations/reorder
-     *
-     * Body: { "order": [3, 1, 2] }   — registry IDs in desired display order.
-     *
-     * Returns updated enabled integration list.
-     */
+    /** PUT /api/v1/teams/{teamId}/integrations/reorder — team admin required. */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function reorderIntegrations(string $teamId): JSONResponse {
-
         try {
+            $this->memberService->requireAdminLevel($teamId);
+
             $body  = $this->request->getParams();
             $order = isset($body['order']) && is_array($body['order']) ? $body['order'] : [];
 
@@ -300,15 +228,14 @@ class IntegrationController extends Controller {
                 return new JSONResponse(['error' => 'order array is required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $updated = $this->integrationService->reorderIntegrations($teamId, $order);
-            return new JSONResponse($updated);
+            return new JSONResponse($this->integrationService->reorderIntegrations($teamId, $order));
         } catch (\Exception $e) {
             $this->logger->error('IntegrationController::reorderIntegrations — failed', [
-                'team_id'   => $teamId,
-                'exception' => $e,
-                'app'       => Application::APP_ID,
+                'team_id' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 }

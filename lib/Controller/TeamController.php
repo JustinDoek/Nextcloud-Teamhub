@@ -493,12 +493,15 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function updateTeamConfig(string $teamId): JSONResponse {
         try {
+            $this->memberService->requireAdminLevel($teamId);
             $body = $this->request->getParams();
             $config = isset($body['config']) ? (int)$body['config'] : 0;
             $this->teamService->updateTeamConfig($teamId, $config);
             return new JSONResponse(['success' => true, 'config' => $config]);
         } catch (\Throwable $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 

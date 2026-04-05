@@ -29,6 +29,7 @@ class MessageService {
     private IDBConnection $db;
     private IConfig $config;
     private IURLGenerator $urlGenerator;
+    private MemberService $memberService;
 
     public function __construct(
         MessageMapper $messageMapper,
@@ -41,7 +42,8 @@ class MessageService {
         LoggerInterface $logger,
         IDBConnection $db,
         IConfig $config,
-        IURLGenerator $urlGenerator
+        IURLGenerator $urlGenerator,
+        MemberService $memberService
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -55,6 +57,7 @@ class MessageService {
         $this->db = $db;
         $this->config = $config;
         $this->urlGenerator = $urlGenerator;
+        $this->memberService = $memberService;
     }
 
     private function getCirclesManager() {
@@ -151,15 +154,19 @@ class MessageService {
     /**
      * Delete a message
      */
-    public function deleteMessage(int $messageId): void {
+    public function deleteMessage(string $teamId, int $messageId): void {
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
         }
         $existing = $this->messageMapper->find($messageId);
+
+        // Author can always delete their own message.
+        // Team admin/owner can delete any message (moderation).
         if ($existing['author_id'] !== $user->getUID()) {
-            throw new \Exception('Only the author can delete this message');
+            $this->memberService->requireAdminLevel($teamId);
         }
+
         $this->messageMapper->delete($messageId);
     }
 

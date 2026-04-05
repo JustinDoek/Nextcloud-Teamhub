@@ -160,7 +160,7 @@
                                 <span>{{ t('teamhub', 'Message stream') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <MessageOutline :size="18" />
+                                <MessageOutline :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</span>
                                 <button
                                     class="teamhub-widget-collapse-btn"
@@ -186,7 +186,7 @@
                                 <span>{{ t('teamhub', 'Team info') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <InformationOutline :size="18" />
+                                <InformationOutline :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Team Info') }}</span>
                                 <NcActions class="teamhub-widget-actions">
                                     <NcActionButton v-if="isTeamAdmin" @click="openManageTeam">
@@ -240,7 +240,7 @@
                                 <span>{{ t('teamhub', 'Members') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <AccountGroup :size="18" />
+                                <AccountGroup :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ members.length }})</span>
                                 <button
                                     class="teamhub-widget-collapse-btn"
@@ -282,7 +282,7 @@
                                 <span>{{ t('teamhub', 'Upcoming events') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <Calendar :size="18" />
+                                <Calendar :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Events') }}</span>
                                 <NcActions class="teamhub-widget-actions">
                                     <NcActionButton v-if="resources.talk" @click="showScheduleMeeting = true">
@@ -320,7 +320,7 @@
                                 <span>{{ t('teamhub', 'Upcoming tasks') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <CardText :size="18" />
+                                <CardText :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</span>
                                 <NcActions class="teamhub-widget-actions">
                                     <NcActionButton @click="showAddTask = true">
@@ -354,7 +354,7 @@
                                 <span>{{ t('teamhub', 'Team activity') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <ClockOutline :size="18" />
+                                <ClockOutline :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Team Activity') }}</span>
                                 <button
                                     class="teamhub-widget-collapse-btn"
@@ -382,7 +382,7 @@
                                 <span>{{ t('teamhub', 'Pages') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <FileDocumentOutline :size="18" />
+                                <FileDocumentOutline :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Pages') }}</span>
                                 <button
                                     class="teamhub-widget-collapse-btn"
@@ -411,8 +411,25 @@
                                 <span>{{ widget.title || t('teamhub', 'Widget') }}</span>
                             </div>
                             <div class="teamhub-widget-header">
-                                <Puzzle :size="18" />
+                                <!-- App icon from the originating NC app; falls back to Puzzle -->
+                                <img
+                                    v-if="widget.app_id"
+                                    :src="appIconUrl(widget.app_id)"
+                                    :alt="widget.app_id"
+                                    class="teamhub-widget-app-icon"
+                                    @error="onAppIconError($event)" />
+                                <Puzzle v-else :size="25" />
                                 <span class="teamhub-widget-title">{{ widget.title }}</span>
+                                <!-- Action button in header — triggers modal inside IntegrationWidget -->
+                                <NcActions
+                                    v-if="widget.action_url"
+                                    class="teamhub-widget-actions">
+                                    <NcActionButton
+                                        @click="triggerWidgetAction(widget.registry_id)">
+                                        <template #icon><Plus :size="20" /></template>
+                                        {{ widget.action_label || t('teamhub', 'Action') }}
+                                    </NcActionButton>
+                                </NcActions>
                                 <button
                                     class="teamhub-widget-collapse-btn"
                                     :aria-label="isCollapsed('widget-int-' + widget.registry_id) ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
@@ -423,6 +440,7 @@
                             </div>
                             <div v-show="!isCollapsed('widget-int-' + widget.registry_id)" class="teamhub-widget-content">
                                 <IntegrationWidget
+                                    :ref="'intWidget-' + widget.registry_id"
                                     :integration="widget"
                                     :team-id="currentTeamId" />
                             </div>
@@ -910,6 +928,28 @@ export default {
             return menuItem.iframe_url + sep + 'teamId=' + encodeURIComponent(this.currentTeamId)
         },
 
+        appIconUrl(appId) {
+            return generateUrl(`/apps/${appId}/img/app.svg`)
+        },
+
+        onAppIconError(event) {
+            const img = event.target
+            if (img.src.endsWith('.svg')) {
+                img.src = img.src.replace('.svg', '.png')
+            } else {
+                img.style.display = 'none'
+            }
+        },
+
+        triggerWidgetAction(registryId) {
+            const ref = this.$refs[`intWidget-${registryId}`]
+            if (ref) {
+                ref.openAction()
+            } else {
+                console.warn('[TeamView] triggerWidgetAction ref not found:', registryId)
+            }
+        },
+
         // ── Team actions ──────────────────────────────────────────────
 
         openManageTeam() {
@@ -1162,6 +1202,15 @@ export default {
     flex-shrink: 0;
 }
 
+/* NC app icon in integration widget header */
+.teamhub-widget-app-icon {
+    width: 25px;
+    height: 25px;
+    object-fit: contain;
+    flex-shrink: 0;
+    /* NC dark-mode inversion handled by NC itself for its own app icons */
+}
+
 /* Collapse toggle button */
 .teamhub-widget-collapse-btn {
     display: inline-flex;
@@ -1245,21 +1294,85 @@ export default {
 }
 
 /* ── vue-grid-layout overrides ───────────────────────────────────── */
-/* Resize handle — only the message stream gets isResizable=true */
+/*
+ * Resize handle — vue-grid-layout 2.4.x always renders .vue-resizable-handle
+ * in the DOM regardless of :is-resizable. We hide it by default and only
+ * show it when the parent has the --editing modifier class (i.e. editMode).
+ * This ensures the handle cannot be seen or interacted with outside edit mode.
+ */
 :deep(.vue-resizable-handle) {
-    width: 18px;
-    height: 18px;
-    bottom: 3px;
-    right: 3px;
-    background-image: none;
-    border-right: 2px solid var(--color-primary-element);
-    border-bottom: 2px solid var(--color-primary-element);
-    opacity: 0.5;
-    border-radius: 0 0 6px 0;
-    transition: opacity 0.15s;
+    /* Hidden by default — only visible inside the editing wrapper */
+    display: none;
 }
 
-:deep(.vue-resizable-handle:hover) { opacity: 1; }
+/*
+ * Inside edit mode: override the default bottom-right corner bracket with a
+ * prominent centred pill indicator. The pill sits at the bottom-centre of the
+ * card and contains a horizontal double-arrow SVG (←→).
+ *
+ * The native hit-target is widened to span the full card width so clicking
+ * anywhere along the bottom edge triggers the resize.
+ */
+.teamhub-home-view--editing :deep(.vue-resizable-handle) {
+    display: block;
+
+    /* Span the full width, positioned at the bottom */
+    width: 100%;
+    height: 22px;
+    bottom: 0;
+    right: 0;
+    left: 0;
+
+    /* Reset default image + border */
+    background-image: none;
+    border: none;
+    border-radius: 0 0 var(--border-radius-large) var(--border-radius-large);
+
+    /* Subtle hover zone */
+    background: transparent;
+    cursor: ns-resize;
+    transition: background 0.15s;
+    z-index: 10;
+}
+
+.teamhub-home-view--editing :deep(.vue-resizable-handle:hover) {
+    background: color-mix(in srgb, var(--color-primary-element) 8%, transparent);
+}
+
+/*
+ * The visible pill indicator sits in the centre of the handle via a
+ * pseudo-element. It contains a double-arrow SVG encoded inline.
+ */
+.teamhub-home-view--editing :deep(.vue-resizable-handle)::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 3px;
+    transform: translateX(-50%);
+
+    /* Pill size */
+    width: 36px;
+    height: 14px;
+
+    /* Primary-colour pill background */
+    background-color: var(--color-primary-element);
+    border-radius: var(--border-radius-pill);
+
+    /* Double-arrow SVG (horizontal ↔, white) encoded inline */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='7 16 3 12 7 8'/%3E%3Cpolyline points='17 8 21 12 17 16'/%3E%3Cline x1='3' y1='12' x2='21' y2='12'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 20px 10px;
+
+    opacity: 0.9;
+    transition: opacity 0.15s, transform 0.15s;
+    pointer-events: none;
+}
+
+.teamhub-home-view--editing :deep(.vue-resizable-handle:hover)::after {
+    opacity: 1;
+    transform: translateX(-50%) scaleX(1.08);
+}
 
 /* Drop placeholder */
 :deep(.vue-grid-placeholder) {

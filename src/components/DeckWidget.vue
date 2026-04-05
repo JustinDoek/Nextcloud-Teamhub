@@ -1,7 +1,8 @@
 <template>
     <div class="deck-widget">
         <div v-if="deckTasks.length === 0" class="deck-widget__empty">
-            {{ t('teamhub', 'No upcoming tasks') }}
+            <CardTextIcon :size="36" class="deck-widget__empty-icon" />
+            <span>{{ t('teamhub', 'No upcoming tasks') }}</span>
         </div>
         <ul v-else class="deck-widget__list">
             <li v-for="card in deckTasks" :key="card.id" class="deck-card">
@@ -38,10 +39,11 @@ import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { NcAvatar } from '@nextcloud/vue'
+import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 
 export default {
     name: 'DeckWidget',
-    components: { NcAvatar },
+    components: { NcAvatar, CardTextIcon },
     computed: {
         ...mapState(['deckTasks', 'resources']),
     },
@@ -68,9 +70,19 @@ export default {
 <style scoped>
 .deck-widget { padding: 0 0 4px; }
 .deck-widget__empty {
-    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px 16px;
     color: var(--color-text-maxcontrast);
-    padding: 8px 16px;
+    font-size: 15px;
+    text-align: center;
+}
+.deck-widget__empty-icon {
+    opacity: 0.35;
+    color: var(--color-primary-element);
 }
 .deck-widget__list { list-style: none; padding: 0; margin: 0; }
 .deck-card {
@@ -91,7 +103,7 @@ export default {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 500;
     text-decoration: none;
     color: var(--color-main-text);

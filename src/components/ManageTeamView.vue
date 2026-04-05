@@ -5,322 +5,304 @@
             <p class="manage-team-subtitle">{{ team.name }}</p>
         </div>
 
-        <!-- Description -->
-        <div class="manage-section">
-            <h3>{{ t('teamhub', 'Team Description') }}</h3>
-            <div class="manage-description-form">
-                <NcTextArea
-                    v-model="editedDescription"
-                    :label="t('teamhub', 'Description')"
-                    :placeholder="t('teamhub', 'Enter team description...')"
-                    :rows="3" />
-                <div class="manage-description-actions">
-                    <NcButton
-                        type="primary"
-                        :disabled="(editedDescription === (team.description || '')) || saving"
-                        @click="saveDescription">
-                        <template #icon>
-                            <NcLoadingIcon v-if="saving" :size="20" />
-                            <ContentSave v-else :size="20" />
-                        </template>
-                        {{ t('teamhub', 'Save Description') }}
-                    </NcButton>
+        <!-- Tab bar -->
+        <div class="manage-tabs">
+            <button
+                v-for="tab in tabs"
+                :key="tab.key"
+                class="manage-tab"
+                :class="{ 'manage-tab--active': activeTab === tab.key, 'manage-tab--danger': tab.key === 'danger' }"
+                @click="activeTab = tab.key">
+                <component :is="tab.icon" :size="18" />
+                {{ tab.label }}
+            </button>
+        </div>
+
+        <!-- TAB: Description -->
+        <div v-if="activeTab === 'description'" class="manage-tab-content">
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Team Description') }}</h3>
+                <div class="manage-description-form">
+                    <NcTextArea
+                        v-model="editedDescription"
+                        :label="t('teamhub', 'Description')"
+                        :placeholder="t('teamhub', 'Enter team description...')"
+                        :rows="4" />
+                    <div class="manage-description-actions">
+                        <NcButton
+                            type="primary"
+                            :disabled="(editedDescription === (team.description || '')) || saving"
+                            @click="saveDescription">
+                            <template #icon>
+                                <NcLoadingIcon v-if="saving" :size="20" />
+                                <ContentSave v-else :size="20" />
+                            </template>
+                            {{ t('teamhub', 'Save Description') }}
+                        </NcButton>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Circle Settings -->
-        <div class="manage-section">
-            <h3>{{ t('teamhub', 'Team Settings') }}</h3>
-            <div v-if="loadingConfig" class="section-loading">
-                <NcLoadingIcon :size="24" />
-            </div>
-            <div v-else class="manage-settings">
-                <div class="manage-settings-group">
-                    <h4>{{ t('teamhub', 'Invitations') }}</h4>
-                    <NcCheckboxRadioSwitch
-                        v-for="opt in invitationOptions"
-                        :key="opt.key"
-                        :checked.sync="circleConfig[opt.key]"
-                        type="checkbox"
-                        @update:checked="saveConfig">
-                        {{ opt.label }}
-                    </NcCheckboxRadioSwitch>
-                </div>
-                <div class="manage-settings-group">
-                    <h4>{{ t('teamhub', 'Membership') }}</h4>
-                    <NcCheckboxRadioSwitch
-                        v-for="opt in membershipOptions"
-                        :key="opt.key"
-                        :checked.sync="circleConfig[opt.key]"
-                        type="checkbox"
-                        @update:checked="saveConfig">
-                        {{ opt.label }}
-                    </NcCheckboxRadioSwitch>
-                </div>
-                <div class="manage-settings-group">
-                    <h4>{{ t('teamhub', 'Privacy') }}</h4>
-                    <NcCheckboxRadioSwitch
-                        v-for="opt in privacyOptions"
-                        :key="opt.key"
-                        :checked.sync="circleConfig[opt.key]"
-                        type="checkbox"
-                        @update:checked="saveConfig">
-                        {{ opt.label }}
-                    </NcCheckboxRadioSwitch>
-                </div>
-                <p v-if="configSaved" class="manage-settings-saved">
-                    <CheckCircle :size="14" />{{ t('teamhub', 'Settings saved') }}
+        <!-- TAB: Settings -->
+        <div v-else-if="activeTab === 'settings'" class="manage-tab-content">
+            <!-- Circle Settings -->
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Circle Settings') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'These settings control how people can join and interact with this team.') }}
                 </p>
+                <div v-if="loadingConfig" class="section-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <div v-else class="manage-settings">
+                    <div class="manage-settings-group">
+                        <h4>{{ t('teamhub', 'Invitations') }}</h4>
+                        <NcCheckboxRadioSwitch
+                            v-for="opt in invitationOptions"
+                            :key="opt.key"
+                            :checked.sync="circleConfig[opt.key]"
+                            type="checkbox"
+                            @update:checked="saveConfig">
+                            {{ opt.label }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+                    <div class="manage-settings-group">
+                        <h4>{{ t('teamhub', 'Membership') }}</h4>
+                        <NcCheckboxRadioSwitch
+                            v-for="opt in membershipOptions"
+                            :key="opt.key"
+                            :checked.sync="circleConfig[opt.key]"
+                            type="checkbox"
+                            @update:checked="saveConfig">
+                            {{ opt.label }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+                    <div class="manage-settings-group">
+                        <h4>{{ t('teamhub', 'Privacy') }}</h4>
+                        <NcCheckboxRadioSwitch
+                            v-for="opt in privacyOptions"
+                            :key="opt.key"
+                            :checked.sync="circleConfig[opt.key]"
+                            type="checkbox"
+                            @update:checked="saveConfig">
+                            {{ opt.label }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+                    <p v-if="configSaved" class="manage-settings-saved">
+                        <CheckCircle :size="14" />{{ t('teamhub', 'Settings saved') }}
+                    </p>
+                </div>
             </div>
-        </div>
 
-        <!-- Team Apps -->
-        <div class="manage-section">
-            <h3>{{ t('teamhub', 'Team Apps') }}</h3>
-            <p class="manage-section-desc">
-                {{ t('teamhub', 'Enable or disable Nextcloud apps for this team. Disabled apps are hidden from the tab bar.') }}
-            </p>
-            <div v-if="loadingApps" class="section-loading">
-                <NcLoadingIcon :size="24" />
-            </div>
-            <div v-else class="team-apps-list">
-                <div
-                    v-for="app in teamAppsList"
-                    :key="app.id"
-                    class="team-app-item">
-                    <div class="team-app-icon">
-                        <component :is="app.icon" :size="22" />
+            <!-- Team Apps -->
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Team Apps') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Enable or disable Nextcloud apps for this team. Disabled apps are hidden from the tab bar.') }}
+                </p>
+                <div v-if="loadingApps" class="section-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <div v-else class="team-apps-list">
+                    <div
+                        v-for="app in teamAppsList"
+                        :key="app.id"
+                        class="team-app-item">
+                        <div class="team-app-icon">
+                            <component :is="app.icon" :size="22" />
+                        </div>
+                        <div class="team-app-info">
+                            <span class="team-app-name">{{ app.label }}</span>
+                            <span class="team-app-desc">{{ app.description }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            :checked="app.enabled"
+                            :disabled="togglingApp === app.id || !app.installed"
+                            type="switch"
+                            :aria-label="t('teamhub', 'Enable {name}', { name: app.label })"
+                            @update:checked="toggleApp(app, $event)">
+                            {{ app.installed ? (app.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled')) : t('teamhub', 'Not installed') }}
+                        </NcCheckboxRadioSwitch>
                     </div>
-                    <div class="team-app-info">
-                        <span class="team-app-name">{{ app.label }}</span>
-                        <span class="team-app-desc">{{ app.description }}</span>
-                    </div>
-                    <NcCheckboxRadioSwitch
-                        :checked="app.enabled"
-                        :disabled="togglingApp === app.id || !app.installed"
-                        type="switch"
-                        :aria-label="t('teamhub', 'Enable {name}', { name: app.label })"
-                        @update:checked="toggleApp(app, $event)">
-                        {{ app.installed ? (app.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled')) : t('teamhub', 'Not installed') }}
-                    </NcCheckboxRadioSwitch>
                 </div>
             </div>
         </div>
 
-        <!-- Members -->
-        <div class="manage-section">
-            <h3>{{ t('teamhub', 'Team Members') }} ({{ members.length }})</h3>
-            <div v-if="loadingMembers" class="section-loading">
-                <NcLoadingIcon :size="32" />
-            </div>
-            <div v-else class="members-list">
-                <div
-                    v-for="member in members"
-                    :key="member.userId || member.displayName"
-                    class="member-item">
-                    <NcAvatar
-                        v-if="member.userId"
-                        :user="member.userId"
-                        :display-name="member.displayName"
-                        :size="32"
-                        :show-user-status="false" />
-                    <div v-else class="member-avatar-fallback">
-                        {{ (member.displayName || '?').charAt(0).toUpperCase() }}
-                    </div>
-                    <div class="member-info">
-                        <span class="member-name">{{ member.displayName }}</span>
-                    </div>
-
-                    <!-- Role dropdown — disabled for owners and for the current user -->
-                    <select
-                        v-if="canChangeLevel(member)"
-                        :value="member.level"
-                        :disabled="changingLevel === member.userId"
-                        class="member-level-select"
-                        :aria-label="t('teamhub', 'Change role for {name}', { name: member.displayName })"
-                        @change="changeLevel(member, Number($event.target.value))">
-                        <option :value="1">{{ t('teamhub', 'Member') }}</option>
-                        <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
-                        <!-- Admin option only shown to owners -->
-                        <option v-if="currentUserIsOwner" :value="8">{{ t('teamhub', 'Admin') }}</option>
-                    </select>
-                    <!-- Static label for owners and current user -->
-                    <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
-
-                    <NcButton
-                        v-if="canRemoveMember(member)"
-                        type="error"
-                        :aria-label="t('teamhub', 'Remove member')"
-                        @click="confirmRemoveMember(member)">
-                        <template #icon><AccountRemove :size="20" /></template>
-                        {{ t('teamhub', 'Remove') }}
-                    </NcButton>
+        <!-- TAB: Members -->
+        <div v-else-if="activeTab === 'members'" class="manage-tab-content">
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Team Members') }} ({{ members.length }})</h3>
+                <div v-if="loadingMembers" class="section-loading">
+                    <NcLoadingIcon :size="32" />
                 </div>
-            </div>
-        </div>
-
-        <!-- Pending Join Requests -->
-        <div class="manage-section">
-            <h3>{{ t('teamhub', 'Pending Join Requests') }}</h3>
-            <div v-if="loadingPending" class="section-loading">
-                <NcLoadingIcon :size="32" />
-            </div>
-            <div v-else-if="pendingRequests.length === 0" class="no-pending">
-                {{ t('teamhub', 'No pending requests') }}
-            </div>
-            <div v-else class="pending-list">
-                <div v-for="req in pendingRequests" :key="req.userId" class="pending-item">
-                    <NcAvatar
-                        v-if="req.userId"
-                        :user="req.userId"
-                        :display-name="req.displayName"
-                        :size="32"
-                        :show-user-status="false" />
-                    <div v-else class="member-avatar-fallback">
-                        {{ (req.displayName || '?').charAt(0).toUpperCase() }}
-                    </div>
-                    <div class="pending-info">
-                        <span class="pending-name">{{ req.displayName }}</span>
-                        <span class="pending-date">{{ req.userId }}</span>
-                    </div>
-                    <div class="pending-actions">
-                        <NcButton type="primary" @click="approve(req)">
-                            <template #icon><Check :size="20" /></template>
-                            {{ t('teamhub', 'Approve') }}
+                <div v-else class="members-list">
+                    <div
+                        v-for="member in members"
+                        :key="member.userId || member.displayName"
+                        class="member-item">
+                        <NcAvatar
+                            v-if="member.userId"
+                            :user="member.userId"
+                            :display-name="member.displayName"
+                            :size="32"
+                            :show-user-status="false" />
+                        <div v-else class="member-avatar-fallback">
+                            {{ (member.displayName || '?').charAt(0).toUpperCase() }}
+                        </div>
+                        <div class="member-info">
+                            <span class="member-name">{{ member.displayName }}</span>
+                        </div>
+                        <select
+                            v-if="canChangeLevel(member)"
+                            :value="member.level"
+                            :disabled="changingLevel === member.userId"
+                            class="member-level-select"
+                            :aria-label="t('teamhub', 'Change role for {name}', { name: member.displayName })"
+                            @change="changeLevel(member, Number($event.target.value))">
+                            <option :value="1">{{ t('teamhub', 'Member') }}</option>
+                            <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
+                            <option v-if="currentUserIsOwner" :value="8">{{ t('teamhub', 'Admin') }}</option>
+                        </select>
+                        <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
+                        <NcButton
+                            v-if="canRemoveMember(member)"
+                            type="error"
+                            :aria-label="t('teamhub', 'Remove member')"
+                            @click="confirmRemoveMember(member)">
+                            <template #icon><AccountRemove :size="20" /></template>
+                            {{ t('teamhub', 'Remove') }}
                         </NcButton>
-                        <NcButton type="error" @click="reject(req)">
-                            <template #icon><Close :size="20" /></template>
-                            {{ t('teamhub', 'Reject') }}
-                        </NcButton>
+                    </div>
+                </div>
+            </div>
+
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Pending Join Requests') }}</h3>
+                <div v-if="loadingPending" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+                <div v-else-if="pendingRequests.length === 0" class="no-pending">
+                    {{ t('teamhub', 'No pending requests') }}
+                </div>
+                <div v-else class="pending-list">
+                    <div v-for="req in pendingRequests" :key="req.userId" class="pending-item">
+                        <NcAvatar
+                            v-if="req.userId"
+                            :user="req.userId"
+                            :display-name="req.displayName"
+                            :size="32"
+                            :show-user-status="false" />
+                        <div v-else class="member-avatar-fallback">
+                            {{ (req.displayName || '?').charAt(0).toUpperCase() }}
+                        </div>
+                        <div class="pending-info">
+                            <span class="pending-name">{{ req.displayName }}</span>
+                            <span class="pending-date">{{ req.userId }}</span>
+                        </div>
+                        <div class="pending-actions">
+                            <NcButton type="primary" @click="approve(req)">
+                                <template #icon><Check :size="20" /></template>
+                                {{ t('teamhub', 'Approve') }}
+                            </NcButton>
+                            <NcButton type="error" @click="reject(req)">
+                                <template #icon><Close :size="20" /></template>
+                                {{ t('teamhub', 'Reject') }}
+                            </NcButton>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Integrations -->
-        <div class="manage-section">
-            <h3>{{ t('teamhub', 'Integrations') }}</h3>
-            <p class="manage-section-desc">
-                {{ t('teamhub', 'Enable or disable integrations for this team. Sidebar widgets show data in the right panel. Menu items add a tab to the tab bar.') }}
-            </p>
-
-            <div v-if="loadingWidgets" class="section-loading">
-                <NcLoadingIcon :size="32" />
-            </div>
-
-            <template v-else>
-                <!-- Menu items (tabs) -->
-                <div class="integrations-group">
-                    <h4 class="integrations-group-title">{{ t('teamhub', 'Tab bar items') }}</h4>
-                    <div v-if="menuItemIntegrations.length === 0" class="no-pending">
-                        {{ t('teamhub', 'No tab bar integrations available.') }}
+        <!-- TAB: Integrations -->
+        <div v-else-if="activeTab === 'integrations'" class="manage-tab-content">
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Integrations') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Enable or disable third-party integrations registered by other Nextcloud apps. Widgets appear on the Home view. Tab integrations add a tab to the tab bar.') }}
+                </p>
+                <div v-if="loadingWidgets" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+                <template v-else>
+                    <!--
+                        Only EXTERNAL (non-builtin) integrations appear here.
+                        Built-in NC apps (Talk, Files, Calendar, Deck) are managed
+                        in the Settings tab under Team Apps. They are seeded into
+                        the registry as is_builtin=true and did NOT register via
+                        the integration API — so they must not appear here.
+                    -->
+                    <div v-if="externalIntegrations.length === 0" class="no-pending">
+                        {{ t('teamhub', 'No third-party integrations available. Install a compatible app to add integrations to this team.') }}
                     </div>
                     <div v-else class="widgets-list">
                         <div
-                            v-for="item in menuItemIntegrations"
-                            :key="item.registry_id"
+                            v-for="integration in externalIntegrations"
+                            :key="integration.registry_id"
                             class="widget-item"
-                            :class="{ 'widget-item--enabled': item.enabled }">
-
+                            :class="{ 'widget-item--enabled': integration.enabled }">
                             <span
-                                v-if="item.enabled && !item.is_builtin"
+                                v-if="integration.enabled"
                                 class="widget-drag-handle"
                                 :draggable="true"
                                 :aria-label="t('teamhub', 'Drag to reorder')"
-                                @dragstart="onDragStart($event, item)"
+                                @dragstart="onDragStart($event, integration)"
                                 @dragover.prevent
-                                @drop="onDrop($event, item)">
+                                @drop="onDrop($event, integration)">
                                 <DragVertical :size="18" />
                             </span>
                             <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
-
                             <div class="widget-info">
                                 <span class="widget-title">
-                                    {{ item.title }}
-                                    <span v-if="item.is_builtin" class="widget-badge">{{ t('teamhub', 'Built-in') }}</span>
+                                    {{ integration.title }}
+                                    <span
+                                        class="widget-badge"
+                                        :class="integration.integration_type === 'widget' ? 'widget-badge--widget' : 'widget-badge--tab'">
+                                        {{ integration.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Tab') }}
+                                    </span>
                                 </span>
-                                <span v-if="item.description" class="widget-description">{{ item.description }}</span>
+                                <span v-if="integration.description" class="widget-description">{{ integration.description }}</span>
+                                <span v-if="integration.app_id" class="widget-app-id">{{ integration.app_id }}</span>
                             </div>
-
                             <NcCheckboxRadioSwitch
-                                :checked="item.enabled"
-                                :disabled="togglingWidget === item.registry_id"
-                                type="checkbox"
-                                :aria-label="t('teamhub', 'Enable {title}', { title: item.title })"
-                                @update:checked="toggleIntegration(item, $event)">
-                                {{ item.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                                :checked="integration.enabled"
+                                :disabled="togglingWidget === integration.registry_id"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable {title}', { title: integration.title })"
+                                @update:checked="toggleIntegration(integration, $event)">
+                                {{ integration.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
                             </NcCheckboxRadioSwitch>
                         </div>
                     </div>
-                </div>
-
-                <!-- Sidebar widgets -->
-                <div class="integrations-group">
-                    <h4 class="integrations-group-title">{{ t('teamhub', 'Sidebar widgets') }}</h4>
-                    <div v-if="widgetIntegrations.length === 0" class="no-pending">
-                        {{ t('teamhub', 'No sidebar widgets registered. Install a compatible app to add widgets to this team.') }}
-                    </div>
-                    <div v-else class="widgets-list">
-                        <div
-                            v-for="widget in widgetIntegrations"
-                            :key="widget.registry_id"
-                            class="widget-item"
-                            :class="{ 'widget-item--enabled': widget.enabled }">
-
-                            <span
-                                v-if="widget.enabled"
-                                class="widget-drag-handle"
-                                :draggable="true"
-                                :aria-label="t('teamhub', 'Drag to reorder')"
-                                @dragstart="onDragStart($event, widget)"
-                                @dragover.prevent
-                                @drop="onDrop($event, widget)">
-                                <DragVertical :size="18" />
-                            </span>
-                            <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
-
-                            <div class="widget-info">
-                                <span class="widget-title">{{ widget.title }}</span>
-                                <span v-if="widget.description" class="widget-description">{{ widget.description }}</span>
-                                <span class="widget-app-id">{{ widget.app_id }}</span>
-                            </div>
-
-                            <NcCheckboxRadioSwitch
-                                :checked="widget.enabled"
-                                :disabled="togglingWidget === widget.registry_id"
-                                type="checkbox"
-                                :aria-label="t('teamhub', 'Enable {title}', { title: widget.title })"
-                                @update:checked="toggleIntegration(widget, $event)">
-                                {{ widget.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                            </NcCheckboxRadioSwitch>
-                        </div>
-                    </div>
-                </div>
-            </template>
-        </div>
-
-        <!-- Danger zone: Delete Team -->
-        <div class="manage-section manage-section--danger">
-            <h3>{{ t('teamhub', 'Danger Zone') }}</h3>
-            <div class="manage-danger-row">
-                <div class="manage-danger-info">
-                    <span class="manage-danger-title">{{ t('teamhub', 'Delete this team') }}</span>
-                    <span class="manage-danger-desc">{{ t('teamhub', 'Permanently delete the team and all its settings. Resources (files, calendar, chat) are not deleted.') }}</span>
-                </div>
-                <NcButton
-                    type="error"
-                    :disabled="deleting"
-                    @click="confirmDeleteTeam">
-                    <template #icon>
-                        <NcLoadingIcon v-if="deleting" :size="20" />
-                        <Delete v-else :size="20" />
-                    </template>
-                    {{ t('teamhub', 'Delete team') }}
-                </NcButton>
+                </template>
             </div>
         </div>
-        <!-- Hard-delete confirmation dialog (shown when user toggles an app OFF) -->
+
+        <!-- TAB: Danger Zone -->
+        <div v-else-if="activeTab === 'danger'" class="manage-tab-content">
+            <div class="manage-section manage-section--danger">
+                <h3>{{ t('teamhub', 'Danger Zone') }}</h3>
+                <div class="manage-danger-row">
+                    <div class="manage-danger-info">
+                        <span class="manage-danger-title">{{ t('teamhub', 'Delete this team') }}</span>
+                        <span class="manage-danger-desc">{{ t('teamhub', 'Permanently delete the team and all its settings. Resources (files, calendar, chat) are not deleted.') }}</span>
+                    </div>
+                    <NcButton
+                        type="error"
+                        :disabled="deleting"
+                        @click="confirmDeleteTeam">
+                        <template #icon>
+                            <NcLoadingIcon v-if="deleting" :size="20" />
+                            <Delete v-else :size="20" />
+                        </template>
+                        {{ t('teamhub', 'Delete team') }}
+                    </NcButton>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hard-delete confirmation dialog -->
         <NcDialog
             v-if="pendingDisableApp"
             :name="t('teamhub', 'Permanently delete {name} data?', { name: pendingDisableApp.label })"
@@ -373,6 +355,11 @@ import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
 import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 import FileDocumentOutlineIcon from 'vue-material-design-icons/FileDocumentOutline.vue'
+import TextIcon from 'vue-material-design-icons/Text.vue'
+import TuneIcon from 'vue-material-design-icons/Tune.vue'
+import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
+import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
+import AlertIcon from 'vue-material-design-icons/Alert.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -388,6 +375,7 @@ export default {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
+        TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -395,6 +383,7 @@ export default {
     emits: ['description-updated', 'team-deleted'],
     data() {
         return {
+            activeTab: 'description',
             editedDescription: this.team.description || '',
             members: [],
             pendingRequests: [],
@@ -404,7 +393,6 @@ export default {
             saving: false,
             configSaved: false,
             deleting: false,
-            // userId of the member whose level is currently being saved, or null
             changingLevel: null,
             circleConfig: {
                 open: false,
@@ -414,22 +402,29 @@ export default {
                 protected: false,
                 singleMember: false,
             },
-            // Integrations tab (merged widget + menu_item registry)
-            integrationRegistry: [], // full list from /integrations/registry with enabled state
+            integrationRegistry: [],
             loadingWidgets: false,
-            togglingWidget: null,    // registry_id currently being toggled, or null
-            dragSourceWidget: null,  // integration row being dragged
-            // Team apps (Talk, Files, Calendar, Deck)
-            teamApps: [],          // rows from GET /api/v1/teams/{id}/apps
-            installedApps: {},     // { talk, calendar, deck } from /api/v1/apps/check
+            togglingWidget: null,
+            dragSourceWidget: null,
+            teamApps: [],
+            installedApps: {},
             loadingApps: false,
-            togglingApp: null,     // app_id currently being toggled, or null
-            pendingDisableApp: null, // app awaiting hard-delete confirmation, or null
+            togglingApp: null,
+            pendingDisableApp: null,
         }
     },
     computed: {
-        // Pull intravoxAvailable from Vuex — same source as TeamView uses
         ...mapState(['intravoxAvailable']),
+
+        tabs() {
+            return [
+                { key: 'description',  label: t('teamhub', 'Description'),  icon: 'TextIcon' },
+                { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
+                { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
+                { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
+                { key: 'danger',       label: t('teamhub', 'Danger Zone'),  icon: 'AlertIcon' },
+            ]
+        },
 
         invitationOptions() {
             return [
@@ -462,7 +457,6 @@ export default {
         currentUserId() {
             return getCurrentUser()?.uid
         },
-        // The caller's own level in this team
         currentUserLevel() {
             const me = this.members.find(m => m.userId === this.currentUserId)
             return me ? (me.level || 1) : 1
@@ -471,49 +465,33 @@ export default {
             return this.currentUserLevel >= 9
         },
 
-        /** All integrations — alias kept for drag/drop logic */
-        widgetRegistry() {
-            return this.integrationRegistry
-        },
-
-        /** Only menu_item integrations (built-in tab bar entries + external mini apps) */
-        menuItemIntegrations() {
-            return this.integrationRegistry.filter(i => i.integration_type === 'menu_item')
-        },
-
-        /** Only sidebar widget integrations (external data-driven widgets) */
-        widgetIntegrations() {
-            return this.integrationRegistry.filter(i => i.integration_type === 'widget')
-        },
-
         /**
-         * Merged list of built-in apps with their installed + enabled state.
+         * Only EXTERNAL (non-builtin) integrations.
          *
-         * app_id values must match what the TeamView's isBuiltinEnabled() uses
-         * ('spreed', 'files', 'calendar', 'deck', 'intravox').
-         *
-         * installedApps keys from checkInstalledApps(): talk, calendar, deck, intravox.
-         * Note: 'talk' maps to app_id 'spreed' — the NC app name for Talk.
-         *
-         * Intravox installed state comes from the Vuex store (intravoxAvailable)
-         * which uses the same dual-check as TeamView.
+         * Built-in NC apps (Talk, Files, Calendar, Deck) are seeded into the
+         * registry as is_builtin=true by seedBuiltins() in IntegrationService.
+         * They are managed under "Team Apps" (Settings tab). They did NOT
+         * register via the external integration API and must not appear here.
          */
+        externalIntegrations() {
+            return this.integrationRegistry.filter(i => !i.is_builtin)
+        },
+
         teamAppsList() {
-            // Icons must be component references, not strings — <component :is="..."> requires an object
             const definitions = [
                 {
                     id: 'spreed',
                     label: t('teamhub', 'Talk'),
                     description: t('teamhub', 'Team chat and video calls'),
                     icon: MessageIcon,
-                    installed: !!this.installedApps.talk,   // key is 'talk' not 'spreed'
+                    installed: !!this.installedApps.talk,
                 },
                 {
                     id: 'files',
                     label: t('teamhub', 'Files'),
                     description: t('teamhub', 'Shared team folder'),
                     icon: FolderIcon,
-                    installed: true, // Files is always available in NC core
+                    installed: true,
                 },
                 {
                     id: 'calendar',
@@ -534,15 +512,13 @@ export default {
                     label: t('teamhub', 'Pages'),
                     description: t('teamhub', 'Team wiki and pages (Intravox)'),
                     icon: FileDocumentOutlineIcon,
-                    installed: !!this.intravoxAvailable,    // from Vuex store
+                    installed: !!this.intravoxAvailable,
                 },
             ]
-
             return definitions
-                .filter(def => def.installed) // hide apps that are not installed
+                .filter(def => def.installed)
                 .map(def => {
                     const row = this.teamApps.find(a => a.app_id === def.id)
-                    // Default to enabled when no row exists (matches isBuiltinEnabled rule #20)
                     const enabled = row ? row.enabled : true
                     return { ...def, enabled }
                 })
@@ -551,22 +527,23 @@ export default {
     watch: {
         'team.id'() {
             this.editedDescription = this.team.description || ''
+            this.activeTab = 'description'
+            this.loadAll()
+        },
+    },
+    mounted() {
+        this.loadAll()
+    },
+    methods: {
+        t,
+
+        loadAll() {
             this.loadMembers()
             this.loadPendingRequests()
             this.loadConfig()
             this.loadTeamApps()
             this.loadIntegrationRegistry()
         },
-    },
-    mounted() {
-        this.loadMembers()
-        this.loadPendingRequests()
-        this.loadConfig()
-        this.loadTeamApps()
-        this.loadIntegrationRegistry()
-    },
-    methods: {
-        t,
 
         getMemberRoleLabel(level) {
             if (level >= 9) return t('teamhub', 'Owner')
@@ -575,8 +552,6 @@ export default {
             return t('teamhub', 'Member')
         },
 
-        // Show the dropdown when the current user is admin/owner, the target is
-        // not the owner, and the target is not the current user themselves.
         canChangeLevel(member) {
             if (this.currentUserLevel < 8) return false
             if (member.userId === this.currentUserId) return false
@@ -596,13 +571,12 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/${member.userId}/level`),
                     { level: newLevel }
                 )
-                // Backend returns the updated full member list
                 this.members = Array.isArray(data) ? data : this.members
                 showSuccess(t('teamhub', 'Role updated'))
             } catch (error) {
+                console.error('[ManageTeamView] changeLevel error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update role') + (msg ? `: ${msg}` : ''))
-                // Revert the dropdown visually by re-fetching
                 await this.loadMembers()
             } finally {
                 this.changingLevel = null
@@ -619,6 +593,7 @@ export default {
                 showSuccess(t('teamhub', 'Description updated'))
                 this.$emit('description-updated', this.editedDescription)
             } catch (error) {
+                console.error('[ManageTeamView] saveDescription error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update description') + (msg ? `: ${msg}` : ''))
             } finally {
@@ -639,8 +614,8 @@ export default {
                 this.circleConfig.visible       = !!(v & CFG_VISIBLE)
                 this.circleConfig.protected     = !!(v & CFG_PROTECTED)
                 this.circleConfig.singleMember  = !!(v & CFG_SINGLE)
-            } catch {
-                // Silently ignore — config is optional
+            } catch (e) {
+                console.error('[ManageTeamView] loadConfig error:', e?.response?.data)
             } finally {
                 this.loadingConfig = false
             }
@@ -655,6 +630,7 @@ export default {
                 this.configSaved = true
                 setTimeout(() => { this.configSaved = false }, 2000)
             } catch (error) {
+                console.error('[ManageTeamView] saveConfig error:', error?.response?.data)
                 showError(t('teamhub', 'Failed to save settings'))
             }
         },
@@ -666,7 +642,8 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members`)
                 )
                 this.members = Array.isArray(data) ? data : []
-            } catch {
+            } catch (e) {
+                console.error('[ManageTeamView] loadMembers error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to load members'))
             } finally {
                 this.loadingMembers = false
@@ -680,7 +657,8 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/pending-requests`)
                 )
                 this.pendingRequests = Array.isArray(data) ? data : []
-            } catch {
+            } catch (e) {
+                console.error('[ManageTeamView] loadPendingRequests error:', e?.response?.data)
                 this.pendingRequests = []
             } finally {
                 this.loadingPending = false
@@ -697,7 +675,8 @@ export default {
                 )
                 showSuccess(t('teamhub', 'Member removed'))
                 await this.loadMembers()
-            } catch {
+            } catch (e) {
+                console.error('[ManageTeamView] removeMember error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to remove member'))
             }
         },
@@ -707,7 +686,8 @@ export default {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/approve/${req.userId}`))
                 showSuccess(t('teamhub', '{name} has been approved', { name: req.displayName }))
                 await Promise.all([this.loadMembers(), this.loadPendingRequests()])
-            } catch {
+            } catch (e) {
+                console.error('[ManageTeamView] approve error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to approve request'))
             }
         },
@@ -717,7 +697,8 @@ export default {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/reject/${req.userId}`))
                 showSuccess(t('teamhub', 'Request rejected'))
                 await this.loadPendingRequests()
-            } catch {
+            } catch (e) {
+                console.error('[ManageTeamView] reject error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to reject request'))
             }
         },
@@ -729,6 +710,7 @@ export default {
                 showSuccess(t('teamhub', 'Team deleted'))
                 this.$emit('team-deleted')
             } catch (error) {
+                console.error('[ManageTeamView] confirmDeleteTeam error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to delete team') + (msg ? ': ' + msg : ''))
             } finally {
@@ -737,7 +719,7 @@ export default {
         },
 
         // ------------------------------------------------------------------
-        // Team apps (Talk / Files / Calendar / Deck)
+        // Team apps
         // ------------------------------------------------------------------
 
         async loadTeamApps() {
@@ -747,40 +729,26 @@ export default {
                     axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`)),
                     axios.get(generateUrl('/apps/teamhub/api/v1/apps/check')),
                 ])
-                this.teamApps     = Array.isArray(appsRes.data) ? appsRes.data : []
+                this.teamApps      = Array.isArray(appsRes.data) ? appsRes.data : []
                 this.installedApps = installedRes.data || {}
             } catch (e) {
-                this.teamApps     = []
+                console.error('[ManageTeamView] loadTeamApps error:', e?.response?.data)
+                this.teamApps      = []
                 this.installedApps = {}
             } finally {
                 this.loadingApps = false
             }
         },
 
-        /**
-         * Toggle a built-in app on or off for this team.
-         *
-         * Enabling  → POST /teams/{id}/create-resources  (creates resource + grants access)
-         * Disabling → DELETE /teams/{id}/resources/{appId}  (hard-deletes resource, all data gone)
-         *
-         * The enabled flag is always saved to teamhub_team_apps via the backend,
-         * which now handles both the resource op and the flag upsert in one call
-         * via PUT /teams/{id}/apps.
-         */
         async toggleApp(app, enabled) {
             if (!app.installed) return
-
-            // Disabling = hard delete of all app data. Show confirmation before proceeding.
             if (!enabled) {
                 this.pendingDisableApp = app
                 return
             }
-
-            // Enable path: go straight to the API call
             await this._executeToggleApp(app, true)
         },
 
-        /** Called when the user confirms the hard-delete warning dialog. */
         async confirmDisableApp() {
             const app = this.pendingDisableApp
             this.pendingDisableApp = null
@@ -789,24 +757,19 @@ export default {
         },
 
         cancelDisableApp() {
-            // Revert the switch back to enabled visually
             const existing = this.teamApps.find(a => a.app_id === this.pendingDisableApp?.id)
             if (existing) existing.enabled = true
             this.pendingDisableApp = null
         },
 
-        /** Internal: execute the actual API call after confirmation (or for enable). */
         async _executeToggleApp(app, enabled) {
             this.togglingApp = app.id
-
-            // Optimistic UI update
             const existing = this.teamApps.find(a => a.app_id === app.id)
             if (existing) {
                 existing.enabled = enabled
             } else {
                 this.teamApps.push({ app_id: app.id, enabled })
             }
-
             try {
                 await axios.put(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/apps`),
@@ -818,14 +781,13 @@ export default {
                     showSuccess(t('teamhub', '{name} and all its data have been removed from this team', { name: app.label }))
                 }
             } catch (error) {
-                // Revert optimistic update
                 if (existing) {
                     existing.enabled = !enabled
                 } else {
                     this.teamApps = this.teamApps.filter(a => a.app_id !== app.id)
                 }
+                console.error('[ManageTeamView] _executeToggleApp failed:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
-                console.error('[ManageTeamView] toggleApp failed:', error?.response?.data)
                 showError(t('teamhub', 'Failed to update {name}', { name: app.label }) + (msg ? `: ${msg}` : ''))
                 await this.loadTeamApps()
             } finally {
@@ -834,7 +796,7 @@ export default {
         },
 
         // ------------------------------------------------------------------
-        // Integrations tab
+        // External integrations
         // ------------------------------------------------------------------
 
         async loadIntegrationRegistry() {
@@ -845,6 +807,7 @@ export default {
                 )
                 this.integrationRegistry = Array.isArray(data) ? data : []
             } catch (e) {
+                console.error('[ManageTeamView] loadIntegrationRegistry error:', e?.response?.data)
                 this.integrationRegistry = []
             } finally {
                 this.loadingWidgets = false
@@ -859,12 +822,14 @@ export default {
                     { enable: enabled }
                 )
                 this.integrationRegistry = Array.isArray(data) ? data : this.integrationRegistry
+                await this.$store.dispatch('fetchTeamIntegrations', this.team.id)
                 showSuccess(
                     enabled
                         ? t('teamhub', '{title} enabled for this team', { title: integration.title })
                         : t('teamhub', '{title} disabled for this team', { title: integration.title })
                 )
             } catch (error) {
+                console.error('[ManageTeamView] toggleIntegration error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update integration') + (msg ? `: ${msg}` : ''))
             } finally {
@@ -883,14 +848,12 @@ export default {
                 this.dragSourceWidget = null
                 return
             }
-
-            // Only reorder within the same type group.
             if (this.dragSourceWidget.integration_type !== targetIntegration.integration_type) {
                 this.dragSourceWidget = null
                 return
             }
 
-            const enabled = this.integrationRegistry
+            const enabled = this.externalIntegrations
                 .filter(i => i.enabled && i.integration_type === this.dragSourceWidget.integration_type)
                 .map(i => i.registry_id)
 
@@ -904,7 +867,6 @@ export default {
 
             enabled.splice(srcIdx, 1)
             enabled.splice(tgtIdx, 0, this.dragSourceWidget.registry_id)
-
             this.dragSourceWidget = null
 
             try {
@@ -928,6 +890,7 @@ export default {
                     })
                 }
             } catch (e) {
+                console.error('[ManageTeamView] onDrop reorder error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to save order'))
                 await this.loadIntegrationRegistry()
             }
@@ -938,78 +901,129 @@ export default {
 
 <style scoped>
 .manage-team-view {
-    padding: 40px;
+    padding: 32px 40px;
     max-width: 900px;
     margin: 0 auto;
 }
 
-.manage-team-header { margin-bottom: 32px; }
-.manage-team-header h2 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
-.manage-team-subtitle { color: var(--color-text-maxcontrast); margin: 0; }
+.manage-team-header {
+    margin-bottom: 24px;
+}
+.manage-team-header h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 4px;
+}
+.manage-team-subtitle {
+    color: var(--color-text-maxcontrast);
+    margin: 0;
+}
+
+/* ── Tab bar ─────────────────────────────────────────────────── */
+.manage-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 2px solid var(--color-border);
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+.manage-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 16px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--color-text-maxcontrast);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--border-radius-large) var(--border-radius-large) 0 0;
+    margin-bottom: -2px;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+
+.manage-tab:hover {
+    color: var(--color-main-text);
+    background: var(--color-background-hover);
+}
+
+.manage-tab--active {
+    color: var(--color-primary-element);
+    border-bottom-color: var(--color-primary-element);
+    background: transparent;
+}
+
+.manage-tab--active:hover {
+    background: color-mix(in srgb, var(--color-primary-element) 6%, transparent);
+}
+
+/* Danger tab styling */
+.manage-tab--danger:hover {
+    color: var(--color-error);
+}
+.manage-tab--danger.manage-tab--active {
+    color: var(--color-error);
+    border-bottom-color: var(--color-error);
+}
+
+/* ── Sections ─────────────────────────────────────────────────── */
+.manage-tab-content {
+    display: flex;
+    flex-direction: column;
+}
 
 .manage-section {
     margin-bottom: 36px;
     padding-bottom: 36px;
     border-bottom: 1px solid var(--color-border);
 }
-.manage-section:last-child { border-bottom: none; }
-.manage-section h3 { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
+.manage-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+.manage-section h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 16px;
+}
 
-.section-loading { padding: 12px 0; }
+.manage-section-desc {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    margin: -8px 0 16px;
+}
+
+.section-loading {
+    padding: 12px 0;
+}
 
 /* Description */
-.manage-description-form { display: flex; flex-direction: column; gap: 12px; }
-.manage-description-actions { display: flex; justify-content: flex-end; }
-
-/* Team apps */
-.team-apps-list {
+.manage-description-form {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-}
-
-.team-app-item {
-    display: flex;
-    align-items: center;
     gap: 12px;
-    padding: 10px 12px;
-    border-radius: var(--border-radius-large);
-    background: var(--color-background-dark);
 }
-
-.team-app-icon {
+.manage-description-actions {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--border-radius);
-    background: var(--color-primary-element-light);
-    color: var(--color-primary-element);
-    flex-shrink: 0;
-}
-
-.team-app-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.team-app-name {
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.team-app-desc {
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
+    justify-content: flex-end;
 }
 
 /* Settings */
-.manage-settings { display: flex; flex-direction: column; gap: 20px; }
-.manage-settings-group { display: flex; flex-direction: column; gap: 4px; }
+.manage-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.manage-settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
 .manage-settings-group h4 {
     font-size: 12px;
     font-weight: 700;
@@ -1027,8 +1041,53 @@ export default {
     margin: 4px 0 0;
 }
 
+/* Team apps */
+.team-apps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.team-app-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark);
+}
+.team-app-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--border-radius);
+    background: var(--color-primary-element-light);
+    color: var(--color-primary-element);
+    flex-shrink: 0;
+}
+.team-app-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.team-app-name {
+    font-size: 14px;
+    font-weight: 500;
+}
+.team-app-desc {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+}
+
 /* Members */
-.members-list { display: flex; flex-direction: column; gap: 8px; }
+.members-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
 .member-item {
     display: flex;
     align-items: center;
@@ -1050,10 +1109,15 @@ export default {
     font-weight: 700;
     flex-shrink: 0;
 }
-.member-info { flex: 1; display: flex; flex-direction: column; }
-.member-name { font-size: 14px; font-weight: 500; }
-
-/* Role dropdown */
+.member-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.member-name {
+    font-size: 14px;
+    font-weight: 500;
+}
 .member-level-select {
     padding: 5px 8px;
     border-radius: var(--border-radius);
@@ -1075,9 +1139,16 @@ export default {
     text-align: center;
 }
 
-/* Pending */
-.no-pending { font-size: 14px; color: var(--color-text-maxcontrast); }
-.pending-list { display: flex; flex-direction: column; gap: 10px; }
+/* Pending requests */
+.no-pending {
+    font-size: 14px;
+    color: var(--color-text-maxcontrast);
+}
+.pending-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
 .pending-item {
     display: flex;
     align-items: center;
@@ -1086,39 +1157,30 @@ export default {
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-large);
 }
-.pending-info { flex: 1; display: flex; flex-direction: column; }
-.pending-name { font-size: 14px; font-weight: 500; }
-.pending-date { font-size: 12px; color: var(--color-text-maxcontrast); }
-.pending-actions { display: flex; gap: 8px; }
-
-/* Danger zone */
-.manage-section--danger {
-    border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-error);
-    border-radius: var(--border-radius-large);
-    padding: 20px 24px;
-    margin-top: 8px;
-    background: color-mix(in srgb, var(--color-error) 5%, transparent);
-}
-.manage-section--danger h3 { color: var(--color-error); }
-.manage-danger-row {
+.pending-info {
+    flex: 1;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
+    flex-direction: column;
 }
-.manage-danger-info { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-.manage-danger-title { font-size: 14px; font-weight: 500; }
-.manage-danger-desc { font-size: 13px; color: var(--color-text-maxcontrast); }
+.pending-name {
+    font-size: 14px;
+    font-weight: 500;
+}
+.pending-date {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+}
+.pending-actions {
+    display: flex;
+    gap: 8px;
+}
 
-/* Widgets section */
+/* Integrations */
 .widgets-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
-
 .widget-item {
     display: flex;
     align-items: center;
@@ -1128,11 +1190,9 @@ export default {
     background: var(--color-background-dark);
     transition: background 0.15s ease;
 }
-
 .widget-item--enabled {
     background: color-mix(in srgb, var(--color-primary-element) 6%, var(--color-background-dark));
 }
-
 .widget-drag-handle {
     display: flex;
     align-items: center;
@@ -1140,20 +1200,16 @@ export default {
     flex-shrink: 0;
     width: 20px;
 }
-
 .widget-drag-handle:not(.widget-drag-handle--placeholder) {
     cursor: grab;
 }
-
 .widget-drag-handle:not(.widget-drag-handle--placeholder):active {
     cursor: grabbing;
 }
-
 .widget-drag-handle--placeholder {
     pointer-events: none;
     opacity: 0;
 }
-
 .widget-info {
     flex: 1;
     display: flex;
@@ -1161,7 +1217,6 @@ export default {
     gap: 2px;
     min-width: 0;
 }
-
 .widget-title {
     font-size: 14px;
     font-weight: 500;
@@ -1169,7 +1224,6 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
 .widget-description {
     font-size: 12px;
     color: var(--color-text-maxcontrast);
@@ -1177,51 +1231,62 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
 .widget-app-id {
     font-size: 11px;
     color: var(--color-text-maxcontrast);
     font-family: monospace;
     opacity: 0.7;
 }
-.widget-app-id {
-    font-size: 11px;
-    color: var(--color-text-maxcontrast);
-    font-family: monospace;
-}
-
-.integrations-group {
-    margin-bottom: 24px;
-}
-
-.integrations-group-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin: 0 0 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--color-border);
-}
-
-.manage-section-desc {
-    font-size: 13px;
-    color: var(--color-text-maxcontrast);
-    margin: -8px 0 16px;
-}
-
 .widget-badge {
     display: inline-block;
     font-size: 10px;
     font-weight: 600;
-    background: var(--color-primary-element-light);
-    color: var(--color-primary-element);
     border-radius: var(--border-radius-pill);
     padding: 1px 6px;
     margin-left: 6px;
     vertical-align: middle;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+}
+.widget-badge--widget {
+    background: color-mix(in srgb, var(--color-primary-element) 15%, transparent);
+    color: var(--color-primary-element);
+}
+.widget-badge--tab {
+    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    color: var(--color-success, #46ba61);
+}
+
+/* Danger zone */
+.manage-section--danger {
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-error);
+    border-radius: var(--border-radius-large);
+    padding: 20px 24px;
+    background: color-mix(in srgb, var(--color-error) 5%, transparent);
+}
+.manage-section--danger h3 {
+    color: var(--color-error);
+}
+.manage-danger-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.manage-danger-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+}
+.manage-danger-title {
+    font-size: 14px;
+    font-weight: 500;
+}
+.manage-danger-desc {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
 }
 </style>
