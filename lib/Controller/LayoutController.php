@@ -8,6 +8,8 @@ use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\IDBConnection;
 use OCP\IRequest;
 use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
@@ -127,6 +129,7 @@ class LayoutController extends Controller {
         IRequest $request,
         private LayoutMapper $layoutMapper,
         private IUserSession $userSession,
+        private IDBConnection $db,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -152,6 +155,14 @@ class LayoutController extends Controller {
             return new JSONResponse(['error' => 'Invalid team ID'], Http::STATUS_BAD_REQUEST);
         }
 
+        // Verify the user is a member of this team before returning layout data.
+        if ($this->getMemberLevel($teamId, $userId) === 0) {
+            $this->logger->warning('LayoutController::getLayout — non-member access attempt', [
+                'teamId' => $teamId,
+                'userId' => $userId,
+            ]);
+            return new JSONResponse(['error' => 'Access denied'], Http::STATUS_FORBIDDEN);
+        }
 
         $row = $this->layoutMapper->find($userId, $teamId);
 
@@ -190,6 +201,15 @@ class LayoutController extends Controller {
                 'teamId' => $teamId, 'userId' => $userId,
             ]);
             return new JSONResponse(['error' => 'Invalid team ID'], Http::STATUS_BAD_REQUEST);
+        }
+
+        // Verify the user is a member of this team before saving their layout.
+        if ($this->getMemberLevel($teamId, $userId) === 0) {
+            $this->logger->warning('LayoutController::saveLayout — non-member access attempt', [
+                'teamId' => $teamId,
+                'userId' => $userId,
+            ]);
+            return new JSONResponse(['error' => 'Access denied'], Http::STATUS_FORBIDDEN);
         }
 
         $params = $this->request->getParams();
@@ -314,5 +334,23 @@ class LayoutController extends Controller {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Direct DB lookup for a user's member level in a team (0 = not a member).
+     * Uses the same indexed query as MemberService::getMemberLevelFromDb().
+     */
+    private function getMemberLevel(string $teamId, string $userId): int {
+        $qb     = $this->db->getQueryBuilder();
+        $result = $qb->select('level')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id',   $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('status',    $qb->createNamedParameter('Member')))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (int)$row['level'] : 0;
     }
 }

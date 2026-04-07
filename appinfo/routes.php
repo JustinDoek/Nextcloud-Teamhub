@@ -105,7 +105,6 @@ return [
         // Integration — team render endpoints (called on team select)
         ['name' => 'integration#getEnabledIntegrations', 'url' => '/api/v1/teams/{teamId}/integrations',                              'verb' => 'GET'],
         ['name' => 'integration#getWidgetData',          'url' => '/api/v1/teams/{teamId}/integrations/widget-data/{registryId}',     'verb' => 'GET'],
-        ['name' => 'integration#getWidgetAction',        'url' => '/api/v1/teams/{teamId}/integrations/action/{registryId}',          'verb' => 'GET'],
 
         // Integration — Manage Team → Integrations tab
         ['name' => 'integration#getIntegrationRegistry', 'url' => '/api/v1/teams/{teamId}/integrations/registry',                    'verb' => 'GET'],

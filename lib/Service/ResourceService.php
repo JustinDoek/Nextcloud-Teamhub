@@ -49,6 +49,23 @@ class ResourceService {
             'app'    => Application::APP_ID,
         ]);
 
+        // Verify the current user is actually a member of this team before
+        // returning Talk tokens, file paths, or calendar IDs.
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+        $db          = $this->container->get(\OCP\IDBConnection::class);
+        $memberLevel = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+        if ($memberLevel === 0) {
+            $this->logger->warning('[ResourceService] getTeamResources — non-member access attempt', [
+                'teamId' => $teamId,
+                'userId' => $user->getUID(),
+                'app'    => Application::APP_ID,
+            ]);
+            throw new \Exception('Access denied');
+        }
+
         $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null];
 
         try {
@@ -1614,5 +1631,24 @@ class ResourceService {
         }
 
         return [];
+    }
+
+    /**
+     * Direct DB lookup for a user's member level in a team (0 = not a member).
+     * Duplicated from MemberService to avoid a circular dependency
+     * (MemberService injects ResourceService).
+     */
+    private function getMemberLevelFromDb(\OCP\IDBConnection $db, string $teamId, string $userId): int {
+        $qb     = $db->getQueryBuilder();
+        $result = $qb->select('level')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id',   $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('status',    $qb->createNamedParameter('Member')))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (int)$row['level'] : 0;
     }
 }

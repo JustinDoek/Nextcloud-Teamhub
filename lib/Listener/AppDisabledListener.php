@@ -44,14 +44,17 @@ class AppDisabledListener implements IEventListener {
         ]);
 
         try {
-            $this->integrationService->deregisterIntegration($appId, calledInProcess: true);
-            $this->logger->info('AppDisabledListener::handle — deregisterIntegration completed', [
+            // suspendIntegration() clears php_class/iframe_url but keeps the
+            // registry row and all team opt-ins intact. The ID never changes.
+            // When the app is re-enabled, boot() calls registerIntegration()
+            // which upserts the class back in — team admins never need to
+            // re-enable widgets after an app update or disable/enable cycle.
+            $this->integrationService->suspendIntegration($appId);
+            $this->logger->info('AppDisabledListener::handle — suspendIntegration completed', [
                 'app_id' => $appId,
             ]);
         } catch (\Throwable $e) {
-            // deregisterIntegration() throws for built-in app IDs. That is
-            // expected and harmless — log at debug level only.
-            $this->logger->debug('AppDisabledListener::handle — deregisterIntegration skipped or failed', [
+            $this->logger->debug('AppDisabledListener::handle — suspendIntegration skipped or failed', [
                 'app_id' => $appId,
                 'reason' => $e->getMessage(),
             ]);

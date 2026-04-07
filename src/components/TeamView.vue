@@ -243,6 +243,14 @@
                                 <AccountGroup :size="25" />
                                 <span class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ members.length }})</span>
                                 <button
+                                    v-if="isTeamModerator && !editMode"
+                                    class="teamhub-widget-invite-btn"
+                                    :aria-label="t('teamhub', 'Invite members')"
+                                    :title="t('teamhub', 'Invite members')"
+                                    @click.stop="showInviteModal = true">
+                                    <AccountPlus :size="18" />
+                                </button>
+                                <button
                                     class="teamhub-widget-collapse-btn"
                                     :aria-label="isCollapsed('widget-members') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
                                     @click.stop="toggleCollapse('widget-members')">
@@ -420,14 +428,24 @@
                                     @error="onAppIconError($event)" />
                                 <Puzzle v-else :size="25" />
                                 <span class="teamhub-widget-title">{{ widget.title }}</span>
-                                <!-- Action button in header — triggers modal inside IntegrationWidget -->
+                                <!-- Dynamic 3-dot action menu — populated reactively from
+                                     widgetDynamicActions after IntegrationWidget emits
+                                     'actions-loaded'. Supports multiple actions from the
+                                     data endpoint, falling back to the single registration
+                                     action_url when the endpoint returns none. -->
                                 <NcActions
-                                    v-if="widget.action_url"
+                                    v-if="widgetDynamicActions[widget.registry_id] && widgetDynamicActions[widget.registry_id].length"
                                     class="teamhub-widget-actions">
                                     <NcActionButton
-                                        @click="triggerWidgetAction(widget.registry_id)">
-                                        <template #icon><Plus :size="20" /></template>
-                                        {{ widget.action_label || t('teamhub', 'Action') }}
+                                        v-for="action in widgetDynamicActions[widget.registry_id]"
+                                        :key="action.label"
+                                        @click="triggerWidgetAction(widget.registry_id, action)">
+                                        <template #icon>
+                                            <component
+                                                :is="resolveWidgetActionIcon(action.icon)"
+                                                :size="20" />
+                                        </template>
+                                        {{ action.label }}
                                     </NcActionButton>
                                 </NcActions>
                                 <button
@@ -442,7 +460,8 @@
                                 <IntegrationWidget
                                     :ref="'intWidget-' + widget.registry_id"
                                     :integration="widget"
-                                    :team-id="currentTeamId" />
+                                    :team-id="currentTeamId"
+                                    @actions-loaded="onWidgetActionsLoaded" />
                             </div>
                         </div>
                     </grid-item>
@@ -539,8 +558,18 @@ import VideoIcon from 'vue-material-design-icons/Video.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import DragVariant from 'vue-material-design-icons/DragVariant.vue'
+import ChartBar from 'vue-material-design-icons/ChartBar.vue'
+import Bell from 'vue-material-design-icons/Bell.vue'
+import ViewDashboard from 'vue-material-design-icons/ViewDashboard.vue'
+import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
+import FileDocument from 'vue-material-design-icons/FileDocument.vue'
 import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
+import Delete from 'vue-material-design-icons/Delete.vue'
+import AlertCircle from 'vue-material-design-icons/AlertCircle.vue'
+import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
+import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import Minus from 'vue-material-design-icons/Minus.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -580,6 +609,7 @@ export default {
         CheckboxMarkedOutline, Plus, OpenInNew, InformationOutline,
         AccountGroup, ClockOutline, FileDocumentOutline,
         ContentCopy, AccountPlus, Cog, VideoIcon, Puzzle,
+        ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
         ViewDashboardEdit, DragVariant, ChevronUp, ChevronDown,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget, ActivityFeedView,
@@ -607,6 +637,12 @@ export default {
             showScheduleMeeting: false,
             showAddEvent:        false,
             showAddTask:         false,
+
+            // ── Integration widget dynamic actions ────────────────────
+            // Keyed by registry_id (number). Populated when IntegrationWidget emits
+            // 'actions-loaded'. Shape: { [registryId]: [ { label, icon?, url, isModalAction? } ] }
+            // Must be declared here (not added ad-hoc) so Vue tracks it reactively.
+            widgetDynamicActions: {},
         }
     },
 
@@ -630,6 +666,15 @@ export default {
             if (!uid) return false
             const m = this.members.find(m => m.userId === uid)
             return m && m.level >= 8
+        },
+
+        // Moderators (level 4+) can invite members, not just admins.
+        isTeamModerator() {
+            if (!this.members || !Array.isArray(this.members) || !this.members.length) return false
+            const uid = getCurrentUser()?.uid
+            if (!uid) return false
+            const m = this.members.find(m => m.userId === uid)
+            return m && m.level >= 4
         },
 
         talkUrl() {
@@ -922,6 +967,33 @@ export default {
             return supported.includes(iconName) ? iconName : 'Puzzle'
         },
 
+        /**
+         * Resolve an MDI icon name from an integration action descriptor to a
+         * registered Vue component. Uses the same icon set as IntegrationWidget.
+         * Returns Puzzle when the name is absent or unrecognised.
+         */
+        resolveWidgetActionIcon(iconName) {
+            const WIDGET_ACTION_ICONS = {
+                Puzzle:              Puzzle,
+                CalendarMonth:       Calendar,
+                ViewDashboard:       ViewDashboard,
+                AccountGroup:        AccountGroup,
+                ChartBar:            ChartBar,
+                Bell:                Bell,
+                FileDocument:        FileDocument,
+                CheckCircle:         CheckCircle,
+                AlertCircle:         AlertCircle,
+                Message:             MessageOutline,
+                Folder:              Folder,
+                Plus:                Plus,
+                ArrowRight:          ArrowRight,
+                FormatListBulleted:  FormatListBulleted,
+                Delete:              Delete,
+                Minus:               Minus,
+            }
+            return (iconName && WIDGET_ACTION_ICONS[iconName]) ? WIDGET_ACTION_ICONS[iconName] : Puzzle
+        },
+
         menuItemUrl(menuItem) {
             if (!menuItem.iframe_url) return ''
             const sep = menuItem.iframe_url.includes('?') ? '&' : '?'
@@ -941,13 +1013,24 @@ export default {
             }
         },
 
-        triggerWidgetAction(registryId) {
-            const ref = this.$refs[`intWidget-${registryId}`]
-            if (ref) {
-                ref.openAction()
-            } else {
-                console.warn('[TeamView] triggerWidgetAction ref not found:', registryId)
+        triggerWidgetAction(registryId, action) {
+            if (!action || !action.url) {
+                console.warn('[TeamView] triggerWidgetAction — action has no url', { registryId, action })
+                return
             }
+            window.open(action.url, '_blank', 'noopener,noreferrer')
+        },
+
+        /**
+         * Called when an IntegrationWidget finishes loadData().
+         * Stores the effective actions array for that widget so the card header
+         * NcActions menu updates reactively.
+         *
+         * Uses this.$set() because widgetDynamicActions keys are added dynamically
+         * and Vue 2 cannot detect property addition otherwise.
+         */
+        onWidgetActionsLoaded({ registryId, actions }) {
+            this.$set(this.widgetDynamicActions, registryId, actions || [])
         },
 
         // ── Team actions ──────────────────────────────────────────────
@@ -1230,6 +1313,30 @@ export default {
 }
 
 .teamhub-widget-collapse-btn:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* Invite members button — same shape as collapse btn, sits just left of it */
+.teamhub-widget-invite-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--color-primary-element);
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    opacity: 0.8;
+    transition: opacity 0.15s, background 0.15s;
+    flex-shrink: 0;
+    margin-right: 2px;
+}
+
+.teamhub-widget-invite-btn:hover {
     opacity: 1;
     background: rgba(255, 255, 255, 0.15);
 }

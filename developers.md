@@ -10,59 +10,84 @@ TeamHub supports two ways to extend a team workspace:
 
 | Type | Where it appears | How data is delivered |
 |---|---|---|
-| **Sidebar widget** | Right-hand sidebar on the Home and Activity views | TeamHub calls your API server-side; you return a structured list of items |
+| **Sidebar widget** | Right-hand sidebar on the Home and Activity views | Your app implements `ITeamHubWidget` — TeamHub calls it directly in-process via NC's DI container. No HTTP. |
 | **Menu item** | Tab bar alongside Talk, Files, Calendar, Deck | Your app opens in a sandboxed iframe in the main canvas |
 
-Both types are registered once via a REST call from your app. Team admins then enable each integration per team from **Manage Team → Integrations**.
+Both types are registered once from your app's `Application::boot()`. Team admins then enable each integration per team from **Manage Team → Integrations**.
 
 ---
 
-## Registering an integration
+## Architecture — why no HTTP calls
 
-Your app calls TeamHub's registration endpoint when it is first enabled or configured. The call is idempotent — calling it again updates the existing registration.
+All TeamHub integrations are Nextcloud apps installed on the **same NC instance** as TeamHub. This means your code and TeamHub's code run in the same PHP process on the same server. There is no need to make HTTP calls between them — and in fact, Nextcloud 28+ actively blocks such calls via its loopback guard (`LocalAddressChecker`).
 
-### Endpoint
+TeamHub solves this cleanly: widget integrations deliver data by implementing a PHP interface (`ITeamHubWidget`). TeamHub resolves your class from NC's DI container and calls it directly. This approach is:
 
-```
-POST /apps/teamhub/api/v1/ext/integrations/register
-Content-Type: application/json
-```
+- **Simple** — implement one interface method, register one class name
+- **Robust** — no network, no ports, no DNS, no TLS, no routing
+- **Secure** — no credentials forwarded over HTTP, no SSRF surface
+- **Scalable** — works identically on single-server and complex load-balanced NC deployments
 
-### Parameters
+---
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `app_id` | string | ✅ | Your Nextcloud app ID (must match an installed, enabled app) |
-| `integration_type` | string | ✅ | `widget` or `menu_item` |
-| `title` | string | ✅ | Label shown in the sidebar header or tab bar (max 255 chars) |
-| `description` | string | — | Short description shown in Manage Team → Integrations (max 500 chars) |
-| `icon` | string | — | MDI icon name (e.g. `ChartBar`, `Bell`, `AccountGroup`). Defaults to `Puzzle`. |
+## Sidebar widgets — PHP interface
 
-**For `widget` only:**
+### Step 1 — Implement `ITeamHubWidget`
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `data_url` | string | ✅ | URL TeamHub calls server-side to fetch widget data. Relative NC path (`/apps/myapp/api/…`) or absolute `https://` |
-| `action_url` | string | — | URL TeamHub calls to get the action modal definition. Same rules as `data_url` |
-| `action_label` | string | — | Label for the 3-dot action menu item (max 64 chars) |
-
-**For `menu_item` only:**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `iframe_url` | string | ✅ | URL loaded in the sandboxed canvas iframe. Must be `https://` |
-
-### How to call the registration endpoint
-
-> ⚠️ **Do not use `IClientService` (HTTP) to call TeamHub from within PHP.**
-> Nextcloud 28+ blocks HTTP requests that resolve to `127.0.0.1` (loopback guard). Any `$client->post('http://localhost/…')` call will fail with a connection error.
-
-Register by calling TeamHub's `IntegrationService` **directly in-process** via constructor injection. Do this from your app's `Application::boot()` or a dedicated `IBootstrap` implementation.
-
-### Example — registering a widget
+Create a class in your app that implements `OCA\TeamHub\Integration\ITeamHubWidget`:
 
 ```php
-// lib/AppInfo/Application.php in your app
+<?php
+declare(strict_types=1);
+
+namespace OCA\MyApp\Integration;
+
+use OCA\TeamHub\Integration\ITeamHubWidget;
+use OCA\MyApp\Service\MyService;
+
+class TeamHubWidget implements ITeamHubWidget {
+
+    public function __construct(
+        private MyService $myService,
+    ) {}
+
+    public function getWidgetData(string $teamId, string $userId): array {
+
+        // Always validate access before returning data.
+        $items = $this->myService->getItemsForTeam($teamId, $userId);
+
+        return [
+            'items' => array_map(fn($item) => [
+                'label' => $item->title,
+                'value' => $item->status,
+                'icon'  => 'CheckCircle',
+                'url'   => '/apps/myapp/items/' . $item->id,
+            ], array_slice($items, 0, 20)),
+
+            // Optional: populate the 3-dot action menu in the widget header.
+            'actions' => [
+                [
+                    'label' => 'New Item',
+                    'icon'  => 'Plus',
+                    'url'   => '/apps/myapp/teams/' . $teamId . '/new',
+                ],
+                [
+                    'label' => 'View All',
+                    'icon'  => 'ArrowRight',
+                    'url'   => '/apps/myapp/teams/' . $teamId,
+                ],
+            ],
+        ];
+    }
+}
+```
+
+### Step 2 — Register in `Application::boot()`
+
+```php
+<?php
+declare(strict_types=1);
+
 namespace OCA\MyApp\AppInfo;
 
 use OCP\AppFramework\App;
@@ -77,191 +102,152 @@ class Application extends App implements IBootstrap {
     }
 
     public function register(IRegistrationContext $context): void {
-        // Register your own services here.
+        // Register your own services here as normal.
     }
 
     public function boot(IBootContext $context): void {
-        // Resolve TeamHub's IntegrationService directly — no HTTP call needed.
         try {
-            /** @var \OCA\TeamHub\Service\IntegrationService $teamhubService */
-            $teamhubService = $context->getServerContainer()->get(
+            /** @var \OCA\TeamHub\Service\IntegrationService $teamHub */
+            $teamHub = $context->getServerContainer()->get(
                 \OCA\TeamHub\Service\IntegrationService::class
             );
 
-            $teamhubService->registerIntegration(
+            $teamHub->registerIntegration(
                 appId:           'myapp',
                 integrationType: 'widget',
                 title:           'My Widget',
                 description:     'Shows recent items from My App',
                 icon:            'ChartBar',
-                dataUrl:         '/apps/myapp/api/teamhub/widget-data',
-                actionUrl:       '/apps/myapp/api/teamhub/widget-action',
-                actionLabel:     'Create item',
+                phpClass:        \OCA\MyApp\Integration\TeamHubWidget::class,
                 calledInProcess: true,  // required — no web session exists during boot()
             );
+
         } catch (\Throwable $e) {
-            // TeamHub may not be installed — fail silently.
+            // TeamHub may not be installed — always fail silently.
             \OC::$server->get(\Psr\Log\LoggerInterface::class)->debug(
-                'MyApp: TeamHub integration registration skipped: ' . $e->getMessage()
+                'MyApp: TeamHub registration skipped: ' . $e->getMessage(),
+                ['app' => 'myapp']
             );
         }
     }
 }
 ```
 
-### Example — registering a menu item
+### `getWidgetData()` response shape
 
 ```php
-$teamhubService->registerIntegration(
+return [
+    'items' => [                           // required, may be empty array
+        [
+            'label' => 'string',           // required — primary text
+            'value' => 'string',           // required — secondary text (status, count, date...)
+            'icon'  => 'MDI name',         // optional — see Icon reference below
+            'url'   => '/apps/myapp/...',  // optional — makes the item a clickable link
+        ],
+        // Maximum 20 items. Additional items are silently dropped by TeamHub.
+    ],
+
+    'actions' => [                         // optional — populates the widget 3-dot header menu
+        [
+            'label' => 'string',           // required
+            'icon'  => 'MDI name',         // optional
+            'url'   => '/apps/myapp/...',  // required — relative NC path or https://
+        ],
+        // Maximum 10 actions.
+    ],
+];
+```
+
+**Action URLs** in the `actions[]` array are browser-navigation links — they open in a new tab when clicked. They may be relative NC paths (`/apps/myapp/...`) or absolute `https://` URLs. These are not called server-side.
+
+### Security rules for `getWidgetData()`
+
+- **Always validate** that `$userId` is a member of `$teamId` before returning data. TeamHub passes the currently authenticated user's NC ID — treat it as trusted.
+- **Never return data** the user should not have access to.
+- **Throw freely** — any `\Throwable` is caught by TeamHub. The widget renders an empty/error state rather than crashing the page.
+- TeamHub calls `getWidgetData()` synchronously. Keep it fast — aim for under 500ms. Cache aggressively where possible.
+
+### Deregistering
+
+Call `deregisterIntegration()` from your app's disable/uninstall hook or `AppDisabledListener`:
+
+```php
+$teamHub->deregisterIntegration('myapp', calledInProcess: true);
+```
+
+This cascade-deletes all per-team opt-ins.
+
+---
+
+## Menu items — iframe
+
+Menu items load your app in a sandboxed iframe in the main canvas when the user clicks your tab.
+
+### Registering a menu item
+
+```php
+$teamHub->registerIntegration(
     appId:           'myapp',
     integrationType: 'menu_item',
     title:           'My App',
     description:     'Open My App for this team',
     icon:            'ViewDashboard',
     iframeUrl:       'https://my-nextcloud.example.com/apps/myapp/team-view',
-    calledInProcess: true,  // required — no web session exists during boot()
+    calledInProcess: true,
 );
 ```
 
-### Deregistering
-
-Call `deregisterIntegration()` the same way — in-process from your app's uninstall hook or `occ` command. Do **not** make an HTTP DELETE request.
-
-```php
-$teamhubService->deregisterIntegration('myapp', calledInProcess: true);
-```
-
-This cascade-deletes all per-team opt-ins. The `calledInProcess: true` parameter bypasses the web-session admin check — the same in-process security model applies.
-
----
-
-## Sidebar widgets — data endpoint
-
-When a team member opens TeamHub, the sidebar fetches data from your `data_url` for each enabled widget.
-
-### What TeamHub sends
-
-TeamHub makes a server-side `GET` request to your endpoint with `teamId` appended as a query parameter:
-
-```
-GET /apps/myapp/api/teamhub/widget-data?teamId=<circle-id>
-```
-
-### What you must return
-
-```json
-{
-  "items": [
-    {
-      "label": "Ticket #42",
-      "value": "Open",
-      "icon": "AlertCircle",
-      "url": "https://my-nextcloud.example.com/apps/myapp/tickets/42"
-    },
-    {
-      "label": "Ticket #38",
-      "value": "In Progress",
-      "icon": "CheckCircle"
-    }
-  ]
-}
-```
-
-**Item fields:**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `label` | string | ✅ | Primary text displayed |
-| `value` | string | ✅ | Secondary text (status, count, date…) |
-| `icon` | string | — | MDI icon name rendered next to the label |
-| `url` | string | — | If present, the item becomes a link (opens in new tab) |
-
-**Rules:**
-- Maximum 20 items returned. Items beyond 20 are silently dropped.
-- Respond within 5 seconds or TeamHub will show an error state.
-- Return HTTP 200 even for empty results: `{ "items": [] }`
-
-### Authentication
-
-TeamHub calls your endpoint as a server-to-server request. Validate the request is coming from within the same Nextcloud instance by checking for a valid NC session or using an internal shared secret you configure in your app's settings.
-
----
-
-## Sidebar widgets — action modal
-
-If you register an `action_url`, a 3-dot menu appears in the widget header with your `action_label`. When clicked, TeamHub fetches the action definition from your endpoint and renders a modal.
-
-### What TeamHub sends
-
-```
-GET /apps/myapp/api/teamhub/widget-action?teamId=<circle-id>
-```
-
-### What you must return
-
-```json
-{
-  "title": "Create Ticket",
-  "submit_label": "Create",
-  "fields": [
-    { "name": "subject",  "label": "Subject",      "type": "text"     },
-    { "name": "priority", "label": "Priority",     "type": "text",  "value": "normal" },
-    { "name": "body",     "label": "Description",  "type": "textarea" }
-  ]
-}
-```
-
-**Field types supported:** `text`, `email`, `textarea`, `checkbox`
-
-When the user submits the modal, TeamHub POSTs to your `action_url`:
-
-```
-POST /apps/myapp/api/teamhub/widget-action
-Content-Type: application/json
-
-{
-  "teamId": "<circle-id>",
-  "fields": {
-    "subject":  "My new ticket",
-    "priority": "high",
-    "body":     "Details here"
-  }
-}
-```
-
-After a successful POST, TeamHub automatically refreshes the widget data.
-
----
-
-## Menu items — iframe
-
-When a user clicks your menu item tab, TeamHub loads your `iframe_url` in the main canvas with `teamId` appended:
-
-```
-https://my-nextcloud.example.com/apps/myapp/team-view?teamId=<circle-id>
-```
+`iframe_url` must be absolute `https://`. TeamHub appends `?teamId=<circle-id>` when loading the iframe.
 
 ### iframe sandbox policy
 
-Your iframe runs under this sandbox attribute:
-
 ```
 sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
-```
-
-`allow-same-origin` is granted for menu items (unlike the old widget iframe design) because your app is a first-party NC app hosted on the same origin. This lets you use NC's session cookie. Cross-origin `iframe_url` values are still accepted but will have limited cookie access per browser SameSite policy.
-
-### Referrer policy
-
-```
 referrerpolicy="strict-origin-when-cross-origin"
 ```
+
+Serve your iframe page with:
+
+```php
+header("Content-Security-Policy: frame-ancestors 'self'");
+```
+
+---
+
+## `registerIntegration()` parameters
+
+> **Naming: PHP vs REST API**
+> The PHP method uses **camelCase named parameters** (`phpClass`, `iframeUrl`).
+> The REST API JSON body uses **snake_case keys** (`php_class`, `iframe_url`).
+> These refer to the same fields. Always use camelCase when calling from PHP.
+
+| PHP named parameter | REST API JSON key | Type | Required | Description |
+|---|---|---|---|---|
+| `appId` | `app_id` | string | YES | Your NC app ID (must match an installed, enabled app) |
+| `integrationType` | `integration_type` | string | YES | `widget` or `menu_item` |
+| `title` | `title` | string | YES | Label shown in the sidebar header or tab bar (max 255 chars) |
+| `description` | `description` | string | no | Short description in Manage Team → Integrations (max 500 chars) |
+| `icon` | `icon` | string | no | MDI icon name (e.g. `ChartBar`). Defaults to `Puzzle`. |
+| `phpClass` | `php_class` | string | YES for widget | Fully-qualified class name implementing `ITeamHubWidget` |
+| `iframeUrl` | `iframe_url` | string | YES for menu_item | Must be absolute `https://` |
+| `calledInProcess` | *(not in REST API)* | bool | YES | Always `true` when called from `boot()` |
+
+`phpClass` and `iframeUrl` are mutually exclusive. Passing both throws immediately.
+
+---
+
+## Team admin flow
+
+1. Your app is installed and `boot()` runs — `registerIntegration()` is called.
+2. The integration appears in **Manage Team → Integrations** for every team admin.
+3. The admin enables your integration for their team.
+4. TeamHub immediately renders your widget or shows your tab for that team.
+
+Registration is **idempotent** — calling it again on re-enable updates the existing record.
 
 ---
 
 ## Icon reference
-
-These MDI icon names are supported in TeamHub. Pass the name string exactly as shown.
 
 | Name | Usage |
 |---|---|
@@ -276,57 +262,36 @@ These MDI icon names are supported in TeamHub. Pass the name string exactly as s
 | `AlertCircle` | Warnings, issues |
 | `Message` | Chat, messages |
 | `Folder` | Files, storage |
-
----
-
-## Team admin flow
-
-1. Your app is installed and calls `POST /apps/teamhub/api/v1/ext/integrations/register`.
-2. The integration appears in **Manage Team → Integrations** for every team admin.
-3. The admin checks the checkbox next to your integration to enable it for their team.
-4. TeamHub immediately starts rendering your widget in the sidebar or showing your tab.
-
-Built-in integrations (Talk, Files, Calendar, Deck) follow the same enable/disable flow — team admins can turn them off from the same screen.
+| `Plus` | Add, create |
+| `ArrowRight` | Navigate, view all |
+| `FormatListBulleted` | Lists |
+| `Delete` | Delete, remove (destructive actions) |
+| `Minus` | Remove, subtract |
 
 ---
 
 ## Versioning and compatibility
 
-| TeamHub version | API version | NC min |
+| TeamHub version | Integration model | NC min |
 |---|---|---|
-| 2.27.0+ | v1 | NC32 |
+| 2.41+ | PHP interface (`ITeamHubWidget`) | NC32 |
+| 2.27-2.40 | HTTP `data_url` (removed) | NC32 |
 
-The integration API is versioned at `/api/v1/`. Non-breaking additions (new optional fields) will not bump the version. Breaking changes will introduce `/api/v2/`.
-
----
-
-## Error handling
-
-All registration and data endpoints return JSON. On error:
-
-```json
-{ "error": "Human-readable message" }
-```
-
-HTTP status codes:
-
-| Code | Meaning |
-|---|---|
-| 200 | Success (including upsert on re-registration) |
-| 400 | Validation error (see `error` field) |
-| 403 | Forbidden (NC admin required for register and deregister) |
-| 500 | Server error |
+Apps registered with the old `data_url` model must be updated to implement `ITeamHubWidget`.
 
 ---
 
-## Security checklist for your integration
+## Common mistakes
 
-- ✅ Validate `teamId` in your data/action endpoints — only return data the requesting user has access to in that team.
-- ✅ Use NC's `IUserSession` to verify the user is authenticated before serving data.
-- ✅ For `data_url` and `action_url`: accept only `GET`/`POST` from within the NC instance.
-- ✅ For `iframe_url`: serve with `Content-Security-Policy: frame-ancestors 'self'` to prevent your page being embedded elsewhere.
-- ✅ Treat `teamId` as untrusted input — validate it is a real circle the user belongs to before returning sensitive data.
-- ✅ Never return data from `data_url` that the current NC user should not see.
+| Mistake | Symptom | Fix |
+|---|---|---|
+| Using `php_class` (snake_case) as the PHP named parameter | PHP `Unknown named argument` error | Use `phpClass` (camelCase) in your PHP call |
+| Using `phpClass` (camelCase) as the REST API JSON key | 400 — widget has no `php_class` configured | Use `php_class` (snake_case) in JSON body |
+| Omitting `calledInProcess: true` from `boot()` | 403 Forbidden — no NC admin session exists during boot | Always pass `calledInProcess: true` from `boot()` |
+| `phpClass` pointing to a class that does not implement `ITeamHubWidget` | 400 on widget-data load | Ensure your class `implements ITeamHubWidget` |
+| Not wrapping `boot()` registration in `try/catch` | Fatal error when TeamHub is disabled or not installed | Always wrap in `try { ... } catch (\Throwable $e) {}` |
+| Registering a `widget` without `phpClass` | 400 — widget has no `php_class` configured | `widget` type requires `phpClass`; `menu_item` requires `iframeUrl` |
+| `getWidgetData()` returning `{lists: [...]}` instead of `{items: [...]}` | Widget renders empty | Response root key must be `items`, not any other name |
 
 ---
 

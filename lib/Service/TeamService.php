@@ -343,16 +343,22 @@ class TeamService {
         try {
             $manager->getCircle($teamId);
 
-            $db       = $this->container->get(\OCP\IDBConnection::class);
-            $affected = $db->executeStatement(
-                'UPDATE `*PREFIX*circles_circle` SET `description` = ? WHERE `unique_id` = ?',
-                [$description, $teamId]
-            );
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // Try updating the 'description' column (NC32 Circles schema).
+            $qb = $db->getQueryBuilder();
+            $affected = $qb->update('circles_circle')
+                ->set('description', $qb->createNamedParameter($description))
+                ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+                ->executeStatement();
+
+            // Fall back to 'long_desc' for older Circles schema variants.
             if ($affected === 0) {
-                $db->executeStatement(
-                    'UPDATE `*PREFIX*circles_circle` SET `long_desc` = ? WHERE `unique_id` = ?',
-                    [$description, $teamId]
-                );
+                $qb2 = $db->getQueryBuilder();
+                $qb2->update('circles_circle')
+                    ->set('long_desc', $qb2->createNamedParameter($description))
+                    ->where($qb2->expr()->eq('unique_id', $qb2->createNamedParameter($teamId)))
+                    ->executeStatement();
             }
         } catch (\Exception $e) {
             $this->logger->error('[TeamService] Error updating team description', [
@@ -602,6 +608,21 @@ class TeamService {
             'keys' => array_keys($settings),
             'app'  => Application::APP_ID,
         ]);
+
+        // Defence-in-depth: verify NC admin even though the controller attribute
+        // already blocks non-admins at the framework level.
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('Not authenticated');
+        }
+        $groupManager = $this->container->get(\OCP\IGroupManager::class);
+        if (!$groupManager->isAdmin($user->getUID())) {
+            $this->logger->warning('[TeamService] saveAdminSettings — non-admin attempt', [
+                'userId' => $user->getUID(),
+                'app'    => Application::APP_ID,
+            ]);
+            throw new \Exception('NC admin privilege required');
+        }
 
         $config = $this->container->get(\OCP\IConfig::class);
 

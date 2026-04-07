@@ -25,7 +25,6 @@ use Psr\Log\LoggerInterface;
  * Team render endpoints (any authenticated user):
  *   GET    /api/v1/teams/{teamId}/integrations          — all enabled integrations split by type
  *   GET    /api/v1/teams/{teamId}/integrations/widget-data/{registryId}  — fetch widget data
- *   GET    /api/v1/teams/{teamId}/integrations/action/{registryId}       — get action modal def
  *
  * Manage Team → Integrations tab (team admin required):
  *   GET    /api/v1/teams/{teamId}/integrations/registry                  — full list + enabled state
@@ -72,9 +71,7 @@ class IntegrationController extends Controller {
             $title           = isset($body['title'])            ? trim((string)$body['title'])            : '';
             $description     = ($body['description'] ?? '') !== '' ? trim((string)$body['description']) : null;
             $icon            = ($body['icon']        ?? '') !== '' ? trim((string)$body['icon'])        : null;
-            $dataUrl         = ($body['data_url']    ?? '') !== '' ? trim((string)$body['data_url'])    : null;
-            $actionUrl       = ($body['action_url']  ?? '') !== '' ? trim((string)$body['action_url'])  : null;
-            $actionLabel     = ($body['action_label']?? '') !== '' ? trim((string)$body['action_label']): null;
+            $phpClass        = ($body['php_class']   ?? '') !== '' ? trim((string)$body['php_class'])   : null;
             $iframeUrl       = ($body['iframe_url']  ?? '') !== '' ? trim((string)$body['iframe_url'])  : null;
 
             if ($appId === '' || $integrationType === '' || $title === '') {
@@ -85,8 +82,14 @@ class IntegrationController extends Controller {
             }
 
             $result = $this->integrationService->registerIntegration(
-                $appId, $integrationType, $title, $description, $icon,
-                $dataUrl, $actionUrl, $actionLabel, $iframeUrl
+                appId:           $appId,
+                integrationType: $integrationType,
+                title:           $title,
+                description:     $description,
+                icon:            $icon,
+                phpClass:        $phpClass,
+                iframeUrl:       $iframeUrl,
+                calledInProcess: false,
             );
 
             $this->logger->info('IntegrationController::registerIntegration — success', [
@@ -159,20 +162,6 @@ class IntegrationController extends Controller {
         }
     }
 
-    /** GET /api/v1/teams/{teamId}/integrations/action/{registryId} */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function getWidgetAction(string $teamId, int $registryId): JSONResponse {
-        try {
-            return new JSONResponse($this->integrationService->triggerWidgetAction($teamId, $registryId));
-        } catch (\Exception $e) {
-            $this->logger->warning('IntegrationController::getWidgetAction — failed', [
-                'team_id' => $teamId, 'registry_id' => $registryId,
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
-        }
-    }
 
     // ------------------------------------------------------------------
     // Manage Team → Integrations tab (team admin required)

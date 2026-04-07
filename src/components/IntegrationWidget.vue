@@ -54,7 +54,7 @@
             </li>
         </ul>
 
-        <!-- Action modal — opened by parent calling this.$refs.widget.openAction() -->
+        <!-- Action modal — opened by openAction(), or by parent via this.$refs.widget.openAction() -->
         <NcModal
             v-if="showActionModal"
             :name="actionModalTitle"
@@ -159,12 +159,18 @@ export default {
         teamId:      { type: String, required: true },
     },
 
+    emits: ['actions-loaded'],
+
     data() {
         return {
             loading:           true,
             loadError:         false,
             items:             [],
-            appIconFailed:     false, // true when both app.svg and app.png fail to load
+            // Dynamic actions returned by the widget data endpoint.
+            // Shape: [ { label: string, icon?: string, url: string } ]
+            // Empty array when the endpoint returns none (falls back to registration action_url).
+            dynamicActions:    [],
+            appIconFailed:     false,
             showActionModal:   false,
             actionLoading:     false,
             actionError:       null,
@@ -172,12 +178,17 @@ export default {
             actionFieldValues: {},
             actionSubmitLabel: null,
             actionSubmitting:  false,
+            // The action_url currently being used for the open modal (supports multi-action).
+            activeActionUrl:   null,
+            activeActionLabel: null,
         }
     },
 
     computed: {
         actionModalTitle() {
-            return this.integration.action_label || this.t('teamhub', 'Action')
+            return this.activeActionLabel
+                || this.integration.action_label
+                || this.t('teamhub', 'Action')
         },
 
         /**
@@ -194,8 +205,38 @@ export default {
             return (name && ICON_MAP[name]) ? ICON_MAP[name] : PuzzleIcon
         },
 
+        /**
+         * Effective actions for the 3-dot menu in the card header (TeamView reads this
+         * via the 'actions-loaded' event after loadData completes).
+         *
+         * Priority:
+         *   1. Dynamic actions from the widget data endpoint response (data.actions[]).
+         *   2. Single registration action_url / action_label (backward compat).
+         *   3. Empty array — no 3-dot menu shown.
+         *
+         * Each entry: { label: string, icon?: string, url: string }
+         * The url for registration-level actions is a sentinel pointing to the TeamHub
+         * action endpoint so TeamView can call openAction() on the ref instead of
+         * navigating directly.
+         */
+        effectiveActions() {
+            if (this.dynamicActions.length > 0) {
+                return this.dynamicActions
+            }
+            if (this.integration.action_url) {
+                return [{
+                    label:        this.integration.action_label || this.t('teamhub', 'Action'),
+                    icon:         null,
+                    url:          this.integration.action_url,
+                    // Flag: this action opens the TeamHub modal rather than navigating.
+                    isModalAction: true,
+                }]
+            }
+            return []
+        },
+
         hasAction() {
-            return !!this.integration.action_url
+            return this.effectiveActions.length > 0
         },
     },
 
@@ -214,13 +255,20 @@ export default {
                     `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/widget-data/${this.integration.registry_id}`
                 )
                 const { data } = await axios.get(url)
-                this.items = Array.isArray(data.items) ? data.items : []
+                this.items          = Array.isArray(data.items) ? data.items : []
+                this.dynamicActions = Array.isArray(data.actions) ? data.actions : []
             } catch (e) {
                 console.error('[IntegrationWidget] loadData error:', e?.response?.data || e.message)
-                this.loadError = true
-                this.items     = []
+                this.loadError      = true
+                this.items          = []
+                this.dynamicActions = []
             } finally {
                 this.loading = false
+                // Emit effective actions so TeamView can update the card header menu reactively.
+                this.$emit('actions-loaded', {
+                    registryId: this.integration.registry_id,
+                    actions:    this.effectiveActions,
+                })
             }
         },
 
@@ -228,31 +276,49 @@ export default {
             return (iconName && ICON_MAP[iconName]) ? ICON_MAP[iconName] : null
         },
 
+        resolveActionIcon(iconName) {
+            return (iconName && ICON_MAP[iconName]) ? ICON_MAP[iconName] : null
+        },
+
         /**
          * App icon fallback — mirrors TeamView.onAppIconError().
          * svg → png → hide img (MDI resolvedIcon will take over via v-else on the component).
-         * Note: hiding the img does NOT trigger the v-else branch because v-if/v-else
-         * is evaluated at render time. To show the MDI icon after a failed load we
-         * toggle a data flag instead.
          */
         onAppIconError(event) {
             const img = event.target
             if (img.src.endsWith('.svg')) {
-                // Try .png fallback first
                 img.src = img.src.replace('.svg', '.png')
             } else {
-                // Both svg and png failed — hide the img so the MDI icon shows
                 img.style.display = 'none'
                 this.appIconFailed = true
             }
         },
 
         /**
-         * Called by parent via this.$refs.intWidget.openAction()
-         * Keeps action modal logic inside this component while the trigger button
-         * lives in the widget card header (TeamView.vue).
+         * Open the action modal.
+         *
+         * Called by parent (TeamView) via this.$refs['intWidget-{id}'].openAction(action).
+         * Also called internally for registration-level single actions.
+         *
+         * @param {Object|null} action  Action descriptor from effectiveActions, or null/undefined
+         *                              to use the registration-level action_url (backward compat).
          */
-        async openAction() {
+        async openAction(action) {
+            // Determine which action_url to call on the TeamHub server.
+            // For dynamic actions the url is the external app's direct URL (navigated by the
+            // browser, not fetched server-side by TeamHub). The modal flow only applies to
+            // the registration-level action_url which goes through the TeamHub action endpoint.
+            const isModalAction = !action || action.isModalAction === true
+
+            if (!isModalAction && action?.url) {
+                // Dynamic action with a direct URL — open in new tab, no modal needed.
+                window.open(action.url, '_blank', 'noopener,noreferrer')
+                return
+            }
+
+            // Modal-style action — hit TeamHub's action endpoint then show form.
+            this.activeActionUrl   = (action && action.url) || this.integration.action_url || null
+            this.activeActionLabel = (action && action.label) || this.integration.action_label || null
             this.showActionModal   = true
             this.actionLoading     = true
             this.actionError       = null
@@ -281,7 +347,9 @@ export default {
         },
 
         closeActionModal() {
-            this.showActionModal = false
+            this.showActionModal   = false
+            this.activeActionUrl   = null
+            this.activeActionLabel = null
         },
 
         async submitAction() {

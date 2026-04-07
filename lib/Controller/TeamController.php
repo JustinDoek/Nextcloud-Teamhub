@@ -79,6 +79,10 @@ class TeamController extends Controller {
     public function updateTeam(string $teamId): JSONResponse {
         try {
             $body = $this->request->getParams();
+            if (isset($body['description']) || isset($body['config'])) {
+                // Both description and config changes require team admin/owner.
+                $this->memberService->requireAdminLevel($teamId);
+            }
             if (isset($body['description'])) {
                 $this->teamService->updateTeamDescription($teamId, (string)$body['description']);
             }
@@ -373,6 +377,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function updateTeamDescription(string $teamId, string $description): JSONResponse {
         try {
+            $this->memberService->requireAdminLevel($teamId);
             $this->teamService->updateTeamDescription($teamId, $description);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
@@ -450,6 +455,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function inviteMembers(string $teamId): JSONResponse {
         try {
+            $this->memberService->requireModeratorLevel($teamId);
             $body = $this->request->getParams();
             $members = isset($body['members']) && is_array($body['members']) ? $body['members'] : [];
             $results = $this->memberService->inviteMembers($teamId, $members);
@@ -463,6 +469,10 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function createTeamResources(string $teamId): JSONResponse {
         try {
+            // Resource creation (Talk room, Deck board, Calendar, Files) is a
+            // destructive/provisioning operation — requires team admin or owner.
+            $this->memberService->requireAdminLevel($teamId);
+
             $body = $this->request->getParams();
             $apps = isset($body['apps']) && is_array($body['apps']) ? $body['apps'] : [];
             $teamName = isset($body['teamName']) ? (string)$body['teamName'] : '';

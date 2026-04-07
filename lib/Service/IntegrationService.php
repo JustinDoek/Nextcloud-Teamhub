@@ -5,10 +5,11 @@ namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\Db\IntegrationRegistryMapper;
 use OCA\TeamHub\Db\TeamIntegrationMapper;
+use OCA\TeamHub\Integration\ITeamHubWidget;
 use OCP\App\IAppManager;
 use OCP\IGroupManager;
 use OCP\IUserSession;
-use OCP\Http\Client\IClientService;
+use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -16,20 +17,22 @@ use Psr\Log\LoggerInterface;
  *
  * Two integration types:
  *
- *   'widget'    — appears in the right sidebar. TeamHub calls data_url server-side
- *                 (PHP → HTTP GET to external app endpoint), renders the response
- *                 natively as a list of items. Optional 3-dot action menu item
- *                 triggers a POST to action_url and shows the response in a modal.
+ *   'widget'    — appears in the right sidebar. TeamHub resolves the
+ *                 registered php_class from NC's DI container and calls
+ *                 ITeamHubWidget::getWidgetData() directly — no HTTP,
+ *                 no loopback, no routing issues. The response is rendered
+ *                 natively as a list of items with an optional 3-dot action
+ *                 menu populated from the returned actions[] array.
  *
- *   'menu_item' — appears as a tab in the tab bar. Content loads in a sandboxed iframe
- *                 (iframe_url) for external apps, or is handled natively for built-ins
- *                 (Talk/Files/Calendar/Deck).
+ *   'menu_item' — appears as a tab in the tab bar. Content loads in a
+ *                 sandboxed iframe (iframe_url) for external apps, or is
+ *                 handled natively for built-ins (Talk/Files/Calendar/Deck).
  *
- * Built-in integrations are seeded once via seedBuiltins() called from Application::boot().
+ * Built-in integrations are seeded once via seedBuiltins() called from
+ * Application::boot().
  *
- * External apps register via REST:
- *   POST   /api/v1/ext/integrations/register
- *   DELETE /api/v1/ext/integrations/{appId}
+ * External apps register via IntegrationService::registerIntegration()
+ * called in-process from their own Application::boot() — never via HTTP.
  *
  * Team management (Manage Team → Integrations tab):
  *   GET    /api/v1/teams/{teamId}/integrations/registry
@@ -39,16 +42,14 @@ use Psr\Log\LoggerInterface;
  * Render endpoints (called on team select):
  *   GET    /api/v1/teams/{teamId}/integrations        — all enabled (widgets + menu_items)
  *   GET    /api/v1/teams/{teamId}/integrations/widget-data/{registryId}  — fetch widget data
- *   POST   /api/v1/teams/{teamId}/integrations/action/{registryId}       — trigger action modal
- *
  */
 class IntegrationService {
 
-    // Widget data response timeout in seconds.
-    private const DATA_FETCH_TIMEOUT = 5;
-
-    // Maximum number of items returned by a widget data endpoint.
+    // Maximum number of items returned by a widget.
     private const MAX_WIDGET_ITEMS = 20;
+
+    // Maximum number of actions returned by a widget.
+    private const MAX_WIDGET_ACTIONS = 10;
 
     /** Built-in menu_item definitions seeded once into the registry. */
     private const BUILTINS = [
@@ -84,7 +85,7 @@ class IntegrationService {
         private IAppManager               $appManager,
         private IGroupManager             $groupManager,
         private IUserSession              $userSession,
-        private IClientService            $httpClientService,
+        private ContainerInterface        $container,
         private LoggerInterface           $logger,
     ) {}
 
@@ -110,13 +111,10 @@ class IntegrationService {
                 title:           $builtin['title'],
                 description:     $builtin['description'],
                 icon:            $builtin['icon'],
-                dataUrl:         null,
-                actionUrl:       null,
-                actionLabel:     null,
-                iframeUrl:       null,  // built-ins resolve URL from team resources at runtime
+                phpClass:        null,
+                iframeUrl:       null,
                 isBuiltin:       true,
             );
-
         }
     }
 
@@ -125,43 +123,52 @@ class IntegrationService {
     // ------------------------------------------------------------------
 
     /**
-     * Register or update an integration for an external app.
+     * Register or update an integration for an external NC app.
+     *
+     * Must be called in-process from the registering app's Application::boot()
+     * with calledInProcess: true. HTTP-based registration is not supported —
+     * NC's loopback guard blocks same-server HTTP calls.
      *
      * Security rules:
-     *   When called via HTTP controller ($calledInProcess = false, default):
-     *     1. Caller must be an authenticated NC admin (defence-in-depth; controller has no NoAdminRequired).
-     *   When called in-process from another app's boot() ($calledInProcess = true):
-     *     1. Session check is skipped — no web session exists during NC bootstrap.
-     *        Security is provided by the fact that only server-side PHP can call this directly.
+     *   When $calledInProcess = false (HTTP fallback path, NC admin only):
+     *     1. Caller must be an authenticated NC admin.
+     *   When $calledInProcess = true (in-process from boot()):
+     *     1. Session check skipped — no web session exists during NC bootstrap.
+     *        Security is provided by the fact that only server-side PHP can
+     *        call this method directly.
      *   In both cases:
      *     2. app_id must match an installed and enabled NC app.
-     *     3. app_id must not be a built-in (Talk/Files/Calendar/Deck).
+     *     3. app_id must not be a built-in.
      *     4. integration_type must be 'widget' or 'menu_item'.
-     *     5. For widget: data_url required; action_url/action_label optional.
+     *     5. For widget: php_class required, must implement ITeamHubWidget,
+     *        must be resolvable from NC's DI container.
      *     6. For menu_item: iframe_url required, must be https://.
      *     7. title required, max 255 chars.
+     *     8. php_class and iframe_url are mutually exclusive.
      *
-     * @param bool $calledInProcess Set true when calling from Application::boot() — skips session check.
+     * @param bool $calledInProcess Set true when calling from Application::boot().
      * @throws \Exception On any validation failure.
      */
     public function registerIntegration(
         string  $appId,
         string  $integrationType,
         string  $title,
-        ?string $description      = null,
-        ?string $icon             = null,
-        ?string $dataUrl          = null,
-        ?string $actionUrl        = null,
-        ?string $actionLabel      = null,
-        ?string $iframeUrl        = null,
-        bool    $calledInProcess  = false,
+        ?string $description     = null,
+        ?string $icon            = null,
+        ?string $phpClass        = null,
+        ?string $iframeUrl       = null,
+        bool    $calledInProcess = false,
     ): array {
 
-        // 1. Auth + admin check.
-        //    When called via HTTP the NC framework already requires a session (NoCSRFRequired only,
-        //    no NoAdminRequired), but we also check here as defence-in-depth.
-        //    When called in-process (boot context), no web session exists — skip the session gate
-        //    and rely on the fact that only server PHP can invoke this method directly.
+        $this->logger->debug('IntegrationService::registerIntegration — called', [
+            'app_id'           => $appId,
+            'integration_type' => $integrationType,
+            'php_class'        => $phpClass,
+            'called_in_process'=> $calledInProcess,
+            'app'              => 'teamhub',
+        ]);
+
+        // 1. Auth check.
         if (!$calledInProcess) {
             $user = $this->userSession->getUser();
             if (!$user) {
@@ -177,9 +184,10 @@ class IntegrationService {
 
         // 2. App must be installed and enabled.
         if (!$this->appManager->isInstalled($appId)) {
-            $this->logger->warning('IntegrationService::registerIntegration — app_id not installed', [
-                'app_id'    => $appId,
-                'called_by' => $callerLabel,
+            $this->logger->warning('IntegrationService::registerIntegration — app not installed', [
+                'app_id'     => $appId,
+                'called_by'  => $callerLabel,
+                'app'        => 'teamhub',
             ]);
             throw new \Exception("App '{$appId}' is not installed or not enabled on this instance");
         }
@@ -196,17 +204,55 @@ class IntegrationService {
 
         // 5/6. Type-specific field validation.
         if ($integrationType === IntegrationRegistryMapper::TYPE_WIDGET) {
-            $dataUrl = $this->validateUrl($dataUrl, 'data_url', required: true);
-            $actionUrl = $actionUrl ? $this->validateUrl($actionUrl, 'action_url', required: false) : null;
-            if ($actionLabel !== null && strlen($actionLabel) > 64) {
-                throw new \Exception('action_label exceeds maximum length of 64 characters');
+
+            if (empty($phpClass)) {
+                throw new \Exception(
+                    "php_class is required for widget integrations — provide the fully-qualified " .
+                    "class name of your ITeamHubWidget implementation"
+                );
             }
+
+            $phpClass = trim($phpClass);
+
+            if (strlen($phpClass) > 255) {
+                throw new \Exception('php_class exceeds maximum length of 255 characters');
+            }
+
+            // Validate the class exists and implements ITeamHubWidget.
+            // We do this at registration time so misconfigurations are caught
+            // immediately rather than silently at render time.
+            if (!$this->container->has($phpClass)) {
+                // Try class_exists as fallback — some classes are auto-wireable
+                // without explicit container binding.
+                if (!class_exists($phpClass)) {
+                    throw new \Exception(
+                        "php_class '{$phpClass}' is not resolvable from NC's DI container. " .
+                        "Ensure the class exists and is autoloaded."
+                    );
+                }
+            }
+
+            if (!is_a($phpClass, ITeamHubWidget::class, true)) {
+                throw new \Exception(
+                    "php_class '{$phpClass}' must implement OCA\\TeamHub\\Integration\\ITeamHubWidget"
+                );
+            }
+
             $iframeUrl = null; // not used for widgets
+
         } else {
-            $iframeUrl = $this->validateUrl($iframeUrl, 'iframe_url', required: true, httpsOnly: true);
-            $dataUrl   = null;
-            $actionUrl = null;
-            $actionLabel = null;
+            // menu_item
+            if (empty($iframeUrl) || trim($iframeUrl) === '') {
+                throw new \Exception('iframe_url is required for menu_item integrations');
+            }
+            $iframeUrl = trim($iframeUrl);
+            if (!str_starts_with($iframeUrl, 'https://')) {
+                throw new \Exception('iframe_url must start with https://');
+            }
+            if (strlen($iframeUrl) > 2048) {
+                throw new \Exception('iframe_url exceeds maximum length of 2048 characters');
+            }
+            $phpClass = null; // not used for menu_items
         }
 
         // 7. Title.
@@ -231,17 +277,27 @@ class IntegrationService {
         // Upsert.
         $existing = $this->registryMapper->findByAppId($appId);
         if ($existing !== null) {
+            $this->logger->info('IntegrationService::registerIntegration — updating existing', [
+                'app_id'      => $appId,
+                'registry_id' => $existing['id'],
+                'called_by'   => $callerLabel,
+                'app'         => 'teamhub',
+            ]);
             return $this->registryMapper->update(
                 $existing['id'],
                 $title,
                 $description,
                 $icon,
-                $dataUrl,
-                $actionUrl,
-                $actionLabel,
+                $phpClass,
                 $iframeUrl,
             );
         }
+
+        $this->logger->info('IntegrationService::registerIntegration — creating new', [
+            'app_id'     => $appId,
+            'called_by'  => $callerLabel,
+            'app'        => 'teamhub',
+        ]);
 
         return $this->registryMapper->create(
             appId:           $appId,
@@ -249,27 +305,70 @@ class IntegrationService {
             title:           $title,
             description:     $description,
             icon:            $icon,
-            dataUrl:         $dataUrl,
-            actionUrl:       $actionUrl,
-            actionLabel:     $actionLabel,
+            phpClass:        $phpClass,
             iframeUrl:       $iframeUrl,
             isBuiltin:       false,
         );
     }
 
     /**
-     * Deregister an integration by app ID.
+     * Suspend an integration when its app is disabled.
      *
-     * Cascades: all team opt-ins are removed first.
+     * Clears php_class / iframe_url so the widget cannot be called while the
+     * app is down, but preserves the registry row and all per-team opt-ins.
+     * The next time the app is enabled its boot() calls registerIntegration()
+     * which upserts the class/url back in. The ID never changes and team
+     * admins never need to re-enable the widget after an app update.
+     *
+     * Built-in app IDs are silently skipped (they have no php_class to clear).
+     */
+    public function suspendIntegration(string $appId): void {
+
+        $this->logger->debug('IntegrationService::suspendIntegration — called', [
+            'app_id' => $appId,
+            'app'    => 'teamhub',
+        ]);
+
+        if (in_array($appId, IntegrationRegistryMapper::BUILTIN_APP_IDS, true)) {
+            $this->logger->debug('IntegrationService::suspendIntegration — built-in, skipping', [
+                'app_id' => $appId,
+                'app'    => 'teamhub',
+            ]);
+            return;
+        }
+
+        $existing = $this->registryMapper->findByAppId($appId);
+        if ($existing === null) {
+            $this->logger->debug('IntegrationService::suspendIntegration — not registered, skipping', [
+                'app_id' => $appId,
+                'app'    => 'teamhub',
+            ]);
+            return;
+        }
+
+        $this->registryMapper->suspendByAppId($appId);
+
+        $this->logger->info('IntegrationService::suspendIntegration — suspended', [
+            'app_id'      => $appId,
+            'registry_id' => $existing['id'],
+            'app'         => 'teamhub',
+        ]);
+    }
+
+    /**
+     * Permanently deregister an integration by app ID.
+     *
+     * Use this only for permanent removal — e.g. an NC admin explicitly
+     * deleting a registration, or a future uninstall hook.
+     * Do NOT call this on routine app:disable — use suspendIntegration() instead.
+     *
+     * Cascades: all per-team opt-ins are removed first.
      * Built-in integrations cannot be deregistered.
-     * NC admin privilege required.
      *
      * @throws \Exception When caller is not NC admin or app is built-in.
      */
     public function deregisterIntegration(string $appId, bool $calledInProcess = false): void {
 
-        // Session gate: skip when called in-process (boot/CLI) — no web session exists.
-        // HTTP callers are gated at the controller level (no NoAdminRequired attribute).
         if (!$calledInProcess) {
             $user = $this->userSession->getUser();
             if (!$user || !$this->groupManager->isAdmin($user->getUID())) {
@@ -285,17 +384,18 @@ class IntegrationService {
         if ($existing === null) {
             $this->logger->info('IntegrationService::deregisterIntegration — not registered, skipping', [
                 'app_id' => $appId,
+                'app'    => 'teamhub',
             ]);
             return;
         }
 
-        // Cascade.
         $this->teamMapper->deleteByRegistryId($existing['id']);
         $this->registryMapper->deleteByAppId($appId);
 
         $this->logger->info('IntegrationService::deregisterIntegration — done', [
             'app_id'      => $appId,
             'registry_id' => $existing['id'],
+            'app'         => 'teamhub',
         ]);
     }
 
@@ -304,8 +404,8 @@ class IntegrationService {
     // ------------------------------------------------------------------
 
     /**
-     * Return all registry entries (built-ins first, then external, ordered by created_at).
-     * Used by the Admin Settings → Integrations tab via GET /api/v1/ext/integrations.
+     * Return all registry entries (built-ins first, then external).
+     * Used by Admin Settings → Integrations tab.
      *
      * @return array<int, array>
      */
@@ -319,7 +419,6 @@ class IntegrationService {
 
     /**
      * Return all integrations with their enabled state for a team.
-     * Used to populate Manage Team → Integrations.
      */
     public function getRegistryForTeam(string $teamId): array {
         return $this->teamMapper->findAllWithEnabledStateForTeam($teamId);
@@ -328,12 +427,11 @@ class IntegrationService {
     /**
      * Enable or disable an integration for a team.
      *
-     * @return array Updated full registry list (same shape as getRegistryForTeam).
+     * @return array Updated full registry list.
      * @throws \Exception When registry_id does not exist.
      */
     public function toggleIntegration(string $teamId, int $registryId, bool $enable): array {
 
-        // Verify the registry entry exists.
         $this->registryMapper->findById($registryId); // throws if not found
 
         if ($enable) {
@@ -387,177 +485,160 @@ class IntegrationService {
     }
 
     /**
-     * Fetch widget data from the external app's data_url endpoint.
+     * Fetch widget data by calling the registered ITeamHubWidget implementation
+     * directly via NC's DI container — no HTTP, no loopback, no curl.
      *
-     * TeamHub calls the external app server-side (PHP HTTP GET).
-     * The external app must respond with:
-     *   { "items": [ { "label": "string", "value": "string", "icon"?: "MDI name", "url"?: "string" } ] }
+     * The implementing class is resolved fresh from the container on each call,
+     * so it benefits from full constructor injection (services, mappers, etc.).
      *
-     * teamId is passed as a query parameter so the external app can scope its response.
-     * The current user's NC auth token is forwarded so the external app can authenticate.
+     * Response is sanitised before being returned to the frontend:
+     *   - items: capped at MAX_WIDGET_ITEMS, shape enforced
+     *   - actions: capped at MAX_WIDGET_ACTIONS, URL validated, label required
      *
-     * @throws \Exception When the integration is not a widget or data_url is missing.
+     * @throws \Exception When the integration is not a widget, has no php_class,
+     *                    or the widget is not enabled for this team.
      */
     public function fetchWidgetData(string $teamId, int $registryId): array {
 
         $entry = $this->registryMapper->findById($registryId);
 
+        $this->logger->debug('IntegrationService::fetchWidgetData — entry loaded', [
+            'registry_id' => $registryId,
+            'app_id'      => $entry['app_id'],
+            'php_class'   => $entry['php_class'],
+            'app'         => 'teamhub',
+        ]);
+
         if ($entry['integration_type'] !== IntegrationRegistryMapper::TYPE_WIDGET) {
             throw new \Exception("Integration {$registryId} is not a widget");
         }
-        if (empty($entry['data_url'])) {
-            throw new \Exception("Widget {$registryId} has no data_url configured");
+
+        if (empty($entry['php_class'])) {
+            throw new \Exception(
+                "Widget {$registryId} has no php_class configured — " .
+                "the registering app must implement ITeamHubWidget"
+            );
         }
 
-        // Verify the widget is actually enabled for this team.
         if (!$this->teamMapper->isEnabled($registryId, $teamId)) {
             throw new \Exception("Widget {$registryId} is not enabled for team {$teamId}");
         }
 
-        // Build the URL — append teamId query param.
-        $url       = $entry['data_url'];
-        $separator = str_contains($url, '?') ? '&' : '?';
-        $fetchUrl  = $url . $separator . 'teamId=' . urlencode($teamId);
-
+        // Resolve the ITeamHubWidget implementation from NC's DI container.
+        // This gives the implementing class full access to its own injected services.
+        $phpClass = $entry['php_class'];
 
         try {
-            $client   = $this->httpClientService->newClient();
-            $response = $client->get($fetchUrl, [
-                'timeout'         => self::DATA_FETCH_TIMEOUT,
-                'connect_timeout' => self::DATA_FETCH_TIMEOUT,
+            /** @var ITeamHubWidget $widget */
+            $widget = $this->container->get($phpClass);
+        } catch (\Throwable $e) {
+            $this->logger->error('IntegrationService::fetchWidgetData — container resolution failed', [
+                'registry_id' => $registryId,
+                'php_class'   => $phpClass,
+                'error'       => $e->getMessage(),
+                'app'         => 'teamhub',
             ]);
+            return ['items' => [], 'error' => "Widget class '{$phpClass}' could not be loaded"];
+        }
 
-            $body = $response->getBody();
-            $data = json_decode($body, true);
+        if (!($widget instanceof ITeamHubWidget)) {
+            $this->logger->error('IntegrationService::fetchWidgetData — class does not implement ITeamHubWidget', [
+                'registry_id' => $registryId,
+                'php_class'   => $phpClass,
+                'app'         => 'teamhub',
+            ]);
+            return ['items' => [], 'error' => "Widget class '{$phpClass}' does not implement ITeamHubWidget"];
+        }
 
-            if (!is_array($data) || !isset($data['items']) || !is_array($data['items'])) {
-                $this->logger->warning('IntegrationService::fetchWidgetData — invalid response shape', [
-                    'registry_id' => $registryId,
-                    'url'         => $fetchUrl,
-                    'body'        => substr($body, 0, 200),
-                ]);
-                return ['items' => []];
+        // Get current user ID to pass to the widget — widget uses it for access control.
+        $user   = $this->userSession->getUser();
+        $userId = $user ? $user->getUID() : '';
+
+        $this->logger->debug('IntegrationService::fetchWidgetData — calling getWidgetData', [
+            'registry_id' => $registryId,
+            'php_class'   => $phpClass,
+            'team_id'     => $teamId,
+            'user_id'     => $userId,
+            'app'         => 'teamhub',
+        ]);
+
+        try {
+            $raw = $widget->getWidgetData($teamId, $userId);
+        } catch (\Throwable $e) {
+            $this->logger->error('IntegrationService::fetchWidgetData — getWidgetData threw', [
+                'registry_id' => $registryId,
+                'php_class'   => $phpClass,
+                'error'       => $e->getMessage(),
+                'app'         => 'teamhub',
+            ]);
+            return ['items' => [], 'error' => 'Widget data could not be loaded'];
+        }
+
+        if (!is_array($raw) || !isset($raw['items']) || !is_array($raw['items'])) {
+            $this->logger->warning('IntegrationService::fetchWidgetData — invalid response shape', [
+                'registry_id' => $registryId,
+                'php_class'   => $phpClass,
+                'app'         => 'teamhub',
+            ]);
+            return ['items' => []];
+        }
+
+        // Sanitise items — enforce shape and cap count.
+        $items = [];
+        foreach (array_slice($raw['items'], 0, self::MAX_WIDGET_ITEMS) as $item) {
+            if (!is_array($item)) {
+                continue;
             }
+            $items[] = [
+                'label' => isset($item['label']) ? (string)$item['label'] : '',
+                'value' => isset($item['value']) ? (string)$item['value'] : '',
+                'icon'  => isset($item['icon'])  ? (string)$item['icon']  : null,
+                'url'   => isset($item['url'])   ? (string)$item['url']   : null,
+            ];
+        }
 
-            // Sanitise items — enforce shape and cap count.
-            $items = [];
-            foreach (array_slice($data['items'], 0, self::MAX_WIDGET_ITEMS) as $item) {
-                if (!is_array($item)) { continue; }
-                $items[] = [
-                    'label' => isset($item['label']) ? (string)$item['label'] : '',
-                    'value' => isset($item['value']) ? (string)$item['value'] : '',
-                    'icon'  => isset($item['icon'])  ? (string)$item['icon']  : null,
-                    'url'   => isset($item['url'])   ? (string)$item['url']   : null,
+        // Sanitise optional dynamic actions array.
+        // url must be a relative NC path (/apps/… or /index.php/…) or https://.
+        // These are browser-navigation URLs, not server-side call targets — https:// is fine here.
+        $actions = [];
+        if (isset($raw['actions']) && is_array($raw['actions'])) {
+            foreach (array_slice($raw['actions'], 0, self::MAX_WIDGET_ACTIONS) as $action) {
+                if (!is_array($action)) {
+                    continue;
+                }
+                $actionUrl  = isset($action['url']) ? trim((string)$action['url']) : '';
+                $isRelative = str_starts_with($actionUrl, '/apps/') || str_starts_with($actionUrl, '/index.php/');
+                $isHttps    = str_starts_with($actionUrl, 'https://');
+                if (!$isRelative && !$isHttps) {
+                    continue;
+                }
+                if (strlen($actionUrl) > 2048) {
+                    continue;
+                }
+                $label = isset($action['label']) ? trim((string)$action['label']) : '';
+                if ($label === '') {
+                    continue;
+                }
+                $actions[] = [
+                    'label' => $label,
+                    'icon'  => isset($action['icon']) ? (string)$action['icon'] : null,
+                    'url'   => $actionUrl,
                 ];
             }
-
-            return ['items' => $items];
-
-        } catch (\Throwable $e) {
-            $this->logger->error('IntegrationService::fetchWidgetData — HTTP call failed', [
-                'registry_id' => $registryId,
-                'url'         => $fetchUrl,
-                'error'       => $e->getMessage(),
-            ]);
-            // Return empty items so the widget renders gracefully rather than crashing.
-            return ['items' => [], 'error' => 'Failed to load widget data'];
-        }
-    }
-
-    /**
-     * Trigger a widget action by POSTing to the external app's action_url.
-     *
-     * The external app responds with a modal definition:
-     *   { "title": "string", "fields": [ { "label", "type", "name", "value"? } ], "submit_label"?: "string" }
-     *
-     * The modal is rendered by TeamHub. On submit, the browser POSTs directly to action_url.
-     *
-     * @throws \Exception When the integration has no action_url or is not a widget.
-     */
-    public function triggerWidgetAction(string $teamId, int $registryId): array {
-
-        $entry = $this->registryMapper->findById($registryId);
-
-        if ($entry['integration_type'] !== IntegrationRegistryMapper::TYPE_WIDGET) {
-            throw new \Exception("Integration {$registryId} is not a widget");
-        }
-        if (empty($entry['action_url'])) {
-            throw new \Exception("Widget {$registryId} has no action_url configured");
-        }
-        if (!$this->teamMapper->isEnabled($registryId, $teamId)) {
-            throw new \Exception("Widget {$registryId} is not enabled for team {$teamId}");
         }
 
-        $url       = $entry['action_url'];
-        $separator = str_contains($url, '?') ? '&' : '?';
-        $fetchUrl  = $url . $separator . 'teamId=' . urlencode($teamId);
-
-
-        try {
-            $client   = $this->httpClientService->newClient();
-            $response = $client->get($fetchUrl, [
-                'timeout' => self::DATA_FETCH_TIMEOUT,
-            ]);
-
-            $body = $response->getBody();
-            $data = json_decode($body, true);
-
-            if (!is_array($data)) {
-                return ['title' => $entry['action_label'] ?? 'Action', 'fields' => []];
-            }
-
-            return $data;
-
-        } catch (\Throwable $e) {
-            $this->logger->error('IntegrationService::triggerWidgetAction — HTTP call failed', [
-                'registry_id' => $registryId,
-                'url'         => $fetchUrl,
-                'error'       => $e->getMessage(),
-            ]);
-            throw new \Exception('Failed to load action modal: ' . $e->getMessage());
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Private helpers
-    // ------------------------------------------------------------------
-
-    /**
-     * Validate and normalise a URL field.
-     *
-     * Allows:
-     *   - Relative NC paths starting with /apps/ or /index.php/
-     *   - Absolute https:// URLs
-     *
-     * @throws \Exception On validation failure.
-     */
-    private function validateUrl(?string $url, string $fieldName, bool $required, bool $httpsOnly = false): ?string {
-        if ($url === null || trim($url) === '') {
-            if ($required) {
-                throw new \Exception("{$fieldName} is required");
-            }
-            return null;
+        $result = ['items' => $items];
+        if (!empty($actions)) {
+            $result['actions'] = $actions;
         }
 
-        $url = trim($url);
+        $this->logger->debug('IntegrationService::fetchWidgetData — success', [
+            'registry_id'  => $registryId,
+            'item_count'   => count($items),
+            'action_count' => count($actions),
+            'app'          => 'teamhub',
+        ]);
 
-        if (strlen($url) > 2048) {
-            throw new \Exception("{$fieldName} exceeds maximum length of 2048 characters");
-        }
-
-        if ($httpsOnly) {
-            if (!str_starts_with($url, 'https://')) {
-                throw new \Exception("{$fieldName} must start with https://");
-            }
-        } else {
-            // Allow relative NC paths or absolute https.
-            $isRelative = str_starts_with($url, '/apps/') || str_starts_with($url, '/index.php/');
-            $isHttps    = str_starts_with($url, 'https://');
-            if (!$isRelative && !$isHttps) {
-                throw new \Exception("{$fieldName} must be a relative NC path (/apps/…) or an absolute https:// URL");
-            }
-        }
-
-        return $url;
+        return $result;
     }
 }

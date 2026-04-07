@@ -215,7 +215,7 @@ class MemberService {
 
     /**
      * Asserts the current user has admin (level >= 8) or owner (level 9) in the team.
-     * Public so other methods in this class and TeamService can share the guard.
+     * Uses a direct indexed DB query — avoids the full Circles API member-list fetch.
      *
      * @throws \Exception if user is not authenticated, not a member, or insufficient level
      */
@@ -225,17 +225,38 @@ class MemberService {
             throw new \Exception('User not authenticated');
         }
 
-        $members = $this->getTeamMembers($teamId);
-        foreach ($members as $member) {
-            if ($member['userId'] === $user->getUID()) {
-                if ($member['level'] >= 8) {
-                    return;
-                }
-                throw new \Exception('Insufficient permissions. Admin or owner role required.');
-            }
+        $db    = $this->container->get(\OCP\IDBConnection::class);
+        $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+
+        if ($level === 0) {
+            throw new \Exception('You are not a member of this team');
+        }
+        if ($level < 8) {
+            throw new \Exception('Insufficient permissions. Admin or owner role required.');
+        }
+    }
+
+    /**
+     * Asserts the current user has moderator (level >= 4), admin, or owner in the team.
+     * Uses a direct indexed DB query — avoids the full Circles API member-list fetch.
+     *
+     * @throws \Exception if user is not authenticated, not a member, or insufficient level
+     */
+    public function requireModeratorLevel(string $teamId): void {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
         }
 
-        throw new \Exception('You are not a member of this team');
+        $db    = $this->container->get(\OCP\IDBConnection::class);
+        $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+
+        if ($level === 0) {
+            throw new \Exception('You are not a member of this team');
+        }
+        if ($level < 4) {
+            throw new \Exception('Insufficient permissions. Moderator, admin, or owner role required.');
+        }
     }
 
     /** Convert a Circle Member to the array shape used by the API. */
@@ -340,15 +361,20 @@ class MemberService {
 
         $this->requireAdminLevel($teamId);
 
+        $user    = $this->userSession->getUser();
         $manager = $this->getCirclesManager();
-        $manager->startSession();
+        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
+        $manager->startSession($federatedUser);
 
         try {
             $circle  = $manager->getCircle($teamId);
-            $members = $circle->getMembers();
 
             $targetMember = null;
-            foreach ($members as $member) {
+            foreach ($circle->getMembers() as $member) {
+                $this->logger->debug('[MemberService] removeMember scanning member', [
+                    'memberId' => method_exists($member, 'getUserId') ? $member->getUserId() : 'unknown',
+                    'app'      => Application::APP_ID,
+                ]);
                 $mId = method_exists($member, 'getUserId') ? $member->getUserId() : null;
                 if ($mId === $userId) {
                     $targetMember = $member;
@@ -393,7 +419,9 @@ class MemberService {
             'app'    => Application::APP_ID,
         ]);
 
-        $this->requireAdminLevel($teamId);
+        // Moderator (level >= 4) or above may invite — matches the controller gate.
+        // Previously this called requireAdminLevel() which silently rejected moderators.
+        $this->requireModeratorLevel($teamId);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -576,8 +604,10 @@ class MemberService {
 
         $this->requireAdminLevel($teamId);
 
-        $manager = $this->getCirclesManager();
-        $manager->startSession();
+        $user          = $this->userSession->getUser();
+        $manager       = $this->getCirclesManager();
+        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
+        $manager->startSession($federatedUser);
 
         try {
             $circle  = $manager->getCircle($teamId);
@@ -625,8 +655,10 @@ class MemberService {
 
         $this->requireAdminLevel($teamId);
 
-        $manager = $this->getCirclesManager();
-        $manager->startSession();
+        $user          = $this->userSession->getUser();
+        $manager       = $this->getCirclesManager();
+        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
+        $manager->startSession($federatedUser);
 
         try {
             $circle = $manager->getCircle($teamId);
@@ -671,8 +703,10 @@ class MemberService {
 
         $this->requireAdminLevel($teamId);
 
-        $manager = $this->getCirclesManager();
-        $manager->startSession();
+        $user          = $this->userSession->getUser();
+        $manager       = $this->getCirclesManager();
+        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
+        $manager->startSession($federatedUser);
 
         try {
             $circle = $manager->getCircle($teamId);
@@ -725,26 +759,51 @@ class MemberService {
         $allowedTypes = $this->getAllowedInviteTypes();
         $results      = [];
 
-        // Local NC users (Circles member type 1)
+        // Local NC users (Circles member type 1).
+        // Use searchDisplayName() + search() — both are DB-backed with LIKE queries
+        // and respect the $limit parameter. Avoids iterating ALL users in PHP.
         if (in_array('user', $allowedTypes, true)) {
-            $this->userManager->callForAllUsers(function ($user) use ($query, $currentUid, &$results, $limit) {
+            $seen = [];
+
+            // Search by display name first (most user-friendly matches).
+            $byDisplay = $this->userManager->searchDisplayName($query, $limit + 1);
+            foreach ($byDisplay as $user) {
                 if (count($results) >= $limit) {
-                    return;
+                    break;
                 }
                 if ($user->getUID() === $currentUid) {
-                    return;
+                    continue;
                 }
-                $uid     = $user->getUID();
-                $display = $user->getDisplayName();
-                if (stripos($uid, $query) !== false || stripos($display, $query) !== false) {
+                $seen[$user->getUID()] = true;
+                $results[] = [
+                    'id'          => $user->getUID(),
+                    'displayName' => $user->getDisplayName() ?: $user->getUID(),
+                    'type'        => 'user',
+                    'icon'        => 'user',
+                ];
+            }
+
+            // Also search by user ID to catch UIDs that don't match the display name.
+            if (count($results) < $limit) {
+                $byUid = $this->userManager->search($query, $limit + 1);
+                foreach ($byUid as $user) {
+                    if (count($results) >= $limit) {
+                        break;
+                    }
+                    if ($user->getUID() === $currentUid) {
+                        continue;
+                    }
+                    if (isset($seen[$user->getUID()])) {
+                        continue; // already added from display name search
+                    }
                     $results[] = [
-                        'id'          => $uid,
-                        'displayName' => $display ?: $uid,
+                        'id'          => $user->getUID(),
+                        'displayName' => $user->getDisplayName() ?: $user->getUID(),
                         'type'        => 'user',
                         'icon'        => 'user',
                     ];
                 }
-            });
+            }
         }
 
         // NC Groups (Circles member type 2)

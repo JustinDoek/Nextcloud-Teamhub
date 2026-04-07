@@ -9,10 +9,15 @@ use OCP\IDBConnection;
 /**
  * Data-access layer for teamhub_integration_registry.
  *
- * One row per registered integration. External apps register via the REST API.
- * Built-in integrations (Talk, Files, Calendar, Deck) are seeded by
- * IntegrationService::seedBuiltins() on first boot.
+ * One row per registered integration. External apps register via
+ * IntegrationService::registerIntegration() called in-process from their
+ * Application::boot(). Built-in integrations (Talk, Files, Calendar, Deck)
+ * are seeded by IntegrationService::seedBuiltins() on first boot.
  *
+ * Widget integrations deliver data via php_class — a fully-qualified class
+ * name implementing ITeamHubWidget, resolved from NC's DI container at
+ * render time. HTTP-based data_url / action_url / action_label have been
+ * removed. Menu item integrations still use iframe_url (browser-side).
  */
 class IntegrationRegistryMapper {
 
@@ -133,9 +138,7 @@ class IntegrationRegistryMapper {
         string  $title,
         ?string $description,
         ?string $icon,
-        ?string $dataUrl,
-        ?string $actionUrl,
-        ?string $actionLabel,
+        ?string $phpClass,
         ?string $iframeUrl,
         bool    $isBuiltin = false,
     ): array {
@@ -150,9 +153,7 @@ class IntegrationRegistryMapper {
                 'title'            => $qb->createNamedParameter($title),
                 'description'      => $qb->createNamedParameter($description),
                 'icon'             => $qb->createNamedParameter($icon),
-                'data_url'         => $qb->createNamedParameter($dataUrl),
-                'action_url'       => $qb->createNamedParameter($actionUrl),
-                'action_label'     => $qb->createNamedParameter($actionLabel),
+                'php_class'        => $qb->createNamedParameter($phpClass),
                 'iframe_url'       => $qb->createNamedParameter($iframeUrl),
                 'is_builtin'       => $qb->createNamedParameter($isBuiltin, IQueryBuilder::PARAM_BOOL),
                 'created_at'       => $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT),
@@ -161,33 +162,30 @@ class IntegrationRegistryMapper {
         $qb->executeStatement();
         $id = (int)$qb->getLastInsertId();
 
+        $this->logger_debug("IntegrationRegistryMapper::create — inserted id={$id} app_id={$appId}");
 
         return $this->findById($id);
     }
 
     /**
-     * Update an existing registry entry (upsert pattern — called by register endpoint).
+     * Update an existing registry entry (upsert pattern — called by registerIntegration).
      */
     public function update(
         int     $id,
         string  $title,
         ?string $description,
         ?string $icon,
-        ?string $dataUrl,
-        ?string $actionUrl,
-        ?string $actionLabel,
+        ?string $phpClass,
         ?string $iframeUrl,
     ): array {
 
         $qb = $this->db->getQueryBuilder();
         $qb->update('teamhub_integration_registry')
-            ->set('title',        $qb->createNamedParameter($title))
-            ->set('description',  $qb->createNamedParameter($description))
-            ->set('icon',         $qb->createNamedParameter($icon))
-            ->set('data_url',     $qb->createNamedParameter($dataUrl))
-            ->set('action_url',   $qb->createNamedParameter($actionUrl))
-            ->set('action_label', $qb->createNamedParameter($actionLabel))
-            ->set('iframe_url',   $qb->createNamedParameter($iframeUrl))
+            ->set('title',       $qb->createNamedParameter($title))
+            ->set('description', $qb->createNamedParameter($description))
+            ->set('icon',        $qb->createNamedParameter($icon))
+            ->set('php_class',   $qb->createNamedParameter($phpClass))
+            ->set('iframe_url',  $qb->createNamedParameter($iframeUrl))
             ->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
         $qb->executeStatement();
@@ -195,7 +193,31 @@ class IntegrationRegistryMapper {
     }
 
     /**
+     * Suspend a registry entry by clearing php_class and iframe_url.
+     *
+     * Called when the registering app is disabled (not uninstalled). The row
+     * and all team opt-ins are preserved — the ID never changes. When the app
+     * is re-enabled its boot() calls registerIntegration() which upserts the
+     * class/url back in. Team admins never need to re-enable the widget.
+     *
+     * A suspended widget returns a 400 from fetchWidgetData() because php_class
+     * is empty — which is the correct safe behaviour while the app is down.
+     */
+    public function suspendByAppId(string $appId): void {
+
+        $this->logger_debug("IntegrationRegistryMapper::suspendByAppId — suspending app_id={$appId}");
+
+        $qb = $this->db->getQueryBuilder();
+        $qb->update('teamhub_integration_registry')
+            ->set('php_class',  $qb->createNamedParameter(null))
+            ->set('iframe_url', $qb->createNamedParameter(null))
+            ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)));
+        $qb->executeStatement();
+    }
+
+    /**
      * Delete a registry entry by app ID.
+     * Only used for permanent removal (app uninstall / NC admin action).
      * Caller is responsible for cascading into teamhub_team_integrations first.
      */
     public function deleteByAppId(string $appId): void {
@@ -216,14 +238,17 @@ class IntegrationRegistryMapper {
             'app_id'           => (string)$row['app_id'],
             'integration_type' => (string)$row['integration_type'],
             'title'            => (string)$row['title'],
-            'description'      => isset($row['description'])  ? (string)$row['description']  : null,
-            'icon'             => isset($row['icon'])          ? (string)$row['icon']          : null,
-            'data_url'         => isset($row['data_url'])      ? (string)$row['data_url']      : null,
-            'action_url'       => isset($row['action_url'])    ? (string)$row['action_url']    : null,
-            'action_label'     => isset($row['action_label'])  ? (string)$row['action_label']  : null,
-            'iframe_url'       => isset($row['iframe_url'])    ? (string)$row['iframe_url']    : null,
+            'description'      => isset($row['description']) ? (string)$row['description'] : null,
+            'icon'             => isset($row['icon'])        ? (string)$row['icon']        : null,
+            'php_class'        => isset($row['php_class'])   ? (string)$row['php_class']   : null,
+            'iframe_url'       => isset($row['iframe_url'])  ? (string)$row['iframe_url']  : null,
             'is_builtin'       => (bool)$row['is_builtin'],
             'created_at'       => (int)$row['created_at'],
         ];
+    }
+
+    /** Temporary debug helper — removed at session end. */
+    private function logger_debug(string $msg): void {
+        \OC::$server->get(\Psr\Log\LoggerInterface::class)->debug($msg, ['app' => 'teamhub']);
     }
 }

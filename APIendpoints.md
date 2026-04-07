@@ -1,328 +1,297 @@
-# TeamHub API Endpoints — v2.37.0
+# TeamHub API Endpoints — v2.42
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
-All endpoints require an authenticated Nextcloud session (cookie or token).
-All responses are JSON.
+All endpoints require an authenticated Nextcloud session unless noted.
+CSRF protection is disabled (`#[NoCSRFRequired]`) on all endpoints — authentication is via NC session cookie.
 
 ---
 
 ## Teams
 
 ### GET `/teams`
-Returns all teams the current user is a member of.
-**Response:** `[{ id, name, description, memberCount, level }]`
+List all teams the current user is a member of.
+**Auth:** Any authenticated user.
+**Response:** `[ { id, name, description, memberCount, level } ]`
 
 ### POST `/teams`
-Create a new team (Circle). Requires createTeamGroup permission.
-**Body:** `{ name, description }`
+Create a new team.
+**Auth:** Any user allowed by `createTeamGroup` admin setting (empty = everyone).
+**Body:** `{ name, description? }`
 **Response:** `{ id, name, description }`
-
-### DELETE `/teams/{teamId}`
-Delete a team. Requires team owner level.
-**Response:** `{ success: true }`
 
 ### GET `/teams/{teamId}`
-Get a single team's details.
-**Response:** `{ id, name, description }`
+Get details for a single team.
+**Auth:** Team member (Circles session verifies membership).
+**Response:** `{ id, name, description, config }`
 
-### PUT `/teams/{teamId}/description`
-Update team description. Requires team admin/owner.
-**Body:** `{ description }`
-**Response:** `{ success: true }`
+### PUT `/teams/{teamId}`
+Update team description and/or config flags.
+**Auth:** Team admin/owner (level >= 8). ← enforced v2.42
+**Body:** `{ description?, config? }`
 
-### GET `/teams/{teamId}/config`
-Get team Circle config bitmask.
-**Response:** `{ config: int }`
-
-### PUT `/teams/{teamId}/config`
-Update team Circle config bitmask. **Requires team admin/owner.**
-**Body:** `{ config: int }`
-**Response:** `{ success: true, config: int }`
-
----
-
-## Members
+### DELETE `/teams/{teamId}`
+Delete a team and all its resources.
+**Auth:** Team owner (level 9).
 
 ### GET `/teams/{teamId}/members`
-Returns all members of the team.
-**Response:** `[{ userId, displayName, level }]`
-
-### POST `/teams/{teamId}/invite-members`
-Invite a user or group to the team. Requires team moderator+.
-**Body:** `{ type: 'user'|'group', id }`
-**Response:** `{ success: true }`
-
-### DELETE `/teams/{teamId}/members/{userId}`
-Remove a member. Requires team moderator+.
-**Response:** `{ success: true }`
+List all members of a team.
+**Auth:** Team member.
+**Response:** `[ { userId, displayName, level, role } ]`
 
 ### PUT `/teams/{teamId}/members/{userId}/level`
-Change a member's level. Requires team admin/owner.
-**Body:** `{ level: int }`
-**Response:** `{ success: true }`
+Change a member's role.
+**Auth:** Team admin/owner. Cannot demote someone at or above your own level.
+**Body:** `{ level: 1|4|8 }`
 
-### GET `/teams/{teamId}/pending-requests`
-List pending join requests. Requires team moderator+.
-**Response:** `[{ userId, displayName }]`
+### DELETE `/teams/{teamId}/members/{userId}`
+Remove a member from the team.
+**Auth:** Team admin/owner.
 
-### POST `/teams/{teamId}/approve/{userId}`
-Approve a join request. Requires team moderator+.
-**Response:** `{ success: true }`
-
-### POST `/teams/{teamId}/reject/{userId}`
-Reject a join request. Requires team moderator+.
-**Response:** `{ success: true }`
-
----
-
-## Resources
+### POST `/teams/{teamId}/invite-members`
+Invite users/groups to the team.
+**Auth:** Team moderator/admin/owner (level >= 4). Enforced in both controller and service.
+**Body:** `{ members: [ { id, type } ] }` — type: `user` | `group` | `email` | `federated`
+**Response:** `{ invited: [], failed: [] }`
 
 ### GET `/teams/{teamId}/resources`
-Returns all provisioned resources for the team (talk, files, calendar, deck).
-**Response:** `{ talk: { token }|null, files: { path }|null, calendar: { public_token }|null, deck: { board_id }|null }`
+Get provisioned resources (Talk token, Files path, Calendar id, Deck board id).
+**Auth:** Team member. ← membership check enforced v2.42
+**Response:** `{ talk: { token }, files: { path }, calendar: { id }, deck: { board_id } }`
 
-### POST `/teams/{teamId}/create-resources`
-Provision all app resources for the team. Requires team admin/owner.
-**Response:** `{ success: true }`
+### POST `/teams/{teamId}/resources`
+Provision resources for enabled team apps.
+**Auth:** Team admin/owner. ← enforced v2.42
+**Body:** `{ apps: ['spreed','files','calendar','deck'], teamName: string }`
 
 ### DELETE `/teams/{teamId}/resources/{app}`
-Disable (hard delete) an app resource. `{app}` one of: `spreed`, `files`, `calendar`, `deck`, `intravox`. **Requires team admin/owner.**
-**Response:** `{ success: true }`
+Delete resources for a specific app. `app` is allowlisted.
+**Auth:** Team admin/owner.
 
----
+### PUT `/teams/{teamId}/description`
+Update team description.
+**Auth:** Team admin/owner. ← enforced v2.42
 
-## Apps
-
-### GET `/teams/{teamId}/apps`
-Returns enabled/disabled state of each app for the team.
-**Response:** `[{ app_id, enabled }]`
-
-### PUT `/teams/{teamId}/apps`
-Enable or disable apps for the team. **Requires team admin/owner.**
-**Body:** `{ apps: [{ app_id, enabled }] }`
-**Response:** `{ success: true }`
+### PUT `/teams/{teamId}/config`
+Update team configuration flags.
+**Auth:** Team admin/owner.
 
 ---
 
 ## Messages
 
 ### GET `/teams/{teamId}/messages`
-Returns pinned message and all messages.
+Get team messages and pinned message.
+**Auth:** Team member.
 **Response:** `{ pinned: object|null, messages: [] }`
 
 ### POST `/teams/{teamId}/messages`
-Post a new message. Any team member.
-**Body:** `{ subject, message, priority?, messageType?, pollOptions? }`
-**Response:** `{ id, content, author, created_at }`
-
-### PUT `/teams/{teamId}/messages/{messageId}`
-Edit a message. Author only.
-**Body:** `{ subject, message }`
-**Response:** updated message object
+Post a new message.
+**Auth:** Team member.
+**Body:** `{ message: string }`
 
 ### DELETE `/teams/{teamId}/messages/{messageId}`
-Delete a message. **Author or team admin/owner.**
-**Response:** `{ success: true }`
+Delete a message.
+**Auth:** Message author OR team admin/owner.
 
 ### POST `/teams/{teamId}/messages/{messageId}/pin`
-Pin a message. Requires pinMinLevel (admin setting).
-**Response:** `{ success: true }`
+Pin a message.
+**Auth:** Team admin/owner per `pinMinLevel` admin setting.
 
-### POST `/teams/{teamId}/messages/{messageId}/unpin`
-Unpin the currently pinned message.
-**Response:** `{ success: true }`
+### DELETE `/teams/{teamId}/messages/{messageId}/unpin`
+Unpin a message.
+**Auth:** Team admin/owner per `pinMinLevel` admin setting.
 
-### GET `/messages/aggregated`
-Returns messages across all of the current user's teams.
-**Response:** `[{ teamId, teamName, messages: [] }]`
+### GET `/teams/{teamId}/messages/{messageId}/comments`
+Get comments on a message.
+**Auth:** Team member.
 
----
+### POST `/teams/{teamId}/messages/{messageId}/comments`
+Post a comment.
+**Auth:** Team member.
 
-## Polls
-
-### POST `/messages/{messageId}/vote`
-Vote on a poll option.
-**Body:** `{ optionIndex: int }`
-**Response:** updated poll state
-
-### GET `/messages/{messageId}/poll-results`
-Get poll results.
-**Response:** `{ options: [], votes: [] }`
-
-### POST `/messages/{messageId}/close-poll`
-Close a poll. Author only.
-**Response:** updated message object
-
-### POST `/messages/{messageId}/mark-solved`
-Mark a question message as solved.
-**Body:** `{ commentId: int }`
-**Response:** updated message object
-
-### POST `/messages/{messageId}/unmark-solved`
-Unmark a question as solved. Author only.
-**Response:** updated message object
+### DELETE `/teams/{teamId}/messages/{messageId}/comments/{commentId}`
+Delete a comment.
+**Auth:** Comment author OR team admin/owner.
 
 ---
 
-## Comments
-
-### GET `/messages/{messageId}/comments`
-Returns all comments on a message.
-**Response:** `[{ id, content, author, created_at }]`
-
-### POST `/messages/{messageId}/comments`
-Post a comment. Any team member.
-**Body:** `{ comment }`
-**Response:** `{ id, content, author, created_at }`
-
-### PUT `/comments/{commentId}`
-Edit a comment. **Author only** (enforced via DB WHERE clause).
-**Body:** `{ comment }`
-**Response:** updated comment object
-
----
-
-## Web Links
+## Web Links (custom tab bar links)
 
 ### GET `/teams/{teamId}/links`
-Returns all web links for the team.
-**Response:** `[{ id, title, url }]`
+List all web links for the team.
+**Auth:** Team member.
 
 ### POST `/teams/{teamId}/links`
-Add a web link. **Requires team admin/owner.**
-**Body:** `{ title, url }`
-**Response:** `{ id, title, url }`
+Create a web link.
+**Auth:** Team admin/owner.
+**Body:** `{ label: string, url: string }`
 
 ### PUT `/teams/{teamId}/links/{linkId}`
-Update a web link. **Requires team admin/owner.**
-**Body:** `{ title, url, sortOrder }`
-**Response:** updated link object
+Update a web link.
+**Auth:** Team admin/owner.
 
 ### DELETE `/teams/{teamId}/links/{linkId}`
-Remove a web link. **Requires team admin/owner.**
-**Response:** `{ success: true }`
+Delete a web link.
+**Auth:** Team admin/owner.
+
+### PUT `/teams/{teamId}/links/reorder`
+Reorder web links.
+**Auth:** Team admin/owner.
+**Body:** `{ ordered_ids: [int] }`
 
 ---
 
 ## Layout
 
 ### GET `/teams/{teamId}/layout`
-Returns the saved grid layout and tab order for the current user + team.
-If no saved layout exists, returns the server-side default.
-**Response:** `{ layout: [...gridItems], tabOrder: [...keys] }`
-
-Each grid item shape: `{ i, x, y, w, h, minW, minH, isResizable, collapsed, hSaved }`
+Get the current user's grid layout and tab order for a team.
+**Auth:** Team member. ← membership check enforced v2.42
+**Response:** `{ layout_json: [...], tab_order: [...] }`
 
 ### PUT `/teams/{teamId}/layout`
-Save the current grid layout and tab order.
-**Body:** `{ layout: [...gridItems], tabOrder: [...keys] }`
-**Validation:** widget IDs allowlisted; tab keys allowlisted; numeric values clamped; payload limit 64 KB
-**Response:** `{ success: true }`
+Save the current user's grid layout and tab order.
+**Auth:** Team member. ← membership check enforced v2.42
+**Body:** `{ layout: [...], tabOrder: [...] }`
 
 ---
 
-## Integrations — external-app registration (NC admin only)
+## Integrations — Team management
 
-These three endpoints require the calling user to be a **Nextcloud admin**. No `#[NoAdminRequired]` — NC framework gate applies. Service layer also enforces this as defence-in-depth.
+### GET `/teams/{teamId}/integrations/registry`
+List all integrations with their enabled state for a team.
+**Auth:** Team admin/owner.
+**Response:** `[ { registry_id, app_id, integration_type, title, icon, php_class, iframe_url, is_builtin, enabled } ]`
 
-> ⚠️ Do not call these via HTTP from within PHP — NC blocks loopback. Use in-process service injection. See `developers.md`.
+### POST `/teams/{teamId}/integrations/{registryId}/toggle`
+Enable or disable an integration for a team.
+**Auth:** Team admin/owner.
+**Body:** `{ enable: bool }`
 
-### GET `/ext/integrations`
-Returns all registry entries (built-ins first, then external).
-**Response:** `[{ registry_id, app_id, integration_type, title, description, icon, data_url, action_url, action_label, iframe_url, is_builtin, created_at }]`
-
-### POST `/ext/integrations/register`
-Register or update (upsert) an integration. `app_id` must match an installed NC app; built-in IDs rejected.
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `app_id` | string | ✅ | Must match installed NC app |
-| `integration_type` | string | ✅ | `widget` or `menu_item` |
-| `title` | string | ✅ | Max 255 chars |
-| `description` | string | — | Max 500 chars |
-| `icon` | string | — | MDI icon name, max 64 chars |
-| `data_url` | string | widget ✅ | Relative NC path or `https://` |
-| `action_url` | string | — | Same URL rules as data_url |
-| `action_label` | string | — | 3-dot menu label, max 64 chars |
-| `iframe_url` | string | menu_item ✅ | Must be `https://` |
-
-**Response:** Full registry row
-
-### DELETE `/ext/integrations/{appId}`
-Deregister an integration. Cascade-deletes all team opt-ins. Idempotent. Built-ins cannot be deregistered.
-**Response:** `{ success: true }`
+### PUT `/teams/{teamId}/integrations/reorder`
+Reorder enabled integrations for a team.
+**Auth:** Team admin/owner.
+**Body:** `{ ordered_ids: [int] }`
 
 ---
 
-## Integrations — team render (any authenticated user)
+## Integrations — Render endpoints
 
 ### GET `/teams/{teamId}/integrations`
-Returns enabled integrations split by type.
+Get all enabled integrations split by type. Called on team select.
+**Auth:** Team member.
 **Response:** `{ widgets: [...], menu_items: [...] }`
 
 ### GET `/teams/{teamId}/integrations/widget-data/{registryId}`
-TeamHub fetches data from the external app's `data_url` server-side. Widget must be enabled for the team.
-**Response:** `{ items: [{ label, value, icon?, url? }], error? }`
-
-### GET `/teams/{teamId}/integrations/action/{registryId}`
-Returns the action modal definition from the external app's `action_url`.
-**Response:** `{ title, fields: [{ label, type, name, value? }], submit_label? }`
+Fetch widget data by calling the registered `ITeamHubWidget::getWidgetData()` implementation
+directly in-process via NC's DI container. No HTTP call is made.
+**Auth:** Team member (widget must be enabled for the team).
+**Response:**
+```json
+{
+  "items": [ { "label": "string", "value": "string", "icon": "MDI name?", "url": "string?" } ],
+  "actions": [
+    { "label": "string", "icon": "MDI name?", "url": "string (relative NC path or https://)" }
+  ]
+}
+```
+`items` is required (may be empty). `actions` is optional — when present, TeamHub renders a 3-dot menu
+in the widget card header. Action URLs open in a new browser tab (`window.open`, `noopener,noreferrer`).
+Actions are capped at 10 entries; URLs must be a relative NC path or `https://`.
 
 ---
 
-## Integrations — team management (team admin required)
+## Integrations — External app registration (NC admin required)
 
-### GET `/teams/{teamId}/integrations/registry`
-Returns all integrations with their enabled state for this team.
-**Response:** `[{ registry_id, app_id, integration_type, title, description, icon, data_url, action_url, action_label, iframe_url, is_builtin, enabled, sort_order }]`
+### GET `/ext/integrations`
+List all registered integrations (built-ins + external).
+**Auth:** NC admin.
 
-### POST `/teams/{teamId}/integrations/{registryId}/toggle`
-Enable or disable an integration for a team. **Requires team admin/owner.**
-**Body:** `{ enable: true|false }`
-**Response:** Updated full registry list.
+### POST `/ext/integrations/register`
+Register or update an external app's integration.
+**Auth:** NC admin (or in-process PHP with `calledInProcess: true`).
+**Body:**
+```json
+{
+  "app_id": "myapp",
+  "integration_type": "widget|menu_item",
+  "title": "string",
+  "description": "string?",
+  "icon": "MDI icon name?",
+  "php_class": "OCA\\MyApp\\Integration\\TeamHubWidget",
+  "iframe_url": "https://..."
+}
+```
+Note: `php_class` is required for `widget` type. `iframe_url` is required for `menu_item` type.
+These two fields are mutually exclusive. Preferred registration method is always in-process
+from `Application::boot()` — see `developers.md`.
 
-### PUT `/teams/{teamId}/integrations/reorder`
-Persist display order for a team's enabled integrations. **Requires team admin/owner.**
-**Body:** `{ order: [3, 1, 2] }` — registry IDs in desired order.
-**Response:** Updated enabled integration list.
+### DELETE `/ext/integrations/{appId}`
+Deregister an external app's integration (cascades team opt-ins).
+**Auth:** NC admin.
+
+---
+
+## Team Apps (built-in NC app toggles)
+
+### GET `/teams/{teamId}/apps`
+Get enabled/disabled state of built-in apps for a team.
+**Auth:** Team member.
+**Response:** `[ { app_id, enabled } ]`
+
+### POST `/teams/{teamId}/apps/{appId}/toggle`
+Enable or disable a built-in app for a team.
+**Auth:** Team admin/owner.
+**Body:** `{ enable: bool }`
 
 ---
 
 ## Activity
 
 ### GET `/teams/{teamId}/activity`
-Returns recent activity for the team.
-**Response:** `[{ id, type, subject, object_type, object_id, timestamp, author }]`
+Get activity feed for a team.
+**Auth:** Team member.
+**Response:** `[ { id, type, subject, timestamp, user } ]`
 
 ---
 
-## User / Permissions
-
-### GET `/user/can-create-team`
-Returns whether the current user is allowed to create teams.
-**Response:** `{ canCreate: bool }`
-
-### GET `/invite-types`
-Returns allowed invite types for the invite modal.
-**Response:** `{ types: ['user', 'group', ...] }`
+## Search / Invite
 
 ### GET `/users/search`
-Search NC users. Used by invite modal.
-**Response:** `[{ uid, displayName }]`
+Search Nextcloud users and groups for invite autocomplete.
+**Auth:** Any authenticated user.
+**Query:** `?q=searchterm`
+**Response:** `[ { id, displayName, type } ]` — type: `user` | `group` | `email` | `federated`
+**Note:** Uses `IUserManager::searchDisplayName()` + `search()` — DB-backed, limited. Does not iterate all users.
 
-### GET `/apps/check`
-Returns installed state of Talk, Calendar, Deck.
-**Response:** `{ talk: bool, calendar: bool, deck: bool }`
+### GET `/invite-types`
+Get allowed invite types from admin settings.
+**Auth:** Any authenticated user.
+**Response:** `{ types: ['user', 'group', ...] }`
+
+---
+
+## Admin settings
 
 ### GET `/admin/settings`
-Returns current admin settings. **Requires NC admin.**
-**Response:** `{ wizardDescription, createTeamGroup, inviteTypes, pinMinLevel }`
+Get all admin configuration values.
+**Auth:** NC admin (framework-level; no `#[NoAdminRequired]`).
 
-### POST `/admin/settings`
-Update admin settings. **Requires NC admin.**
+### PUT `/admin/settings`
+Save admin configuration.
+**Auth:** NC admin (framework-level + service-level `isAdmin()` check).
 **Body:** `{ wizardDescription?, createTeamGroup?, inviteTypes?, pinMinLevel? }`
-**Response:** `{ success: true }`
 
-### GET `/admin/groups/search`
-Search NC groups for the createTeamGroup picker. **Requires NC admin.**
-**Response:** `[{ id, displayName }]`
+---
+
+## Notes for external app developers
+
+- Register your integration in-process from your app's `Application::boot()` — see `developers.md`.
+- Widget integrations must implement `OCA\TeamHub\Integration\ITeamHubWidget` and pass the
+  fully-qualified class name as `php_class`. TeamHub resolves the class via NC's DI container
+  and calls `getWidgetData(teamId, userId)` directly — no HTTP involved at any layer.
+- `iframe_url` for `menu_item`: must be absolute `https://` — loaded in the browser in a sandboxed iframe.
+- `php_class` and `iframe_url` are mutually exclusive.
+- Widget `getWidgetData()` must return `{ items: [...], actions?: [...] }`. Actions populate the
+  3-dot menu in the widget header. Action URLs open in a new tab via `window.open` — they are
+  browser-navigation links, not server-side calls. Relative NC paths or `https://` only.
+- See `developers.md` for the full integration guide, interface definition, and PHP examples.

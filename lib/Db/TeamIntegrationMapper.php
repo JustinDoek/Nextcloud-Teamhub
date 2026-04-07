@@ -43,9 +43,7 @@ class TeamIntegrationMapper {
                 'ir.title',
                 'ir.description',
                 'ir.icon',
-                'ir.data_url',
-                'ir.action_url',
-                'ir.action_label',
+                'ir.php_class',
                 'ir.iframe_url',
                 'ir.is_builtin',
             )
@@ -91,9 +89,7 @@ class TeamIntegrationMapper {
                 'ir.title',
                 'ir.description',
                 'ir.icon',
-                'ir.data_url',
-                'ir.action_url',
-                'ir.action_label',
+                'ir.php_class',
                 'ir.iframe_url',
                 'ir.is_builtin',
             )
@@ -126,7 +122,7 @@ class TeamIntegrationMapper {
      * Columns prefixed ir_ are registry fields; ti_ are team-integration fields.
      *
      * @return array<int, array>  Each item includes: registry_id, app_id, integration_type,
-     *                            title, description, icon, data_url, action_url, action_label,
+     *                            title, description, icon, php_class,
      *                            iframe_url, is_builtin, enabled (bool), sort_order.
      */
     public function findAllWithEnabledStateForTeam(string $teamId): array {
@@ -140,9 +136,7 @@ class TeamIntegrationMapper {
                 'ir.title',
                 'ir.description',
                 'ir.icon',
-                'ir.data_url',
-                'ir.action_url',
-                'ir.action_label',
+                'ir.php_class',
                 'ir.iframe_url',
                 'ir.is_builtin',
             )
@@ -171,12 +165,10 @@ class TeamIntegrationMapper {
                 'app_id'           => (string)$row['app_id'],
                 'integration_type' => (string)$row['integration_type'],
                 'title'            => (string)$row['title'],
-                'description'      => isset($row['description'])  ? (string)$row['description']  : null,
-                'icon'             => isset($row['icon'])          ? (string)$row['icon']          : null,
-                'data_url'         => isset($row['data_url'])      ? (string)$row['data_url']      : null,
-                'action_url'       => isset($row['action_url'])    ? (string)$row['action_url']    : null,
-                'action_label'     => isset($row['action_label'])  ? (string)$row['action_label']  : null,
-                'iframe_url'       => isset($row['iframe_url'])    ? (string)$row['iframe_url']    : null,
+                'description'      => isset($row['description']) ? (string)$row['description'] : null,
+                'icon'             => isset($row['icon'])        ? (string)$row['icon']        : null,
+                'php_class'        => isset($row['php_class'])   ? (string)$row['php_class']   : null,
+                'iframe_url'       => isset($row['iframe_url'])  ? (string)$row['iframe_url']  : null,
                 'is_builtin'       => (bool)$row['is_builtin'],
                 'enabled'          => $isEnabled,
                 'sort_order'       => $isEnabled ? (int)$row['ti_sort_order'] : 0,
@@ -299,12 +291,10 @@ class TeamIntegrationMapper {
             'app_id'           => (string)$row['app_id'],
             'integration_type' => (string)$row['integration_type'],
             'title'            => (string)$row['title'],
-            'description'      => isset($row['description'])  ? (string)$row['description']  : null,
-            'icon'             => isset($row['icon'])          ? (string)$row['icon']          : null,
-            'data_url'         => isset($row['data_url'])      ? (string)$row['data_url']      : null,
-            'action_url'       => isset($row['action_url'])    ? (string)$row['action_url']    : null,
-            'action_label'     => isset($row['action_label'])  ? (string)$row['action_label']  : null,
-            'iframe_url'       => isset($row['iframe_url'])    ? (string)$row['iframe_url']    : null,
+            'description'      => isset($row['description']) ? (string)$row['description'] : null,
+            'icon'             => isset($row['icon'])        ? (string)$row['icon']        : null,
+            'php_class'        => isset($row['php_class'])   ? (string)$row['php_class']   : null,
+            'iframe_url'       => isset($row['iframe_url'])  ? (string)$row['iframe_url']  : null,
             'is_builtin'       => (bool)$row['is_builtin'],
         ];
     }
