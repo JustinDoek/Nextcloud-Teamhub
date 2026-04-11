@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -18,6 +19,7 @@ class MessageController extends Controller {
         string $appName,
         IRequest $request,
         private MessageService $messageService,
+        private MemberService $memberService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -25,15 +27,19 @@ class MessageController extends Controller {
 
     /**
      * Returns { pinned: object|null, messages: array }
+     * SEC: membership enforced — non-members receive 403.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function listMessages(string $teamId, int $limit = 50, int $offset = 0): JSONResponse {
         try {
+            $this->memberService->requireMemberLevel($teamId);
             $result = $this->messageService->getTeamMessages($teamId, $limit, $offset);
             return new JSONResponse($result);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -47,12 +53,6 @@ class MessageController extends Controller {
         ?array $pollOptions = null
     ): JSONResponse {
         try {
-            $this->logger->debug('Creating message', [
-                'teamId'      => $teamId,
-                'subject'     => $subject,
-                'messageType' => $messageType,
-                'app'         => Application::APP_ID,
-            ]);
             $newMessage = $this->messageService->createMessage($teamId, $subject, $message, $priority, $messageType, $pollOptions);
             return new JSONResponse($newMessage, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
@@ -149,10 +149,6 @@ class MessageController extends Controller {
     #[NoAdminRequired]
     public function closePoll(int $messageId): JSONResponse {
         try {
-            $this->logger->debug('Close poll request received', [
-                'messageId' => $messageId,
-                'app'       => Application::APP_ID,
-            ]);
             $updatedMessage = $this->messageService->closePoll($messageId);
             return new JSONResponse($updatedMessage);
         } catch (\Exception $e) {
@@ -172,11 +168,6 @@ class MessageController extends Controller {
     #[NoAdminRequired]
     public function markQuestionSolved(int $messageId, int $commentId): JSONResponse {
         try {
-            $this->logger->debug('Mark question solved request received', [
-                'messageId' => $messageId,
-                'commentId' => $commentId,
-                'app'       => Application::APP_ID,
-            ]);
             $updatedMessage = $this->messageService->markQuestionSolved($messageId, $commentId);
             return new JSONResponse($updatedMessage);
         } catch (\Exception $e) {
@@ -193,10 +184,6 @@ class MessageController extends Controller {
     #[NoAdminRequired]
     public function unmarkQuestionSolved(int $messageId): JSONResponse {
         try {
-            $this->logger->debug('Unmark question solved request received', [
-                'messageId' => $messageId,
-                'app'       => Application::APP_ID,
-            ]);
             $updatedMessage = $this->messageService->unmarkQuestionSolved($messageId);
             return new JSONResponse($updatedMessage);
         } catch (\Exception $e) {

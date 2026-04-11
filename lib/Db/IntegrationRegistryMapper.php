@@ -9,15 +9,19 @@ use OCP\IDBConnection;
 /**
  * Data-access layer for teamhub_integration_registry.
  *
- * One row per registered integration. External apps register via
- * IntegrationService::registerIntegration() called in-process from their
- * Application::boot(). Built-in integrations (Talk, Files, Calendar, Deck)
- * are seeded by IntegrationService::seedBuiltins() on first boot.
+ * One row per (app_id, integration_type) pair. An external app may register
+ * both a 'widget' row and a 'menu_item' row — they are fully independent
+ * entries, each with their own registry_id and team opt-in state.
  *
  * Widget integrations deliver data via php_class — a fully-qualified class
  * name implementing ITeamHubWidget, resolved from NC's DI container at
- * render time. HTTP-based data_url / action_url / action_label have been
- * removed. Menu item integrations still use iframe_url (browser-side).
+ * render time.
+ *
+ * Menu item integrations expose a URL (iframe_url) that TeamHub embeds in the
+ * main canvas iframe or opens in a new window. The URL may be:
+ *   - https://example.com/...  (external app)
+ *   - /apps/myapp/...          (same-server NC app, relative path)
+ *   - /index.php/apps/myapp/...
  */
 class IntegrationRegistryMapper {
 
@@ -107,14 +111,44 @@ class IntegrationRegistryMapper {
     }
 
     /**
-     * Find a registry entry by app ID. Returns null when not registered.
+     * Find ALL registry entries for a given app ID.
+     *
+     * An app may have up to two rows (one per integration_type). Returns an
+     * empty array when the app has no registrations at all.
+     *
+     * @return array<int, array>  Indexed array, each element is a hydrated row.
      */
-    public function findByAppId(string $appId): ?array {
+    public function findByAppId(string $appId): array {
 
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
             ->from('teamhub_integration_registry')
-            ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)));
+            ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
+            ->orderBy('integration_type', 'ASC'); // deterministic: menu_item before widget
+
+        $result = $qb->executeQuery();
+        $rows   = [];
+        while ($row = $result->fetch()) {
+            $rows[] = $this->hydrate($row);
+        }
+        $result->closeCursor();
+
+        return $rows;
+    }
+
+    /**
+     * Find a single registry entry by (app_id, integration_type).
+     *
+     * This is the natural key used for upsert logic in registerIntegration().
+     * Returns null when no row exists for that specific combination.
+     */
+    public function findByAppIdAndType(string $appId, string $integrationType): ?array {
+
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from('teamhub_integration_registry')
+            ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
+            ->andWhere($qb->expr()->eq('integration_type', $qb->createNamedParameter($integrationType)));
 
         $result = $qb->executeQuery();
         $row    = $result->fetch();
@@ -162,8 +196,6 @@ class IntegrationRegistryMapper {
         $qb->executeStatement();
         $id = (int)$qb->getLastInsertId();
 
-        $this->logger_debug("IntegrationRegistryMapper::create — inserted id={$id} app_id={$appId}");
-
         return $this->findById($id);
     }
 
@@ -205,8 +237,6 @@ class IntegrationRegistryMapper {
      */
     public function suspendByAppId(string $appId): void {
 
-        $this->logger_debug("IntegrationRegistryMapper::suspendByAppId — suspending app_id={$appId}");
-
         $qb = $this->db->getQueryBuilder();
         $qb->update('teamhub_integration_registry')
             ->set('php_class',  $qb->createNamedParameter(null))
@@ -216,7 +246,9 @@ class IntegrationRegistryMapper {
     }
 
     /**
-     * Delete a registry entry by app ID.
+     * Delete ALL registry entries for an app by app ID.
+     *
+     * Removes both the widget and menu_item rows if both exist.
      * Only used for permanent removal (app uninstall / NC admin action).
      * Caller is responsible for cascading into teamhub_team_integrations first.
      */
@@ -247,8 +279,4 @@ class IntegrationRegistryMapper {
         ];
     }
 
-    /** Temporary debug helper — removed at session end. */
-    private function logger_debug(string $msg): void {
-        \OC::$server->get(\Psr\Log\LoggerInterface::class)->debug($msg, ['app' => 'teamhub']);
-    }
 }

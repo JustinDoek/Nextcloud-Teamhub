@@ -106,24 +106,46 @@ PHP files in `lib/` take effect immediately. Vue components require a rebuild.
 ```
 teamhub/
 ├── appinfo/
-│   ├── info.xml            # App metadata
-│   └── routes.php          # API route definitions
+│   ├── info.xml            # App metadata and version
+│   └── routes.php          # All API route definitions
 ├── lib/
 │   ├── AppInfo/
-│   │   └── Application.php # Bootstrap
-│   ├── Controller/         # REST API controllers
+│   │   └── Application.php # Bootstrap — registers integrations, jobs, listeners
+│   ├── Controller/         # REST API controllers (one per domain)
 │   ├── Service/
-│   │   └── TeamService.php # Core business logic + Circles integration
-│   ├── Db/                 # Database mappers
-│   ├── Migration/          # Database migrations
-│   ├── Notification/       # Push notification handler
+│   │   ├── TeamService.php          # Team CRUD, config, admin settings
+│   │   ├── MemberService.php        # Membership, invite, roles
+│   │   ├── ResourceService.php      # Resource lookup + provisioning orchestrator
+│   │   ├── TalkService.php          # Talk room create/delete
+│   │   ├── FilesService.php         # Shared folder create/delete
+│   │   ├── CalendarService.php      # Calendar create/delete
+│   │   ├── DeckService.php          # Deck board + Intravox page create/delete
+│   │   ├── DbIntrospectionService.php # DB schema introspection utility
+│   │   ├── MessageService.php       # Messages, polls, questions
+│   │   ├── ActivityService.php      # Activity feed + calendar events
+│   │   ├── IntegrationService.php   # Integration registry + widget data
+│   │   ├── MaintenanceService.php   # Orphaned team cleanup
+│   │   ├── TelemetryService.php     # Anonymous usage telemetry
+│   │   ├── LinkPreviewService.php   # URL metadata for message previews
+│   │   ├── TeamImageService.php     # Team logo upload/storage
+│   │   └── WebLinkService.php       # Custom tab bar links
+│   ├── Db/                 # Database mappers (QueryBuilder only, no raw SQL)
+│   ├── Integration/        # ITeamHubWidget interface
+│   ├── Migration/          # DB schema migrations (one file per schema change)
+│   ├── Notification/       # NC push notification handler
+│   ├── Listener/           # App disabled listener (auto-deregisters integrations)
 │   └── Settings/           # Admin settings panel
 ├── src/
-│   ├── App.vue             # Root component + sidebar
-│   ├── store/index.js      # Vuex state
-│   └── components/         # Vue components
-├── js/                     # Compiled output
-├── templates/              # PHP templates
+│   ├── App.vue             # Root component + NC sidebar shell
+│   ├── store/index.js      # Vuex state management
+│   └── components/
+│       ├── TeamView.vue         # Team shell — mounts tab bar + widget grid
+│       ├── TeamTabBar.vue       # Draggable tab bar
+│       ├── TeamWidgetGrid.vue   # Home-view drag-and-drop widget grid
+│       ├── ManageTeamView.vue   # Team settings panel
+│       └── ...                  # Widgets, modals, activity views
+├── js/                     # Compiled output (do not edit directly)
+├── templates/              # PHP page templates
 └── webpack.config.js
 ```
 
@@ -133,7 +155,17 @@ teamhub/
 
 **Config bitmask preservation** — When saving team settings, TeamHub reads the existing config from the database, applies only the bits it manages (open, invite, request, protected, visible, single), and writes back. Internal Circles bits (hidden, personal, root) are never touched.
 
+**Batch DB queries** — `getUserTeams()` uses 4 queries regardless of how many teams the user belongs to (one for team list, one batch member count, two batch unread checks). The old per-team query loop has been removed.
+
+**SQL-filtered team browsing** — `browseAllTeams()` uses a LEFT JOIN with a WHERE clause to filter by CFG_VISIBLE and membership in the database. No full table scan into PHP.
+
+**Resource provisioning via sub-services** — `ResourceService` is an orchestrator only. Each app (Talk, Files, Calendar, Deck/Intravox) has its own service class with create and delete methods, keeping each file under 400 lines.
+
+**No circular DI** — `TalkService` and `DeckService` need DB schema introspection (`getTableColumns`). They inject `DbIntrospectionService` directly rather than `ResourceService`, avoiding a circular dependency.
+
 **PostgreSQL compatibility** — The `activity` table's `object_id` column is `bigint` in PostgreSQL. Non-numeric values (circle IDs, Talk tokens) are handled by matching on `object_type` alone rather than attempting a string-to-bigint comparison.
+
+**Membership checks on all team-scoped endpoints** — Every endpoint that returns team data (messages, resources, widgets, activity) verifies the caller is a team member before responding. This uses a direct indexed DB query against `circles_member`, not the full Circles API.
 
 ## License
 

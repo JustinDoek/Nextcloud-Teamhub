@@ -27,7 +27,6 @@ class ActivityService {
         private ContainerInterface $container,
         private LoggerInterface $logger,
     ) {
-        $this->logger->debug('[ActivityService] constructed', ['app' => Application::APP_ID]);
     }
 
     // -------------------------------------------------------------------------
@@ -52,12 +51,6 @@ class ActivityService {
      * @throws \Exception if user is not authenticated
      */
     public function getTeamActivity(string $teamId, int $limit = 25, int $since = 0): array {
-        $this->logger->debug('[ActivityService] getTeamActivity start', [
-            'teamId' => $teamId,
-            'limit'  => $limit,
-            'since'  => $since,
-            'app'    => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -66,15 +59,6 @@ class ActivityService {
 
         $db        = $this->container->get(\OCP\IDBConnection::class);
         $resources = $this->resourceService->getTeamResources($teamId);
-
-        $this->logger->debug('[ActivityService] getTeamActivity resources resolved', [
-            'teamId'     => $teamId,
-            'talk'       => isset($resources['talk']['token']) ? 'yes' : 'no',
-            'files'      => isset($resources['files']['folder_id']) ? 'yes' : 'no',
-            'calendar'   => isset($resources['calendar']['id']) ? 'yes' : 'no',
-            'deck'       => isset($resources['deck']['board_id']) ? 'yes' : 'no',
-            'app'        => Application::APP_ID,
-        ]);
 
         // Build OR conditions: each resource type adds one clause
         $conditions = [];
@@ -117,12 +101,6 @@ class ActivityService {
             }
         }
 
-        $this->logger->debug('[ActivityService] getTeamActivity condition count', [
-            'teamId'     => $teamId,
-            'conditions' => count($conditions),
-            'app'        => Application::APP_ID,
-        ]);
-
         // Build the query with OR clauses
         // PostgreSQL: activity.object_id is bigint — comparing to non-numeric strings
         // (circle IDs, talk tokens) causes "invalid input syntax for type bigint".
@@ -132,12 +110,6 @@ class ActivityService {
             $isPostgres = $platform instanceof \Doctrine\DBAL\Platforms\PostgreSQLPlatform
                        || $platform instanceof \Doctrine\DBAL\Platforms\PostgreSQL100Platform
                        || str_contains(get_class($platform), 'PostgreSQL');
-
-            $this->logger->debug('[ActivityService] DB platform', [
-                'platform'   => get_class($platform),
-                'isPostgres' => $isPostgres,
-                'app'        => Application::APP_ID,
-            ]);
 
             $qb = $db->getQueryBuilder();
             $qb->select('activity_id', 'app', 'type', 'user', 'affecteduser',
@@ -197,10 +169,6 @@ class ActivityService {
             }
 
             if (empty($orClauses)) {
-                $this->logger->debug('[ActivityService] getTeamActivity no OR clauses — returning empty', [
-                    'teamId' => $teamId,
-                    'app'    => Application::APP_ID,
-                ]);
                 return [];
             }
 
@@ -209,12 +177,6 @@ class ActivityService {
             $result = $qb->executeQuery();
             $rows   = $result->fetchAll();
             $result->closeCursor();
-
-            $this->logger->debug('[ActivityService] getTeamActivity raw rows fetched', [
-                'teamId'   => $teamId,
-                'rowCount' => count($rows),
-                'app'      => Application::APP_ID,
-            ]);
 
         } catch (\Throwable $e) {
             $this->logger->error('[ActivityService] getTeamActivity query failed', [
@@ -268,12 +230,6 @@ class ActivityService {
             }
         }
 
-        $this->logger->debug('[ActivityService] getTeamActivity returning', [
-            'teamId'    => $teamId,
-            'itemCount' => count($items),
-            'app'       => Application::APP_ID,
-        ]);
-
         return $items;
     }
 
@@ -303,11 +259,6 @@ class ActivityService {
      * Returns events starting between now and 30 days from now, sorted ascending.
      */
     public function getTeamCalendarEvents(string $teamId, int $limit = 10): array {
-        $this->logger->debug('[ActivityService] getTeamCalendarEvents', [
-            'teamId' => $teamId,
-            'limit'  => $limit,
-            'app'    => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -332,10 +283,6 @@ class ActivityService {
             $result->closeCursor();
 
             if (!$row) {
-                $this->logger->debug('[ActivityService] getTeamCalendarEvents no calendar share found', [
-                    'teamId' => $teamId,
-                    'app'    => Application::APP_ID,
-                ]);
                 return [];
             }
 
@@ -401,12 +348,6 @@ class ActivityService {
             usort($events, fn($a, $b) => strcmp($a['start'], $b['start']));
             $events = array_slice($events, 0, $limit);
 
-            $this->logger->debug('[ActivityService] getTeamCalendarEvents returning', [
-                'teamId'     => $teamId,
-                'eventCount' => count($events),
-                'app'        => Application::APP_ID,
-            ]);
-
             return $events;
 
         } catch (\Exception $e) {
@@ -435,13 +376,6 @@ class ActivityService {
         string $location = '',
         string $description = ''
     ): void {
-        $this->logger->debug('[ActivityService] createCalendarEvent', [
-            'teamId' => $teamId,
-            'title'  => $title,
-            'start'  => $start,
-            'end'    => $end,
-            'app'    => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -513,13 +447,6 @@ class ActivityService {
 
         $caldav = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
         $objUri = strtolower($uid) . '.ics';
-
-        $this->logger->debug('[ActivityService] createCalendarEvent writing via CalDavBackend', [
-            'teamId'     => $teamId,
-            'calendarId' => $calendarId,
-            'objUri'     => $objUri,
-            'app'        => Application::APP_ID,
-        ]);
 
         $caldav->createCalendarObject($calendarId, $objUri, $ical);
     }

@@ -41,7 +41,6 @@ class MemberService {
         private ContainerInterface $container,
         private LoggerInterface $logger,
     ) {
-        $this->logger->debug('[MemberService] constructed', ['app' => Application::APP_ID]);
     }
 
     // -------------------------------------------------------------------------
@@ -75,10 +74,6 @@ class MemberService {
      * @throws \Exception if user is not authenticated or team not found
      */
     public function getTeamMembers(string $teamId): array {
-        $this->logger->debug('[MemberService] getTeamMembers', [
-            'teamId' => $teamId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -109,12 +104,6 @@ class MemberService {
                 }
             }
 
-            $this->logger->debug('[MemberService] getTeamMembers result', [
-                'teamId'      => $teamId,
-                'memberCount' => count($members),
-                'app'         => Application::APP_ID,
-            ]);
-
             return $members;
 
         } finally {
@@ -133,12 +122,6 @@ class MemberService {
      * @throws \Exception on invalid state or insufficient permissions
      */
     public function updateMemberLevel(string $teamId, string $userId, int $newLevel): array {
-        $this->logger->debug('[MemberService] updateMemberLevel', [
-            'teamId'   => $teamId,
-            'userId'   => $userId,
-            'newLevel' => $newLevel,
-            'app'      => Application::APP_ID,
-        ]);
 
         $caller = $this->userSession->getUser();
         if (!$caller) {
@@ -184,13 +167,6 @@ class MemberService {
             ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
             ->executeStatement();
 
-        $this->logger->info('[MemberService] updateMemberLevel done', [
-            'teamId'   => $teamId,
-            'userId'   => $userId,
-            'newLevel' => $newLevel,
-            'app'      => Application::APP_ID,
-        ]);
-
         // Return refreshed member list
         return $this->getTeamMembers($teamId);
     }
@@ -211,6 +187,27 @@ class MemberService {
         $row = $result->fetch();
         $result->closeCursor();
         return $row ? (int)$row['level'] : 0;
+    }
+
+    /**
+     * Asserts the current user is at least a basic member (level >= 1) of the team.
+     * Use this to gate read-only endpoints that should be invisible to non-members.
+     * Uses a direct indexed DB query — avoids the full Circles API member-list fetch.
+     *
+     * @throws \Exception if user is not authenticated or not a member
+     */
+    public function requireMemberLevel(string $teamId): void {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+
+        $db    = $this->container->get(\OCP\IDBConnection::class);
+        $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+
+        if ($level === 0) {
+            throw new \Exception('You are not a member of this team');
+        }
     }
 
     /**
@@ -298,10 +295,6 @@ class MemberService {
      * @throws \Exception if owner tries to leave with members still in the team
      */
     public function leaveTeam(string $teamId): void {
-        $this->logger->debug('[MemberService] leaveTeam', [
-            'teamId' => $teamId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -353,11 +346,6 @@ class MemberService {
      * @throws \Exception if target is the owner or not found
      */
     public function removeMember(string $teamId, string $userId): void {
-        $this->logger->debug('[MemberService] removeMember', [
-            'teamId' => $teamId,
-            'userId' => $userId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $this->requireAdminLevel($teamId);
 
@@ -371,10 +359,6 @@ class MemberService {
 
             $targetMember = null;
             foreach ($circle->getMembers() as $member) {
-                $this->logger->debug('[MemberService] removeMember scanning member', [
-                    'memberId' => method_exists($member, 'getUserId') ? $member->getUserId() : 'unknown',
-                    'app'      => Application::APP_ID,
-                ]);
                 $mId = method_exists($member, 'getUserId') ? $member->getUserId() : null;
                 if ($mId === $userId) {
                     $targetMember = $member;
@@ -413,11 +397,6 @@ class MemberService {
      * Non-fatal per entry — returns per-id results.
      */
     public function inviteMembers(string $teamId, array $members): array {
-        $this->logger->debug('[MemberService] inviteMembers', [
-            'teamId' => $teamId,
-            'count'  => count($members),
-            'app'    => Application::APP_ID,
-        ]);
 
         // Moderator (level >= 4) or above may invite — matches the controller gate.
         // Previously this called requireAdminLevel() which silently rejected moderators.
@@ -458,12 +437,6 @@ class MemberService {
                     $invitee = $manager->getFederatedUser($memberId, $memberType);
                     $manager->addMember($teamId, $invitee);
                     $results[$memberId] = 'invited';
-                    $this->logger->debug('[MemberService] invited member', [
-                        'teamId'     => $teamId,
-                        'memberId'   => $memberId,
-                        'memberType' => $memberType,
-                        'app'        => Application::APP_ID,
-                    ]);
                 } catch (\Exception $e) {
                     $results[$memberId] = 'failed: ' . $e->getMessage();
                     $this->logger->warning('[MemberService] Could not invite member', [
@@ -488,10 +461,6 @@ class MemberService {
      * (happens when config != 0, which causes probeCircles to hide it).
      */
     public function requestJoinTeam(string $teamId): void {
-        $this->logger->debug('[MemberService] requestJoinTeam', [
-            'teamId' => $teamId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -574,11 +543,6 @@ class MemberService {
 
         try {
             $qb->insert('circles_member')->values($values)->executeStatement();
-            $this->logger->info('[MemberService] requestJoinTeam DB fallback insert succeeded', [
-                'teamId' => $teamId,
-                'uid'    => $uid,
-                'app'    => Application::APP_ID,
-            ]);
         } catch (\Throwable $e) {
             $this->logger->error('[MemberService] requestJoinTeam DB fallback failed', [
                 'teamId' => $teamId,
@@ -597,10 +561,6 @@ class MemberService {
      * Get pending membership requests for a team. Requires admin or owner level.
      */
     public function getPendingRequests(string $teamId): array {
-        $this->logger->debug('[MemberService] getPendingRequests', [
-            'teamId' => $teamId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $this->requireAdminLevel($teamId);
 
@@ -623,12 +583,6 @@ class MemberService {
                 }
             }
 
-            $this->logger->debug('[MemberService] getPendingRequests result', [
-                'teamId'       => $teamId,
-                'pendingCount' => count($pending),
-                'app'          => Application::APP_ID,
-            ]);
-
             return $pending;
 
         } catch (\Exception $e) {
@@ -647,11 +601,6 @@ class MemberService {
      * Approve a pending membership request. Requires admin or owner level.
      */
     public function approveRequest(string $teamId, string $userId): void {
-        $this->logger->debug('[MemberService] approveRequest', [
-            'teamId' => $teamId,
-            'userId' => $userId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $this->requireAdminLevel($teamId);
 
@@ -695,11 +644,6 @@ class MemberService {
      * Reject a pending membership request. Requires admin or owner level.
      */
     public function rejectRequest(string $teamId, string $userId): void {
-        $this->logger->debug('[MemberService] rejectRequest', [
-            'teamId' => $teamId,
-            'userId' => $userId,
-            'app'    => Application::APP_ID,
-        ]);
 
         $this->requireAdminLevel($teamId);
 
@@ -748,11 +692,6 @@ class MemberService {
      * Respects the admin 'inviteTypes' setting.
      */
     public function searchUsers(string $query, int $limit = 10): array {
-        $this->logger->debug('[MemberService] searchUsers', [
-            'query' => $query,
-            'limit' => $limit,
-            'app'   => Application::APP_ID,
-        ]);
 
         $currentUser  = $this->userSession->getUser();
         $currentUid   = $currentUser ? $currentUser->getUID() : '';
@@ -850,12 +789,6 @@ class MemberService {
                 'icon'        => 'federation',
             ];
         }
-
-        $this->logger->debug('[MemberService] searchUsers result', [
-            'query'       => $query,
-            'resultCount' => count($results),
-            'app'         => Application::APP_ID,
-        ]);
 
         return $results;
     }

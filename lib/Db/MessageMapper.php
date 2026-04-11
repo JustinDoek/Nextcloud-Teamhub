@@ -284,6 +284,70 @@ class MessageMapper {
         return (int)($row['latest'] ?? 0);
     }
 
+    /**
+     * Full-text search across message subject and body.
+     *
+     * Also JOINs circles_circle to include the team display_name in each row,
+     * so the search provider can show "Team Name" in the result subline without
+     * a second query per result.
+     *
+     * Returns raw rows (not run through rowToArray) because the search provider
+     * only needs a subset of fields and also needs team_name from the JOIN.
+     *
+     * @param string $term  The search term (LIKE %term%)
+     * @param int    $limit Maximum rows to return from the DB
+     * @param int    $offset Pagination offset (for cursor-based paging)
+     * @return array<int, array{id:int, team_id:string, author_id:string, subject:string, message:string, team_name:string}>
+     */
+    public function search(string $term, int $limit = 30, int $offset = 0): array {
+
+        $qb = $this->db->getQueryBuilder();
+
+        $qb->select('m.id', 'm.team_id', 'm.author_id', 'm.subject', 'm.message', 'm.created_at')
+            ->addSelect($qb->createFunction("COALESCE(cc.display_name, '') AS team_name"))
+            ->from('teamhub_messages', 'm')
+            ->leftJoin(
+                'm',
+                'circles_circle',
+                'cc',
+                $qb->expr()->eq('m.team_id', 'cc.unique_id')
+            )
+            ->where(
+                $qb->expr()->orX(
+                    $qb->expr()->like(
+                        $qb->createFunction('LOWER(m.subject)'),
+                        $qb->createNamedParameter('%' . strtolower($term) . '%')
+                    ),
+                    $qb->expr()->like(
+                        $qb->createFunction('LOWER(m.message)'),
+                        $qb->createNamedParameter('%' . strtolower($term) . '%')
+                    )
+                )
+            )
+            ->orderBy('m.created_at', 'DESC')
+            ->setMaxResults($limit)
+            ->setFirstResult($offset);
+
+        $result = $qb->executeQuery();
+        $rows   = [];
+
+        while ($row = $result->fetch()) {
+            $rows[] = [
+                'id'        => (int)$row['id'],
+                'team_id'   => (string)$row['team_id'],
+                'author_id' => (string)$row['author_id'],
+                'subject'   => (string)$row['subject'],
+                'message'   => (string)$row['message'],
+                'team_name' => (string)$row['team_name'],
+                'created_at'=> (int)$row['created_at'],
+            ];
+        }
+
+        $result->closeCursor();
+
+        return $rows;
+    }
+
     private function rowToArray(array $row): array {
         $pollOptions = null;
         if (!empty($row['poll_options'])) {

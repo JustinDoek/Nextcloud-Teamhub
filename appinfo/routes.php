@@ -75,6 +75,30 @@ return [
         ['name' => 'message#unmarkQuestionSolved','url' => '/api/v1/messages/{messageId}/unmark-solved',     'verb' => 'POST'],
 
         // ----------------------------------------------------------------
+        // Team image — upload, remove, serve
+        // ----------------------------------------------------------------
+        ['name' => 'teamImage#upload', 'url' => '/api/v1/teams/{teamId}/image', 'verb' => 'POST'],
+        ['name' => 'teamImage#remove', 'url' => '/api/v1/teams/{teamId}/image', 'verb' => 'DELETE'],
+        ['name' => 'teamImage#serve',  'url' => '/api/v1/teams/{teamId}/image', 'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
+        // Maintenance & telemetry (NC admin only)
+        // ----------------------------------------------------------------
+        ['name' => 'maintenance#getOrphanedTeams',  'url' => '/api/v1/admin/maintenance/orphaned-teams',                       'verb' => 'GET'],
+        ['name' => 'maintenance#deleteOrphanedTeam','url' => '/api/v1/admin/maintenance/orphaned-teams/{teamId}',              'verb' => 'DELETE'],
+        ['name' => 'maintenance#assignOwner',        'url' => '/api/v1/admin/maintenance/orphaned-teams/{teamId}/assign-owner','verb' => 'POST'],
+        ['name' => 'maintenance#getTelemetry',       'url' => '/api/v1/admin/telemetry',                                       'verb' => 'GET'],
+        ['name' => 'maintenance#saveTelemetry',      'url' => '/api/v1/admin/telemetry',                                       'verb' => 'PUT'],
+        ['name' => 'maintenance#searchUsers',        'url' => '/api/v1/admin/users/search',                                    'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
+        // Link preview — server-side Open Graph metadata resolver
+        // ----------------------------------------------------------------
+        ['name' => 'linkPreview#resolve',    'url' => '/api/v1/preview',       'verb' => 'GET'],
+        // Image proxy — serves external OG images through TeamHub to avoid NC CSP violations
+        ['name' => 'linkPreview#proxyImage', 'url' => '/api/v1/preview/image', 'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
         // Web links routes
         // ----------------------------------------------------------------
         ['name' => 'webLink#listLinks',           'url' => '/api/v1/teams/{teamId}/links',                   'verb' => 'GET'],
@@ -105,6 +129,8 @@ return [
         // Integration — team render endpoints (called on team select)
         ['name' => 'integration#getEnabledIntegrations', 'url' => '/api/v1/teams/{teamId}/integrations',                              'verb' => 'GET'],
         ['name' => 'integration#getWidgetData',          'url' => '/api/v1/teams/{teamId}/integrations/widget-data/{registryId}',     'verb' => 'GET'],
+        ['name' => 'integration#getActionForm',          'url' => '/api/v1/teams/{teamId}/integrations/action-form/{registryId}',     'verb' => 'GET'],
+        ['name' => 'integration#submitAction',           'url' => '/api/v1/teams/{teamId}/integrations/action-submit/{registryId}',   'verb' => 'POST'],
 
         // Integration — Manage Team → Integrations tab
         ['name' => 'integration#getIntegrationRegistry', 'url' => '/api/v1/teams/{teamId}/integrations/registry',                    'verb' => 'GET'],

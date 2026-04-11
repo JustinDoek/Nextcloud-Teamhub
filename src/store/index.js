@@ -52,6 +52,13 @@ export default new Vuex.Store({
 
     mutations: {
         SET_TEAMS(state, teams) { state.teams = teams },
+        UPDATE_TEAM_IMAGE(state, { teamId, imageUrl }) {
+            const team = state.teams.find(t => t.id === teamId)
+            if (team) {
+                // Cache-buster already applied in ManageTeamView — store the raw URL
+                team.image_url = imageUrl
+            }
+        },
         SET_CURRENT_TEAM(state, id) { state.currentTeamId = id },
         SET_VIEW(state, view) { state.currentView = view },
         SET_MESSAGES(state, messages) { state.messages = messages },

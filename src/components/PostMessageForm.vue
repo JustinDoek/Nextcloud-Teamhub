@@ -258,7 +258,6 @@ export default {
                 }
             } catch (e) {
                 if (e?.message !== 'User cancelled') {
-                    console.error('[TeamHub] Smart Picker error:', e)
                 }
                 // User closed picker — no-op
             }
@@ -353,7 +352,6 @@ export default {
                     } catch (shareErr) {
                         // Share with circle failed — file is uploaded but not shared
                         // Just link to the file in the poster's Files
-                        console.warn('[TeamHub] Circle share failed, file uploaded to personal folder', shareErr?.response?.status)
                     }
                 }
 

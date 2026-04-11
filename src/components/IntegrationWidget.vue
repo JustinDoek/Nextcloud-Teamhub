@@ -40,8 +40,6 @@
                 <component
                     :is="item.url ? 'a' : 'span'"
                     :href="item.url || undefined"
-                    :target="item.url ? '_blank' : undefined"
-                    :rel="item.url ? 'noopener noreferrer' : undefined"
                     class="teamhub-int-widget__item-link">
                     <component
                         :is="resolveItemIcon(item.icon)"
@@ -178,17 +176,15 @@ export default {
             actionFieldValues: {},
             actionSubmitLabel: null,
             actionSubmitting:  false,
-            // The action_url currently being used for the open modal (supports multi-action).
-            activeActionUrl:   null,
+            // The actionId and label currently open in the modal.
+            activeActionId:    null,
             activeActionLabel: null,
         }
     },
 
     computed: {
         actionModalTitle() {
-            return this.activeActionLabel
-                || this.integration.action_label
-                || this.t('teamhub', 'Action')
+            return this.activeActionLabel || this.t('teamhub', 'Action')
         },
 
         /**
@@ -206,33 +202,13 @@ export default {
         },
 
         /**
-         * Effective actions for the 3-dot menu in the card header (TeamView reads this
-         * via the 'actions-loaded' event after loadData completes).
-         *
-         * Priority:
-         *   1. Dynamic actions from the widget data endpoint response (data.actions[]).
-         *   2. Single registration action_url / action_label (backward compat).
-         *   3. Empty array — no 3-dot menu shown.
-         *
-         * Each entry: { label: string, icon?: string, url: string }
-         * The url for registration-level actions is a sentinel pointing to the TeamHub
-         * action endpoint so TeamView can call openAction() on the ref instead of
-         * navigating directly.
+         * Effective actions for the 3-dot menu in the card header.
+         * Actions come from the widget's getWidgetData() response.
+         * Each entry: { label, icon?, actionId?, url? }
+         * actionId → native TeamHub modal; url-only → new tab.
          */
         effectiveActions() {
-            if (this.dynamicActions.length > 0) {
-                return this.dynamicActions
-            }
-            if (this.integration.action_url) {
-                return [{
-                    label:        this.integration.action_label || this.t('teamhub', 'Action'),
-                    icon:         null,
-                    url:          this.integration.action_url,
-                    // Flag: this action opens the TeamHub modal rather than navigating.
-                    isModalAction: true,
-                }]
-            }
-            return []
+            return this.dynamicActions
         },
 
         hasAction() {
@@ -258,7 +234,6 @@ export default {
                 this.items          = Array.isArray(data.items) ? data.items : []
                 this.dynamicActions = Array.isArray(data.actions) ? data.actions : []
             } catch (e) {
-                console.error('[IntegrationWidget] loadData error:', e?.response?.data || e.message)
                 this.loadError      = true
                 this.items          = []
                 this.dynamicActions = []
@@ -295,52 +270,62 @@ export default {
         },
 
         /**
-         * Open the action modal.
+         * Open the native action modal.
          *
-         * Called by parent (TeamView) via this.$refs['intWidget-{id}'].openAction(action).
-         * Also called internally for registration-level single actions.
+         * Called by TeamView via this.$refs['intWidget-{id}'][0].openAction(action).
          *
-         * @param {Object|null} action  Action descriptor from effectiveActions, or null/undefined
-         *                              to use the registration-level action_url (backward compat).
+         * If the action has an actionId, fetch the form from TeamHub's action-form
+         * endpoint (which calls getActionForm() in-process on the widget class) and
+         * render it natively. If the action has only a url, open it in a new tab.
          */
         async openAction(action) {
-            // Determine which action_url to call on the TeamHub server.
-            // For dynamic actions the url is the external app's direct URL (navigated by the
-            // browser, not fetched server-side by TeamHub). The modal flow only applies to
-            // the registration-level action_url which goes through the TeamHub action endpoint.
-            const isModalAction = !action || action.isModalAction === true
 
-            if (!isModalAction && action?.url) {
-                // Dynamic action with a direct URL — open in new tab, no modal needed.
-                window.open(action.url, '_blank', 'noopener,noreferrer')
+            // url-only fallback: no actionId → open in new tab
+            if (!action || (!action.actionId && action.url)) {
+                window.open(action.url, '_blank', 'noopener noreferrer')
                 return
             }
 
-            // Modal-style action — hit TeamHub's action endpoint then show form.
-            this.activeActionUrl   = (action && action.url) || this.integration.action_url || null
-            this.activeActionLabel = (action && action.label) || this.integration.action_label || null
+            if (!action || !action.actionId) {
+                return
+            }
+
+            // Native modal — fetch form definition
+            this.activeActionId    = action.actionId
+            this.activeActionLabel = action.label || this.t('teamhub', 'Action')
             this.showActionModal   = true
             this.actionLoading     = true
             this.actionError       = null
             this.actionFields      = []
             this.actionFieldValues = {}
+            this.actionSubmitLabel = null
 
             try {
                 const url = generateUrl(
-                    `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/action/${this.integration.registry_id}`
+                    `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/action-form/${this.integration.registry_id}`
                 )
-                const { data } = await axios.get(url)
-                this.actionFields      = Array.isArray(data.fields) ? data.fields : []
+                const { data } = await axios.get(url, { params: { actionId: action.actionId } })
+
+                if (!data.fields || data.fields.length === 0) {
+                    // No fields returned — fall back to new tab
+                    this.showActionModal = false
+                    if (action.url) {
+                        window.open(action.url, '_blank', 'noopener noreferrer')
+                    }
+                    return
+                }
+
+                this.actionFields      = data.fields
                 this.actionSubmitLabel = data.submit_label || null
+                if (data.title) { this.activeActionLabel = data.title }
 
                 const vals = {}
                 for (const field of this.actionFields) {
-                    vals[field.name] = field.value !== undefined ? field.value : ''
+                    vals[field.name] = field.value !== undefined ? field.value : (field.type === 'checkbox' ? false : '')
                 }
                 this.actionFieldValues = vals
             } catch (e) {
-                console.error('[IntegrationWidget] openAction error:', e?.response?.data || e.message)
-                this.actionError = this.t('teamhub', 'Failed to load action')
+                this.actionError = this.t('teamhub', 'Failed to load action form')
             } finally {
                 this.actionLoading = false
             }
@@ -348,22 +333,32 @@ export default {
 
         closeActionModal() {
             this.showActionModal   = false
-            this.activeActionUrl   = null
+            this.activeActionId    = null
             this.activeActionLabel = null
         },
 
         async submitAction() {
             this.actionSubmitting = true
             try {
-                await axios.post(this.integration.action_url, {
-                    teamId: this.teamId,
-                    fields: this.actionFieldValues,
+                const url = generateUrl(
+                    `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/action-submit/${this.integration.registry_id}`
+                )
+                const { data } = await axios.post(url, {
+                    actionId: this.activeActionId,
+                    fields:   this.actionFieldValues,
                 })
                 this.showActionModal = false
-                this.loadData()
+
+                if (data.message) {
+                    const { showSuccess, showError } = await import('@nextcloud/dialogs')
+                    data.success ? showSuccess(data.message) : showError(data.message)
+                }
+                if (data.refresh) {
+                    this.loadData()
+                }
             } catch (e) {
-                console.error('[IntegrationWidget] submitAction error:', e?.response?.data || e.message)
-                this.actionError = this.t('teamhub', 'Action failed. Please try again.')
+                const msg = e?.response?.data?.error || ''
+                this.actionError = this.t('teamhub', 'Action failed') + (msg ? ': ' + msg : '')
             } finally {
                 this.actionSubmitting = false
             }

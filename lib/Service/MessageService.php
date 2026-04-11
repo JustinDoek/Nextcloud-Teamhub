@@ -468,7 +468,7 @@ class MessageService {
         $qb->delete('teamhub_poll_votes')
             ->where($qb->expr()->eq('message_id', $qb->createNamedParameter($messageId)))
             ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($user->getUID())))
-            ->execute();
+            ->executeStatement();
         
         // Insert new vote
         $qb = $db->getQueryBuilder();
@@ -479,7 +479,7 @@ class MessageService {
                 'option_index' => $qb->createNamedParameter($optionIndex),
                 'created_at' => $qb->createNamedParameter(time()),
             ])
-            ->execute();
+            ->executeStatement();
         
         return $this->getPollResults($messageId);
     }
@@ -497,7 +497,7 @@ class MessageService {
             ->from('teamhub_poll_votes')
             ->where($qb->expr()->eq('message_id', $qb->createNamedParameter($messageId)))
             ->groupBy('option_index')
-            ->execute();
+            ->executeQuery();
         
         $votes = [];
         while ($row = $result->fetch()) {
@@ -514,7 +514,7 @@ class MessageService {
                 ->from('teamhub_poll_votes')
                 ->where($qb->expr()->eq('message_id', $qb->createNamedParameter($messageId)))
                 ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($user->getUID())))
-                ->execute();
+                ->executeQuery();
             
             if ($row = $voteResult->fetch()) {
                 $userVote = (int)$row['option_index'];
@@ -541,13 +541,6 @@ class MessageService {
 
         $message = $this->messageMapper->find($messageId);
         
-        $this->logger->debug('Attempting to close poll', [
-            'messageId' => $messageId,
-            'userId' => $user->getUID(),
-            'authorId' => $message['author_id'],
-            'messageType' => $message['messageType'] ?? 'missing',
-            'app' => Application::APP_ID
-        ]);
         
         if ($message['author_id'] !== $user->getUID()) {
             $this->logger->error('Close poll failed: User is not author', [
@@ -569,7 +562,6 @@ class MessageService {
         }
 
         $result = $this->messageMapper->closePoll($messageId);
-        $this->logger->info('Poll closed successfully', ['messageId' => $messageId, 'app' => Application::APP_ID]);
         return $result;
     }
 
@@ -585,14 +577,6 @@ class MessageService {
 
         $message = $this->messageMapper->find($messageId);
         
-        $this->logger->debug('Attempting to mark question as solved', [
-            'messageId' => $messageId,
-            'commentId' => $commentId,
-            'userId' => $user->getUID(),
-            'authorId' => $message['author_id'],
-            'messageType' => $message['messageType'] ?? 'missing',
-            'app' => Application::APP_ID
-        ]);
         
         if ($message['author_id'] !== $user->getUID()) {
             $this->logger->error('Mark solved failed: User is not author', [
@@ -614,11 +598,6 @@ class MessageService {
         }
 
         $result = $this->messageMapper->markQuestionSolved($messageId, $commentId);
-        $this->logger->info('Question marked as solved', [
-            'messageId' => $messageId, 
-            'commentId' => $commentId,
-            'app' => Application::APP_ID
-        ]);
         return $result;
     }
 

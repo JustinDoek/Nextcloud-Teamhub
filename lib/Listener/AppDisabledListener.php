@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Listener;
 
 use OCA\TeamHub\Service\IntegrationService;
+use OCA\TeamHub\Service\TelemetryService;
+use OCA\TeamHub\AppInfo\Application;
 use OCP\App\Events\AppDisabledEvent;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
@@ -29,6 +31,7 @@ class AppDisabledListener implements IEventListener {
 
     public function __construct(
         private IntegrationService $integrationService,
+        private TelemetryService   $telemetryService,
         private LoggerInterface    $logger,
     ) {}
 
@@ -39,9 +42,14 @@ class AppDisabledListener implements IEventListener {
 
         $appId = $event->getAppId();
 
-        $this->logger->debug('AppDisabledListener::handle — app disabled, checking integration registry', [
-            'app_id' => $appId,
-        ]);
+        // Fire uninstall telemetry when TeamHub itself is disabled
+        if ($appId === Application::APP_ID) {
+            try {
+                $this->telemetryService->sendUninstallEvent();
+            } catch (\Throwable $e) {
+                // Never let telemetry affect the disable flow
+            }
+        }
 
         try {
             // suspendIntegration() clears php_class/iframe_url but keeps the
@@ -50,14 +58,7 @@ class AppDisabledListener implements IEventListener {
             // which upserts the class back in — team admins never need to
             // re-enable widgets after an app update or disable/enable cycle.
             $this->integrationService->suspendIntegration($appId);
-            $this->logger->info('AppDisabledListener::handle — suspendIntegration completed', [
-                'app_id' => $appId,
-            ]);
         } catch (\Throwable $e) {
-            $this->logger->debug('AppDisabledListener::handle — suspendIntegration skipped or failed', [
-                'app_id' => $appId,
-                'reason' => $e->getMessage(),
-            ]);
         }
     }
 }

@@ -20,6 +20,62 @@
 
         <!-- TAB: Description -->
         <div v-if="activeTab === 'description'" class="manage-tab-content">
+
+            <!-- Team Image section -->
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Team Image') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Upload a custom image to represent this team. Shown on the team home view. Maximum 200×200 px, 2 MB.') }}
+                </p>
+
+                <!-- Current image preview -->
+                <div class="team-image-preview-row">
+                    <div class="team-image-preview" :class="{ 'team-image-preview--empty': !imagePreviewUrl }">
+                        <img
+                            v-if="imagePreviewUrl"
+                            :src="imagePreviewUrl"
+                            :alt="t('teamhub', 'Team image')"
+                            class="team-image-preview__img" />
+                        <ImageIcon v-else :size="48" class="team-image-preview__placeholder" />
+                    </div>
+
+                    <div class="team-image-actions">
+                        <!-- Upload button — triggers hidden file input -->
+                        <NcButton
+                            type="secondary"
+                            :disabled="imageUploading || imageRemoving"
+                            @click="$refs.teamImageInput.click()">
+                            <template #icon>
+                                <NcLoadingIcon v-if="imageUploading" :size="20" />
+                                <UploadIcon v-else :size="20" />
+                            </template>
+                            {{ imagePreviewUrl ? t('teamhub', 'Replace image') : t('teamhub', 'Upload image') }}
+                        </NcButton>
+
+                        <!-- Remove button — only shown when an image exists -->
+                        <NcButton
+                            v-if="imagePreviewUrl"
+                            type="error"
+                            :disabled="imageUploading || imageRemoving"
+                            @click="removeTeamImage">
+                            <template #icon>
+                                <NcLoadingIcon v-if="imageRemoving" :size="20" />
+                                <TrashCanOutline v-else :size="20" />
+                            </template>
+                            {{ t('teamhub', 'Remove image') }}
+                        </NcButton>
+
+                        <!-- Hidden file input -->
+                        <input
+                            ref="teamImageInput"
+                            type="file"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            class="team-image-hidden-input"
+                            @change="onTeamImageSelected" />
+                    </div>
+                </div>
+            </div>
+
             <div class="manage-section">
                 <h3>{{ t('teamhub', 'Team Description') }}</h3>
                 <div class="manage-description-form">
@@ -42,6 +98,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
 
         <!-- TAB: Settings -->
@@ -259,7 +316,7 @@
                                     <span
                                         class="widget-badge"
                                         :class="integration.integration_type === 'widget' ? 'widget-badge--widget' : 'widget-badge--tab'">
-                                        {{ integration.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Tab') }}
+                                        {{ integration.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Menu item') }}
                                     </span>
                                 </span>
                                 <span v-if="integration.description" class="widget-description">{{ integration.description }}</span>
@@ -360,6 +417,9 @@ import TuneIcon from 'vue-material-design-icons/Tune.vue'
 import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
 import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
 import AlertIcon from 'vue-material-design-icons/Alert.vue'
+import ImageIcon from 'vue-material-design-icons/Image.vue'
+import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
+import UploadIcon from 'vue-material-design-icons/Upload.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -375,6 +435,7 @@ export default {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
+        ImageIcon, TrashCanOutline, UploadIcon,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
     },
     props: {
@@ -411,6 +472,10 @@ export default {
             loadingApps: false,
             togglingApp: null,
             pendingDisableApp: null,
+            // Team image
+            imageUploading: false,
+            imageRemoving: false,
+            imagePreviewUrl: this.team.image_url || null,
         }
     },
     computed: {
@@ -574,7 +639,6 @@ export default {
                 this.members = Array.isArray(data) ? data : this.members
                 showSuccess(t('teamhub', 'Role updated'))
             } catch (error) {
-                console.error('[ManageTeamView] changeLevel error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update role') + (msg ? `: ${msg}` : ''))
                 await this.loadMembers()
@@ -593,7 +657,6 @@ export default {
                 showSuccess(t('teamhub', 'Description updated'))
                 this.$emit('description-updated', this.editedDescription)
             } catch (error) {
-                console.error('[ManageTeamView] saveDescription error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update description') + (msg ? `: ${msg}` : ''))
             } finally {
@@ -615,7 +678,6 @@ export default {
                 this.circleConfig.protected     = !!(v & CFG_PROTECTED)
                 this.circleConfig.singleMember  = !!(v & CFG_SINGLE)
             } catch (e) {
-                console.error('[ManageTeamView] loadConfig error:', e?.response?.data)
             } finally {
                 this.loadingConfig = false
             }
@@ -630,7 +692,6 @@ export default {
                 this.configSaved = true
                 setTimeout(() => { this.configSaved = false }, 2000)
             } catch (error) {
-                console.error('[ManageTeamView] saveConfig error:', error?.response?.data)
                 showError(t('teamhub', 'Failed to save settings'))
             }
         },
@@ -643,7 +704,6 @@ export default {
                 )
                 this.members = Array.isArray(data) ? data : []
             } catch (e) {
-                console.error('[ManageTeamView] loadMembers error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to load members'))
             } finally {
                 this.loadingMembers = false
@@ -658,7 +718,6 @@ export default {
                 )
                 this.pendingRequests = Array.isArray(data) ? data : []
             } catch (e) {
-                console.error('[ManageTeamView] loadPendingRequests error:', e?.response?.data)
                 this.pendingRequests = []
             } finally {
                 this.loadingPending = false
@@ -676,7 +735,6 @@ export default {
                 showSuccess(t('teamhub', 'Member removed'))
                 await this.loadMembers()
             } catch (e) {
-                console.error('[ManageTeamView] removeMember error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to remove member'))
             }
         },
@@ -687,7 +745,6 @@ export default {
                 showSuccess(t('teamhub', '{name} has been approved', { name: req.displayName }))
                 await Promise.all([this.loadMembers(), this.loadPendingRequests()])
             } catch (e) {
-                console.error('[ManageTeamView] approve error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to approve request'))
             }
         },
@@ -698,7 +755,6 @@ export default {
                 showSuccess(t('teamhub', 'Request rejected'))
                 await this.loadPendingRequests()
             } catch (e) {
-                console.error('[ManageTeamView] reject error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to reject request'))
             }
         },
@@ -710,7 +766,6 @@ export default {
                 showSuccess(t('teamhub', 'Team deleted'))
                 this.$emit('team-deleted')
             } catch (error) {
-                console.error('[ManageTeamView] confirmDeleteTeam error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to delete team') + (msg ? ': ' + msg : ''))
             } finally {
@@ -732,7 +787,6 @@ export default {
                 this.teamApps      = Array.isArray(appsRes.data) ? appsRes.data : []
                 this.installedApps = installedRes.data || {}
             } catch (e) {
-                console.error('[ManageTeamView] loadTeamApps error:', e?.response?.data)
                 this.teamApps      = []
                 this.installedApps = {}
             } finally {
@@ -786,7 +840,6 @@ export default {
                 } else {
                     this.teamApps = this.teamApps.filter(a => a.app_id !== app.id)
                 }
-                console.error('[ManageTeamView] _executeToggleApp failed:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update {name}', { name: app.label }) + (msg ? `: ${msg}` : ''))
                 await this.loadTeamApps()
@@ -807,7 +860,6 @@ export default {
                 )
                 this.integrationRegistry = Array.isArray(data) ? data : []
             } catch (e) {
-                console.error('[ManageTeamView] loadIntegrationRegistry error:', e?.response?.data)
                 this.integrationRegistry = []
             } finally {
                 this.loadingWidgets = false
@@ -829,7 +881,6 @@ export default {
                         : t('teamhub', '{title} disabled for this team', { title: integration.title })
                 )
             } catch (error) {
-                console.error('[ManageTeamView] toggleIntegration error:', error?.response?.data)
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update integration') + (msg ? `: ${msg}` : ''))
             } finally {
@@ -840,6 +891,76 @@ export default {
         onDragStart(event, integration) {
             this.dragSourceWidget = integration
             event.dataTransfer.effectAllowed = 'move'
+        },
+
+        // ------------------------------------------------------------------
+        // Team image
+        // ------------------------------------------------------------------
+
+        async onTeamImageSelected(event) {
+            const file = event.target.files?.[0]
+            if (!file) return
+
+            // Client-side size guard (2 MB)
+            if (file.size > 2 * 1024 * 1024) {
+                showError(t('teamhub', 'Image too large. Maximum size is 2 MB.'))
+                return
+            }
+
+            this.imageUploading = true
+            try {
+                const formData = new FormData()
+                formData.append('image', file)
+
+                const resp = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/image`),
+                    formData,
+                    { headers: { 'Content-Type': 'multipart/form-data' } }
+                )
+
+                // Append cache-buster so the browser reloads the new image
+                this.imagePreviewUrl = resp.data.image_url
+                    ? resp.data.image_url + '?t=' + Date.now()
+                    : null
+
+                // Propagate to Vuex so TeamView reflects the change immediately
+                this.$store.commit('UPDATE_TEAM_IMAGE', {
+                    teamId: this.team.id,
+                    imageUrl: resp.data.image_url || null,
+                })
+
+                showSuccess(t('teamhub', 'Team image updated'))
+            } catch (e) {
+                const msg = e?.response?.data?.error || e.message || ''
+                showError(t('teamhub', 'Failed to upload image') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.imageUploading = false
+                // Reset so the same file can be re-selected if needed
+                if (this.$refs.teamImageInput) {
+                    this.$refs.teamImageInput.value = ''
+                }
+            }
+        },
+
+        async removeTeamImage() {
+            this.imageRemoving = true
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/image`)
+                )
+                this.imagePreviewUrl = null
+
+                this.$store.commit('UPDATE_TEAM_IMAGE', {
+                    teamId: this.team.id,
+                    imageUrl: null,
+                })
+
+                showSuccess(t('teamhub', 'Team image removed'))
+            } catch (e) {
+                showError(t('teamhub', 'Failed to remove image'))
+            } finally {
+                this.imageRemoving = false
+            }
         },
 
         async onDrop(event, targetIntegration) {
@@ -890,7 +1011,6 @@ export default {
                     })
                 }
             } catch (e) {
-                console.error('[ManageTeamView] onDrop reorder error:', e?.response?.data)
                 showError(t('teamhub', 'Failed to save order'))
                 await this.loadIntegrationRegistry()
             }
@@ -1288,5 +1408,52 @@ export default {
 .manage-danger-desc {
     font-size: 13px;
     color: var(--color-text-maxcontrast);
+}
+
+/* ── Team image ────────────────────────────────────────────────── */
+.team-image-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.team-image-preview {
+    width: 100px;
+    height: 100px;
+    border-radius: var(--border-radius-large);
+    border: 2px solid var(--color-border);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-background-dark);
+    flex-shrink: 0;
+}
+
+.team-image-preview--empty {
+    border-style: dashed;
+}
+
+.team-image-preview__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.team-image-preview__placeholder {
+    color: var(--color-text-maxcontrast);
+    opacity: 0.4;
+}
+
+.team-image-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.team-image-hidden-input {
+    display: none;
 }
 </style>

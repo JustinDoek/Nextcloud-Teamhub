@@ -9,126 +9,143 @@ namespace OCA\TeamHub\Integration;
  * Implement this interface in your app and register the class name via
  * IntegrationService::registerIntegration() during your app's boot() phase.
  * TeamHub will resolve your class from Nextcloud's DI container and call
- * getWidgetData() directly — no HTTP requests, no routing issues, no
- * loopback restrictions.
+ * its methods directly — no HTTP round-trips, no loopback restrictions.
  *
  * -----------------------------------------------------------------------
- * QUICK START
+ * METHODS
  * -----------------------------------------------------------------------
  *
- * 1. Implement this interface in your app:
+ * getWidgetData()  — Required. Returns items shown in the sidebar card and
+ *                    optional action descriptors for the 3-dot header menu.
  *
- *    namespace OCA\MyApp\Integration;
+ * getActionForm()  — Optional. Return a form definition for a named action.
+ *                    TeamHub renders the form in a native NC modal. If your
+ *                    app does not implement this method (or returns an empty
+ *                    fields array), TeamHub falls back to opening the action
+ *                    url in a new browser tab.
  *
- *    use OCA\TeamHub\Integration\ITeamHubWidget;
- *
- *    class TeamHubWidget implements ITeamHubWidget {
- *
- *        public function __construct(
- *            private MyService $myService,
- *        ) {}
- *
- *        public function getWidgetData(string $teamId, string $userId): array {
- *            $items = $this->myService->getItemsForTeam($teamId, $userId);
- *            return [
- *                'items' => array_map(fn($i) => [
- *                    'label' => $i->title,
- *                    'value' => $i->status,
- *                    'icon'  => 'CheckCircle',
- *                    'url'   => '/apps/myapp/items/' . $i->id,
- *                ], $items),
- *            ];
- *        }
- *    }
- *
- * 2. Register your class in your Application::boot():
- *
- *    public function boot(IBootContext $context): void {
- *        try {
- *            $teamHub = $context->getServerContainer()
- *                ->get(\OCA\TeamHub\Service\IntegrationService::class);
- *
- *            $teamHub->registerIntegration(
- *                appId:           'myapp',
- *                integrationType: 'widget',
- *                title:           'My Widget',
- *                description:     'Shows recent items from My App',
- *                icon:            'ChartBar',
- *                phpClass:        \OCA\MyApp\Integration\TeamHubWidget::class,
- *                calledInProcess: true,
- *            );
- *        } catch (\Throwable $e) {
- *            // TeamHub not installed — fail silently.
- *        }
- *    }
+ * handleAction()   — Optional. Process a submitted action form. TeamHub
+ *                    calls this after the user submits the form returned by
+ *                    getActionForm(). Return a success/error shape; TeamHub
+ *                    shows the result to the user and optionally refreshes
+ *                    the widget data.
  *
  * -----------------------------------------------------------------------
- * RESPONSE SHAPE
+ * RESPONSE SHAPES
  * -----------------------------------------------------------------------
  *
- * getWidgetData() must return an array with the following structure:
+ * getWidgetData():
  *
  *   [
- *     'items' => [                      // required, may be empty
+ *     'items' => [                          // required, may be empty
  *       [
- *         'label' => 'string',          // required — primary text
- *         'value' => 'string',          // required — secondary text (status, count, date…)
- *         'icon'  => 'MDI name',        // optional — MDI icon name e.g. 'CheckCircle'
- *         'url'   => '/apps/myapp/…',   // optional — makes item a clickable link
+ *         'label' => 'string',              // required — primary text
+ *         'value' => 'string',              // required — secondary text
+ *         'icon'  => 'MDI name',            // optional
+ *         'url'   => '/apps/myapp/...',     // optional — makes item a link
  *       ],
- *       // …up to 20 items (additional items are silently dropped by TeamHub)
+ *       // max 20 items
  *     ],
- *     'actions' => [                    // optional — populates the widget 3-dot menu
+ *     'actions' => [                        // optional — 3-dot header menu
  *       [
- *         'label' => 'string',          // required
- *         'icon'  => 'MDI name',        // optional
- *         'url'   => '/apps/myapp/…',   // required — relative NC path or https://
+ *         'label'    => 'string',           // required
+ *         'icon'     => 'MDI name',         // optional
+ *         'actionId' => 'new_item',         // use this for native modal actions
+ *         'url'      => '/apps/myapp/...',  // use this for plain link fallback
  *       ],
- *       // …up to 10 actions
+ *       // max 10 actions; actionId takes priority over url when both present
  *     ],
+ *   ]
+ *
+ * getActionForm():
+ *
+ *   [
+ *     'title'        => 'string',           // optional — modal title override
+ *     'submit_label' => 'string',           // optional — submit button label
+ *     'fields'       => [                   // required — empty = fall back to url
+ *       [
+ *         'name'        => 'field_name',    // required — key in handleAction $fields
+ *         'label'       => 'Field Label',   // required — shown above the input
+ *         'type'        => 'text',          // required — text|textarea|email|checkbox|date
+ *         'required'    => true,            // optional — default false
+ *         'value'       => '',              // optional — pre-filled value
+ *         'placeholder' => 'hint text',     // optional
+ *       ],
+ *     ],
+ *   ]
+ *
+ * handleAction():
+ *
+ *   [
+ *     'success' => true,                    // required
+ *     'message' => 'Item created',          // optional — shown as toast to user
+ *     'refresh' => true,                    // optional — if true, widget data reloads
  *   ]
  *
  * -----------------------------------------------------------------------
  * SECURITY RULES
  * -----------------------------------------------------------------------
  *
- * - Always validate that the requesting $userId is a member of $teamId
- *   before returning any data. TeamHub passes the currently authenticated
- *   user's ID — treat it as trusted (it comes from IUserSession, not from
- *   an HTTP request parameter).
+ * - Always validate that $userId is a member of $teamId before returning
+ *   any data or performing any action.
  * - Never return data the user should not have access to.
- * - You may throw any \Throwable on error — TeamHub will catch it, log it,
- *   and return an empty widget rather than crashing the page.
+ * - Throw freely — any \Throwable is caught by TeamHub.
+ * - Keep all methods fast (< 500 ms). Cache aggressively.
  *
  * -----------------------------------------------------------------------
  * COMPATIBILITY
  * -----------------------------------------------------------------------
  *
  * - Nextcloud 32+ / PHP 8.1+
- * - Your class is resolved via NC's DI container — constructor injection
- *   works exactly as in any other NC service. No special registration needed
- *   beyond implementing this interface.
- * - TeamHub version: 2.41+
+ * - TeamHub 2.46.0+ (getActionForm / handleAction added)
+ * - getWidgetData() is the only required method. Apps that do not implement
+ *   getActionForm() / handleAction() continue to work; actions without
+ *   actionId fall back to opening url in a new tab.
  */
 interface ITeamHubWidget {
 
     /**
      * Return widget data for a team member.
      *
-     * Called by TeamHub whenever a user opens a team view that has this
-     * widget enabled. The call is made in the same PHP process — there is
-     * no HTTP round-trip.
-     *
-     * @param string $teamId The Circles/Teams UUID of the team being viewed.
-     * @param string $userId The NC user ID of the currently authenticated user.
+     * @param string $teamId The Circles UUID of the team.
+     * @param string $userId The authenticated NC user ID.
      *
      * @return array{
      *   items: array<int, array{label: string, value: string, icon?: string, url?: string}>,
-     *   actions?: array<int, array{label: string, icon?: string, url: string}>
+     *   actions?: array<int, array{label: string, icon?: string, actionId?: string, url?: string}>
      * }
-     *
-     * @throws \Throwable Any exception is caught by TeamHub — the widget
-     *                    renders an empty/error state rather than crashing.
      */
     public function getWidgetData(string $teamId, string $userId): array;
+
+    /**
+     * Return the form definition for a named action.
+     *
+     * TeamHub calls this when the user clicks a 3-dot menu action that has
+     * an actionId. The returned fields are rendered in a native NC modal.
+     * Implementing this method is optional — if absent or fields is empty,
+     * TeamHub falls back to opening the action url in a new tab.
+     *
+     * @param string $actionId The actionId from getWidgetData() actions.
+     * @param string $teamId   The team UUID.
+     * @param string $userId   The authenticated NC user ID.
+     *
+     * @return array{
+     *   title?: string,
+     *   submit_label?: string,
+     *   fields: array<int, array{name: string, label: string, type: string, required?: bool, value?: mixed, placeholder?: string}>
+     * }
+     */
+    public function getActionForm(string $actionId, string $teamId, string $userId): array;
+
+    /**
+     * Handle a submitted action form.
+     *
+     * @param string $actionId The actionId being handled.
+     * @param array  $fields   Submitted values keyed by field name.
+     * @param string $teamId   The team UUID.
+     * @param string $userId   The authenticated NC user ID.
+     *
+     * @return array{success: bool, message?: string, refresh?: bool}
+     */
+    public function handleAction(string $actionId, array $fields, string $teamId, string $userId): array;
 }

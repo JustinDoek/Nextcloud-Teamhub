@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\TeamAppMapper;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
@@ -50,8 +51,8 @@ class TeamService {
         private ContainerInterface $container,
         private LoggerInterface $logger,
         private IUserManager $userManager,
+        private TeamImageService $teamImageService,
     ) {
-        $this->logger->debug('[TeamService] constructed', ['app' => Application::APP_ID]);
     }
 
     private function getCirclesManager(): \OCA\Circles\CirclesManager {
@@ -78,7 +79,6 @@ class TeamService {
      * circles with non-zero config, so it cannot be used as the team list source.
      */
     public function getUserTeams(): array {
-        $this->logger->debug('[TeamService] getUserTeams', ['app' => Application::APP_ID]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -95,6 +95,7 @@ class TeamService {
             $db  = $this->container->get(\OCP\IDBConnection::class);
             $uid = $user->getUID();
 
+            // ── Step 1: fetch teams the user belongs to (1 query) ────────────
             $qb = $db->getQueryBuilder();
             $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config', 'm.level')
                ->from('circles_circle', 'c')
@@ -105,39 +106,81 @@ class TeamService {
                ->orderBy('c.name', 'ASC');
 
             $result = $qb->executeQuery();
-            $teams  = [];
+            $rows   = [];
+            $ids    = [];
 
             while ($row = $result->fetch()) {
                 $name = $row['name'] ?? '';
                 if (str_starts_with($name, 'user:') || str_starts_with($name, 'group:')) {
                     continue;
                 }
-
-                $countQb  = $db->getQueryBuilder();
-                $countRes = $countQb->select($countQb->func()->count('*', 'cnt'))
-                    ->from('circles_member')
-                    ->where($countQb->expr()->eq('circle_id', $countQb->createNamedParameter($row['unique_id'])))
-                    ->andWhere($countQb->expr()->eq('status', $countQb->createNamedParameter('Member')))
-                    ->executeQuery();
-                $countRow    = $countRes->fetch();
-                $memberCount = $countRow ? (int)$countRow['cnt'] : 0;
-                $countRes->closeCursor();
-
-                $teams[] = [
-                    'id'          => $row['unique_id'],
-                    'name'        => $name,
-                    'description' => $row['description'] ?? '',
-                    'members'     => $memberCount,
-                    'unread'      => $this->hasUnreadMessages($db, $row['unique_id'], $uid),
-                ];
+                $rows[] = $row;
+                $ids[]  = $row['unique_id'];
             }
             $result->closeCursor();
 
-            $this->logger->debug('[TeamService] getUserTeams result', [
-                'uid'   => $uid,
-                'count' => count($teams),
-                'app'   => Application::APP_ID,
-            ]);
+            if (empty($ids)) {
+                return [];
+            }
+
+            // ── Step 2: member counts for all teams (1 query) ────────────────
+            $cqb = $db->getQueryBuilder();
+            $cqb->select('circle_id', $cqb->func()->count('*', 'cnt'))
+                ->from('circles_member')
+                ->where($cqb->expr()->in('circle_id', $cqb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                ->andWhere($cqb->expr()->eq('status', $cqb->createNamedParameter('Member')))
+                ->groupBy('circle_id');
+            $cRes = $cqb->executeQuery();
+            $memberCounts = [];
+            while ($cRow = $cRes->fetch()) {
+                $memberCounts[$cRow['circle_id']] = (int)$cRow['cnt'];
+            }
+            $cRes->closeCursor();
+
+            // ── Step 3: unread status for all teams (2 queries, not 2×N) ─────
+            // Last-seen timestamps per team for this user
+            $lsQb  = $db->getQueryBuilder();
+            $lsRes = $lsQb->select('team_id', 'last_seen_at')
+                ->from('teamhub_last_seen')
+                ->where($lsQb->expr()->eq('user_id', $lsQb->createNamedParameter($uid)))
+                ->andWhere($lsQb->expr()->in('team_id', $lsQb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                ->executeQuery();
+            $lastSeen = [];
+            while ($lsRow = $lsRes->fetch()) {
+                $lastSeen[$lsRow['team_id']] = (int)$lsRow['last_seen_at'];
+            }
+            $lsRes->closeCursor();
+
+            // Latest message timestamp per team
+            $mqb  = $db->getQueryBuilder();
+            $mqb->select('team_id', $mqb->func()->max('created_at', 'latest'))
+                ->from('teamhub_messages')
+                ->where($mqb->expr()->in('team_id', $mqb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                ->groupBy('team_id');
+            $mRes = $mqb->executeQuery();
+            $latestMsg = [];
+            while ($mRow = $mRes->fetch()) {
+                $latestMsg[$mRow['team_id']] = (int)$mRow['latest'];
+            }
+            $mRes->closeCursor();
+
+            // ── Assemble result ───────────────────────────────────────────────
+            $teams = [];
+            foreach ($rows as $row) {
+                $id     = $row['unique_id'];
+                $latest = $latestMsg[$id] ?? 0;
+                $seen   = $lastSeen[$id]  ?? 0;
+                $unread = $latest > 0 && $latest > $seen;
+
+                $teams[] = [
+                    'id'          => $id,
+                    'name'        => $row['name'],
+                    'description' => $row['description'] ?? '',
+                    'members'     => $memberCounts[$id] ?? 0,
+                    'unread'      => $unread,
+                    'image_url'   => $this->teamImageService->getImageUrl($id),
+                ];
+            }
 
             return $teams;
 
@@ -148,37 +191,9 @@ class TeamService {
     }
 
     /**
-     * True if the team has at least one message posted after the user last visited it.
-     */
-    private function hasUnreadMessages(\OCP\IDBConnection $db, string $teamId, string $userId): bool {
-        $qb  = $db->getQueryBuilder();
-        $res = $qb->select('last_seen_at')
-            ->from('teamhub_last_seen')
-            ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
-            ->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $row = $res->fetch();
-        $res->closeCursor();
-        $lastSeen = $row ? (int)$row['last_seen_at'] : 0;
-
-        $qb2  = $db->getQueryBuilder();
-        $res2 = $qb2->select($qb2->createFunction('MAX(created_at) as latest'))
-            ->from('teamhub_messages')
-            ->where($qb2->expr()->eq('team_id', $qb2->createNamedParameter($teamId)))
-            ->executeQuery();
-        $row2  = $res2->fetch();
-        $res2->closeCursor();
-        $latest = (int)($row2['latest'] ?? 0);
-
-        return $latest > 0 && $latest > $lastSeen;
-    }
-
-    /**
      * Get a specific team by ID.
      */
     public function getTeam(string $teamId): array {
-        $this->logger->debug('[TeamService] getTeam', ['teamId' => $teamId, 'app' => Application::APP_ID]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -225,6 +240,7 @@ class TeamService {
             'name'        => $row['name'],
             'description' => $row['description'] ?? '',
             'members'     => $memberCount,
+            'image_url'   => $this->teamImageService->getImageUrl($row['unique_id']),
         ];
     }
 
@@ -237,7 +253,6 @@ class TeamService {
      * Description is always set via updateTeamDescription() separately.
      */
     public function createTeam(string $name): array {
-        $this->logger->debug('[TeamService] createTeam', ['name' => $name, 'app' => Application::APP_ID]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -251,11 +266,6 @@ class TeamService {
         try {
             $circle = $circlesManager->createCircle($name);
             $result = $this->circleToArray($circle);
-            $this->logger->info('[TeamService] createTeam done', [
-                'teamId' => $result['id'],
-                'name'   => $name,
-                'app'    => Application::APP_ID,
-            ]);
             return $result;
         } catch (\Exception $e) {
             $this->logger->error('[TeamService] Error creating team', ['exception' => $e, 'app' => Application::APP_ID]);
@@ -270,7 +280,6 @@ class TeamService {
      * Also cleans up TeamHub app data for this circle.
      */
     public function deleteTeam(string $teamId): void {
-        $this->logger->debug('[TeamService] deleteTeam', ['teamId' => $teamId, 'app' => Application::APP_ID]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -312,8 +321,6 @@ class TeamService {
                 $db->executeStatement('DELETE FROM `*PREFIX*teamhub_team_apps` WHERE `team_id` = ?', [$teamId]);
             } catch (\Throwable $e) { /* Not fatal */ }
 
-            $this->logger->info('[TeamService] deleteTeam done', ['teamId' => $teamId, 'app' => Application::APP_ID]);
-
         } finally {
             $manager->stopSession();
         }
@@ -329,7 +336,6 @@ class TeamService {
      * since some Circles versions do not expose updateCircle().
      */
     public function updateTeamDescription(string $teamId, string $description): void {
-        $this->logger->debug('[TeamService] updateTeamDescription', ['teamId' => $teamId, 'app' => Application::APP_ID]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -384,11 +390,6 @@ class TeamService {
      * All other bits (e.g. 256=CFG_PERSONAL, 32768=CFG_ROOT) are preserved.
      */
     public function updateTeamConfig(string $teamId, int $config): void {
-        $this->logger->debug('[TeamService] updateTeamConfig', [
-            'teamId'   => $teamId,
-            'incoming' => $config,
-            'app'      => Application::APP_ID,
-        ]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -414,16 +415,6 @@ class TeamService {
         $currentConfig = (int)$row['config'];
         $newConfig     = ($currentConfig & ~$MANAGED_BITS) | ($config & $MANAGED_BITS);
 
-        $this->logger->info('[TeamService] updateTeamConfig bitmask', [
-            'teamId'     => $teamId,
-            'before'     => $currentConfig,
-            'before_bin' => decbin($currentConfig),
-            'incoming'   => $config,
-            'after'      => $newConfig,
-            'after_bin'  => decbin($newConfig),
-            'app'        => Application::APP_ID,
-        ]);
-
         $db->executeStatement(
             'UPDATE `*PREFIX*circles_circle` SET `config` = ? WHERE `unique_id` = ?',
             [$newConfig, $teamId]
@@ -440,7 +431,6 @@ class TeamService {
                 $manager->stopSession();
             }
         } catch (\Throwable $e) {
-            $this->logger->info('[TeamService] updateTeamConfig: cache flush via getCircle failed (non-fatal): ' . $e->getMessage(), ['app' => Application::APP_ID]);
         }
 
         // Bust APCu cache
@@ -485,7 +475,6 @@ class TeamService {
      * current user is already a member.
      */
     public function browseAllTeams(): array {
-        $this->logger->debug('[TeamService] browseAllTeams', ['app' => Application::APP_ID]);
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -496,45 +485,63 @@ class TeamService {
             $db  = $this->container->get(\OCP\IDBConnection::class);
             $uid = $user->getUID();
 
-            $qb = $db->getQueryBuilder();
-            $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config')
-               ->from('circles_circle', 'c')
-               ->orderBy('c.name', 'ASC');
-            $result = $qb->executeQuery();
-
-            $memberQb = $db->getQueryBuilder();
-            $memRes   = $memberQb->select('circle_id')
-                ->from('circles_member')
-                ->where($memberQb->expr()->eq('user_id',   $memberQb->createNamedParameter($uid)))
-                ->andWhere($memberQb->expr()->eq('user_type', $memberQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($memberQb->expr()->eq('status',  $memberQb->createNamedParameter('Member')))
-                ->executeQuery();
-            $memberIds = [];
-            while ($mRow = $memRes->fetch()) {
-                $memberIds[$mRow['circle_id']] = true;
-            }
-            $memRes->closeCursor();
-
+            // CFG_VISIBLE bitmask (bit 9 = 512): circles with this bit set are
+            // discoverable by non-members. We push the filter into SQL so we never
+            // load all circles into PHP — critical for scalability to 1,000+ groups.
+            //
+            // Strategy: LEFT JOIN on the current user's membership row.
+            // Include the circle if:
+            //   (a) the user is already a member (m.user_id IS NOT NULL), OR
+            //   (b) the circle has CFG_VISIBLE set (config & 512 != 0)
+            //
+            // Note: bitwise AND in portable QueryBuilder requires createFunction().
+            // We use a raw expression here — safe because $CFG_VISIBLE is a PHP
+            // integer literal, not user input.
             $CFG_VISIBLE = 512;
-            $teams = [];
-            while ($row = $result->fetch()) {
-                $name     = $row['name'] ?? '';
-                $id       = $row['unique_id'];
-                $config   = (int)$row['config'];
-                $isMember = isset($memberIds[$id]);
 
+            $qb = $db->getQueryBuilder();
+            $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config', 'm.user_id AS member_uid')
+               ->from('circles_circle', 'c')
+               ->leftJoin(
+                   'c',
+                   'circles_member',
+                   'm',
+                   $qb->expr()->andX(
+                       $qb->expr()->eq('m.circle_id',  'c.unique_id'),
+                       $qb->expr()->eq('m.user_id',    $qb->createNamedParameter($uid)),
+                       $qb->expr()->eq('m.user_type',  $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                       $qb->expr()->eq('m.status',     $qb->createNamedParameter('Member'))
+                   )
+               )
+               ->where(
+                   $qb->expr()->orX(
+                       // User is a member
+                       $qb->expr()->isNotNull('m.user_id'),
+                       // Circle is publicly visible (CFG_VISIBLE bit set)
+                       $qb->expr()->neq(
+                           $qb->createFunction('(c.config & ' . $CFG_VISIBLE . ')'),
+                           $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+                       )
+                   )
+               )
+               ->orderBy('c.name', 'ASC');
+
+            $result = $qb->executeQuery();
+            $teams  = [];
+
+            while ($row = $result->fetch()) {
+                $name = $row['name'] ?? '';
+                // Filter out internal Circles auto-circles (personal/group circles)
                 if (str_starts_with($name, 'user:') || str_starts_with($name, 'group:')) {
-                    continue;
-                }
-                if (!$isMember && !($config & $CFG_VISIBLE)) {
                     continue;
                 }
 
                 $teams[] = [
-                    'id'          => $id,
+                    'id'          => $row['unique_id'],
                     'name'        => $name,
                     'description' => $row['description'] ?? '',
-                    'isMember'    => $isMember,
+                    'isMember'    => $row['member_uid'] !== null,
+                    'image_url'   => $this->teamImageService->getImageUrl($row['unique_id']),
                 ];
             }
             $result->closeCursor();
@@ -604,10 +611,6 @@ class TeamService {
      * createTeamGroup accepts either a comma-separated string or a JSON array of group IDs.
      */
     public function saveAdminSettings(array $settings): void {
-        $this->logger->debug('[TeamService] saveAdminSettings', [
-            'keys' => array_keys($settings),
-            'app'  => Application::APP_ID,
-        ]);
 
         // Defence-in-depth: verify NC admin even though the controller attribute
         // already blocks non-admins at the framework level.
@@ -683,309 +686,8 @@ class TeamService {
             'name'        => method_exists($circle, 'getDisplayName') ? $circle->getDisplayName() : $circle->getName(),
             'description' => method_exists($circle, 'getDescription') ? ($circle->getDescription() ?? '') : '',
             'members'     => $memberCount,
+            'image_url'   => $this->teamImageService->getImageUrl(method_exists($circle, 'getSingleId') ? $circle->getSingleId() : $circle->getId()),
         ];
     }
 
-    private function probeCircles(\OCA\Circles\CirclesManager $manager): array {
-        if (!method_exists($manager, 'probeCircles')) {
-            return $manager->getCircles();
-        }
-        $probeResult = $manager->probeCircles();
-        if (is_array($probeResult)) {
-            return $probeResult;
-        }
-        if (is_object($probeResult) && method_exists($probeResult, 'getCircles')) {
-            return $probeResult->getCircles();
-        }
-        return [];
-    }
-
-    private function findCircle(\OCA\Circles\CirclesManager $manager, string $teamId): mixed {
-        $circles = $this->probeCircles($manager);
-        foreach ($circles as $circle) {
-            $id = method_exists($circle, 'getSingleId') ? $circle->getSingleId() : $circle->getId();
-            if ($id === $teamId) {
-                return $circle;
-            }
-        }
-        return null;
-    }
-
-    // =========================================================================
-    // Known dead code — kept for emergency use only (no registered routes)
-    // =========================================================================
-
-    public function debugCircleConfig(string $teamId): array {
-        $user = $this->userSession->getUser();
-        $db   = $this->container->get(\OCP\IDBConnection::class);
-
-        $qb    = $db->getQueryBuilder();
-        $res   = $qb->select('config', 'unique_id', 'name', 'description')
-            ->from('circles_circle')
-            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $dbRow = $res->fetch();
-        $res->closeCursor();
-
-        $probeInfo = $getCircleInfo = null;
-        try {
-            $manager       = $this->getCirclesManager();
-            $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
-            $manager->startSession($federatedUser);
-            try {
-                $circles = $this->probeCircles($manager);
-                foreach ($circles as $c) {
-                    $id = method_exists($c, 'getSingleId') ? $c->getSingleId() : $c->getId();
-                    if ($id === $teamId) {
-                        $probeInfo = [
-                            'found'      => true,
-                            'config'     => method_exists($c, 'getConfig') ? $c->getConfig() : 'no getConfig()',
-                            'config_bin' => method_exists($c, 'getConfig') ? decbin((int)$c->getConfig()) : 'n/a',
-                            'name'       => method_exists($c, 'getName') ? $c->getName() : 'n/a',
-                        ];
-                        break;
-                    }
-                }
-                if ($probeInfo === null) {
-                    $probeInfo = ['found' => false, 'total_circles_returned' => count($circles)];
-                }
-                try {
-                    $circle        = $manager->getCircle($teamId);
-                    $getCircleInfo = [
-                        'found'      => true,
-                        'config'     => method_exists($circle, 'getConfig') ? $circle->getConfig() : 'no getConfig()',
-                        'config_bin' => method_exists($circle, 'getConfig') ? decbin((int)$circle->getConfig()) : 'n/a',
-                    ];
-                } catch (\Exception $e) {
-                    $getCircleInfo = ['found' => false, 'error' => $e->getMessage()];
-                }
-            } finally {
-                $manager->stopSession();
-            }
-        } catch (\Exception $e) {
-            $probeInfo = ['error' => $e->getMessage()];
-        }
-
-        $qb3  = $db->getQueryBuilder();
-        $mres = $qb3->select('*')
-            ->from('circles_member')
-            ->where($qb3->expr()->eq('circle_id', $qb3->createNamedParameter($teamId)))
-            ->executeQuery();
-        $memberRows = $mres->fetchAll();
-        $mres->closeCursor();
-
-        $uid             = $user->getUID();
-        $currentUserRows = array_filter($memberRows, fn($r) => ($r['user_id'] ?? '') === $uid);
-
-        return [
-            'teamId'               => $teamId,
-            'currentUser'          => $uid,
-            'db'                   => $dbRow ? ['config' => (int)$dbRow['config'], 'config_bin' => decbin((int)$dbRow['config']), 'name' => $dbRow['name']] : ['found' => false],
-            'probeCircles'         => $probeInfo,
-            'getCircle'            => $getCircleInfo,
-            'db_members'           => array_map(fn($r) => ['user_id' => $r['user_id'] ?? '?', 'user_type' => $r['user_type'] ?? '?', 'level' => $r['level'] ?? '?', 'status' => $r['status'] ?? '?', 'instance' => $r['instance'] ?? '', 'single_id' => $r['single_id'] ?? ''], $memberRows),
-            'currentUserInMembers'  => count($currentUserRows) > 0,
-            'currentUserMemberRows' => array_values($currentUserRows),
-        ];
-    }
-
-    public function debugAllCircles(): array {
-        $user = $this->userSession->getUser();
-        $db   = $this->container->get(\OCP\IDBConnection::class);
-
-        $qb  = $db->getQueryBuilder();
-        $res = $qb->select('c.unique_id', 'c.name', 'c.config', 'm.level', 'm.status', 'm.user_type')
-            ->from('circles_circle', 'c')
-            ->join('c', 'circles_member', 'm', 'c.unique_id = m.circle_id')
-            ->where($qb->expr()->eq('m.user_id', $qb->createNamedParameter($user->getUID())))
-            ->andWhere($qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-            ->executeQuery();
-        $dbCircles = [];
-        while ($row = $res->fetch()) {
-            $cfg = (int)$row['config'];
-            $dbCircles[$row['unique_id']] = ['name' => $row['name'], 'config' => $cfg, 'config_bin' => decbin($cfg), 'member_level' => $row['level'], 'member_status' => $row['status'], 'in_probe' => false];
-        }
-        $res->closeCursor();
-
-        $probeIds = [];
-        try {
-            $manager       = $this->getCirclesManager();
-            $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
-            $manager->startSession($federatedUser);
-            try {
-                $circles = $this->probeCircles($manager);
-                foreach ($circles as $c) {
-                    $id = method_exists($c, 'getSingleId') ? $c->getSingleId() : $c->getId();
-                    $probeIds[] = $id;
-                    if (isset($dbCircles[$id])) {
-                        $dbCircles[$id]['in_probe'] = true;
-                    }
-                }
-            } finally {
-                $manager->stopSession();
-            }
-        } catch (\Throwable $e) { /* non-fatal */ }
-
-        return ['user' => $user->getUID(), 'probe_count' => count($probeIds), 'db_count' => count($dbCircles), 'circles' => array_values(array_map(fn($id, $c) => array_merge(['id' => $id], $c), array_keys($dbCircles), $dbCircles))];
-    }
-
-    public function repairCircleMembership(string $teamId): array {
-        $user = $this->userSession->getUser();
-        if (!$user) {
-            throw new \Exception('User not authenticated');
-        }
-        $uid = $user->getUID();
-        $db  = $this->container->get(\OCP\IDBConnection::class);
-
-        $qb  = $db->getQueryBuilder();
-        $res = $qb->select('unique_id', 'name', 'config')->from('circles_circle')
-            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))->setMaxResults(1)->executeQuery();
-        $circleRow = $res->fetch();
-        $res->closeCursor();
-        if (!$circleRow) {
-            return ['error' => 'Circle not found in DB'];
-        }
-
-        $qb2  = $db->getQueryBuilder();
-        $mres = $qb2->select('*')->from('circles_member')
-            ->where($qb2->expr()->eq('circle_id', $qb2->createNamedParameter($teamId)))->executeQuery();
-        $existingMembers = $mres->fetchAll();
-        $mres->closeCursor();
-
-        $myRow = null;
-        foreach ($existingMembers as $r) {
-            if (($r['user_id'] ?? '') === $uid && (int)($r['user_type'] ?? 0) === 1) {
-                $myRow = $r;
-                break;
-            }
-        }
-
-        $action = 'none';
-        if ($myRow === null) {
-            $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-            $singleId = '';
-            for ($i = 0; $i < 21; $i++) {
-                $singleId .= $chars[random_int(0, strlen($chars) - 1)];
-            }
-            $repairCols   = array_flip($this->resourceService->getTableColumns('circles_member'));
-            $qbI = $db->getQueryBuilder();
-            $repairValues = [
-                'single_id' => $qbI->createNamedParameter($singleId),
-                'circle_id' => $qbI->createNamedParameter($teamId),
-                'user_id'   => $qbI->createNamedParameter($uid),
-                'user_type' => $qbI->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-                'member_id' => $qbI->createNamedParameter($uid),
-                'instance'  => $qbI->createNamedParameter(''),
-                'level'     => $qbI->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-                'status'    => $qbI->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-                'joined'    => $qbI->createNamedParameter(time(), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-            ];
-            foreach (['display_name' => $user->getDisplayName() ?: $uid, 'cached_name' => $user->getDisplayName() ?: $uid, 'note' => '', 'contact_id' => '', 'contact_meta' => ''] as $col => $val) {
-                if (isset($repairCols[$col])) {
-                    $repairValues[$col] = $qbI->createNamedParameter($val);
-                }
-            }
-            $qbI->insert('circles_member')->values($repairValues)->executeStatement();
-            $action = 'inserted_owner_row';
-        } elseif ((int)($myRow['level'] ?? 0) < 9 || (int)($myRow['status'] ?? 0) !== 1) {
-            $db->executeStatement('UPDATE `*PREFIX*circles_member` SET `level` = 9, `status` = 1 WHERE `circle_id` = ? AND `user_id` = ? AND `user_type` = 1', [$teamId, $uid]);
-            $action = 'repaired_existing_row (was level=' . $myRow['level'] . ' status=' . $myRow['status'] . ')';
-        } else {
-            $action = 'row_ok_level=' . $myRow['level'] . '_status=' . $myRow['status'] . ' — circle may be broken for another reason';
-        }
-
-        if (function_exists('apcu_delete') && class_exists('APCUIterator')) {
-            try {
-                foreach (new \APCUIterator('/^(circles|NC__circles)/') as $item) {
-                    apcu_delete($item['key']);
-                }
-            } catch (\Throwable $e) {}
-        }
-
-        $circlesVisible = false;
-        try {
-            $manager = $this->getCirclesManager();
-            $manager->startSession($manager->getFederatedUser($uid, 1));
-            try {
-                $circlesVisible = $manager->getCircle($teamId) !== null;
-            } finally {
-                $manager->stopSession();
-            }
-        } catch (\Throwable $e) {}
-
-        return ['action' => $action, 'circlesVisible' => $circlesVisible];
-    }
-
-    public function debugActivity(string $teamId): array {
-        $db        = $this->container->get(\OCP\IDBConnection::class);
-        $resources = $this->resourceService->getTeamResources($teamId);
-
-        $resolved = ['circle_id' => $teamId, 'folder_id' => $resources['files']['folder_id'] ?? null, 'folder_path' => $resources['files']['path'] ?? null, 'deck_board' => $resources['deck']['board_id'] ?? null, 'calendar_id' => $resources['calendar']['id'] ?? null, 'talk_token' => $resources['talk']['token'] ?? null];
-
-        $shareQb  = $db->getQueryBuilder();
-        $shareRes = $shareQb->select('id', 'share_type', 'share_with', 'item_type', 'item_source', 'file_source', 'file_target', 'uid_owner')
-            ->from('share')->where($shareQb->expr()->eq('share_with', $shareQb->createNamedParameter($teamId)))->setMaxResults(10)->executeQuery();
-        $shareRows = $shareRes->fetchAll();
-        $shareRes->closeCursor();
-
-        $qb  = $db->getQueryBuilder();
-        $res = $qb->select('activity_id', 'app', 'type', 'user', 'object_type', 'object_id', 'file', 'subject', 'timestamp')
-            ->from('activity')
-            ->where($qb->expr()->orX($qb->expr()->eq('app', $qb->createNamedParameter('files')), $qb->expr()->eq('app', $qb->createNamedParameter('files_sharing')), $qb->expr()->eq('app', $qb->createNamedParameter('deck')), $qb->expr()->eq('app', $qb->createNamedParameter('calendar')), $qb->expr()->eq('app', $qb->createNamedParameter('dav')), $qb->expr()->eq('app', $qb->createNamedParameter('spreed')), $qb->expr()->eq('app', $qb->createNamedParameter('circles'))))
-            ->orderBy('timestamp', 'DESC')->setMaxResults(30)->executeQuery();
-        $recentRows = $res->fetchAll();
-        $res->closeCursor();
-
-        $folderInfo = null;
-        if (!empty($resources['files']['folder_id'])) {
-            $fcQb  = $db->getQueryBuilder();
-            $fcRes = $fcQb->select('fileid', 'path', 'name', 'parent')->from('filecache')
-                ->where($fcQb->expr()->eq('fileid', $fcQb->createNamedParameter((int)$resources['files']['folder_id'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))->setMaxResults(1)->executeQuery();
-            $folderInfo = $fcRes->fetch() ?: null;
-            $fcRes->closeCursor();
-        }
-
-        return ['resolved_resources' => $resolved, 'share_rows_for_team' => $shareRows, 'folder_in_filecache' => $folderInfo, 'recent_activity_rows' => array_map(fn($r) => ['activity_id' => $r['activity_id'], 'app' => $r['app'], 'type' => $r['type'], 'user' => $r['user'], 'object_type' => $r['object_type'], 'object_id' => $r['object_id'], 'file' => $r['file'], 'subject' => substr($r['subject'] ?? '', 0, 80), 'timestamp' => date('Y-m-d H:i:s', (int)$r['timestamp'])], $recentRows)];
-    }
-
-    public function debugResourceTables(): array {
-        $tables = ['talk_rooms', 'talk_attendees', 'deck_boards', 'deck_stacks', 'deck_board_acl', 'circles_circle', 'circles_member'];
-        $result = [];
-        foreach ($tables as $table) {
-            try {
-                $cols           = $this->resourceService->getTableColumns($table);
-                $result[$table] = !empty($cols) ? $cols : ['(no columns found — table may not exist)'];
-            } catch (\Exception $e) {
-                $result[$table] = ['error' => $e->getMessage()];
-            }
-        }
-        return $result;
-    }
-
-    public function debugCirclesMethods(): array {
-        $manager        = $this->getCirclesManager();
-        $managerMethods = get_class_methods($manager);
-        sort($managerMethods);
-
-        $user          = $this->userSession->getUser();
-        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
-        $manager->startSession($federatedUser);
-
-        $circleMethods = [];
-        $circleClass   = null;
-        try {
-            $circle        = $manager->createCircle('__debug_delete_me__');
-            $circleClass   = get_class($circle);
-            $circleMethods = get_class_methods($circle);
-            sort($circleMethods);
-            try { $manager->destroyCircle($circle->getSingleId()); } catch (\Exception $e) {}
-        } catch (\Exception $e) {
-            $circleMethods = ['error: ' . $e->getMessage()];
-        } finally {
-            $manager->stopSession();
-        }
-
-        return ['circlesManagerClass' => get_class($manager), 'circlesManagerMethods' => $managerMethods, 'circleClass' => $circleClass, 'circleMethods' => $circleMethods];
-    }
 }

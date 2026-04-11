@@ -264,12 +264,11 @@ export default {
                     await axios.put(
                         generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/apps`),
                         { apps: appsToCreate }
-                    ).catch(e => console.warn('[CreateTeam] app setup failed (non-fatal):', e?.response?.data))
+                    ).catch(() => {})
                 }
 
                 // 3. Create IntraVox page from template (best-effort)
                 await this.createIntravoxPage(team).catch(e =>
-                    console.warn('[CreateTeam] IntraVox failed (non-fatal):', e?.response?.data)
                 )
 
                 this.$emit('created', team)

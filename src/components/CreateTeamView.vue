@@ -423,7 +423,6 @@ export default {
                         const anyError = Object.values(resourceResults).some(r => r?.error)
                         this.setTask(i++, anyError ? 'error' : 'done')
                     } catch (e) {
-                        console.error('[CreateTeam] create-resources failed:', e?.response?.data)
                         this.setTask(i++, 'error')
                     }
                 }
@@ -490,11 +489,9 @@ export default {
 
                 templateId = match?.id || null
             } catch (e) {
-                console.warn('[CreateTeam] IntraVox templates API failed:', e?.message)
             }
 
             if (!templateId) {
-                console.warn('[CreateTeam] IntraVox: no template found for type', this.form.teamType)
                 return
             }
 

@@ -45,11 +45,18 @@ import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 export default {
     name: 'IntravoxWidget',
     components: { NcLoadingIcon, FileDocumentOutline, OpenInNew },
+    props: {
+        // Whether the current user has permission to create/delete pages.
+        // Passed from TeamView, which already has the isTeamModerator computed.
+        canAct: { type: Boolean, default: false },
+    },
+    emits: ['pages-loaded'],
     data() {
         return {
             loading: true,
             teamPage: null,
             subPages: [],
+            allPages: [],
             error: null,
             teamhubRoot: null,
         }
@@ -107,6 +114,8 @@ export default {
                     !p.uniqueId?.startsWith('template-')
                 ) || null
 
+                this.allPages = pages
+
                 if (existingTeamPage) {
                     this.teamPage = existingTeamPage
                     // Collect ALL pages that are descendants of the team page.
@@ -119,6 +128,14 @@ export default {
                     await this.createDocumentationPage(pages)
                 }
                 // Non-admins with no page: widget stays empty silently
+
+                // Emit current page state so TeamView can power the action menu
+                this.$emit('pages-loaded', {
+                    teamPage:    this.teamPage,
+                    subPages:    this.subPages,
+                    teamhubRoot: this.teamhubRoot,
+                    allPages:    this.allPages,
+                })
             } catch (error) {
                 // Silently fail — Intravox may not be installed
             } finally {
@@ -214,6 +231,14 @@ export default {
                     showError(this.error)
                 }
             }
+        },
+
+        /**
+         * Called by TeamView after a create or delete action completes.
+         * Re-fetches all pages from Intravox and re-emits pages-loaded.
+         */
+        async refresh() {
+            await this.initDocumentationPage()
         },
     },
 }

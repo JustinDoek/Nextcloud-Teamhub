@@ -199,13 +199,6 @@ class TeamController extends Controller {
                     continue;
                 }
 
-                $this->logger->debug('[TeamController] updateTeamApps processing', [
-                    'teamId' => $teamId,
-                    'appId'  => $appId,
-                    'enabled' => $enabled,
-                    'app'    => Application::APP_ID,
-                ]);
-
                 $resourceKey = $this->appIdToResourceKey($appId);
 
                 if ($enabled) {
@@ -305,13 +298,16 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamActivity(string $teamId): JSONResponse {
         try {
+            $this->memberService->requireMemberLevel($teamId);
             $limit = (int)($this->request->getParam('limit', 25));
             $limit = max(1, min(100, $limit));
             $since = (int)($this->request->getParam('since', 0));
             $items = $this->activityService->getTeamActivity($teamId, $limit, $since);
             return new JSONResponse(['activities' => $items]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -319,10 +315,13 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamCalendarEvents(string $teamId): JSONResponse {
         try {
+            $this->memberService->requireMemberLevel($teamId);
             $events = $this->activityService->getTeamCalendarEvents($teamId);
             return new JSONResponse($events);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -450,7 +449,6 @@ class TeamController extends Controller {
         }
     }
 
-
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function inviteMembers(string $teamId): JSONResponse {
@@ -487,7 +485,6 @@ class TeamController extends Controller {
         }
     }
 
-
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getTeamConfig(string $teamId): JSONResponse {
@@ -515,14 +512,7 @@ class TeamController extends Controller {
         }
     }
 
-
-    /** DEBUG ONLY — inspect Talk/Deck table schemas */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function debugResourceTables(): JSONResponse {
-        return new JSONResponse($this->teamService->debugResourceTables());
-    }
-
+    
 
     #[NoAdminRequired]
     #[NoCSRFRequired]
@@ -535,6 +525,7 @@ class TeamController extends Controller {
         }
     }
 
+    // NC admin required — no #[NoAdminRequired] attribute intentionally omitted
     #[NoCSRFRequired]
     public function getAdminSettings(): JSONResponse {
         try {
@@ -591,27 +582,7 @@ class TeamController extends Controller {
         }
     }
 
-
-    /** DEBUG: test a single resource creation to diagnose 500 errors */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function testResource(): JSONResponse {
-        try {
-            $body = $this->request->getParams();
-            $teamId   = $body['teamId']   ?? '';
-            $app      = $body['app']      ?? 'calendar';
-            $teamName = $body['teamName'] ?? 'Test Team';
-            $results  = $this->resourceService->createTeamResources($teamId, [$app], $teamName);
-            return new JSONResponse(['result' => $results, 'success' => true]);
-        } catch (\Throwable $e) {
-            return new JSONResponse([
-                'success' => false,
-                'error'   => $e->getMessage(),
-                'trace'   => substr($e->getTraceAsString(), 0, 2000),
-            ], Http::STATUS_OK);
-        }
-    }
-
+    
 
     #[NoAdminRequired]
     #[NoCSRFRequired]
@@ -619,52 +590,13 @@ class TeamController extends Controller {
         return new JSONResponse($this->resourceService->checkInstalledApps());
     }
 
+    
 
-    /** DEBUG ONLY */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function debugCirclesMethods(): JSONResponse {
-        try {
-            $info = $this->teamService->debugCirclesMethods();
-            return new JSONResponse($info);
-        } catch (\Throwable $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
-        }
-    }
+    
 
-    /** DEBUG: inspect raw activity rows for a team to tune the activity query */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function debugActivity(string $teamId): JSONResponse {
-        try {
-            return new JSONResponse($this->teamService->debugActivity($teamId));
-        } catch (\Throwable $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
-        }
-    }
+    
 
-    /** DEBUG: dump all circles DB vs probeCircles to find filter pattern */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function debugAllCircles(): JSONResponse {
-        try {
-            return new JSONResponse($this->teamService->debugAllCircles());
-        } catch (\Throwable $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    /** DEBUG: compare DB config vs probeCircles config for a specific circle */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
-    public function debugCircleConfig(string $teamId): JSONResponse {
-        try {
-            $info = $this->teamService->debugCircleConfig($teamId);
-            return new JSONResponse($info);
-        } catch (\Throwable $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
-        }
-    }
+    
 
     /**
      * DEBUG: Re-insert the current user as owner of a circle that exists in DB

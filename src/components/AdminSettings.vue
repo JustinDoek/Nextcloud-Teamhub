@@ -219,8 +219,138 @@
             </NcSettingsSection>
         </div>
 
-        <!-- ── Save row (always visible) ─────────────────────────────────── -->
-        <div class="admin-save-row">
+        <!-- ── Tab: Statistics ───────────────────────────────────────────── -->
+        <div
+            v-show="activeTab === 'statistics'"
+            id="tab-panel-statistics"
+            role="tabpanel"
+            class="teamhub-admin-panel">
+
+            <NcSettingsSection
+                :name="t('teamhub', 'Usage statistics')"
+                :description="t('teamhub', 'TeamHub can send anonymous usage data to help improve the app. No URLs, hostnames, or user data are ever included — only an anonymous UUID and aggregate counts.')">
+
+                <div v-if="telemetryLoading" class="admin-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <template v-else>
+                    <NcCheckboxRadioSwitch
+                        :checked="telemetry.enabled"
+                        type="switch"
+                        @update:checked="toggleTelemetry">
+                        {{ t('teamhub', 'Send daily anonymous usage report') }}
+                    </NcCheckboxRadioSwitch>
+
+                    <div v-if="telemetry.enabled" class="admin-telemetry-details">
+                        <p class="admin-section-hint">
+                            {{ t('teamhub', 'Reports are sent once per day to:') }}
+                            <code>{{ telemetry.report_url }}</code>
+                        </p>
+                        <p class="admin-section-hint">{{ t('teamhub', 'Preview of what will be sent:') }}</p>
+                        <pre class="admin-telemetry-preview">{{ JSON.stringify(telemetry.preview, null, 2) }}</pre>
+                    </div>
+                    <p v-else class="admin-section-hint">
+                        {{ t('teamhub', 'Usage reporting is disabled. No data is sent.') }}
+                    </p>
+                </template>
+            </NcSettingsSection>
+        </div>
+
+        <!-- ── Tab: Maintenance ──────────────────────────────────────────── -->
+        <div
+            v-show="activeTab === 'maintenance'"
+            id="tab-panel-maintenance"
+            role="tabpanel"
+            class="teamhub-admin-panel">
+
+            <NcSettingsSection
+                :name="t('teamhub', 'Orphaned teams')"
+                :description="t('teamhub', 'Teams that have no owner, usually because the owner account was deleted. You can delete these teams or assign a new owner.')">
+
+                <div v-if="orphanedLoading" class="admin-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <div v-else-if="orphanedError" class="admin-error">
+                    {{ orphanedError }}
+                </div>
+                <div v-else-if="orphanedTeams.length === 0" class="admin-empty">
+                    {{ t('teamhub', 'No orphaned teams found.') }}
+                </div>
+                <div v-else class="admin-orphan-list">
+                    <div
+                        v-for="team in orphanedTeams"
+                        :key="team.id"
+                        class="admin-orphan-row">
+                        <div class="admin-orphan-info">
+                            <span class="admin-orphan-name">{{ team.name || team.raw_name }}</span>
+                            <span class="admin-orphan-meta">
+                                {{ t('teamhub', '{n} members', { n: team.member_count }) }}
+                                <template v-if="team.description"> · {{ team.description }}</template>
+                            </span>
+                            <span class="admin-orphan-meta admin-orphan-meta--id">
+                                <code class="admin-orphan-id">{{ team.id }}</code>
+                            </span>
+                        </div>
+
+                        <!-- Owner assignment inline form -->
+                        <div v-if="assignTeamId === team.id" class="admin-assign-owner">
+                            <NcTextField
+                                v-model="ownerQuery"
+                                :label="t('teamhub', 'Search user')"
+                                :placeholder="t('teamhub', 'Type a username or display name…')"
+                                @input="onOwnerSearch" />
+                            <ul v-if="ownerResults.length" class="admin-owner-results">
+                                <li
+                                    v-for="u in ownerResults"
+                                    :key="u.uid"
+                                    class="admin-owner-result"
+                                    @mousedown.prevent="confirmAssignOwner(team, u)">
+                                    {{ u.displayName }} <span class="admin-owner-result__uid">({{ u.uid }})</span>
+                                </li>
+                            </ul>
+                            <p v-else-if="ownerSearching" class="admin-section-hint">
+                                <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
+                            </p>
+                            <NcButton type="tertiary" @click="cancelAssign">
+                                {{ t('teamhub', 'Cancel') }}
+                            </NcButton>
+                        </div>
+
+                        <div v-else class="admin-orphan-actions">
+                            <NcButton
+                                type="secondary"
+                                :disabled="assigningOwner"
+                                @click="startAssignOwner(team)">
+                                <template #icon><AccountEditIcon :size="18" /></template>
+                                {{ t('teamhub', 'Assign owner') }}
+                            </NcButton>
+                            <NcButton
+                                type="error"
+                                :disabled="deletingTeam === team.id"
+                                @click="confirmDeleteOrphan(team)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="deletingTeam === team.id" :size="18" />
+                                    <DeleteIcon v-else :size="18" />
+                                </template>
+                                {{ t('teamhub', 'Delete') }}
+                            </NcButton>
+                        </div>
+                    </div>
+                </div>
+
+                <NcButton
+                    type="tertiary"
+                    class="admin-orphan-refresh"
+                    :disabled="orphanedLoading"
+                    @click="loadOrphanedTeams">
+                    <template #icon><NcLoadingIcon v-if="orphanedLoading" :size="18" /></template>
+                    {{ t('teamhub', 'Refresh') }}
+                </NcButton>
+            </NcSettingsSection>
+        </div>
+
+        <!-- ── Save row — only for settings tabs, not statistics/maintenance ─ -->
+        <div v-show="!(['statistics','maintenance'].includes(activeTab))" class="admin-save-row">
             <NcButton
                 type="primary"
                 :disabled="saving"
@@ -234,15 +364,44 @@
             <span v-if="saved" class="admin-save-ok">✓ {{ t('teamhub', 'Settings saved') }}</span>
             <span v-if="saveError" class="admin-save-err">{{ saveError }}</span>
         </div>
+
+        <!-- ── Delete orphan confirmation dialog ─────────────────────── -->
+        <NcDialog
+            v-if="confirmDeleteDialog && confirmDeleteTeam"
+            :name="t('teamhub', 'Delete team')"
+            :open="confirmDeleteDialog"
+            @update:open="cancelDeleteOrphan">
+            <template #default>
+                <p style="margin: 0 0 8px;">
+                    {{ t('teamhub', 'Delete "{name}" and all its data? This cannot be undone.', { name: confirmDeleteTeam.name || confirmDeleteTeam.id }) }}
+                </p>
+            </template>
+            <template #actions>
+                <NcButton type="tertiary" @click="cancelDeleteOrphan">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    type="error"
+                    :disabled="deletingTeam === confirmDeleteTeam.id"
+                    @click="executeDeleteOrphan">
+                    <template #icon>
+                        <NcLoadingIcon v-if="deletingTeam === confirmDeleteTeam.id" :size="18" />
+                        <DeleteIcon v-else :size="18" />
+                    </template>
+                    {{ t('teamhub', 'Delete') }}
+                </NcButton>
+            </template>
+        </NcDialog>
     </div>
 </template>
 
 <script>
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
+import { showError, showSuccess } from '@nextcloud/dialogs'
 import {
     NcSettingsSection, NcButton, NcLoadingIcon,
-    NcTextField, NcTextArea, NcCheckboxRadioSwitch,
+    NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
 } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
@@ -250,13 +409,18 @@ import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
 import EmailSendIcon from 'vue-material-design-icons/EmailArrowRight.vue'
 import MessageTextIcon from 'vue-material-design-icons/MessageText.vue'
 import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
+import ChartBarIcon from 'vue-material-design-icons/ChartBar.vue'
+import WrenchIcon from 'vue-material-design-icons/Wrench.vue'
+import DeleteIcon from 'vue-material-design-icons/Delete.vue'
+import AccountEditIcon from 'vue-material-design-icons/AccountEdit.vue'
 
 export default {
     name: 'AdminSettings',
     components: {
         NcSettingsSection, NcButton, NcLoadingIcon,
-        NcTextField, NcTextArea, NcCheckboxRadioSwitch,
+        NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
+        ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon,
     },
     data() {
         return {
@@ -283,6 +447,25 @@ export default {
             integrations: [],
             integrationsLoading: false,
             integrationsError: null,
+            // Statistics tab
+            telemetry: { enabled: true, report_url: '', preview: {} },
+            telemetryLoading: false,
+            telemetrySaving: false,
+            // Maintenance tab
+            orphanedTeams: [],
+            orphanedLoading: false,
+            orphanedError: null,
+            deletingTeam: null,
+            // Delete confirmation dialog
+            confirmDeleteDialog: false,
+            confirmDeleteTeam: null,
+            // Owner assignment
+            assignTeamId: null,
+            ownerQuery: '',
+            ownerResults: [],
+            ownerSearching: false,
+            ownerSearchTimer: null,
+            assigningOwner: false,
         }
     },
     computed: {
@@ -292,6 +475,8 @@ export default {
                 { id: 'invitations',   label: this.t('teamhub', 'Invitations'),   icon: 'EmailSendIcon'   },
                 { id: 'messages',      label: this.t('teamhub', 'Messages'),       icon: 'MessageTextIcon' },
                 { id: 'integrations',  label: this.t('teamhub', 'Integrations'),  icon: 'PuzzleIcon'      },
+                { id: 'statistics',    label: this.t('teamhub', 'Statistics'),    icon: 'ChartBarIcon'    },
+                { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },
             ]
         },
 
@@ -309,6 +494,12 @@ export default {
         activeTab(tab) {
             if (tab === 'integrations' && this.integrations.length === 0 && !this.integrationsLoading) {
                 this.loadIntegrations()
+            }
+            if (tab === 'statistics' && !this.telemetryLoading && !this.telemetry.preview.uuid) {
+                this.loadTelemetry()
+            }
+            if (tab === 'maintenance' && !this.orphanedLoading && this.orphanedTeams.length === 0 && !this.orphanedError) {
+                this.loadOrphanedTeams()
             }
         },
     },
@@ -351,7 +542,6 @@ export default {
                 this.integrations = Array.isArray(data) ? data : []
             } catch (e) {
                 const msg = e?.response?.data?.error || e.message || 'unknown error'
-                console.error('[AdminSettings] loadIntegrations — failed', msg)
                 this.integrationsError = this.t('teamhub', 'Failed to load integrations: {error}', { error: msg })
             } finally {
                 this.integrationsLoading = false
@@ -452,6 +642,143 @@ export default {
                 this.saveError = this.t('teamhub', 'Failed to save settings')
             } finally {
                 this.saving = false
+            }
+        },
+
+        // ------------------------------------------------------------------
+        // Statistics / telemetry
+        // ------------------------------------------------------------------
+
+        async loadTelemetry() {
+            this.telemetryLoading = true
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/telemetry'))
+                this.telemetry = data
+            } catch (e) {
+            } finally {
+                this.telemetryLoading = false
+            }
+        },
+
+        async toggleTelemetry(enabled) {
+            this.telemetrySaving = true
+            try {
+                const params = new URLSearchParams()
+                params.set('enabled', enabled ? '1' : '0')
+                await axios.put(
+                    generateUrl('/apps/teamhub/api/v1/admin/telemetry'),
+                    params.toString(),
+                    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+                )
+                this.telemetry.enabled = enabled
+            } catch (e) {
+            } finally {
+                this.telemetrySaving = false
+            }
+        },
+
+        // ------------------------------------------------------------------
+        // Maintenance — orphaned teams
+        // ------------------------------------------------------------------
+
+        async loadOrphanedTeams() {
+            this.orphanedLoading = true
+            this.orphanedError = null
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/orphaned-teams')
+                )
+                this.orphanedTeams = Array.isArray(data) ? data : []
+            } catch (e) {
+                this.orphanedError = this.t('teamhub', 'Failed to load orphaned teams')
+            } finally {
+                this.orphanedLoading = false
+            }
+        },
+
+        confirmDeleteOrphan(team) {
+            this.confirmDeleteTeam = team
+            this.confirmDeleteDialog = true
+        },
+
+        cancelDeleteOrphan() {
+            this.confirmDeleteDialog = false
+            this.confirmDeleteTeam = null
+        },
+
+        async executeDeleteOrphan() {
+            if (!this.confirmDeleteTeam) return
+            const team = this.confirmDeleteTeam
+            this.deletingTeam = team.id
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/orphaned-teams/${team.id}`)
+                )
+                this.orphanedTeams = this.orphanedTeams.filter(t => t.id !== team.id)
+                this.cancelDeleteOrphan()
+                showSuccess(this.t('teamhub', 'Team deleted successfully'))
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(this.t('teamhub', 'Failed to delete team') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.deletingTeam = null
+            }
+        },
+
+        startAssignOwner(team) {
+            this.assignTeamId  = team.id
+            this.ownerQuery    = ''
+            this.ownerResults  = []
+        },
+
+        cancelAssign() {
+            this.assignTeamId  = null
+            this.ownerQuery    = ''
+            this.ownerResults  = []
+        },
+
+        onOwnerSearch() {
+            clearTimeout(this.ownerSearchTimer)
+            if (this.ownerQuery.length < 1) {
+                this.ownerResults = []
+                return
+            }
+            this.ownerSearching = true
+            this.ownerSearchTimer = setTimeout(async () => {
+                try {
+                    const { data } = await axios.get(
+                        generateUrl('/apps/teamhub/api/v1/admin/users/search'),
+                        { params: { q: this.ownerQuery } }
+                    )
+                    this.ownerResults = Array.isArray(data) ? data : []
+                } catch (e) {
+                    this.ownerResults = []
+                } finally {
+                    this.ownerSearching = false
+                }
+            }, 300)
+        },
+
+        async confirmAssignOwner(team, user) {
+            this.ownerResults  = []
+            this.assigningOwner = true
+            try {
+                const params = new URLSearchParams()
+                params.set('userId', user.uid)
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/orphaned-teams/${team.id}/assign-owner`),
+                    params.toString(),
+                    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+                )
+                // Remove from orphaned list — team now has an owner
+                this.orphanedTeams = this.orphanedTeams.filter(t => t.id !== team.id)
+                this.cancelAssign()
+                showSuccess(this.t('teamhub', 'Owner assigned successfully'))
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(this.t('teamhub', 'Failed to assign owner') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.assigningOwner = false
             }
         },
     },
@@ -745,5 +1072,142 @@ export default {
 
 .admin-save-ok  { font-size: 14px; color: var(--color-success); font-weight: 500; }
 .admin-save-err { font-size: 14px; color: var(--color-error); }
+/* ── Statistics tab ────────────────────────────────────────────── */
+.admin-telemetry-details {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-telemetry-preview {
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    font-size: 12px;
+    font-family: monospace;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--color-main-text);
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+/* ── Maintenance tab ───────────────────────────────────────────── */
+.admin-loading {
+    padding: 12px 0;
+}
+
+.admin-error {
+    color: var(--color-error);
+    font-size: 13px;
+    padding: 8px 0;
+}
+
+.admin-empty {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+    padding: 8px 0;
+}
+
+.admin-orphan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.admin-orphan-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark);
+    flex-wrap: wrap;
+}
+
+.admin-orphan-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.admin-orphan-name {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.admin-orphan-meta {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+}
+
+.admin-orphan-id {
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.admin-orphan-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    align-items: center;
+}
+
+.admin-assign-owner {
+    flex: 1;
+    min-width: 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.admin-owner-results {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.admin-owner-result {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid var(--color-border-dark);
+}
+
+.admin-owner-result:last-child {
+    border-bottom: none;
+}
+
+.admin-owner-result:hover {
+    background: var(--color-background-hover);
+}
+
+.admin-owner-result__uid {
+    color: var(--color-text-maxcontrast);
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.admin-orphan-refresh {
+    margin-top: 4px;
+}
+
+.admin-section-hint {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    margin: 4px 0 0;
+}
 </style>
 

@@ -86,26 +86,61 @@
             <div class="message-card__body" v-html="renderedMessage" />
         </template>
 
-        <!-- Link previews -->
+        <!-- Link / attachment previews -->
         <div v-if="previews.length" class="message-card__previews">
-            <a
-                v-for="(preview, i) in previews"
-                :key="i"
-                :href="preview.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="message-preview">
-                <img
-                    v-if="preview.image"
-                    :src="preview.image"
-                    :alt="preview.title || 'Preview'"
-                    class="message-preview__image" />
-                <div class="message-preview__body">
-                    <span v-if="preview.provider" class="message-preview__provider">{{ preview.provider }}</span>
-                    <span class="message-preview__title">{{ preview.title || preview.url }}</span>
-                    <span v-if="preview.description" class="message-preview__desc">{{ preview.description }}</span>
-                </div>
-            </a>
+            <template v-for="(preview, i) in previews">
+
+                <!-- Image thumbnail — full-width when the URL is a direct image -->
+                <a
+                    v-if="preview.type === 'image'"
+                    :key="'img-' + i"
+                    :href="preview.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="message-preview message-preview--image-only">
+                    <img
+                        :src="preview.url"
+                        :alt="preview.title || t('teamhub', 'Image attachment')"
+                        class="message-preview__thumbnail" />
+                    <span class="message-preview__image-caption">{{ preview.title }}</span>
+                </a>
+
+                <!-- Rich OG card — title + optional description + optional image -->
+                <a
+                    v-else-if="preview.type === 'og' || preview.type === 'rich'"
+                    :key="'og-' + i"
+                    :href="preview.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="message-preview message-preview--og">
+                    <img
+                        v-if="preview.image"
+                        :src="preview.image"
+                        :alt="preview.title || t('teamhub', 'Preview')"
+                        class="message-preview__og-image" />
+                    <div class="message-preview__body">
+                        <span v-if="preview.site_name" class="message-preview__provider">{{ preview.site_name }}</span>
+                        <span class="message-preview__title">{{ preview.title || preview.url }}</span>
+                        <span v-if="preview.description" class="message-preview__desc">{{ preview.description }}</span>
+                    </div>
+                </a>
+
+                <!-- File fallback card — for attachments that could not be resolved -->
+                <a
+                    v-else-if="preview.type === 'file'"
+                    :key="'file-' + i"
+                    :href="preview.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="message-preview message-preview--file">
+                    <PaperclipIcon :size="28" class="message-preview__file-icon" />
+                    <div class="message-preview__body">
+                        <span class="message-preview__title">{{ preview.title }}</span>
+                        <span class="message-preview__desc">{{ t('teamhub', 'Click to open attachment') }}</span>
+                    </div>
+                </a>
+
+            </template>
         </div>
 
         <!-- Poll rendering (if messageType === 'poll') -->
@@ -193,24 +228,67 @@ import Pencil from 'vue-material-design-icons/Pencil.vue'
 import Pin from 'vue-material-design-icons/Pin.vue'
 import PinOff from 'vue-material-design-icons/PinOff.vue'
 import CommentsSection from './CommentsSection.vue'
+import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 
-// Extract all URLs from message text (markdown links + bare URLs)
-function extractUrls(text) {
+// Image extensions we can render as inline thumbnails
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
+
+function extensionOf(url) {
+    try {
+        const path = new URL(url).pathname
+        return path.split('.').pop().toLowerCase().split('?')[0]
+    } catch (e) {
+        return ''
+    }
+}
+
+function isImageUrl(url) {
+    return IMAGE_EXTENSIONS.includes(extensionOf(url))
+}
+
+function filenameFromUrl(url) {
+    try {
+        const path = new URL(url).pathname
+        return decodeURIComponent(path.split('/').pop()) || url
+    } catch (e) {
+        return url
+    }
+}
+
+/**
+ * Extract all URLs from message text.
+ * Returns array of { url, label, isAttachment } objects.
+ * isAttachment = true when the link came from the 📎 attachment markdown pattern.
+ */
+function extractUrlObjects(text) {
     if (!text) return []
-    const urls = []
-    // Markdown links: [label](url)
+    const results = []
+    const seen = new Set()
+
+    // Markdown links (includes 📎 attachment links from PostMessageForm)
     const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g
     let m
     while ((m = mdRe.exec(text)) !== null) {
-        try { urls.push(new URL(m[2]).href) } catch (e) {}
+        try {
+            const href = new URL(m[2]).href
+            if (seen.has(href)) continue
+            seen.add(href)
+            results.push({ url: href, label: m[1], isAttachment: m[1].startsWith('📎') })
+        } catch (e) {}
     }
-    // Bare URLs not inside markdown
+
+    // Bare URLs not inside markdown parentheses
     const bareRe = /(?<!\()https?:\/\/[^\s<>"'\)]+/g
     while ((m = bareRe.exec(text)) !== null) {
-        try { urls.push(new URL(m[0]).href) } catch (e) {}
+        try {
+            const href = new URL(m[0]).href
+            if (seen.has(href)) continue
+            seen.add(href)
+            results.push({ url: href, label: href, isAttachment: false })
+        } catch (e) {}
     }
-    // Deduplicate
-    return [...new Set(urls)]
+
+    return results
 }
 
 // Simple markdown renderer
@@ -245,6 +323,7 @@ export default {
         Pin,
         PinOff,
         CommentsSection,
+        PaperclipIcon,
     },
     props: {
         message:      { type: Object,  required: true },
@@ -327,39 +406,78 @@ export default {
                 showError(t('teamhub', 'Failed to unpin message'))
             }
         },
+        /**
+         * Build preview cards for all URLs found in the message.
+         *
+         * Two-tier resolution per URL:
+         *  1. Direct image URL (jpg/png/gif/webp/svg/avif) → image thumbnail card
+         *  2. Our PHP Open Graph proxy  → title / description / og:image card
+         *
+         * Named file attachments (📎 links) that cannot be resolved get a fallback
+         * file card so the user can still click through to the file.
+         * Bare web URLs that yield no metadata are silently dropped — the inline
+         * clickable link in the message body is sufficient.
+         *
+         * Cap: first 5 URLs per message.
+         */
         async loadPreviews() {
-            const urls = extractUrls(this.message.message || '')
-            if (!urls.length) return
+            const urlObjs = extractUrlObjects(this.message.message || '')
+            if (!urlObjs.length) return
 
-            // Use NC's reference/preview API — resolves rich metadata for known providers
-            // Only show a preview card when the API actually returns useful metadata.
-            // If nothing resolves (e.g. Deck links NC can't resolve), show nothing —
-            // the link in the message body is already clickable.
             const results = []
-            for (const url of urls.slice(0, 3)) {
+
+            for (const { url, label, isAttachment } of urlObjs.slice(0, 5)) {
+
+                // ── Tier 1: the URL itself is an image ──────────────────
+                if (isImageUrl(url)) {
+                    results.push({
+                        url,
+                        title:       filenameFromUrl(url),
+                        description: null,
+                        image:       url,
+                        site_name:   null,
+                        type:        'image',
+                    })
+                    continue
+                }
+
+                // ── Tier 2: PHP Open Graph proxy ────────────────────────
                 try {
-                    const resp = await axios.post(
-                        generateUrl('/ocs/v2.php/references/resolve'),
-                        { references: [url] },
-                        { headers: { 'OCS-APIRequest': 'true', 'Accept': 'application/json' } }
+                    const resp = await axios.get(
+                        generateUrl('/apps/teamhub/api/v1/preview'),
+                        { params: { url } }
                     )
-                    const refData = resp.data?.ocs?.data?.references?.[url]
-                    // Only add a preview card when we have real metadata — title OR image
-                    // An empty/null response means the API couldn't resolve it; skip.
-                    if (refData && (refData.title || refData.imageUrl)) {
+                    const d = resp.data
+                    if (d && (d.title || d.image)) {
                         results.push({
                             url,
-                            title:       refData.title || null,
-                            description: refData.description || null,
-                            image:       refData.imageUrl || null,
-                            provider:    refData.richObjectType || refData.openGraphObject?.name || null,
+                            title:       d.title || filenameFromUrl(url),
+                            description: d.description || null,
+                            image:       d.image || null,
+                            site_name:   d.site_name || null,
+                            type:        d.is_image ? 'image' : 'og',
                         })
+                        continue
                     }
-                    // else: API returned nothing useful — the inline link is enough, no card
                 } catch (e) {
-                    // API not available or network error — skip silently, inline link still works
+                    // 204 no content or network error — fall through to fallback
+                }
+
+                // ── Fallback: file card for named attachments only ───────
+                // Bare web URLs that resolve to nothing are silently dropped —
+                // their clickable inline link is already visible in the body.
+                if (isAttachment) {
+                    results.push({
+                        url,
+                        title:       filenameFromUrl(url),
+                        description: null,
+                        image:       null,
+                        site_name:   null,
+                        type:        'file',
+                    })
                 }
             }
+
             this.previews = results
         },
 
@@ -420,7 +538,6 @@ export default {
                 )
                 this.pollResults = response.data
             } catch (error) {
-                console.error('Failed to load poll results:', error)
             }
         },
         async vote(optionIndex) {
@@ -452,7 +569,6 @@ export default {
                 this.message.pollClosed = true
                 showSuccess(t('teamhub', 'Poll closed'))
             } catch (error) {
-                console.error('Failed to close poll:', error)
                 const errorMsg = error?.response?.data?.error || error?.message || 'Unknown error'
                 showError(t('teamhub', 'Failed to close poll: {error}', { error: errorMsg }))
             }
@@ -469,7 +585,6 @@ export default {
                 // Refresh to show updated state
                 this.$store.dispatch('fetchComments', this.message.id)
             } catch (error) {
-                console.error('Failed to mark question as solved:', error)
                 const errorMsg = error?.response?.data?.error || error?.message || 'Unknown error'
                 showError(t('teamhub', 'Failed to mark question as solved: {error}', { error: errorMsg }))
             }
@@ -485,7 +600,6 @@ export default {
                 // Refresh to show updated state
                 this.$store.dispatch('fetchComments', this.message.id)
             } catch (error) {
-                console.error('Failed to unmark question:', error)
                 const errorMsg = error?.response?.data?.error || error?.message || 'Unknown error'
                 showError(t('teamhub', 'Failed to unmark question: {error}', { error: errorMsg }))
             }
@@ -634,7 +748,7 @@ export default {
     transform: translateY(-4px);
 }
 
-/* Link preview cards */
+/* ── Link / attachment preview cards ──────────────────────────────────── */
 .message-card__previews {
     display: flex;
     flex-direction: column;
@@ -642,10 +756,10 @@ export default {
     margin-bottom: 16px;
 }
 
+/* Base card — shared by all three types */
 .message-preview {
     display: flex;
     align-items: stretch;
-    gap: 0;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-large);
     overflow: hidden;
@@ -653,22 +767,67 @@ export default {
     color: inherit;
     background: var(--color-background-hover);
     transition: box-shadow 0.15s, border-color 0.15s;
-    max-height: 100px;
 }
 
 .message-preview:hover {
     border-color: var(--color-primary-element);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
-.message-preview__image {
-    width: 120px;
-    min-width: 120px;
+/* ── Image thumbnail card ──────────────────────────────────────────────── */
+.message-preview--image-only {
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 360px;
+    background: var(--color-background-dark);
+}
+
+.message-preview__thumbnail {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    display: block;
+    border-radius: var(--border-radius-large) var(--border-radius-large) 0 0;
+}
+
+.message-preview__image-caption {
+    display: block;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* ── OG / rich link card ───────────────────────────────────────────────── */
+.message-preview--og {
+    max-height: 110px;
+}
+
+.message-preview__og-image {
+    width: 130px;
+    min-width: 130px;
     object-fit: cover;
     flex-shrink: 0;
     background: var(--color-background-dark);
 }
 
+/* ── File fallback card ────────────────────────────────────────────────── */
+.message-preview--file {
+    align-items: center;
+    padding: 10px 14px;
+    gap: 12px;
+}
+
+.message-preview__file-icon {
+    flex-shrink: 0;
+    color: var(--color-text-maxcontrast);
+}
+
+/* ── Shared body / text ────────────────────────────────────────────────── */
 .message-preview__body {
     display: flex;
     flex-direction: column;
@@ -677,6 +836,10 @@ export default {
     padding: 10px 14px;
     overflow: hidden;
     flex: 1;
+}
+
+.message-preview--file .message-preview__body {
+    padding: 0;
 }
 
 .message-preview__provider {
@@ -705,7 +868,6 @@ export default {
     -webkit-box-orient: vertical;
     line-height: 1.4;
 }
-
 
 .poll-widget {
     margin-top: 20px;

@@ -47,7 +47,13 @@
         <div v-else :class="['browse-teams-list', `browse-teams-list--${viewMode}`]">
             <div v-for="team in filteredTeams" :key="team.id" class="team-card">
                 <div class="team-card__header">
-                    <AccountGroup :size="48" class="team-card__icon" />
+                    <!-- Team logo when set, fallback to default icon -->
+                    <img
+                        v-if="team.image_url"
+                        :src="team.image_url"
+                        :alt="team.name"
+                        class="team-card__icon team-card__icon--image" />
+                    <AccountGroup v-else :size="48" class="team-card__icon" />
                     <div class="team-card__info">
                         <h3 class="team-card__name">{{ team.name }}</h3>
                         <p v-if="team.description" class="team-card__description">
@@ -250,6 +256,14 @@ export default {
 .team-card__icon {
     flex-shrink: 0;
     color: var(--color-primary);
+}
+
+.team-card__icon--image {
+    width: 100px;
+    height: 100px;
+    border-radius: var(--border-radius-large);
+    object-fit: cover;
+    border: 1px solid var(--color-border);
 }
 
 .team-card__info {
