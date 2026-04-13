@@ -725,9 +725,6 @@ export default {
         },
 
         async confirmRemoveMember(member) {
-            if (!window.confirm(
-                t('teamhub', 'Are you sure you want to remove {name} from this team?', { name: member.displayName })
-            )) return
             try {
                 await axios.delete(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/${member.userId}`)
@@ -735,6 +732,7 @@ export default {
                 showSuccess(t('teamhub', 'Member removed'))
                 await this.loadMembers()
             } catch (e) {
+                console.log('[TeamHub][ManageTeamView] removeMember failed:', e)
                 showError(t('teamhub', 'Failed to remove member'))
             }
         },

@@ -32,7 +32,7 @@ use Psr\Log\LoggerInterface;
 class TelemetryService {
 
     /** The remote endpoint that receives reports. */
-    public const REPORT_URL = 'https://tldr.host/teamhub/report';
+    public const REPORT_URL = 'https://tldr.host/teamhub/report/'; // trailing slash required — Apache 301-redirects bare URL, flipping POST to GET
 
     /** IConfig key: telemetry opt-out flag. '1' = enabled (default), '0' = disabled. */
     private const KEY_ENABLED = 'telemetry_enabled';
@@ -170,7 +170,11 @@ class TelemetryService {
     private function getRegisteredIntegrations(): array {
         try {
             $qb = $this->db->getQueryBuilder();
-            $result = $qb->select('app_id')
+            // selectDistinct prevents duplicate app_id values in the payload when
+            // the same app registers multiple integrations (e.g. both a widget and
+            // a menu_item row). Without this the telemetry payload contained
+            // duplicate entries like ["teamhublists", "teamhublists"].
+            $result = $qb->selectDistinct('app_id')
                 ->from('teamhub_integration_registry')
                 ->where($qb->expr()->eq('is_builtin', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeQuery();

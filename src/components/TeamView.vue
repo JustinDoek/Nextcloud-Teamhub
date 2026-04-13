@@ -372,9 +372,27 @@ export default {
             if (!title) return
             this.creatingPage = true
             try {
-                const { teamhubRoot } = this.pagesData
-                const body = { id: this.toSlug(title), title, language: teamhubRoot?.language || 'nl' }
-                if (teamhubRoot) body.parentPath = `${teamhubRoot.language || 'nl'}/${teamhubRoot.id || 'teamhub'}`
+                const { teamhubRoot, teamPage } = this.pagesData
+                const lang = teamhubRoot?.language || 'nl'
+                const body = { id: this.toSlug(title), title, language: lang }
+
+                // New pages must be created inside the team's own folder, not the
+                // TeamHub root. parentPath must point to the team page so Intravox
+                // places the file at: nl/teamhub/<team-slug>/<new-page>.json
+                // Using teamhubRoot as parent (the previous behaviour) placed files
+                // at nl/teamhub/<new-page>/ — a sibling folder, not a child.
+                if (teamPage) {
+                    // teamPage.id is the slug (e.g. "gemeentes-extern")
+                    const rootId = teamhubRoot?.id || 'teamhub'
+                    body.parentPath = `${lang}/${rootId}/${teamPage.id}`
+                    console.log('[TeamHub][TeamView] submitCreatePage: parentPath set to team page folder', body.parentPath)
+                } else if (teamhubRoot) {
+                    // Fallback: no team page yet, parent to the root (shouldn't normally happen)
+                    body.parentPath = `${lang}/${teamhubRoot.id || 'teamhub'}`
+                    console.log('[TeamHub][TeamView] submitCreatePage: no teamPage found, falling back to root', body.parentPath)
+                }
+
+                console.log('[TeamHub][TeamView] submitCreatePage: posting page', body)
                 await axios.post(generateUrl('/apps/intravox/api/pages'), body)
                 showSuccess(t('teamhub', 'Page "{title}" created', { title }))
                 this.showCreatePage = false

@@ -153,14 +153,25 @@ class TeamService {
 
             // Latest message timestamp per team
             $mqb  = $db->getQueryBuilder();
-            $mqb->select('team_id', $mqb->func()->max('created_at', 'latest'))
+            // func()->max() with an alias is unreliable across DB drivers — MySQL exposes
+            // the key as 'latest' but PostgreSQL and some MariaDB versions use the raw
+            // expression 'max(created_at)' as the key, causing "Undefined array key latest".
+            // Fix: select team_id + MAX(created_at) separately and read both by name.
+            $mqb->select('team_id')
+                ->addSelect($mqb->func()->max('created_at', 'max_created_at'))
                 ->from('teamhub_messages')
                 ->where($mqb->expr()->in('team_id', $mqb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
                 ->groupBy('team_id');
             $mRes = $mqb->executeQuery();
             $latestMsg = [];
             while ($mRow = $mRes->fetch()) {
-                $latestMsg[$mRow['team_id']] = (int)$mRow['latest'];
+                // Normalise: the alias key may vary by driver — try 'max_created_at' first,
+                // then fall back to the raw expression key used by some drivers.
+                $val = $mRow['max_created_at'] ?? $mRow['max(created_at)'] ?? $mRow['MAX(created_at)'] ?? null;
+                if ($val !== null) {
+                    $latestMsg[$mRow['team_id']] = (int)$val;
+                }
+                error_log('[TeamHub][TeamService] fetchTeams latest-msg row: ' . json_encode($mRow));
             }
             $mRes->closeCursor();
 
@@ -200,15 +211,13 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        $circlesManager = $this->getCirclesManager();
-        $federatedUser  = $circlesManager->getFederatedUser($user->getUID(), 1);
-        $circlesManager->startSession($federatedUser);
-        try {
-            $circlesManager->getCircle($teamId);
-        } catch (\Exception $e) {
+        // Access check: verify the user is a member via direct DB query.
+        // getCircle() via CirclesManager fails when the circle config bitmask
+        // is non-zero (hidden from probeCircles), so we use the DB directly.
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        $accessLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $uid);
+        if ($accessLevel < 1) {
             throw new \Exception('Team not found or access denied');
-        } finally {
-            $circlesManager->stopSession();
         }
 
         $db  = $this->container->get(\OCP\IDBConnection::class);
@@ -286,44 +295,24 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        $manager       = $this->getCirclesManager();
-        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
-        $manager->startSession($federatedUser);
+        // Owner check via DB — avoids getCircle() failing on non-zero config circles.
+        $db    = $this->container->get(\OCP\IDBConnection::class);
+        $level = $this->memberService->getMemberLevelFromDb($db, $teamId, $user->getUID());
+        if ($level < 9) {
+            throw new \Exception('Only the team owner can delete a team.');
+        }
+
+        // Use Circles CircleService::destroy() — same path as LocalController::destroy().
+        // FederatedUserService::setLocalCurrentUser() sets up the session context without
+        // the startSession()/stopSession() pattern that fails on hidden circles.
+        $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);
+        $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+        $federatedUserService->setLocalCurrentUser($user);
+        $circleService->destroy($teamId);
 
         try {
-            $circle  = $manager->getCircle($teamId);
-            $isOwner = false;
-
-            if (method_exists($circle, 'getOwner')) {
-                $owner = $circle->getOwner();
-                if ($owner && method_exists($owner, 'getUserId') && $owner->getUserId() === $user->getUID()) {
-                    $isOwner = true;
-                }
-            }
-            if (!$isOwner && method_exists($circle, 'getMembers')) {
-                foreach ($circle->getMembers() as $member) {
-                    $mUid  = method_exists($member, 'getUserId') ? $member->getUserId() : null;
-                    $level = method_exists($member, 'getLevel')  ? $member->getLevel()  : 0;
-                    if ($mUid === $user->getUID() && $level >= 9) {
-                        $isOwner = true;
-                        break;
-                    }
-                }
-            }
-            if (!$isOwner) {
-                throw new \Exception('Only the team owner can delete a team.');
-            }
-
-            $manager->destroyCircle($teamId);
-
-            try {
-                $db = $this->container->get(\OCP\IDBConnection::class);
-                $db->executeStatement('DELETE FROM `*PREFIX*teamhub_team_apps` WHERE `team_id` = ?', [$teamId]);
-            } catch (\Throwable $e) { /* Not fatal */ }
-
-        } finally {
-            $manager->stopSession();
-        }
+            $db->executeStatement('DELETE FROM `*PREFIX*teamhub_team_apps` WHERE `team_id` = ?', [$teamId]);
+        } catch (\Throwable $e) { /* Not fatal */ }
     }
 
     // =========================================================================
@@ -342,13 +331,14 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        $manager       = $this->getCirclesManager();
-        $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
-        $manager->startSession($federatedUser);
+        // Access check via DB — avoids getCircle() failing on non-zero config circles.
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        $accessLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $user->getUID());
+        if ($accessLevel < 4) { // moderator or above may update description
+            throw new \Exception('Access denied');
+        }
 
         try {
-            $manager->getCircle($teamId);
-
             $db = $this->container->get(\OCP\IDBConnection::class);
 
             // Try updating the 'description' column (NC32 Circles schema).
@@ -373,8 +363,6 @@ class TeamService {
                 'app'       => Application::APP_ID,
             ]);
             throw new \Exception('Failed to update description: ' . $e->getMessage());
-        } finally {
-            $manager->stopSession();
         }
     }
 

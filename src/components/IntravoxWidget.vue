@@ -149,15 +149,15 @@ export default {
          */
         collectDescendants(allPages, root) {
             const teamUniqueId = root.uniqueId
-            const teamId = root.id  // slug like "ballers"
 
-            // Build a lookup: uniqueId → page
-            const byUniqueId = {}
-            for (const p of allPages) {
-                if (p.uniqueId) byUniqueId[p.uniqueId] = p
-            }
+            console.log('[TeamHub][IntravoxWidget] collectDescendants: starting BFS from', teamUniqueId)
 
-            // BFS from the root page
+            // BFS from the team page, matching strictly on parentId.
+            // The previous implementation had two additional fallbacks (path-contains
+            // and id-prefix) that could pull in pages from other teams when the slug
+            // happened to be a prefix of another page id. Now that pages are always
+            // created with the correct parentPath (inside the team page folder),
+            // parentId is reliably populated — the fallbacks are not needed.
             const result = []
             const visited = new Set([teamUniqueId])
             const queue = [teamUniqueId]
@@ -167,14 +167,8 @@ export default {
                 for (const p of allPages) {
                     if (visited.has(p.uniqueId)) continue
 
-                    // Primary check: explicit parentId field
-                    const isChild = p.parentId === parentUniqueId
-                        // Fallback: path contains the team slug segment
-                        || (teamId && p.path && p.path.includes(`/${teamId}/`))
-                        // Fallback: uniqueId/id has the team slug as a prefix segment
-                        || (teamId && p.id && p.id.startsWith(`${teamId}-`))
-
-                    if (isChild) {
+                    if (p.parentId === parentUniqueId) {
+                        console.log('[TeamHub][IntravoxWidget] collectDescendants: found child', p.title, 'parentId', p.parentId)
                         visited.add(p.uniqueId)
                         result.push(p)
                         queue.push(p.uniqueId)
@@ -182,6 +176,7 @@ export default {
                 }
             }
 
+            console.log('[TeamHub][IntravoxWidget] collectDescendants: total descendants found', result.length)
             return result
         },
 

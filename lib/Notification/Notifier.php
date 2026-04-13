@@ -86,6 +86,40 @@ class Notifier implements INotifier {
 
                 return $notification;
 
+            case 'join_request':
+                $params        = $notification->getSubjectParameters();
+                $requesterName = $params['requesterName'] ?? ($params['requestingUid'] ?? 'Someone');
+                $teamName      = $params['teamName']      ?? 'a team';
+                $teamId        = $params['teamId']        ?? '';
+
+                $notification->setRichSubject(
+                    '{requester} wants to join {team}',
+                    [
+                        'requester' => [
+                            'type' => 'user',
+                            'id'   => $params['requestingUid'] ?? $requesterName,
+                            'name' => $requesterName,
+                        ],
+                        'team' => [
+                            'type' => 'highlight',
+                            'id'   => $teamId,
+                            'name' => $teamName,
+                        ],
+                    ]
+                );
+                $notification->setParsedSubject(
+                    $requesterName . ' wants to join ' . $teamName
+                );
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+                return $notification;
+
             default:
                 throw new UnknownNotificationException('Unknown subject');
         }
