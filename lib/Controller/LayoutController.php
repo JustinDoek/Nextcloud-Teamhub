@@ -100,6 +100,24 @@ class LayoutController extends Controller {
             'collapsed'   => false,
             'hSaved'      => 3,
         ],
+        [
+            'i'           => 'widget-files-favorites',
+            'x'           => 9, 'y' => 16,
+            'w'           => 3, 'h' => 3,
+            'minW'        => 2, 'minH' => 1,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 3,
+        ],
+        [
+            'i'           => 'widget-files-recent',
+            'x'           => 9, 'y' => 19,
+            'w'           => 3, 'h' => 3,
+            'minW'        => 2, 'minH' => 1,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 3,
+        ],
     ];
 
     private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck'];
@@ -121,6 +139,8 @@ class LayoutController extends Controller {
         'widget-deck',
         'widget-activity',
         'widget-pages',
+        'widget-files-favorites',
+        'widget-files-recent',
     ];
 
     // Allowed built-in tab keys.
@@ -174,20 +194,28 @@ class LayoutController extends Controller {
 
         if ($row === null) {
             // No team-specific row: cascade to user default (or system default).
+            // Merge any new system-default widgets the user's default may not have yet.
+            $mergedDefault = $this->mergeNewWidgets($userDefault['layout']);
             $this->logger->debug('[TeamHub][LayoutController] getLayout — no team layout, cascading to default', [
                 'teamId' => $teamId, 'userId' => $userId,
                 'isSystemDefault' => $userDefault['isSystemDefault'],
+                'itemsBefore' => count($userDefault['layout']),
+                'itemsAfter'  => count($mergedDefault),
             ]);
             return new JSONResponse([
-                'layout'      => $userDefault['layout'],
+                'layout'      => $mergedDefault,
                 'tabOrder'    => $userDefault['tabOrder'],
                 'isDefault'   => true,
-                'userDefault' => $userDefault['layout'],
+                'userDefault' => $mergedDefault,
             ]);
         }
 
         $layout   = json_decode($row['layout_json'],    true) ?? self::DEFAULT_LAYOUT;
         $tabOrder = json_decode($row['tab_order_json'], true) ?? self::DEFAULT_TAB_ORDER;
+
+        // Merge any new system-default widgets that are missing from the saved layout.
+        // This ensures users with existing saved layouts get new widgets automatically.
+        $layout = $this->mergeNewWidgets($layout);
 
         $this->logger->debug('[TeamHub][LayoutController] getLayout — found team layout', [
             'teamId' => $teamId, 'userId' => $userId, 'items' => count($layout),
@@ -410,6 +438,61 @@ class LayoutController extends Controller {
         }
 
         return [$cleanLayout, $cleanTabOrder, null];
+    }
+
+    /**
+     * Merge any system DEFAULT_LAYOUT widgets that are missing from $layout.
+     *
+     * Called on every GET so users who saved their layout before a new widget
+     * was introduced automatically receive it appended at the bottom of the
+     * right-hand column without losing any of their existing positions.
+     *
+     * New widgets are stacked below the lowest existing item in the same
+     * x-column as specified in DEFAULT_LAYOUT, so they do not overlap anything.
+     */
+    private function mergeNewWidgets(array $layout): array {
+        // Build a set of widget IDs already present.
+        $existing = [];
+        foreach ($layout as $item) {
+            $existing[$item['i']] = true;
+        }
+
+        $added = false;
+        foreach (self::DEFAULT_LAYOUT as $defaultItem) {
+            if (isset($existing[$defaultItem['i']])) {
+                continue; // Already in the layout — skip.
+            }
+
+            // Find the lowest y + h in the same x-column so we don't overlap.
+            $targetX = $defaultItem['x'];
+            $maxBottom = 0;
+            foreach ($layout as $item) {
+                if ((int)$item['x'] === $targetX) {
+                    $bottom = (int)$item['y'] + (int)$item['h'];
+                    if ($bottom > $maxBottom) {
+                        $maxBottom = $bottom;
+                    }
+                }
+            }
+
+            $newItem = $defaultItem;
+            $newItem['y'] = $maxBottom;
+
+            $this->logger->debug('[TeamHub][LayoutController] mergeNewWidgets — adding missing widget', [
+                'widgetId' => $defaultItem['i'], 'atY' => $maxBottom,
+            ]);
+
+            $layout[] = $newItem;
+            $added    = true;
+        }
+
+        if ($added) {
+            $this->logger->debug('[TeamHub][LayoutController] mergeNewWidgets — layout updated with new widgets', [
+                'totalItems' => count($layout),
+            ]);
+        }
+
+        return $layout;
     }
 
     private function currentUserId(): ?string {

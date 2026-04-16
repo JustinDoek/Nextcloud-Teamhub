@@ -288,6 +288,28 @@ Reorder web links.
 
 ---
 
+## Files widgets
+
+### GET `/teams/{teamId}/files/favorites`
+Return files in the team's shared folder (and subfolders) that the current user has starred (⭐ favourites).
+**Auth:** Team member. Results are scoped to the requesting user — each user sees only their own starred files.
+**Response:** `[ { id, name, path, mtime, size, mimetype, extension } ]`
+- `path` is relative to the team folder root (e.g. `subfolder/report.pdf`)
+- `mtime` is a Unix timestamp in seconds
+- Returns `[]` if the team has no files resource configured
+
+### GET `/teams/{teamId}/files/recent`
+Return the 5 most recently modified files in the team's shared folder (and subfolders), newest first.
+**Auth:** Team member.
+**Response:** `[ { id, name, path, mtime, size, mimetype, extension } ]`
+- Sorted by `mtime` descending
+- Maximum 5 items
+- Returns `[]` if the team has no files resource configured
+
+**Frontend file URL:** Both widgets open files via `generateUrl('/f/{id}')` — NC resolves the correct editor/viewer by file ID.
+
+---
+
 ## Layout
 
 ### GET `/teams/{teamId}/layout`

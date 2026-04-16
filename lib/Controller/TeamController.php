@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ActivityService;
+use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
@@ -17,6 +18,7 @@ use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IGroupManager;
 use OCP\IRequest;
+use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 class TeamController extends Controller {
@@ -29,6 +31,8 @@ class TeamController extends Controller {
         private ActivityService $activityService,
         private MessageService $messageService,
         private IntravoxService $intravoxService,
+        private FilesService $filesService,
+        private IUserSession $userSession,
         private IGroupManager $groupManager,
         private LoggerInterface $logger,
     ) {
@@ -387,6 +391,104 @@ class TeamController extends Controller {
         } catch (\Exception $e) {
             $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
                 ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/files/favorites
+     *
+     * Returns files in the team folder that the current user has starred.
+     * Requires the user to be a team member.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTeamFavoriteFiles(string $teamId): JSONResponse {
+        try {
+            $this->logger->debug('[TeamHub][TeamController] getTeamFavoriteFiles — teamId: ' . $teamId, [
+                'app' => Application::APP_ID,
+            ]);
+
+            $this->memberService->requireMemberLevel($teamId);
+
+            $uid = $this->userSession->getUser()?->getUID();
+            if ($uid === null) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+
+            // Resolve the team folder ID from the share table via ResourceService.
+            $resources = $this->resourceService->getTeamResources($teamId);
+            if (empty($resources['files']['folder_id'])) {
+                $this->logger->debug('[TeamHub][TeamController] getTeamFavoriteFiles — no files resource', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return new JSONResponse([]);
+            }
+
+            $folderId = (int)$resources['files']['folder_id'];
+            $files    = $this->filesService->getFavoriteFiles($folderId, $uid);
+
+            $this->logger->debug('[TeamHub][TeamController] getTeamFavoriteFiles — returning ' . count($files) . ' files', [
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+
+            return new JSONResponse($files);
+
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'Access denied')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->error('[TeamHub][TeamController] getTeamFavoriteFiles failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/files/recent
+     *
+     * Returns the 5 most recently modified files in the team folder,
+     * newest first.
+     * Requires the user to be a team member.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTeamRecentFiles(string $teamId): JSONResponse {
+        try {
+            $this->logger->debug('[TeamHub][TeamController] getTeamRecentFiles — teamId: ' . $teamId, [
+                'app' => Application::APP_ID,
+            ]);
+
+            $this->memberService->requireMemberLevel($teamId);
+
+            $uid = $this->userSession->getUser()?->getUID();
+            if ($uid === null) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+
+            $resources = $this->resourceService->getTeamResources($teamId);
+            if (empty($resources['files']['folder_id'])) {
+                $this->logger->debug('[TeamHub][TeamController] getTeamRecentFiles — no files resource', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return new JSONResponse([]);
+            }
+
+            $folderId = (int)$resources['files']['folder_id'];
+            $files    = $this->filesService->getRecentFiles($folderId, $uid, 5);
+
+            $this->logger->debug('[TeamHub][TeamController] getTeamRecentFiles — returning ' . count($files) . ' files', [
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+
+            return new JSONResponse($files);
+
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'Access denied')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->error('[TeamHub][TeamController] getTeamRecentFiles failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
             return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }

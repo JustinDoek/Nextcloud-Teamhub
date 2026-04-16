@@ -37,6 +37,10 @@ return [
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
 
+        // Files widgets — favourite files and recently modified files
+        ['name' => 'team#getTeamFavoriteFiles',   'url' => '/api/v1/teams/{teamId}/files/favorites',         'verb' => 'GET'],
+        ['name' => 'team#getTeamRecentFiles',      'url' => '/api/v1/teams/{teamId}/files/recent',            'verb' => 'GET'],
+
         // Team apps (enable/disable per team)
         ['name' => 'team#getTeamApps',            'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'GET'],
         ['name' => 'team#updateTeamApps',         'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'PUT'],

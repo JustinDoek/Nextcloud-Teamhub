@@ -272,7 +272,6 @@ export default {
                 if (!cur) continue // widget inactive in this team — skip
                 const d = def[id]
                 if (cur.x !== d.x || cur.w !== d.w || cur.h !== d.h || cur.collapsed !== d.collapsed) {
-                    console.log('[TeamHub][TeamView] layoutDiffersFromDefault — mismatch on widget:', id, { cur, d })
                     return true
                 }
             }
@@ -301,7 +300,6 @@ export default {
             deep: true,
             handler() {
                 if (this.layoutLoaded && !this.editMode) {
-                    console.log('[TeamHub][TeamView] resources changed — re-applying snap')
                     this.applySnap()
                 }
             },
@@ -330,18 +328,14 @@ export default {
         // ── Layout load / save ──────────────────────────────────────
 
         async loadLayout(teamId) {
-            console.log('[TeamHub][TeamView] loadLayout — fetching for team:', teamId)
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`))
                 this.gridLayout        = Array.isArray(data.layout)      ? data.layout      : []
                 this.userDefaultLayout = Array.isArray(data.userDefault) ? data.userDefault : []
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
-                console.log('[TeamHub][TeamView] loadLayout — done, isDefault:', data.isDefault,
-                    'userDefault items:', this.userDefaultLayout.length)
                 this.applySnap()
             } catch (err) {
-                console.error('[TeamHub][TeamView] loadLayout — error:', err)
                 this.gridLayout = []
                 this.buildOrderedTabs([])
                 this.layoutLoaded = true
@@ -351,15 +345,12 @@ export default {
         async saveLayout() {
             if (!this.currentTeamId || !this.layoutLoaded) return
             const tabOrder = this.orderedTabs.map(t => t.key)
-            console.log('[TeamHub][TeamView] saveLayout — saving for team:', this.currentTeamId,
-                'items:', this.gridLayout.length)
             try {
                 await axios.put(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
                     { layout: this.gridLayout, tabOrder },
                 )
             } catch (err) {
-                console.error('[TeamHub][TeamView] saveLayout — error:', err)
             }
         },
 
@@ -391,7 +382,6 @@ export default {
             if (this.resources && this.resources.intravox) active.add('widget-pages')
             // Dynamic integration widgets.
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
-            console.log('[TeamHub][TeamView] getActiveWidgetIds —', [...active])
             return active
         },
 
@@ -411,7 +401,6 @@ export default {
          */
         applySnap() {
             if (!this.layoutLoaded || !this.gridLayout.length) return
-            console.log('[TeamHub][TeamView] applySnap — start, items:', this.gridLayout.length)
 
             const activeIds = this.getActiveWidgetIds()
             const PARK_Y = 9999
@@ -447,7 +436,6 @@ export default {
                 }
             }
 
-            console.log('[TeamHub][TeamView] applySnap — done, snapped items:', snapped.length)
             this.gridLayout = snapped
         },
 
@@ -458,7 +446,6 @@ export default {
          * Called from TeamWidgetGrid's "Set as default" button.
          */
         async setAsDefault() {
-            console.log('[TeamHub][TeamView] setAsDefault — saving user default layout')
             try {
                 const tabOrder = this.orderedTabs.map(t => t.key)
                 await axios.put(
@@ -469,7 +456,6 @@ export default {
                 this.userDefaultLayout = this.gridLayout.map(item => ({ ...item }))
                 showSuccess(t('teamhub', 'Default layout saved'))
             } catch (err) {
-                console.error('[TeamHub][TeamView] setAsDefault — error:', err)
                 showError(t('teamhub', 'Failed to save default layout'))
             }
         },
@@ -481,7 +467,6 @@ export default {
          */
         async resetToDefault() {
             if (!this.userDefaultLayout || !this.userDefaultLayout.length) return
-            console.log('[TeamHub][TeamView] resetToDefault — resetting to user default')
 
             // Copy default into current layout, then snap for this team's active widgets.
             this.gridLayout = this.userDefaultLayout.map(item => ({ ...item }))
@@ -494,9 +479,7 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
                     { layout: this.gridLayout, tabOrder },
                 )
-                console.log('[TeamHub][TeamView] resetToDefault — saved')
             } catch (err) {
-                console.error('[TeamHub][TeamView] resetToDefault — save error:', err)
                 showError(t('teamhub', 'Failed to reset layout'))
             }
         },
