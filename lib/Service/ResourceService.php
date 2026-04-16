@@ -31,6 +31,7 @@ class ResourceService {
         private FilesService $filesService,
         private CalendarService $calendarService,
         private DeckService $deckService,
+        private IntravoxService $intravoxService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -56,10 +57,25 @@ class ResourceService {
             throw new \Exception('Access denied');
         }
 
-        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null];
+        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false];
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // ── IntraVox enabled flag ─────────────────────────────────────────
+            // Check if the intravox app is enabled for this team in teamhub_team_apps
+            if ($this->appManager->isInstalled('intravox')) {
+                $ivQb  = $db->getQueryBuilder();
+                $ivRes = $ivQb->select('enabled')
+                    ->from('teamhub_team_apps')
+                    ->where($ivQb->expr()->eq('team_id', $ivQb->createNamedParameter($teamId)))
+                    ->andWhere($ivQb->expr()->eq('app_id', $ivQb->createNamedParameter('intravox')))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $ivRow = $ivRes->fetch();
+                $ivRes->closeCursor();
+                $resources['intravox'] = $ivRow ? (bool)$ivRow['enabled'] : false;
+            }
 
             // ── Talk ─────────────────────────────────────────────────────────
             // Find rooms where the circle is an attendee (actor_type=circles, actor_id=teamId)
@@ -296,7 +312,7 @@ class ResourceService {
                         $results['deck'] = $this->deckService->createDeckBoard($teamId, $teamName, $uid);
                         break;
                     case 'intravox':
-                        $results['intravox'] = $this->deckService->createIntravoxPage($teamId, $teamName, $uid);
+                        $results['intravox'] = $this->intravoxService->createPage($teamId, $teamName);
                         break;
                     default:
                         $results[$app] = ['error' => 'Unknown app'];
@@ -316,11 +332,13 @@ class ResourceService {
 
 
     public function checkInstalledApps(): array {
+        $config = $this->container->get(\OCP\IConfig::class);
         return [
-            'talk'     => $this->appManager->isInstalled('spreed'),
-            'calendar' => $this->appManager->isInstalled('calendar'),
-            'deck'     => $this->appManager->isInstalled('deck'),
-            'intravox' => $this->appManager->isInstalled('intravox'),
+            'talk'               => $this->appManager->isInstalled('spreed'),
+            'calendar'           => $this->appManager->isInstalled('calendar'),
+            'deck'               => $this->appManager->isInstalled('deck'),
+            'intravox'           => $this->appManager->isInstalled('intravox'),
+            'intravoxParentPath' => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
         ];
     }
 
@@ -332,7 +350,7 @@ class ResourceService {
      *   files    — delete the Files share (IShare) then delete the folder node itself
      *   calendar — delete the calendar via CalDavBackend (removes all events too)
      *   deck     — delete the board via DB (cascade removes lists, cards, ACL)
-     *   intravox — remove the circle's ACL row from intravox tables (if table exists)
+     *   intravox — find and delete the IntraVox page via PageService (in-process)
      *
      * Each app block is individually try/caught so one failure does not abort others.
      *
@@ -355,7 +373,7 @@ class ResourceService {
             case 'deck':
                 return $this->deckService->deleteDeckBoard($teamId, $db);
             case 'intravox':
-                return $this->deckService->deleteIntravoxAccess($teamId, $db);
+                return $this->intravoxService->deletePage($teamId, $this->getTeamName($teamId, $db));
             default:
                 return ['deleted' => false, 'detail' => "Unknown app: {$app}"];
         }
@@ -373,6 +391,31 @@ class ResourceService {
     // -------------------------------------------------------------------------
     // DB schema introspection — delegates to DbIntrospectionService
     // -------------------------------------------------------------------------
+
+    /**
+     * Look up a team's display name from circles_circle by its unique_id.
+     * Used internally to resolve the name for IntraVox page matching on delete.
+     */
+    private function getTeamName(string $teamId, \OCP\IDBConnection $db): string {
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('name')
+                ->from('circles_circle')
+                ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+            return $row ? (string)($row['name'] ?? '') : '';
+        } catch (\Throwable $e) {
+            $this->logger->warning('[ResourceService] getTeamName failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return '';
+        }
+    }
+
+
 
     /**
      * Return the column names for an un-prefixed table name.

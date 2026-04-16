@@ -213,14 +213,6 @@ import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutline.vue'
 
-// templateId values confirmed from /api/templates response:
-// available ids: department, event, knowledge-base, landing-page, news-article, news-hub, project
-const INTRAVOX_TEMPLATES = {
-    project:       'project',
-    collaboration: 'knowledge-base',
-    department:    'department',
-}
-
 export default {
     name: 'CreateTeamView',
     components: {
@@ -476,33 +468,9 @@ export default {
         },
 
         async createIntravoxPage(team) {
-            // Find the matching template id from the templates API
-            const wantedId = INTRAVOX_TEMPLATES[this.form.teamType]
-            let templateId = null
-            try {
-                const { data: templates } = await axios.get(generateUrl('/apps/intravox/api/templates'))
-                const tplList = Array.isArray(templates) ? templates : (templates?.templates || [])
-
-                // Match on short id (e.g. "project"), then slug, then fuzzy title
-                const match = tplList.find(t => t.id === wantedId || t.slug === wantedId)
-                    || tplList.find(t => (t.title || '').toLowerCase().includes(this.form.teamType.toLowerCase()))
-
-                templateId = match?.id || null
-            } catch (e) {
-            }
-
-            if (!templateId) {
-                return
-            }
-
-            // POST /api/pages/from-template — minimal payload per OpenAPI spec.
-            // Do NOT send parentPath: the value "/teamhub" causes a 400 because IntraVox
-            // validates that the path exists as a real page. Omitting it creates at root.
-            const payload = {
-                templateId,
-                pageTitle: team.name,
-            }
-            await axios.post(generateUrl('/apps/intravox/api/pages/from-template'), payload)
+            // Route through TeamHub's IntravoxService — reads admin config for parentPath,
+            // uses in-process PageService call (no loopback HTTP).
+            await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/intravox/page`))
         },
 
         toSlug(text) {

@@ -62,7 +62,7 @@ export default {
         }
     },
     computed: {
-        ...mapState(['members', 'currentUser']),
+        ...mapState(['members', 'currentUser', 'intravoxParentPath']),
         ...mapGetters(['currentTeam']),
         canCreatePage() {
             const member = this.members.find(m => m.userId === this.currentUser?.uid)
@@ -85,51 +85,49 @@ export default {
             return generateUrl('/apps/intravox/') + '#' + pageId
         },
 
-        toSlug(text) {
-            return (text || '')
-                .toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, '')
-                .trim()
-                .replace(/\s+/g, '-')
-                .replace(/-+/g, '-') || 'team-page'
-        },
-
         async initDocumentationPage() {
             this.loading = true
             this.error = null
             try {
+                const teamId = this.currentTeam?.id
+                if (!teamId) return
+
+                const teamNameLower = this.teamName.toLowerCase()
+                const slug = teamNameLower.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
+                // 1. Find the team's main IntraVox page from the full page list
                 const response = await axios.get(generateUrl('/apps/intravox/api/pages'))
                 if (!response.data || !Array.isArray(response.data)) return
 
                 const pages = response.data
-
-                // Find TeamHub root — prefer exact id="teamhub", fall back to title match
-                const rootCandidates = pages.filter(p => p.title?.toLowerCase() === 'teamhub')
-                this.teamhubRoot = rootCandidates.find(p => p.id === 'teamhub') || rootCandidates[0] || null
-
-                // Find the team page: title matches team name, not a template
                 const existingTeamPage = pages.find(p =>
-                    p.title?.toLowerCase() === this.teamName.toLowerCase() &&
-                    p.uniqueId !== this.teamhubRoot?.uniqueId &&
+                    p.title?.toLowerCase() === teamNameLower &&
                     !p.uniqueId?.startsWith('template-')
                 ) || null
 
+                if (existingTeamPage) {
+                    // Inject path and id since IntraVox API doesn't return them
+                    if (!existingTeamPage.path) {
+                        existingTeamPage.path = (this.intravoxParentPath || 'en/teamhub') + '/' + slug
+                    }
+                    if (!existingTeamPage.id) {
+                        existingTeamPage.id = slug
+                    }
+                    this.teamPage = existingTeamPage
+
+                    // 2. Fetch sub-pages via TeamHub backend (uses getPageTree in-process)
+                    try {
+                        const subResp = await axios.get(
+                            generateUrl('/apps/teamhub/api/v1/teams/' + teamId + '/intravox/subpages')
+                        )
+                        this.subPages = Array.isArray(subResp.data) ? subResp.data : []
+                    } catch (e) {
+                        this.subPages = []
+                    }
+                }
+
                 this.allPages = pages
 
-                if (existingTeamPage) {
-                    this.teamPage = existingTeamPage
-                    // Collect ALL pages that are descendants of the team page.
-                    // IntraVox pages have a `parentId` field that references the parent's uniqueId.
-                    // We do a breadth-first expansion: start with the team page's direct children,
-                    // then their children, etc. — so any depth of subpage shows up in the widget.
-                    this.subPages = this.collectDescendants(pages, existingTeamPage)
-                } else if (this.canCreatePage) {
-                    // Auto-create for admins/owners — no button needed
-                    await this.createDocumentationPage(pages)
-                }
-                // Non-admins with no page: widget stays empty silently
-
-                // Emit current page state so TeamView can power the action menu
                 this.$emit('pages-loaded', {
                     teamPage:    this.teamPage,
                     subPages:    this.subPages,
@@ -137,102 +135,23 @@ export default {
                     allPages:    this.allPages,
                 })
             } catch (error) {
-                // Silently fail — Intravox may not be installed
             } finally {
                 this.loading = false
             }
         },
 
-        /**
-         * Return all pages that are descendants of `root` (any depth).
-         * Tries parentId match first, then falls back to path/slug containment.
-         */
-        collectDescendants(allPages, root) {
-            const teamUniqueId = root.uniqueId
-
-            console.log('[TeamHub][IntravoxWidget] collectDescendants: starting BFS from', teamUniqueId)
-
-            // BFS from the team page, matching strictly on parentId.
-            // The previous implementation had two additional fallbacks (path-contains
-            // and id-prefix) that could pull in pages from other teams when the slug
-            // happened to be a prefix of another page id. Now that pages are always
-            // created with the correct parentPath (inside the team page folder),
-            // parentId is reliably populated — the fallbacks are not needed.
-            const result = []
-            const visited = new Set([teamUniqueId])
-            const queue = [teamUniqueId]
-
-            while (queue.length) {
-                const parentUniqueId = queue.shift()
-                for (const p of allPages) {
-                    if (visited.has(p.uniqueId)) continue
-
-                    if (p.parentId === parentUniqueId) {
-                        console.log('[TeamHub][IntravoxWidget] collectDescendants: found child', p.title, 'parentId', p.parentId)
-                        visited.add(p.uniqueId)
-                        result.push(p)
-                        queue.push(p.uniqueId)
-                    }
-                }
-            }
-
-            console.log('[TeamHub][IntravoxWidget] collectDescendants: total descendants found', result.length)
-            return result
-        },
-
-        async createDocumentationPage(pages) {
-            try {
-                // Step 1: Ensure TeamHub root exists
-                if (!this.teamhubRoot) {
-                    // Detect language from existing pages, fall back to 'nl'
-                    const langCounts = {}
-                    for (const p of pages) {
-                        if (p.language) langCounts[p.language] = (langCounts[p.language] || 0) + 1
-                    }
-                    const lang = Object.keys(langCounts).length
-                        ? Object.entries(langCounts).sort((a, b) => b[1] - a[1])[0][0]
-                        : 'nl'
-
-                    const rootResp = await axios.post(generateUrl('/apps/intravox/api/pages'), {
-                        id: 'teamhub',
-                        title: 'TeamHub',
-                        language: lang,
-                    })
-                    this.teamhubRoot = rootResp.data
-                }
-
-                // parentPath places the team page inside the root folder:
-                // e.g. "nl/teamhub" → intravox/nl/teamhub/sales-team/
-                const rootLang = this.teamhubRoot.language || 'nl'
-                const rootId = this.teamhubRoot.id || 'teamhub'
-                const parentPath = `${rootLang}/${rootId}`
-
-                // Step 2: Create the team page nested under TeamHub root
-                const teamResp = await axios.post(generateUrl('/apps/intravox/api/pages'), {
-                    id: this.toSlug(this.teamName),
-                    title: this.teamName,
-                    language: rootLang,
-                    parentPath,
-                })
-                this.teamPage = teamResp.data
-
-            } catch (e) {
-                if (e.response?.status !== 404) {
-                    // 404 = Intravox not installed, stay silent
-                    const msg = e.response?.data?.message || e.response?.data?.error
-                    this.error = msg
-                        ? t('teamhub', 'Failed to create page: {error}', { error: msg })
-                        : t('teamhub', 'Failed to create documentation page')
-                    showError(this.error)
-                }
-            }
-        },
 
         /**
          * Called by TeamView after a create or delete action completes.
-         * Re-fetches all pages from Intravox and re-emits pages-loaded.
+         * Busts the server-side sub-pages cache then re-fetches.
          */
         async refresh() {
+            const teamId = this.currentTeam?.id
+            if (teamId) {
+                try {
+                    await axios.delete(generateUrl('/apps/teamhub/api/v1/teams/' + teamId + '/intravox/subpages/cache'))
+                } catch (e) { /* non-fatal */ }
+            }
             await this.initDocumentationPage()
         },
     },

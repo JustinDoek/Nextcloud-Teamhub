@@ -171,7 +171,6 @@ class TeamService {
                 if ($val !== null) {
                     $latestMsg[$mRow['team_id']] = (int)$val;
                 }
-                error_log('[TeamHub][TeamService] fetchTeams latest-msg row: ' . json_encode($mRow));
             }
             $mRes->closeCursor();
 
@@ -214,13 +213,13 @@ class TeamService {
         // Access check: verify the user is a member via direct DB query.
         // getCircle() via CirclesManager fails when the circle config bitmask
         // is non-zero (hidden from probeCircles), so we use the DB directly.
-        $db = $this->container->get(\OCP\IDBConnection::class);
+        $db  = $this->container->get(\OCP\IDBConnection::class);
+        $uid = $user->getUID();
         $accessLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $uid);
         if ($accessLevel < 1) {
             throw new \Exception('Team not found or access denied');
         }
 
-        $db  = $this->container->get(\OCP\IDBConnection::class);
         $qb  = $db->getQueryBuilder();
         $res = $qb->select('c.unique_id', 'c.name', 'c.description')
             ->from('circles_circle', 'c')
@@ -524,12 +523,18 @@ class TeamService {
                     continue;
                 }
 
+                // CFG_OPEN = bit 1: when set the circle auto-approves joins (no approval needed).
+                // We invert it so the frontend gets a positive "requiresApproval" flag.
+                $config           = (int)($row['config'] ?? 0);
+                $isOpen           = ($config & 1) > 0;
+
                 $teams[] = [
-                    'id'          => $row['unique_id'],
-                    'name'        => $name,
-                    'description' => $row['description'] ?? '',
-                    'isMember'    => $row['member_uid'] !== null,
-                    'image_url'   => $this->teamImageService->getImageUrl($row['unique_id']),
+                    'id'               => $row['unique_id'],
+                    'name'             => $name,
+                    'description'      => $row['description'] ?? '',
+                    'isMember'         => $row['member_uid'] !== null,
+                    'requiresApproval' => !$isOpen,
+                    'image_url'        => $this->teamImageService->getImageUrl($row['unique_id']),
                 ];
             }
             $result->closeCursor();
@@ -586,9 +591,10 @@ class TeamService {
         }
 
         return [
-            'wizardDescription' => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
-            'inviteTypes'       => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
-            'pinMinLevel'       => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
+            'wizardDescription'  => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
+            'inviteTypes'        => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
+            'pinMinLevel'        => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
+            'intravoxParentPath' => $config->getAppValue(Application::APP_ID, 'intravoxParentPath', 'en/teamhub'),
             'createTeamGroup'   => $rawGroups,           // legacy flat string — keep for canCreateTeam()
             'createTeamGroups'  => $createTeamGroups,   // structured array for the picker
         ];
@@ -637,6 +643,13 @@ class TeamService {
                 ? $settings['pinMinLevel']
                 : 'moderator';
             $config->setAppValue(Application::APP_ID, 'pinMinLevel', $level);
+        }
+        if (isset($settings['intravoxParentPath'])) {
+            // Validate: only alphanumeric, hyphens, underscores, and forward slashes.
+            // Strip leading/trailing slashes for consistency.
+            $raw  = trim((string)$settings['intravoxParentPath'], '/');
+            $path = preg_match('/^[a-zA-Z0-9_\-\/]+$/', $raw) ? $raw : 'en/teamhub';
+            $config->setAppValue(Application::APP_ID, 'intravoxParentPath', $path);
         }
         if (array_key_exists('createTeamGroup', $settings)) {
             $raw = $settings['createTeamGroup'];

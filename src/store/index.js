@@ -23,6 +23,7 @@ export default new Vuex.Store({
         teamWidgets: [],        // enabled sidebar widgets for the current team
         teamMenuItems: [],      // enabled menu_item integrations for the current team
         intravoxAvailable: false,
+        intravoxParentPath: 'en/teamhub',
         loading: {
             teams: false,
             messages: false,
@@ -123,6 +124,7 @@ export default new Vuex.Store({
         SET_LOADING(state, { key, value }) { Vue.set(state.loading, key, value) },
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },
+        SET_INTRAVOX_PARENT_PATH(state, value) { state.intravoxParentPath = value },
     },
 
     actions: {
@@ -130,6 +132,7 @@ export default new Vuex.Store({
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/apps/check'))
                 commit('SET_INTRAVOX_AVAILABLE', !!data.intravox)
+                commit('SET_INTRAVOX_PARENT_PATH', data.intravoxParentPath || 'en/teamhub')
             } catch (e) {
                 try {
                     await axios.get(generateUrl('/apps/intravox/api/pages'), { timeout: 3000 })

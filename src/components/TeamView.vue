@@ -32,7 +32,8 @@
                 @delete-page="openDeletePage"
                 @pages-loaded="onPagesLoaded"
                 @set-view="setView"
-                @widget-actions-loaded="onWidgetActionsLoaded" />
+                @widget-actions-loaded="onWidgetActionsLoaded"
+                @leave-team="onLeaveTeam" />
 
             <!-- Activity feed -->
             <ActivityFeedView v-if="currentView === 'activity'" />
@@ -102,18 +103,12 @@
             @update:open="showDeletePage = false">
             <template #default>
                 <p style="margin: 0 0 12px; font-size: 13px; color: var(--color-text-maxcontrast);">
-                    {{ t('teamhub', 'Select a page to delete. This will also delete all child pages. This action cannot be undone.') }}
+                    {{ t('teamhub', 'Select a sub-page to delete. This cannot be undone.') }}
                 </p>
                 <div class="teamhub-page-delete-list">
-                    <label
-                        v-if="pagesData.teamPage"
-                        class="teamhub-page-delete-option"
-                        :class="{ 'teamhub-page-delete-option--selected': deletePageTarget && deletePageTarget.uniqueId === pagesData.teamPage.uniqueId }">
-                        <input v-model="deletePageTarget" type="radio" :value="pagesData.teamPage" class="teamhub-page-delete-radio" />
-                        <FileDocumentOutline :size="16" />
-                        <span>{{ pagesData.teamPage.title }}</span>
-                        <span class="teamhub-page-delete-hint">{{ t('teamhub', '(main team page + all sub-pages)') }}</span>
-                    </label>
+                    <p v-if="pagesData.subPages.length === 0" style="font-size:13px; color: var(--color-text-maxcontrast); margin: 0;">
+                        {{ t('teamhub', 'No sub-pages to delete. The main team page can only be removed by disabling the Pages app for this team.') }}
+                    </p>
                     <label
                         v-for="page in pagesData.subPages"
                         :key="page.uniqueId"
@@ -261,8 +256,8 @@ export default {
         this._debouncedSave = debounce(this.saveLayout, 1200)
     },
 
-    mounted() {
-        this.$store.dispatch('checkIntravox')
+    async mounted() {
+        await this.$store.dispatch('checkIntravox')
         if (this.currentTeamId) {
             this.loadLayout(this.currentTeamId)
         }
@@ -363,7 +358,25 @@ export default {
         },
 
         openManageTeam() { this.$emit('show-manage-team') },
-        onPagesLoaded(data) { this.pagesData = data },
+
+        async onLeaveTeam() {
+            try {
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/leave`), {})
+                showSuccess(t('teamhub', 'You have left the team'))
+                this.$store.commit('SET_CURRENT_TEAM', null)
+                await this.$store.dispatch('fetchTeams')
+                this.$emit('team-left')
+            } catch (error) {
+                showError(t('teamhub', 'Failed to leave team'))
+            }
+        },
+        onPagesLoaded(data) {
+            // Vue 2: replacing the whole object breaks reactivity — set each key individually
+            this.$set(this.pagesData, 'teamPage',    data.teamPage    || null)
+            this.$set(this.pagesData, 'subPages',    data.subPages    || [])
+            this.$set(this.pagesData, 'teamhubRoot', data.teamhubRoot || null)
+            this.$set(this.pagesData, 'allPages',    data.allPages    || [])
+        },
         openCreatePage() { this.newPageTitle = ''; this.showCreatePage = true },
         openDeletePage() { this.deletePageTarget = null; this.showDeletePage = true },
 
@@ -372,28 +385,23 @@ export default {
             if (!title) return
             this.creatingPage = true
             try {
-                const { teamhubRoot, teamPage } = this.pagesData
-                const lang = teamhubRoot?.language || 'nl'
-                const body = { id: this.toSlug(title), title, language: lang }
+                // Build parentPath from admin config + team name slug.
+                // IntraVox's /api/pages does not return a 'path' field, so we construct
+                // it the same way IntravoxService does: parentPath/team-slug.
+                const intravoxParentPath = this.$store.state.intravoxParentPath || 'en/teamhub'
+                const teamName = this.currentTeam?.name || ''
+                const teamSlug = this.toSlug(teamName)
+                const teamPagePath = intravoxParentPath + '/' + teamSlug
 
-                // New pages must be created inside the team's own folder, not the
-                // TeamHub root. parentPath must point to the team page so Intravox
-                // places the file at: nl/teamhub/<team-slug>/<new-page>.json
-                // Using teamhubRoot as parent (the previous behaviour) placed files
-                // at nl/teamhub/<new-page>/ — a sibling folder, not a child.
-                if (teamPage) {
-                    // teamPage.id is the slug (e.g. "gemeentes-extern")
-                    const rootId = teamhubRoot?.id || 'teamhub'
-                    body.parentPath = `${lang}/${rootId}/${teamPage.id}`
-                    console.log('[TeamHub][TeamView] submitCreatePage: parentPath set to team page folder', body.parentPath)
-                } else if (teamhubRoot) {
-                    // Fallback: no team page yet, parent to the root (shouldn't normally happen)
-                    body.parentPath = `${lang}/${teamhubRoot.id || 'teamhub'}`
-                    console.log('[TeamHub][TeamView] submitCreatePage: no teamPage found, falling back to root', body.parentPath)
+
+                if (!teamSlug || !teamName) {
+                    showError(t('teamhub', 'Cannot create page: team name not available'))
+                    return
                 }
 
-                console.log('[TeamHub][TeamView] submitCreatePage: posting page', body)
-                await axios.post(generateUrl('/apps/intravox/api/pages'), body)
+                const body = { id: this.toSlug(title), title, parentPath: teamPagePath }
+
+                const result = await axios.post(generateUrl('/apps/intravox/api/pages'), body)
                 showSuccess(t('teamhub', 'Page "{title}" created', { title }))
                 this.showCreatePage = false
                 this.$refs.widgetGrid?.refreshIntravox()
@@ -410,7 +418,10 @@ export default {
             const page = this.deletePageTarget
             this.deletingPage = true
             try {
-                await axios.delete(generateUrl(`/apps/intravox/api/pages/${page.uniqueId}`))
+                // IntraVox REST DELETE /api/pages/{id} expects the slug.
+                // Prefer injected page.id, fall back to slug from title, last resort uniqueId.
+                const deleteId = page.id || (page.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/, '') || page.uniqueId
+                await axios.delete(generateUrl(`/apps/intravox/api/pages/${deleteId}`))
                 showSuccess(t('teamhub', 'Page "{title}" deleted', { title: page.title }))
                 this.showDeletePage = false
                 this.deletePageTarget = null

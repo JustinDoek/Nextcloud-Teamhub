@@ -326,20 +326,21 @@ class MemberService {
             throw new \Exception('User not authenticated');
         }
 
-        // Use CircleService::circleLeave() — same path as the Circles UI.
-        // This avoids the startSession()/stopSession() pattern that fails when
-        // the circle config bitmask is non-zero (circle hidden from probeCircles).
+        // CircleService::circleLeave() throws CircleNotFoundException on circles with a
+        // non-zero config bitmask (same root cause as removeMember). Use a direct DB
+        // delete instead — safe because we verify membership and owner status first.
         try {
-            $circleService = $this->container->get(\OCA\Circles\Service\CircleService::class);
-            $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
-            $federatedUserService->setLocalCurrentUser($user);
+            $db  = $this->container->get(\OCP\IDBConnection::class);
+            $uid = $user->getUID();
 
-            // Owner guard: check via DB before attempting leave
-            $db = $this->container->get(\OCP\IDBConnection::class);
-            $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+            $level = $this->getMemberLevelFromDb($db, $teamId, $uid);
+
+            if ($level === 0) {
+                throw new \Exception('You are not a member of this team.');
+            }
+
             if ($level >= 9) {
-                // Count other members to block owner leaving a non-empty team
-                $cntQb = $db->getQueryBuilder();
+                $cntQb  = $db->getQueryBuilder();
                 $cntRes = $cntQb->select($cntQb->func()->count('*', 'cnt'))
                     ->from('circles_member')
                     ->where($cntQb->expr()->eq('circle_id', $cntQb->createNamedParameter($teamId)))
@@ -352,9 +353,16 @@ class MemberService {
                 }
             }
 
-            $circleService->circleLeave($teamId);
-            $this->logger->info('[MemberService] leaveTeam: circleLeave succeeded', [
-                'uid'    => $user->getUID(),
+            // Delete all rows for this user in this circle (covers Member + Requesting).
+            $delQb = $db->getQueryBuilder();
+            $delQb->delete('circles_member')
+                ->where($delQb->expr()->eq('circle_id', $delQb->createNamedParameter($teamId)))
+                ->andWhere($delQb->expr()->eq('user_id',   $delQb->createNamedParameter($uid)))
+                ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $this->logger->info('[MemberService] leaveTeam: member removed via direct DB delete', [
+                'uid'    => $uid,
                 'teamId' => $teamId,
                 'app'    => Application::APP_ID,
             ]);
@@ -636,12 +644,9 @@ class MemberService {
             throw new \Exception('Failed to request team membership: ' . $e->getMessage());
         }
 
-        // Notify all team admins and owners that a new join request has arrived.
-        $this->sendJoinRequestNotification($teamId, $uid, $db);
-
-        // If the circle is open-join (CFG_OPEN bit 1 is set in config), automatically
-        // approve the request by flipping status to 'Member'. This matches Circles'
-        // own behaviour for open circles where no admin approval is required.
+        // Check if the circle is open-join (CFG_OPEN bit 1 set = no approval needed).
+        // This must happen BEFORE sending a notification so admins are only notified
+        // when the join actually requires their approval.
         try {
             $cfgQb  = $db->getQueryBuilder();
             $cfgRes = $cfgQb->select('config')
@@ -655,12 +660,15 @@ class MemberService {
             $circleConfig = $cfgRow ? (int)$cfgRow['config'] : 0;
             $isOpen = ($circleConfig & 1) > 0; // CFG_OPEN = bit 1
 
+
             $this->logger->info('[MemberService] requestJoinTeam: circle config check', [
                 'teamId' => $teamId, 'config' => $circleConfig, 'isOpen' => $isOpen,
                 'app'    => Application::APP_ID,
             ]);
 
             if ($isOpen) {
+                // Open circle: auto-approve by flipping status straight to Member.
+                // Do NOT send a notification — no admin action is required.
                 $approveQb = $db->getQueryBuilder();
                 $approveQb->update('circles_member')
                     ->set('status', $approveQb->createNamedParameter('Member'))
@@ -669,13 +677,19 @@ class MemberService {
                     ->andWhere($approveQb->expr()->eq('user_id',   $approveQb->createNamedParameter($uid)))
                     ->andWhere($approveQb->expr()->eq('status',    $approveQb->createNamedParameter('Requesting')))
                     ->executeStatement();
-                $this->logger->info('[MemberService] requestJoinTeam: open circle — auto-approved membership', [
+                $this->logger->info('[MemberService] requestJoinTeam: open circle — auto-approved, no notification sent', [
+                    'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+            } else {
+                // Closed circle: notify admins that approval is needed.
+                $this->sendJoinRequestNotification($teamId, $uid, $db);
+                $this->logger->info('[MemberService] requestJoinTeam: closed circle — notification sent to admins', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
             }
         } catch (\Throwable $e) {
             // Non-fatal — user is Requesting and an admin can approve manually
-            $this->logger->warning('[MemberService] requestJoinTeam: auto-approve check failed', [
+            $this->logger->warning('[MemberService] requestJoinTeam: open/closed check failed, skipping notification', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }

@@ -87,7 +87,8 @@
             <TeamView
                 v-else
                 :key="currentTeamId"
-                @show-manage-team="showView('manage')" />
+                @show-manage-team="showView('manage')"
+                @team-left="onTeamLeft" />
         </NcAppContent>
     </NcContent>
 </template>
@@ -188,6 +189,13 @@ export default {
             this.$store.commit('SET_CURRENT_TEAM', null)
             await this.$store.dispatch('fetchTeams')
             this.activeView = 'default'
+        },
+
+        async onTeamLeft() {
+            console.log('[TeamHub][App] onTeamLeft: clearing team and refreshing list')
+            this.$store.commit('SET_CURRENT_TEAM', null)
+            await this.$store.dispatch('fetchTeams')
+            this.activeView = null
         },
     },
 }

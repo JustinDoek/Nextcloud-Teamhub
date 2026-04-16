@@ -16,7 +16,7 @@
                 class="browse-teams-search">
                 <Magnify :size="20" />
             </NcTextField>
-            
+
             <div class="browse-teams-view-toggle">
                 <NcButton
                     :type="viewMode === 'grid' ? 'primary' : 'tertiary'"
@@ -46,14 +46,17 @@
 
         <div v-else :class="['browse-teams-list', `browse-teams-list--${viewMode}`]">
             <div v-for="team in filteredTeams" :key="team.id" class="team-card">
+                <!-- Header: icon + info side by side -->
                 <div class="team-card__header">
-                    <!-- Team logo when set, fallback to default icon -->
-                    <img
-                        v-if="team.image_url"
-                        :src="team.image_url"
-                        :alt="team.name"
-                        class="team-card__icon team-card__icon--image" />
-                    <AccountGroup v-else :size="48" class="team-card__icon" />
+                    <!-- Fixed-size icon container keeps card heights consistent -->
+                    <div class="team-card__icon-wrap">
+                        <img
+                            v-if="team.image_url"
+                            :src="team.image_url"
+                            :alt="team.name"
+                            class="team-card__icon team-card__icon--image" />
+                        <AccountGroup v-else :size="48" class="team-card__icon" />
+                    </div>
                     <div class="team-card__info">
                         <h3 class="team-card__name">{{ team.name }}</h3>
                         <p v-if="team.description" class="team-card__description">
@@ -65,22 +68,43 @@
                     </div>
                 </div>
 
+                <!-- Actions always pinned to card bottom -->
                 <div class="team-card__actions">
+                    <!-- Member: show Leave button -->
                     <NcButton
                         v-if="team.isMember"
-                        type="primary"
-                        disabled>
+                        type="error"
+                        :disabled="actionInProgress[team.id]"
+                        @click="leaveTeam(team)">
                         <template #icon>
-                            <Check :size="20" />
+                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
+                            <ExitToApp v-else :size="20" />
                         </template>
-                        {{ t('teamhub', 'Member') }}
+                        {{ t('teamhub', 'Leave') }}
                     </NcButton>
+
+                    <!-- Non-member open circle: Join immediately -->
+                    <NcButton
+                        v-else-if="!team.requiresApproval"
+                        type="primary"
+                        :disabled="actionInProgress[team.id]"
+                        @click="joinTeam(team)">
+                        <template #icon>
+                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
+                            <Plus v-else :size="20" />
+                        </template>
+                        {{ t('teamhub', 'Join') }}
+                    </NcButton>
+
+                    <!-- Non-member closed circle: Request access -->
                     <NcButton
                         v-else
-                        type="primary"
-                        @click="requestJoin(team)">
+                        type="secondary"
+                        :disabled="actionInProgress[team.id]"
+                        @click="requestAccess(team)">
                         <template #icon>
-                            <Plus :size="20" />
+                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
+                            <AccountQuestion v-else :size="20" />
                         </template>
                         {{ t('teamhub', 'Request Access') }}
                     </NcButton>
@@ -96,12 +120,13 @@ import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { NcButton, NcLoadingIcon, NcTextField } from '@nextcloud/vue'
-import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
-import Plus from 'vue-material-design-icons/Plus.vue'
-import Check from 'vue-material-design-icons/Check.vue'
-import Magnify from 'vue-material-design-icons/Magnify.vue'
-import ViewGrid from 'vue-material-design-icons/ViewGrid.vue'
-import ViewList from 'vue-material-design-icons/ViewList.vue'
+import AccountGroup    from 'vue-material-design-icons/AccountGroup.vue'
+import AccountQuestion from 'vue-material-design-icons/AccountQuestion.vue'
+import ExitToApp       from 'vue-material-design-icons/ExitToApp.vue'
+import Plus            from 'vue-material-design-icons/Plus.vue'
+import Magnify         from 'vue-material-design-icons/Magnify.vue'
+import ViewGrid        from 'vue-material-design-icons/ViewGrid.vue'
+import ViewList        from 'vue-material-design-icons/ViewList.vue'
 
 export default {
     name: 'BrowseTeamsView',
@@ -110,8 +135,9 @@ export default {
         NcLoadingIcon,
         NcTextField,
         AccountGroup,
+        AccountQuestion,
+        ExitToApp,
         Plus,
-        Check,
         Magnify,
         ViewGrid,
         ViewList,
@@ -121,7 +147,9 @@ export default {
             loading: false,
             teams: [],
             searchQuery: '',
-            viewMode: 'grid', // 'grid' or 'list'
+            viewMode: 'grid',
+            // Tracks which team ID has a pending action to prevent double-clicks.
+            actionInProgress: {},
         }
     },
     computed: {
@@ -142,6 +170,7 @@ export default {
     },
     methods: {
         t,
+
         async loadTeams() {
             this.loading = true
             try {
@@ -153,18 +182,45 @@ export default {
                 this.loading = false
             }
         },
-        async requestJoin(team) {
+
+        async joinTeam(team) {
+            this.$set(this.actionInProgress, team.id, true)
             try {
-                await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/join`),
-                    {},
-                    
-                )
-                showSuccess(t('teamhub', 'Access requested for {team}', { team: team.name }))
-                team.isMember = true // Optimistic update
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/join`), {})
+                showSuccess(t('teamhub', 'You have joined {team}', { team: team.name }))
+                this.$set(team, 'isMember', true)
                 this.$emit('team-joined', team.id)
             } catch (error) {
+                showError(t('teamhub', 'Failed to join team'))
+            } finally {
+                this.$set(this.actionInProgress, team.id, false)
+            }
+        },
+
+        async requestAccess(team) {
+            this.$set(this.actionInProgress, team.id, true)
+            try {
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/join`), {})
+                showSuccess(t('teamhub', 'Access requested for {team}', { team: team.name }))
+                // Don't flip isMember — user is in Requesting state, not yet approved
+            } catch (error) {
                 showError(t('teamhub', 'Failed to request access'))
+            } finally {
+                this.$set(this.actionInProgress, team.id, false)
+            }
+        },
+
+        async leaveTeam(team) {
+            this.$set(this.actionInProgress, team.id, true)
+            try {
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/leave`), {})
+                showSuccess(t('teamhub', 'You have left {team}', { team: team.name }))
+                this.$set(team, 'isMember', false)
+                this.$emit('team-left', team.id)
+            } catch (error) {
+                showError(t('teamhub', 'Failed to leave team'))
+            } finally {
+                this.$set(this.actionInProgress, team.id, false)
             }
         },
     },
@@ -235,11 +291,14 @@ export default {
     gap: 20px;
 }
 
+/* Card: flex column so actions are always at the bottom */
 .team-card {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
     border-radius: 8px;
     padding: 24px;
+    display: flex;
+    flex-direction: column;
     transition: box-shadow 0.2s ease;
 }
 
@@ -250,17 +309,32 @@ export default {
 .team-card__header {
     display: flex;
     gap: 16px;
+    /* Grow to fill available space, pushing actions to the bottom */
+    flex: 1;
     margin-bottom: 20px;
 }
 
-.team-card__icon {
+/*
+ * Fixed-size container for the icon (image or MDI).
+ * 64px × 64px keeps both variants the same footprint so the card body
+ * height is consistent whether a team has a photo or not.
+ */
+.team-card__icon-wrap {
     flex-shrink: 0;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.team-card__icon {
     color: var(--color-primary);
 }
 
 .team-card__icon--image {
-    width: 100px;
-    height: 100px;
+    width: 64px;
+    height: 64px;
     border-radius: var(--border-radius-large);
     object-fit: cover;
     border: 1px solid var(--color-border);
@@ -288,12 +362,14 @@ export default {
     font-style: italic;
 }
 
+/* Actions: right-aligned, never pushed around by header height */
 .team-card__actions {
     display: flex;
     justify-content: flex-end;
+    margin-top: 0; /* header margin-bottom already provides separation */
 }
 
-/* List view styles */
+/* ── List view ───────────────────────────────────────────────────── */
 .browse-teams-list--list {
     display: flex;
     flex-direction: column;
@@ -301,25 +377,14 @@ export default {
 }
 
 .browse-teams-list--list .team-card {
-    display: flex;
     flex-direction: row;
     align-items: center;
-    justify-content: space-between;
     padding: 16px 20px;
 }
 
 .browse-teams-list--list .team-card__header {
-    flex-direction: row;
-    gap: 16px;
     flex: 1;
-}
-
-.browse-teams-list--list .team-card__icon {
-    flex-shrink: 0;
-}
-
-.browse-teams-list--list .team-card__info {
-    flex: 1;
+    margin-bottom: 0;
 }
 
 .browse-teams-list--list .team-card__actions {

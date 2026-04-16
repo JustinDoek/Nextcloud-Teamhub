@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ActivityService;
+use OCA\TeamHub\Service\IntravoxService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\ResourceService;
@@ -27,6 +28,7 @@ class TeamController extends Controller {
         private ResourceService $resourceService,
         private ActivityService $activityService,
         private MessageService $messageService,
+        private IntravoxService $intravoxService,
         private IGroupManager $groupManager,
         private LoggerInterface $logger,
     ) {
@@ -266,6 +268,70 @@ class TeamController extends Controller {
             'spreed' => 'talk',
             default  => $appId,
         };
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getIntravoxSubPages(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $team   = $this->teamService->getTeam($teamId);
+            $pages  = $this->intravoxService->getSubPages($teamId, $team['name'] ?? '');
+            return new JSONResponse($pages);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function createIntravoxPage(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+            $team   = $this->teamService->getTeam($teamId);
+            $result = $this->intravoxService->createPage($teamId, $team['name'] ?? '');
+            $this->intravoxService->invalidateSubPagesCache($teamId);
+            if (isset($result['error'])) {
+                return new JSONResponse(['error' => $result['error']], Http::STATUS_BAD_REQUEST);
+            }
+            return new JSONResponse(['success' => true, 'result' => $result]);
+        } catch (\Exception $e) {
+            $this->logger->error('[TeamController] createIntravoxPage failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function deleteIntravoxPage(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+            $team   = $this->teamService->getTeam($teamId);
+            $result = $this->intravoxService->deletePage($teamId, $team['name'] ?? '');
+            $this->intravoxService->invalidateSubPagesCache($teamId);
+            return new JSONResponse(['success' => true, 'result' => $result]);
+        } catch (\Exception $e) {
+            $this->logger->error('[TeamController] deleteIntravoxPage failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function invalidateIntravoxCache(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $this->intravoxService->invalidateSubPagesCache($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
     }
 
     #[NoAdminRequired]
@@ -522,6 +588,41 @@ class TeamController extends Controller {
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        }
+    }
+
+    // NC admin required — no #[NoAdminRequired] attribute intentionally omitted
+    #[NoCSRFRequired]
+    public function intravoxDiagnostic(): JSONResponse {
+        // Admin-only diagnostic: uses PHP Reflection to list all public methods
+        // on IntraVox's PageService so we know exactly what to call.
+        if (!\OC::$server->get(\OCP\IGroupManager::class)->isAdmin(\OC::$server->get(\OCP\IUserSession::class)->getUser()?->getUID() ?? '')) {
+            return new JSONResponse(['error' => 'Admin required'], Http::STATUS_FORBIDDEN);
+        }
+        try {
+            $info = ['installed' => $this->intravoxService->isInstalled()];
+            if (!$info['installed']) {
+                return new JSONResponse($info);
+            }
+            $pageService = \OC::$server->get(\OCA\IntraVox\Service\PageService::class);
+            $ref = new \ReflectionClass($pageService);
+            $methods = [];
+            foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $m) {
+                if ($m->getDeclaringClass()->getName() === $ref->getName()) {
+                    $params = [];
+                    foreach ($m->getParameters() as $p) {
+                        $type = $p->getType() ? $p->getType()->getName() : 'mixed';
+                        $params[] = $type . ' $' . $p->getName();
+                    }
+                    $methods[] = $m->getName() . '(' . implode(', ', $params) . ')';
+                }
+            }
+            $info['methods'] = $methods;
+            $info['class'] = $ref->getName();
+            $info['file'] = $ref->getFileName();
+            return new JSONResponse($info);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()]);
         }
     }
 

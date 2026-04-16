@@ -74,6 +74,10 @@
                                 <template #icon><AccountPlus :size="20" /></template>
                                 {{ t('teamhub', 'Invite user') }}
                             </NcActionButton>
+                            <NcActionButton @click="onLeaveTeamClick">
+                                <template #icon><LocationExit :size="20" /></template>
+                                {{ t('teamhub', 'Leave team') }}
+                            </NcActionButton>
                         </NcActions>
                         <button
                             class="teamhub-widget-collapse-btn"
@@ -260,7 +264,7 @@
 
             <!-- Pages / Intravox widget -->
             <grid-item
-                v-if="intravoxAvailable && getGridItem('widget-pages')"
+                v-if="resources.intravox && getGridItem('widget-pages')"
                 v-bind="getGridItem('widget-pages')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
@@ -394,6 +398,7 @@ import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import AlertCircle from 'vue-material-design-icons/AlertCircle.vue'
 import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
+import LocationExit from 'vue-material-design-icons/LocationExit.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
 import Minus from 'vue-material-design-icons/Minus.vue'
 import FilePlus from 'vue-material-design-icons/FilePlus.vue'
@@ -417,7 +422,7 @@ export default {
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus,
         Cog, VideoIcon, Puzzle, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
-        ChevronUp, ChevronDown, Delete, AlertCircle, ArrowRight,
+        ChevronUp, ChevronDown, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
@@ -474,6 +479,10 @@ export default {
 
         onLayoutUpdated(newLayout) {
             this.$emit('layout-updated', newLayout)
+        },
+
+        onLeaveTeamClick() {
+            this.$emit('leave-team')
         },
 
         getGridItem(id) {
@@ -561,9 +570,9 @@ export default {
             return (iconName && ICONS[iconName]) ? ICONS[iconName] : Puzzle
         },
 
-        /** Expose intravoxWidget ref so parent can call refresh() */
+        /** Expose intravoxWidget ref so parent can call refresh() and await it */
         refreshIntravox() {
-            this.$refs.intravoxWidget?.refresh()
+            return this.$refs.intravoxWidget?.refresh() || Promise.resolve()
         },
     },
 }

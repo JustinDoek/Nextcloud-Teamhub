@@ -158,6 +158,21 @@
             class="teamhub-admin-panel">
 
             <NcSettingsSection
+                :name="t('teamhub', 'IntraVox integration')"
+                :description="t('teamhub', 'When IntraVox is enabled for a team, TeamHub creates a page at this path inside IntraVox. Use the format language/folder (e.g. en/teamhub or nl/teamhub). The folder must already exist in IntraVox.')">
+                <div class="admin-select-row">
+                    <NcTextField
+                        v-model="form.intravoxParentPath"
+                        :label="t('teamhub', 'IntraVox parent path')"
+                        :placeholder="t('teamhub', 'e.g. en/teamhub')"
+                        style="max-width: 300px;" />
+                </div>
+                <p class="admin-section-hint">
+                    {{ t('teamhub', 'Team pages will be created at: IntraVox / {path} / team-name', { path: form.intravoxParentPath || 'en/teamhub' }) }}
+                </p>
+            </NcSettingsSection>
+
+            <NcSettingsSection
                 :name="t('teamhub', 'Registered integrations')"
                 :description="t('teamhub', 'Integrations registered by installed apps via the TeamHub API. Registration and deregistration require NC admin access and are done via the REST API or the app\'s own settings.')">
 
@@ -432,6 +447,7 @@ export default {
             form: {
                 wizardDescription: '',
                 pinMinLevel: 'moderator',
+                intravoxParentPath: 'en/teamhub',
             },
             // Invite type toggles
             inviteGroup: true,
@@ -516,8 +532,9 @@ export default {
         async load() {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/settings'))
-                this.form.wizardDescription = data.wizardDescription || ''
-                this.form.pinMinLevel       = data.pinMinLevel        || 'moderator'
+                this.form.wizardDescription  = data.wizardDescription  || ''
+                this.form.pinMinLevel        = data.pinMinLevel         || 'moderator'
+                this.form.intravoxParentPath = data.intravoxParentPath  || 'en/teamhub'
 
                 const types = (data.inviteTypes || 'user,group').split(',').map(s => s.trim())
                 this.inviteGroup     = types.includes('group')
@@ -625,8 +642,9 @@ export default {
             const groupIds = JSON.stringify(this.selectedGroups.map(g => g.id))
 
             const params = new URLSearchParams()
-            params.set('wizardDescription', this.form.wizardDescription)
-            params.set('createTeamGroup',   groupIds)
+            params.set('wizardDescription',  this.form.wizardDescription)
+            params.set('intravoxParentPath', this.form.intravoxParentPath)
+            params.set('createTeamGroup',    groupIds)
             params.set('pinMinLevel',        this.form.pinMinLevel)
             params.set('inviteTypes',        types.join(','))
 

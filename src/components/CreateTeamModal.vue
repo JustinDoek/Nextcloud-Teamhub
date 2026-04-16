@@ -136,13 +136,6 @@ import Briefcase from 'vue-material-design-icons/Briefcase.vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutline.vue'
 
-// IntraVox template uniqueIds per team type
-const INTRAVOX_TEMPLATES = {
-    project: 'template-project-nl',
-    collaboration: 'template-knowledge-base-nl',
-    department: 'template-department-nl',
-}
-
 export default {
     name: 'CreateTeamModal',
     components: {
@@ -284,37 +277,7 @@ export default {
         },
 
         async createIntravoxPage(team) {
-            const { data: pages } = await axios.get(generateUrl('/apps/intravox/api/pages'))
-            if (!Array.isArray(pages)) return
-
-            // Find or skip TeamHub root
-            const rootCandidates = pages.filter(p => p.title?.toLowerCase() === 'teamhub')
-            const root = rootCandidates.find(p => p.id === 'teamhub') || rootCandidates[0]
-            if (!root) return
-
-            const rootLang = root.language || 'nl'
-            const rootId = root.id || 'teamhub'
-            const templateId = INTRAVOX_TEMPLATES[this.form.teamType]
-
-            const payload = {
-                id: this.toSlug(team.name),
-                title: team.name,
-                language: rootLang,
-                parentPath: `${rootLang}/${rootId}`,
-            }
-
-            // Add template if it exists in IntraVox
-            if (templateId && pages.find(p => p.uniqueId === templateId)) {
-                payload.templateId = templateId
-            }
-
-            await axios.post(generateUrl('/apps/intravox/api/pages'), payload)
-        },
-
-        toSlug(text) {
-            return (text || '').toLowerCase()
-                .replace(/[^a-z0-9\s-]/g, '').trim()
-                .replace(/\s+/g, '-').replace(/-+/g, '-') || 'team'
+            await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/intravox/page`))
         },
     },
 }
