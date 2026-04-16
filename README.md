@@ -2,7 +2,7 @@
 
 TeamHub gives every Nextcloud Team a proper home. It wraps the existing Teams (Circles) infrastructure and provisions a shared workspace — messages, Talk chat, Files folder, Calendar, Deck board — all accessible from one place.
 
-![TeamHub screenshot](screenshots/teamhub-main.svg)
+![TeamHub screenshot](screenshots/teamhub-main.jpg)
 
 ## Features
 
@@ -74,7 +74,7 @@ The release zip contains pre-compiled JavaScript. You do not need npm.
 
 ```bash
 cd /path/to/nextcloud/apps
-git clone https://github.com/jdoek/teamhub.git teamhub
+git clone https://github.com/JustinDoek/Nextcloud-Teamhub/teamhub.git teamhub
 cd teamhub
 npm install
 npm run build
@@ -92,7 +92,7 @@ sudo -u www-data php occ maintenance:mode --off
 ## Development
 
 ```bash
-git clone https://github.com/jdoek/teamhub.git
+git clone https://github.com/JustinDoek/Nextcloud-Teamhub/teamhub.git
 cd teamhub
 npm install
 npm run dev       # development build with watch
