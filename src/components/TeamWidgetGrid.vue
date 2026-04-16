@@ -6,7 +6,24 @@
         <!-- Edit mode hint banner -->
         <div v-if="editMode" class="teamhub-edit-banner">
             <ViewDashboardEdit :size="16" />
-            {{ t('teamhub', 'Drag widgets to rearrange. Drag the bottom-right corner of the message stream to resize it.') }}
+            <span class="teamhub-edit-banner-text">{{ t('teamhub', 'Drag widgets to rearrange. Use the resize icon in the bottom-right corner of each widget to resize.') }}</span>
+            <!-- Default layout actions — only shown when current layout differs from user default -->
+            <div v-if="layoutDiffersFromDefault" class="teamhub-edit-banner-actions">
+                <button
+                    class="teamhub-layout-default-btn"
+                    :title="t('teamhub', 'Save as my default layout for all teams')"
+                    :aria-label="t('teamhub', 'Save as my default layout for all teams')"
+                    @click="$emit('set-as-default')">
+                    <ContentSaveAll :size="16" />
+                </button>
+                <button
+                    class="teamhub-layout-default-btn"
+                    :title="t('teamhub', 'Reset to my default layout')"
+                    :aria-label="t('teamhub', 'Reset to my default layout')"
+                    @click="$emit('reset-to-default')">
+                    <Restore :size="16" />
+                </button>
+            </div>
         </div>
 
         <grid-layout
@@ -403,6 +420,8 @@ import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue
 import Minus from 'vue-material-design-icons/Minus.vue'
 import FilePlus from 'vue-material-design-icons/FilePlus.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
+import ContentSaveAll from 'vue-material-design-icons/ContentSaveAll.vue'
+import Restore from 'vue-material-design-icons/Restore.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -424,6 +443,7 @@ export default {
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
         ChevronUp, ChevronDown, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
+        ContentSaveAll, Restore,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
     },
@@ -434,6 +454,9 @@ export default {
         editMode:      { type: Boolean, default: false },
         pagesData:     { type: Object,  default: () => ({ teamPage: null, subPages: [], teamhubRoot: null, allPages: [] }) },
         widgetDynamicActions: { type: Object, default: () => ({}) },
+        // True when the current team's layout differs from the user's personal default.
+        // Controls visibility of the "Set as default" / "Reset to default" buttons.
+        layoutDiffersFromDefault: { type: Boolean, default: false },
     },
 
     emits: [
@@ -441,6 +464,8 @@ export default {
         'schedule-meeting', 'add-event', 'add-task',
         'create-page', 'delete-page', 'pages-loaded', 'set-view',
         'widget-actions-loaded',
+        'set-as-default',    // user clicked "Save as my default layout"
+        'reset-to-default',  // user clicked "Reset to my default layout"
     ],
 
     computed: {
@@ -611,6 +636,41 @@ export default {
     color: var(--color-main-text);
 }
 
+.teamhub-edit-banner-text {
+    flex: 1;
+}
+
+.teamhub-edit-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.teamhub-layout-default-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    opacity: 0.85;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.teamhub-layout-default-btn:hover {
+    opacity: 1;
+    background: var(--color-background-hover);
+    border-color: var(--color-primary-element);
+    color: var(--color-primary-element);
+}
+
 .teamhub-grid-item { touch-action: none; }
 .teamhub-grid-item--editing { cursor: move; }
 
@@ -763,48 +823,46 @@ export default {
 
 :deep(.vue-resizable-handle) { display: none; }
 
+/* Resize handle — small corner icon, bottom-right of each widget card. */
 .teamhub-home-view--editing :deep(.vue-resizable-handle) {
     display: block;
-    width: 100%;
-    height: 22px;
-    bottom: 0;
-    right: 0;
-    left: 0;
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    bottom: 4px;
+    right: 4px;
+    left: auto;
     background-image: none;
     border: none;
-    border-radius: 0 0 var(--border-radius-large) var(--border-radius-large);
     background: transparent;
-    cursor: ns-resize;
-    transition: background 0.15s;
+    cursor: se-resize;
     z-index: 10;
+    border-radius: var(--border-radius);
+    transition: background 0.15s;
 }
 
 .teamhub-home-view--editing :deep(.vue-resizable-handle:hover) {
-    background: color-mix(in srgb, var(--color-primary-element) 8%, transparent);
+    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
 }
 
+/* The diagonal-arrows icon rendered as an inline SVG via ::after. */
 .teamhub-home-view--editing :deep(.vue-resizable-handle)::after {
     content: '';
     position: absolute;
-    left: 50%;
-    bottom: 3px;
-    transform: translateX(-50%);
-    width: 36px;
-    height: 14px;
-    background-color: var(--color-primary-element);
-    border-radius: var(--border-radius-pill);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='7 16 3 12 7 8'/%3E%3Cpolyline points='17 8 21 12 17 16'/%3E%3Cline x1='3' y1='12' x2='21' y2='12'/%3E%3C/svg%3E");
+    inset: 0;
+    /* Diagonal expand arrows — matches the two-arrow icon in the design spec. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23555' d='M5 3h4V1H3a2 2 0 0 0-2 2v6h2V5.4l5.3 5.3 1.4-1.4L4.4 4H5V3zm14 16h-.6l-5.3-5.3-1.4 1.4 5.3 5.3V19h2v-6h-2v4zM19 3h-.6l-5.3 5.3 1.4 1.4L19.6 4H21V3h-4V1h6v6h-2V3zM5 19v-4H3v6h6v-2H5.4l5.3-5.3-1.4-1.4L4 19.6V19H5z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 20px 10px;
-    opacity: 0.9;
-    transition: opacity 0.15s, transform 0.15s;
+    background-size: 16px 16px;
+    opacity: 0.55;
+    transition: opacity 0.15s;
     pointer-events: none;
 }
 
 .teamhub-home-view--editing :deep(.vue-resizable-handle:hover)::after {
     opacity: 1;
-    transform: translateX(-50%) scaleX(1.08);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230082c9' d='M5 3h4V1H3a2 2 0 0 0-2 2v6h2V5.4l5.3 5.3 1.4-1.4L4.4 4H5V3zm14 16h-.6l-5.3-5.3-1.4 1.4 5.3 5.3V19h2v-6h-2v4zM19 3h-.6l-5.3 5.3 1.4 1.4L19.6 4H21V3h-4V1h6v6h-2V3zM5 19v-4H3v6h6v-2H5.4l5.3-5.3-1.4-1.4L4 19.6V19H5z'/%3E%3C/svg%3E");
 }
 
 :deep(.vue-grid-placeholder) {

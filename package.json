@@ -1,6 +1,6 @@
 {
   "name": "teamhub",
-  "version": "3.3.15",
+  "version": "3.3.20",
   "description": "Team collaboration hub for Nextcloud",
   "scripts": {
     "dev": "webpack --config webpack.config.js --mode=development",

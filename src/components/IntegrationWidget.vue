@@ -41,13 +41,19 @@
                     :is="item.url ? 'a' : 'span'"
                     :href="item.url || undefined"
                     class="teamhub-int-widget__item-link">
-                    <component
-                        :is="resolveItemIcon(item.icon)"
-                        v-if="item.icon"
-                        :size="16"
-                        class="teamhub-int-widget__item-icon" />
-                    <span class="teamhub-int-widget__item-label">{{ item.label }}</span>
-                    <span v-if="item.value" class="teamhub-int-widget__item-value">{{ item.value }}</span>
+                    <!-- Icon badge -->
+                    <span class="teamhub-int-widget__item-icon-wrap">
+                        <component
+                            :is="resolveItemIcon(item.icon)"
+                            v-if="item.icon && resolveItemIcon(item.icon)"
+                            :size="18" />
+                        <PuzzleIcon v-else :size="18" />
+                    </span>
+                    <!-- Label + value stacked -->
+                    <span class="teamhub-int-widget__item-body">
+                        <span class="teamhub-int-widget__item-label">{{ item.label }}</span>
+                        <span v-if="item.value" class="teamhub-int-widget__item-value">{{ item.value }}</span>
+                    </span>
                 </component>
             </li>
         </ul>
@@ -422,34 +428,55 @@ export default {
 .teamhub-int-widget__item-link {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
+    gap: 12px;
+    padding: 10px 14px;
     text-decoration: none;
     color: var(--color-main-text);
-    font-size: 15px;
     transition: background 0.1s;
+    min-width: 0;
 }
 
 a.teamhub-int-widget__item-link:hover {
     background: var(--color-background-hover);
 }
 
-.teamhub-int-widget__item-icon {
+/* Icon badge — matches th-widget__badge in CalendarWidget / DeckWidget */
+.teamhub-int-widget__item-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    color: var(--color-text-maxcontrast);
+    width: 38px;
+    height: 38px;
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark, #f4f4f4);
+    border: 1px solid var(--color-border);
+    color: var(--color-primary-element);
+}
+
+.teamhub-int-widget__item-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
 
 .teamhub-int-widget__item-label {
-    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-main-text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .teamhub-int-widget__item-value {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--color-text-maxcontrast);
-    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Modal */

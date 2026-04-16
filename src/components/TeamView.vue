@@ -21,6 +21,7 @@
                 :edit-mode="editMode"
                 :pages-data="pagesData"
                 :widget-dynamic-actions="widgetDynamicActions"
+                :layout-differs-from-default="layoutDiffersFromDefault"
                 @layout-updated="onLayoutUpdated"
                 @manage-team="openManageTeam"
                 @copy-link="copyTeamLink"
@@ -33,7 +34,9 @@
                 @pages-loaded="onPagesLoaded"
                 @set-view="setView"
                 @widget-actions-loaded="onWidgetActionsLoaded"
-                @leave-team="onLeaveTeam" />
+                @leave-team="onLeaveTeam"
+                @set-as-default="setAsDefault"
+                @reset-to-default="resetToDefault" />
 
             <!-- Activity feed -->
             <ActivityFeedView v-if="currentView === 'activity'" />
@@ -188,6 +191,7 @@ export default {
     data() {
         return {
             gridLayout: [],
+            userDefaultLayout: [],      // user's personal default — returned by GET layout
             orderedTabs: [],
             editMode: false,
             layoutLoaded: false,
@@ -236,6 +240,44 @@ export default {
         externalMenuItems() {
             return (this.teamMenuItems || []).filter(item => !item.is_builtin)
         },
+
+        /**
+         * True when the current team's layout differs from the user's personal default.
+         * Compares sizes and column placement per widget — ignores y (determined by snap).
+         * Controls visibility of "Set as default" / "Reset to default" buttons.
+         */
+        layoutDiffersFromDefault() {
+            if (!this.userDefaultLayout || !this.userDefaultLayout.length || !this.gridLayout.length) {
+                return false
+            }
+
+            const normalize = layout => {
+                const map = {}
+                layout.forEach(item => {
+                    map[item.i] = {
+                        x: item.x,
+                        w: item.w,
+                        h: item.h,
+                        collapsed: !!item.collapsed,
+                    }
+                })
+                return map
+            }
+
+            const current = normalize(this.gridLayout)
+            const def     = normalize(this.userDefaultLayout)
+
+            for (const id of Object.keys(def)) {
+                const cur = current[id]
+                if (!cur) continue // widget inactive in this team — skip
+                const d = def[id]
+                if (cur.x !== d.x || cur.w !== d.w || cur.h !== d.h || cur.collapsed !== d.collapsed) {
+                    console.log('[TeamHub][TeamView] layoutDiffersFromDefault — mismatch on widget:', id, { cur, d })
+                    return true
+                }
+            }
+            return false
+        },
     },
 
     watch: {
@@ -250,6 +292,20 @@ export default {
         },
         webLinks() { this.syncLinkTabs() },
         externalMenuItems() { this.syncExtTabs() },
+
+        /**
+         * Re-apply snap when resources change (widget enabled/disabled).
+         * Skipped during edit mode to avoid disrupting drag interactions.
+         */
+        resources: {
+            deep: true,
+            handler() {
+                if (this.layoutLoaded && !this.editMode) {
+                    console.log('[TeamHub][TeamView] resources changed — re-applying snap')
+                    this.applySnap()
+                }
+            },
+        },
     },
 
     created() {
@@ -271,13 +327,21 @@ export default {
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
 
+        // ── Layout load / save ──────────────────────────────────────
+
         async loadLayout(teamId) {
+            console.log('[TeamHub][TeamView] loadLayout — fetching for team:', teamId)
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`))
-                this.gridLayout = Array.isArray(data.layout) ? data.layout : []
+                this.gridLayout        = Array.isArray(data.layout)      ? data.layout      : []
+                this.userDefaultLayout = Array.isArray(data.userDefault) ? data.userDefault : []
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
+                console.log('[TeamHub][TeamView] loadLayout — done, isDefault:', data.isDefault,
+                    'userDefault items:', this.userDefaultLayout.length)
+                this.applySnap()
             } catch (err) {
+                console.error('[TeamHub][TeamView] loadLayout — error:', err)
                 this.gridLayout = []
                 this.buildOrderedTabs([])
                 this.layoutLoaded = true
@@ -287,12 +351,16 @@ export default {
         async saveLayout() {
             if (!this.currentTeamId || !this.layoutLoaded) return
             const tabOrder = this.orderedTabs.map(t => t.key)
+            console.log('[TeamHub][TeamView] saveLayout — saving for team:', this.currentTeamId,
+                'items:', this.gridLayout.length)
             try {
                 await axios.put(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
                     { layout: this.gridLayout, tabOrder },
                 )
-            } catch (err) {}
+            } catch (err) {
+                console.error('[TeamHub][TeamView] saveLayout — error:', err)
+            }
         },
 
         onLayoutUpdated(newLayout) {
@@ -303,6 +371,137 @@ export default {
         onTabReorder() {
             if (this.layoutLoaded) this._debouncedSave()
         },
+
+        // ── Snap / reflow ───────────────────────────────────────────
+
+        /**
+         * Returns the Set of widget IDs that are currently active
+         * (i.e., their v-if condition in TeamWidgetGrid would be true).
+         */
+        getActiveWidgetIds() {
+            const active = new Set()
+            // Always-active widgets.
+            active.add('msgstream')
+            active.add('widget-teaminfo')
+            active.add('widget-members')
+            active.add('widget-activity')
+            // Resource-gated widgets.
+            if (this.resources && this.resources.calendar) active.add('widget-calendar')
+            if (this.resources && this.resources.deck)     active.add('widget-deck')
+            if (this.resources && this.resources.intravox) active.add('widget-pages')
+            // Dynamic integration widgets.
+            ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
+            console.log('[TeamHub][TeamView] getActiveWidgetIds —', [...active])
+            return active
+        },
+
+        /**
+         * Snap all widgets upward within their column to close gaps left by
+         * inactive (hidden) widgets.
+         *
+         * Strategy:
+         *  - Group widgets by their x position (each unique x = one column).
+         *  - Within each column, sort active widgets by their current y.
+         *  - Repack from y=0 with no gaps between active widgets.
+         *  - Park inactive widgets at y=9999 so they don't take up space.
+         *    (They are already hidden by v-if in TeamWidgetGrid.)
+         *
+         * This handles any layout — single column, two column, user-rearranged.
+         * Applied on load and when resources change; never during edit mode.
+         */
+        applySnap() {
+            if (!this.layoutLoaded || !this.gridLayout.length) return
+            console.log('[TeamHub][TeamView] applySnap — start, items:', this.gridLayout.length)
+
+            const activeIds = this.getActiveWidgetIds()
+            const PARK_Y = 9999
+
+            // Build a map of x → [items in that column].
+            const columns = {}
+            for (const item of this.gridLayout) {
+                const col = item.x
+                if (!columns[col]) columns[col] = []
+                columns[col].push(item)
+            }
+
+            const snapped = []
+            for (const col of Object.keys(columns)) {
+                const items = columns[col]
+
+                const active   = items.filter(item => activeIds.has(item.i))
+                const inactive = items.filter(item => !activeIds.has(item.i))
+
+                // Sort active by current y to preserve user-defined ordering.
+                active.sort((a, b) => a.y - b.y)
+
+                let nextY = 0
+                for (const item of active) {
+                    snapped.push({ ...item, y: nextY })
+                    // A collapsed widget occupies h=1 in the grid.
+                    nextY += item.collapsed ? 1 : item.h
+                }
+
+                // Park inactive items — v-if hides them but they must not occupy space.
+                for (const item of inactive) {
+                    snapped.push({ ...item, y: PARK_Y })
+                }
+            }
+
+            console.log('[TeamHub][TeamView] applySnap — done, snapped items:', snapped.length)
+            this.gridLayout = snapped
+        },
+
+        // ── Default layout actions ──────────────────────────────────
+
+        /**
+         * Save the current layout as the user's personal default.
+         * Called from TeamWidgetGrid's "Set as default" button.
+         */
+        async setAsDefault() {
+            console.log('[TeamHub][TeamView] setAsDefault — saving user default layout')
+            try {
+                const tabOrder = this.orderedTabs.map(t => t.key)
+                await axios.put(
+                    generateUrl('/apps/teamhub/api/v1/layout/default'),
+                    { layout: this.gridLayout, tabOrder },
+                )
+                // Update local reference so layoutDiffersFromDefault recomputes to false.
+                this.userDefaultLayout = this.gridLayout.map(item => ({ ...item }))
+                showSuccess(t('teamhub', 'Default layout saved'))
+            } catch (err) {
+                console.error('[TeamHub][TeamView] setAsDefault — error:', err)
+                showError(t('teamhub', 'Failed to save default layout'))
+            }
+        },
+
+        /**
+         * Reset the current team's layout to the user's personal default.
+         * Applies snap, then immediately saves the team layout.
+         * Called from TeamWidgetGrid's "Reset to default" button.
+         */
+        async resetToDefault() {
+            if (!this.userDefaultLayout || !this.userDefaultLayout.length) return
+            console.log('[TeamHub][TeamView] resetToDefault — resetting to user default')
+
+            // Copy default into current layout, then snap for this team's active widgets.
+            this.gridLayout = this.userDefaultLayout.map(item => ({ ...item }))
+            this.applySnap()
+
+            // Immediately persist the reset so the debounce doesn't race.
+            try {
+                const tabOrder = this.orderedTabs.map(t => t.key)
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
+                    { layout: this.gridLayout, tabOrder },
+                )
+                console.log('[TeamHub][TeamView] resetToDefault — saved')
+            } catch (err) {
+                console.error('[TeamHub][TeamView] resetToDefault — save error:', err)
+                showError(t('teamhub', 'Failed to reset layout'))
+            }
+        },
+
+        // ── Tab management ──────────────────────────────────────────
 
         buildOrderedTabs(savedOrder) {
             const all = this.buildAllTabDescriptors()
@@ -347,11 +546,15 @@ export default {
             ]
         },
 
+        // ── URLs ────────────────────────────────────────────────────
+
         menuItemUrl(menuItem) {
             if (!menuItem.iframe_url) return ''
             const sep = menuItem.iframe_url.includes('?') ? '&' : '?'
             return menuItem.iframe_url + sep + 'teamId=' + encodeURIComponent(this.currentTeamId)
         },
+
+        // ── Widget / team actions ───────────────────────────────────
 
         onWidgetActionsLoaded({ registryId, actions }) {
             this.$set(this.widgetDynamicActions, registryId, actions || [])
@@ -370,13 +573,14 @@ export default {
                 showError(t('teamhub', 'Failed to leave team'))
             }
         },
+
         onPagesLoaded(data) {
-            // Vue 2: replacing the whole object breaks reactivity — set each key individually
             this.$set(this.pagesData, 'teamPage',    data.teamPage    || null)
             this.$set(this.pagesData, 'subPages',    data.subPages    || [])
             this.$set(this.pagesData, 'teamhubRoot', data.teamhubRoot || null)
             this.$set(this.pagesData, 'allPages',    data.allPages    || [])
         },
+
         openCreatePage() { this.newPageTitle = ''; this.showCreatePage = true },
         openDeletePage() { this.deletePageTarget = null; this.showDeletePage = true },
 
@@ -385,14 +589,10 @@ export default {
             if (!title) return
             this.creatingPage = true
             try {
-                // Build parentPath from admin config + team name slug.
-                // IntraVox's /api/pages does not return a 'path' field, so we construct
-                // it the same way IntravoxService does: parentPath/team-slug.
                 const intravoxParentPath = this.$store.state.intravoxParentPath || 'en/teamhub'
                 const teamName = this.currentTeam?.name || ''
                 const teamSlug = this.toSlug(teamName)
                 const teamPagePath = intravoxParentPath + '/' + teamSlug
-
 
                 if (!teamSlug || !teamName) {
                     showError(t('teamhub', 'Cannot create page: team name not available'))
@@ -400,8 +600,7 @@ export default {
                 }
 
                 const body = { id: this.toSlug(title), title, parentPath: teamPagePath }
-
-                const result = await axios.post(generateUrl('/apps/intravox/api/pages'), body)
+                await axios.post(generateUrl('/apps/intravox/api/pages'), body)
                 showSuccess(t('teamhub', 'Page "{title}" created', { title }))
                 this.showCreatePage = false
                 this.$refs.widgetGrid?.refreshIntravox()
@@ -418,9 +617,9 @@ export default {
             const page = this.deletePageTarget
             this.deletingPage = true
             try {
-                // IntraVox REST DELETE /api/pages/{id} expects the slug.
-                // Prefer injected page.id, fall back to slug from title, last resort uniqueId.
-                const deleteId = page.id || (page.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/, '') || page.uniqueId
+                const deleteId = page.id
+                    || (page.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/, '')
+                    || page.uniqueId
                 await axios.delete(generateUrl(`/apps/intravox/api/pages/${deleteId}`))
                 showSuccess(t('teamhub', 'Page "{title}" deleted', { title: page.title }))
                 this.showDeletePage = false
@@ -441,7 +640,9 @@ export default {
         copyTeamLink() {
             const url = window.location.origin + generateUrl(`/apps/teamhub?team=${this.currentTeamId}`)
             if (navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(url).then(() => showSuccess(t('teamhub', 'Team link copied to clipboard'))).catch(() => this.fallbackCopy(url))
+                navigator.clipboard.writeText(url)
+                    .then(() => showSuccess(t('teamhub', 'Team link copied to clipboard')))
+                    .catch(() => this.fallbackCopy(url))
             } else {
                 this.fallbackCopy(url)
             }
@@ -453,7 +654,12 @@ export default {
             ta.style.cssText = 'position:fixed;left:-999999px'
             document.body.appendChild(ta)
             ta.select()
-            try { document.execCommand('copy'); showSuccess(t('teamhub', 'Team link copied to clipboard')) } catch { showError(t('teamhub', 'Could not copy link')) }
+            try {
+                document.execCommand('copy')
+                showSuccess(t('teamhub', 'Team link copied to clipboard'))
+            } catch {
+                showError(t('teamhub', 'Could not copy link'))
+            }
             document.body.removeChild(ta)
         },
     },
@@ -506,12 +712,6 @@ export default {
 }
 
 .teamhub-page-delete-radio { display: none; }
-
-.teamhub-page-delete-hint {
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
-    margin-left: 2px;
-}
 </style>
 
 <style>

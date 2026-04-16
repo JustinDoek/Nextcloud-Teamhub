@@ -121,8 +121,11 @@ return [
         // ----------------------------------------------------------------
         // Layout — per-user, per-team Home-view grid + tab order
         // ----------------------------------------------------------------
-        ['name' => 'layout#getLayout',  'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'GET'],
-        ['name' => 'layout#saveLayout', 'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'PUT'],
+        ['name' => 'layout#getLayout',         'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'GET'],
+        ['name' => 'layout#saveLayout',        'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'PUT'],
+        // User personal default layout — stored in oc_preferences, no team scope.
+        ['name' => 'layout#getDefaultLayout',  'url' => '/api/v1/layout/default',        'verb' => 'GET'],
+        ['name' => 'layout#saveDefaultLayout', 'url' => '/api/v1/layout/default',        'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
         // Integration API — external-app registration (NC admin required)
