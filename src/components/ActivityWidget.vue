@@ -172,49 +172,69 @@ export default {
          */
         formatSubject(item) {
             const s = item.subject || ''
-            // Extract filename from the file path if available
+            const u = item.user || ''
             const filename = item.file ? item.file.split('/').pop() : (item.object_id || '')
 
-            // Circles
+            // Circles — member events
             if (item.app === 'circles') {
-                if (s.includes('member_join') || s.includes('joined'))  return `${item.user} joined the team`
-                if (s.includes('member_left') || s.includes('left'))    return `${item.user} left the team`
-                if (s.includes('member_add'))                           return `${item.user} was added`
-                if (s.includes('member_remove'))                        return `${item.user} was removed`
-                return item.user ? `${item.user}: ${s}` : s
+                if (s === 'circle_member_joined' || s.includes('member_join') || s.includes('joined')) return `${u} joined the team`
+                if (s === 'circle_member_left'   || s.includes('member_left') || s.includes('left'))   return `${u} left the team`
+                if (s === 'circle_member_added'  || s.includes('member_add'))                          return `${u} was added to the team`
+                if (s === 'circle_member_removed'|| s.includes('member_remove'))                       return `${u} was removed from the team`
+                return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
             }
+
             // Files
             if (item.app === 'files' || item.app === 'files_sharing') {
-                if (s.includes('created'))  return `${item.user} uploaded ${filename}`
-                if (s.includes('changed'))  return `${item.user} edited ${filename}`
-                if (s.includes('deleted'))  return `${item.user} deleted ${filename}`
-                if (s.includes('restored')) return `${item.user} restored ${filename}`
-                if (s.includes('shared'))   return `${item.user} shared ${filename}`
-                return item.user ? `${item.user} · ${filename}` : filename
+                if (s.includes('created'))  return `${u} uploaded ${filename}`
+                if (s.includes('changed'))  return `${u} edited ${filename}`
+                if (s.includes('deleted'))  return `${u} deleted ${filename}`
+                if (s.includes('restored')) return `${u} restored ${filename}`
+                if (s.includes('shared'))   return `${u} shared ${filename}`
+                return u ? `${u} · ${filename}` : filename
             }
-            // Deck
+
+            // Deck — exact subject strings from oc_activity
             if (item.app === 'deck') {
-                if (s.includes('card_created'))  return `${item.user} created a card`
-                if (s.includes('card_updated'))  return `${item.user} updated a card`
-                if (s.includes('card_deleted'))  return `${item.user} deleted a card`
-                if (s.includes('card_assigned')) return `${item.user} was assigned a card`
-                if (s.includes('board'))         return `${item.user} updated the board`
-                return item.user ? `${item.user} · ${s}` : s
+                if (s === 'card_create')             return `${u} created a card`
+                if (s === 'card_update_title')       return `${u} renamed a card`
+                if (s === 'card_update_description') return `${u} updated a card description`
+                if (s === 'card_update_duedate')     return `${u} set a card due date`
+                if (s === 'card_update_archive')     return `${u} archived a card`
+                if (s === 'card_delete')             return `${u} deleted a card`
+                if (s === 'card_user_assign')        return `${u} assigned a card`
+                if (s === 'card_user_unassign')      return `${u} unassigned a card`
+                if (s === 'stack_create')            return `${u} created a list`
+                if (s === 'stack_update')            return `${u} renamed a list`
+                if (s === 'stack_delete')            return `${u} deleted a list`
+                if (s === 'board_create')            return `${u} created the board`
+                if (s === 'board_update')            return `${u} updated the board`
+                if (s === 'board_delete')            return `${u} deleted the board`
+                if (s === 'board_share')             return `${u} shared the board`
+                if (s === 'label_assign')            return `${u} added a label`
+                if (s === 'label_unassign')          return `${u} removed a label`
+                return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
             }
-            // Calendar
+
+            // Calendar / DAV — real subject strings from oc_activity
             if (item.app === 'calendar' || item.app === 'dav') {
-                if (s.includes('event_created')) return `${item.user} created an event`
-                if (s.includes('event_updated')) return `${item.user} updated an event`
-                if (s.includes('event_deleted')) return `${item.user} deleted an event`
-                return item.user ? `${item.user} · ${s}` : s
+                if (s.includes('add_event') || s.includes('created')) return `${u} created an event`
+                if (s.includes('update_event') || s.includes('updated')) return `${u} updated an event`
+                if (s.includes('delete_event') || s.includes('deleted')) return `${u} deleted an event`
+                if (s === 'calendar_add_self' || s.includes('calendar_add')) return `${u} added a calendar`
+                if (s === 'calendar_update_self' || s.includes('calendar_update')) return `${u} updated a calendar`
+                if (s === 'calendar_delete_self' || s.includes('calendar_delete')) return `${u} deleted a calendar`
+                return u ? `${u} · ${s.replace(/_self$|_by$/g, '').replace(/_/g, ' ')}` : s.replace(/_self$|_by$/g, '').replace(/_/g, ' ')
             }
+
             // Talk
             if (item.app === 'spreed') {
-                if (s.includes('call'))    return `${item.user} started a call`
-                if (s.includes('message')) return `${item.user} sent a message`
-                return item.user ? `${item.user} · ${s}` : s
+                if (s.includes('call'))    return `${u} started a call`
+                if (s.includes('message')) return `${u} sent a message`
+                return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
             }
-            return item.user ? `${item.user} · ${s}` : s
+
+            return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
         },
 
         formatRelativeTime(datetime) {

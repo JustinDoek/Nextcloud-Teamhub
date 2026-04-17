@@ -120,6 +120,40 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            case 'owner_assigned':
+                $params      = $notification->getSubjectParameters();
+                $adminName   = $params['adminName']  ?? ($params['adminUid'] ?? 'An administrator');
+                $teamName    = $params['teamName']   ?? 'a team';
+                $teamId      = $params['teamId']     ?? '';
+
+                $notification->setRichSubject(
+                    '{admin} assigned you as owner of {team}',
+                    [
+                        'admin' => [
+                            'type' => 'user',
+                            'id'   => $params['adminUid'] ?? $adminName,
+                            'name' => $adminName,
+                        ],
+                        'team' => [
+                            'type' => 'highlight',
+                            'id'   => $teamId,
+                            'name' => $teamName,
+                        ],
+                    ]
+                );
+                $notification->setParsedSubject(
+                    $adminName . ' assigned you as owner of ' . $teamName
+                );
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+                return $notification;
+
             default:
                 throw new UnknownNotificationException('Unknown subject');
         }

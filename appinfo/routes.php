@@ -15,6 +15,7 @@ return [
         ['name' => 'team#createTeam',             'url' => '/api/v1/teams',                                    'verb' => 'POST'],
         ['name' => 'team#updateTeam',             'url' => '/api/v1/teams/{teamId}',                          'verb' => 'PUT'],
         ['name' => 'team#deleteTeam',             'url' => '/api/v1/teams/{teamId}',                          'verb' => 'DELETE'],
+        ['name' => 'team#transferOwner',          'url' => '/api/v1/teams/{teamId}/transfer-owner',           'verb' => 'POST'],
 
         // Admin settings
         ['name' => 'team#getAdminSettings',       'url' => '/api/v1/admin/settings',                         'verb' => 'GET'],
@@ -93,12 +94,15 @@ return [
         // ----------------------------------------------------------------
         // Maintenance & telemetry (NC admin only)
         // ----------------------------------------------------------------
+        ['name' => 'maintenance#getAllTeams',        'url' => '/api/v1/admin/maintenance/teams',                                'verb' => 'GET'],
         ['name' => 'maintenance#getOrphanedTeams',  'url' => '/api/v1/admin/maintenance/orphaned-teams',                       'verb' => 'GET'],
         ['name' => 'maintenance#deleteOrphanedTeam','url' => '/api/v1/admin/maintenance/orphaned-teams/{teamId}',              'verb' => 'DELETE'],
         ['name' => 'maintenance#assignOwner',        'url' => '/api/v1/admin/maintenance/orphaned-teams/{teamId}/assign-owner','verb' => 'POST'],
         ['name' => 'maintenance#getTelemetry',       'url' => '/api/v1/admin/telemetry',                                       'verb' => 'GET'],
         ['name' => 'maintenance#saveTelemetry',      'url' => '/api/v1/admin/telemetry',                                       'verb' => 'PUT'],
         ['name' => 'maintenance#searchUsers',        'url' => '/api/v1/admin/users/search',                                    'verb' => 'GET'],
+        ['name' => 'maintenance#checkMembershipIntegrity', 'url' => '/api/v1/admin/maintenance/membership-check',              'verb' => 'GET'],
+        ['name' => 'maintenance#repairMembershipCache',    'url' => '/api/v1/admin/maintenance/membership-repair/{teamId}',    'verb' => 'POST'],
 
         // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver

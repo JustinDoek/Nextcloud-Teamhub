@@ -553,7 +553,8 @@ export default {
                 await this.$store.dispatch('fetchTeams')
                 this.$emit('team-left')
             } catch (error) {
-                showError(t('teamhub', 'Failed to leave team'))
+                const msg = error.response?.data?.error || ''
+                showError(msg || t('teamhub', 'Failed to leave team'))
             }
         },
 

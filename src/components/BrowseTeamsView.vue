@@ -218,7 +218,8 @@ export default {
                 this.$set(team, 'isMember', false)
                 this.$emit('team-left', team.id)
             } catch (error) {
-                showError(t('teamhub', 'Failed to leave team'))
+                const msg = error.response?.data?.error || ''
+                showError(msg || t('teamhub', 'Failed to leave team'))
             } finally {
                 this.$set(this.actionInProgress, team.id, false)
             }

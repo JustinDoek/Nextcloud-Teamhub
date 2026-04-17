@@ -74,15 +74,37 @@ class ActivityService {
             $conditions[] = ['object_type' => 'files', 'object_id' => $folderId];
         }
 
-        // Deck board — match the board itself by ID, plus any deck app event
-        // (card events use card ID as object_id, not board ID)
+        // Deck — two object_type values are used in oc_activity:
+        //   'deck_board' + boardId  → board-level events (board create/update, stack events)
+        //   'deck_card'  + cardId   → card-level events (card create/update/assign etc.)
+        // We match the board event directly, and look up all card IDs on the board
+        // so we can match card events too.
         if (!empty($resources['deck']['board_id'])) {
-            $boardId = (string)$resources['deck']['board_id'];
-            foreach (['deck_board', 'deck_card', 'deck'] as $objType) {
-                $conditions[] = ['object_type' => $objType, 'object_id' => $boardId];
+            $boardId = (int)$resources['deck']['board_id'];
+            // Board-level events
+            $conditions[] = ['object_type' => 'deck_board', 'object_id' => (string)$boardId];
+
+            // Card-level events: fetch all card IDs that belong to this board
+            try {
+                $cardQb  = $db->getQueryBuilder();
+                $cardRes = $cardQb->select('c.id')
+                    ->from('deck_cards', 'c')
+                    ->innerJoin('c', 'deck_stacks', 's', $cardQb->expr()->eq('c.stack_id', 's.id'))
+                    ->where($cardQb->expr()->eq('s.board_id', $cardQb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->executeQuery();
+                $cardIds = array_column($cardRes->fetchAll(), 'id');
+                $cardRes->closeCursor();
+
+                foreach ($cardIds as $cardId) {
+                    $conditions[] = ['object_type' => 'deck_card', 'object_id' => (string)$cardId];
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[ActivityService] deck card ID lookup failed', [
+                    'boardId' => $boardId,
+                    'error'   => $e->getMessage(),
+                    'app'     => Application::APP_ID,
+                ]);
             }
-            // Also include all deck app events — card IDs differ from board ID
-            $conditions[] = ['app_only' => 'deck'];
         }
 
         // Calendar
@@ -93,12 +115,12 @@ class ActivityService {
             }
         }
 
-        // Talk / Spreed — object_id is the room token
-        if (!empty($resources['talk']['token'])) {
-            $token = $resources['talk']['token'];
-            foreach (['call', 'chat', 'room'] as $objType) {
-                $conditions[] = ['object_type' => $objType, 'object_id' => $token];
-            }
+        // Talk / Spreed — object_type='room', object_id=numeric room ID (from talk_rooms.id)
+        // The token string is NOT stored in object_id — it is a bigint column with the room's
+        // primary key. Matching on room_id scopes activity precisely to the team's room.
+        if (!empty($resources['talk']['room_id'])) {
+            $roomId = (string)$resources['talk']['room_id'];
+            $conditions[] = ['object_type' => 'room', 'object_id' => $roomId];
         }
 
         // Build the query with OR clauses

@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ActivityService;
 use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
+use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\ResourceService;
@@ -32,6 +33,7 @@ class TeamController extends Controller {
         private MessageService $messageService,
         private IntravoxService $intravoxService,
         private FilesService $filesService,
+        private MaintenanceService $maintenanceService,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
         private LoggerInterface $logger,
@@ -690,6 +692,58 @@ class TeamController extends Controller {
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/transfer-owner
+     *
+     * Transfers ownership of the team to another user.
+     * Only the current owner (level 9) may call this endpoint.
+     * The target user must already be a member of the team — team owners
+     * cannot promote outsiders (that is the admin-only flow in MaintenanceController).
+     *
+     * Body: application/x-www-form-urlencoded  userId=uid
+     *
+     * Must be form-encoded (not JSON) so NC's dispatcher can inject $userId
+     * as a typed method argument. See AdminSettings.vue assignOwner for the
+     * same pattern.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function transferOwner(string $teamId, string $userId = ''): JSONResponse {
+        try {
+            $this->memberService->requireOwnerLevel($teamId);
+
+            $userId = trim($userId);
+            if ($userId === '') {
+                return new JSONResponse(['error' => 'userId is required'], Http::STATUS_BAD_REQUEST);
+            }
+            if (strlen($userId) > 64) {
+                return new JSONResponse(['error' => 'Invalid userId'], Http::STATUS_BAD_REQUEST);
+            }
+
+            // Verify the target is already a member of this team. Team owners can only
+            // transfer to existing members; promoting outsiders is an NC-admin action.
+            $db          = \OC::$server->get(\OCP\IDBConnection::class);
+            $targetLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $userId);
+            if ($targetLevel === 0) {
+                return new JSONResponse(
+                    ['error' => 'Target user is not a member of this team'],
+                    Http::STATUS_BAD_REQUEST
+                );
+            }
+
+            // enforceNcAdmin=false: the requireOwnerLevel() check above + the
+            // membership verification is the authorisation boundary for this path.
+            $this->maintenanceService->assignOwner($teamId, $userId, false);
+            return new JSONResponse(['success' => true]);
+        } catch (\Throwable $e) {
+            $msg = $e->getMessage();
+            $status = str_contains($msg, 'permissions') || str_contains($msg, 'member') || str_contains($msg, 'owner')
+                ? Http::STATUS_FORBIDDEN
+                : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $msg], $status);
         }
     }
 

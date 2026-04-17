@@ -338,6 +338,62 @@
 
         <!-- TAB: Danger Zone -->
         <div v-else-if="activeTab === 'danger'" class="manage-tab-content">
+
+            <!-- Set Owner section — only visible to current owner -->
+            <div v-if="currentUserIsOwner" class="manage-section">
+                <h3>{{ t('teamhub', 'Transfer ownership') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Assign a new owner from the current team members. The new owner will receive full ownership rights. You will be demoted to admin.') }}
+                </p>
+
+                <!-- Member search -->
+                <div class="manage-owner-search">
+                    <input
+                        v-model="ownerSearch"
+                        type="text"
+                        class="manage-owner-input"
+                        :placeholder="t('teamhub', 'Search team members…')"
+                        autocomplete="off"
+                        @input="onOwnerSearchInput" />
+
+                    <!-- Suggestions dropdown -->
+                    <ul v-if="ownerSuggestions.length" class="manage-owner-suggestions">
+                        <li
+                            v-for="u in ownerSuggestions"
+                            :key="u.id"
+                            class="manage-owner-suggestion"
+                            @mousedown.prevent="selectOwnerSuggestion(u)">
+                            <NcAvatar :user="u.id" :display-name="u.displayName" :size="24" :show-user-status="false" :disable-menu="true" />
+                            <span class="manage-owner-suggestion__name">{{ u.displayName }}</span>
+                            <span class="manage-owner-suggestion__uid">{{ u.id }}</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Selected user + confirm button -->
+                <div v-if="selectedOwner" class="manage-owner-selected">
+                    <NcAvatar :user="selectedOwner.id" :display-name="selectedOwner.displayName" :size="28" :show-user-status="false" :disable-menu="true" />
+                    <span class="manage-owner-selected__name">{{ selectedOwner.displayName }}</span>
+                    <NcButton
+                        type="warning"
+                        :disabled="transferringOwner"
+                        @click="confirmTransferOwner">
+                        <template #icon>
+                            <NcLoadingIcon v-if="transferringOwner" :size="20" />
+                            <AccountArrowRight v-else :size="20" />
+                        </template>
+                        {{ t('teamhub', 'Set as owner') }}
+                    </NcButton>
+                    <NcButton
+                        type="tertiary"
+                        :aria-label="t('teamhub', 'Clear selection')"
+                        @click="clearOwnerSelection">
+                        <template #icon><Close :size="20" /></template>
+                    </NcButton>
+                </div>
+            </div>
+
+            <!-- Danger Zone: Delete -->
             <div class="manage-section manage-section--danger">
                 <h3>{{ t('teamhub', 'Danger Zone') }}</h3>
                 <div class="manage-danger-row">
@@ -357,6 +413,33 @@
                     </NcButton>
                 </div>
             </div>
+
+            <!-- Transfer ownership confirmation dialog -->
+            <NcDialog
+                v-if="pendingOwnerTransfer"
+                :name="t('teamhub', 'Transfer ownership?')"
+                :open="true"
+                @update:open="pendingOwnerTransfer = null">
+                <template #default>
+                    <p style="margin: 0 0 12px;">
+                        {{ t('teamhub', 'Are you sure you want to make {name} the new owner of this team? You will be demoted to admin.', { name: pendingOwnerTransfer.displayName }) }}
+                    </p>
+                    <p style="margin: 0; font-weight: 600; color: var(--color-warning);">
+                        {{ t('teamhub', 'This action cannot be easily undone.') }}
+                    </p>
+                </template>
+                <template #actions>
+                    <NcButton type="tertiary" @click="pendingOwnerTransfer = null">
+                        {{ t('teamhub', 'Cancel') }}
+                    </NcButton>
+                    <NcButton type="warning" @click="executeTransferOwner">
+                        <template #icon>
+                            <AccountArrowRight :size="20" />
+                        </template>
+                        {{ t('teamhub', 'Yes, transfer ownership') }}
+                    </NcButton>
+                </template>
+            </NcDialog>
         </div>
 
         <!-- Hard-delete confirmation dialog -->
@@ -420,6 +503,7 @@ import AlertIcon from 'vue-material-design-icons/Alert.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
 import UploadIcon from 'vue-material-design-icons/Upload.vue'
+import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -435,7 +519,7 @@ export default {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
-        ImageIcon, TrashCanOutline, UploadIcon,
+        ImageIcon, TrashCanOutline, UploadIcon, AccountArrowRight,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
     },
     props: {
@@ -476,6 +560,13 @@ export default {
             imageUploading: false,
             imageRemoving: false,
             imagePreviewUrl: this.team.image_url || null,
+            // Owner transfer
+            ownerSearch: '',
+            ownerSuggestions: [],
+            ownerSearchTimer: null,
+            selectedOwner: null,
+            transferringOwner: false,
+            pendingOwnerTransfer: null,
         }
     },
     computed: {
@@ -487,7 +578,7 @@ export default {
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
                 { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
-                { key: 'danger',       label: t('teamhub', 'Danger Zone'),  icon: 'AlertIcon' },
+                { key: 'danger',       label: t('teamhub', 'Maintenance'),  icon: 'AlertIcon' },
             ]
         },
 
@@ -754,6 +845,79 @@ export default {
                 await this.loadPendingRequests()
             } catch (e) {
                 showError(t('teamhub', 'Failed to reject request'))
+            }
+        },
+
+        // ------------------------------------------------------------------
+        // Owner transfer
+        // ------------------------------------------------------------------
+
+        onOwnerSearchInput() {
+            clearTimeout(this.ownerSearchTimer)
+            this.selectedOwner = null
+            const q = this.ownerSearch.trim().toLowerCase()
+            if (q.length < 1) {
+                this.ownerSuggestions = []
+                return
+            }
+            // Team owners can only transfer ownership to an existing member.
+            // Filter the already-loaded members list locally — exclude the
+            // current user (no point in "transferring" to self).
+            const matches = this.members
+                .filter(m => m.userId && m.userId !== this.currentUserId)
+                .filter(m => {
+                    const name = (m.displayName || '').toLowerCase()
+                    const uid  = (m.userId || '').toLowerCase()
+                    return name.includes(q) || uid.includes(q)
+                })
+                .slice(0, 10)
+                .map(m => ({
+                    id:          m.userId,
+                    displayName: m.displayName || m.userId,
+                }))
+            this.ownerSuggestions = matches
+        },
+
+        selectOwnerSuggestion(user) {
+            this.selectedOwner   = user
+            this.ownerSearch     = user.displayName
+            this.ownerSuggestions = []
+        },
+
+        clearOwnerSelection() {
+            this.selectedOwner    = null
+            this.ownerSearch      = ''
+            this.ownerSuggestions = []
+        },
+
+        confirmTransferOwner() {
+            if (!this.selectedOwner) return
+            this.pendingOwnerTransfer = this.selectedOwner
+        },
+
+        async executeTransferOwner() {
+            const target = this.pendingOwnerTransfer
+            this.pendingOwnerTransfer = null
+            if (!target) return
+
+            this.transferringOwner = true
+            try {
+                const params = new URLSearchParams()
+                params.set('userId', target.id)
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/transfer-owner`),
+                    params.toString(),
+                    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+                )
+                showSuccess(t('teamhub', '{name} is now the team owner', { name: target.displayName }))
+                this.clearOwnerSelection()
+                // Reload members so level badges update
+                await this.loadMembers()
+            } catch (e) {
+                const msg = e.response?.data?.error || ''
+                showError(t('teamhub', 'Failed to transfer ownership') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.transferringOwner = false
             }
         },
 
@@ -1453,5 +1617,87 @@ export default {
 
 .team-image-hidden-input {
     display: none;
+}
+
+/* ── Owner transfer ─────────────────────────────────────────────── */
+.manage-owner-search {
+    position: relative;
+    max-width: 400px;
+    margin-bottom: 12px;
+}
+
+.manage-owner-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.manage-owner-input:focus {
+    outline: none;
+    border-color: var(--color-primary-element);
+    box-shadow: 0 0 0 2px var(--color-primary-element-light);
+}
+
+.manage-owner-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.manage-owner-suggestion {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.manage-owner-suggestion:hover {
+    background: var(--color-background-hover);
+}
+
+.manage-owner-suggestion__name {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
+}
+
+.manage-owner-suggestion__uid {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+}
+
+.manage-owner-selected {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    max-width: 500px;
+}
+
+.manage-owner-selected__name {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
 }
 </style>

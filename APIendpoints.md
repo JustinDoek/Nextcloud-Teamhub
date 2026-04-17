@@ -47,6 +47,12 @@ Update team description and/or config bitmask.
 Delete a team. Does **not** delete provisioned resources (Talk room, Files folder, etc.).
 **Auth:** Team owner.
 
+### POST `/teams/{teamId}/transfer-owner`
+Transfer team ownership to an existing team member. The caller is demoted to admin.
+**Auth:** Team owner. Target must already be a member of the team (non-members require the NC admin path).
+**Body:** `application/x-www-form-urlencoded` — `userId=<uid>`
+**Response:** `{ success: true }`
+
 ### GET `/teams/{teamId}/members`
 List all members of a team.
 **Auth:** Team member.
@@ -461,3 +467,75 @@ See `developers.md` for the full integration guide. Key points:
 - `getWidgetData()` is called in-process via NC's DI container — no HTTP involved at any layer.
 - `iframe_url` accepts relative NC paths (`/apps/...`) or absolute `https://` URLs. TeamHub appends `?teamId=<uuid>` when loading the iframe.
 - `php_class` and `iframe_url` are mutually exclusive within a single registration call.
+
+---
+
+## Maintenance (NC admin only)
+
+### GET `/admin/maintenance/teams`
+Paginated list of all real user-created teams on this NC instance.
+**Auth:** NC admin.
+**Query params:**
+- `search` (string, default `''`) — substring filter on team display name
+- `page` (int, default `1`) — 1-based page number
+- `per_page` (int: 10|20|50|100, default `20`) — rows per page
+- `orphans_only` (int: 0|1, default `0`) — when 1, only return teams with no owner
+**Response:**
+```json
+{
+  "total": 42,
+  "page": 1,
+  "per_page": 20,
+  "teams": [
+    {
+      "id": "unique_id",
+      "name": "Team display name",
+      "description": "...",
+      "member_count": 5,
+      "owner": "uid or null",
+      "owner_display_name": "Display Name or null",
+      "creation": "2026-01-20 14:30:00"
+    }
+  ]
+}
+```
+
+### GET `/admin/maintenance/orphaned-teams`
+Legacy endpoint — returns teams with no owner. Kept for backward compat.
+**Auth:** NC admin.
+
+### DELETE `/admin/maintenance/orphaned-teams/{teamId}`
+Delete any team (not just orphaned ones). Deletes all resources (Talk, Files, Calendar, Deck, IntraVox), all TeamHub DB rows, then destroys the Circles circle. Falls back to raw DB delete if CircleService::destroy() fails.
+**Auth:** NC admin.
+
+### POST `/admin/maintenance/orphaned-teams/{teamId}/assign-owner`
+Assign a new owner to any team. Works for existing members and non-members. Demotes current owner to moderator first. Sends a Nextcloud notification to the new owner.
+**Auth:** NC admin.
+**Body:** `userId=<uid>` (form-encoded)
+**Response:** `{ success: true }`
+
+### GET `/admin/users/search`
+Search NC users for the owner picker.
+**Auth:** NC admin.
+**Query:** `?q=searchterm`
+**Response:** `[ { uid, displayName } ]`
+
+### GET `/admin/maintenance/membership-check`
+Scan all user-created teams and compare `circles_member` active member count against `circles_membership` cache row count. Returns a list of mismatched teams — these teams will be invisible to share pickers (Files, Calendar, Deck).
+**Auth:** NC admin.
+**Response:** `{ total_teams, healthy, mismatched, issues: [ { id, name, member_count, membership_count } ] }`
+
+### POST `/admin/maintenance/membership-repair/{teamId}`
+Rebuild the `circles_membership` cache for a single team. Equivalent to `occ circles:memberships --force <teamId>`. Should be called after `membership-check` identifies a mismatch.
+**Auth:** NC admin.
+**Response:** `{ success: true }`
+
+### GET `/admin/telemetry`
+Current telemetry settings and payload preview.
+**Auth:** NC admin.
+**Response:** `{ enabled: bool, report_url: string, preview: object }`
+
+### PUT `/admin/telemetry`
+Enable or disable daily usage reporting.
+**Auth:** NC admin.
+**Body:** `enabled=1|0` (form-encoded)

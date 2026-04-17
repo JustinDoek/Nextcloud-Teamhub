@@ -34,7 +34,44 @@ class MaintenanceController extends Controller {
     }
 
     // -------------------------------------------------------------------------
-    // Maintenance — orphaned teams
+    // Maintenance — all teams grid
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/v1/admin/maintenance/teams
+     * Returns a paginated list of all real user-created teams.
+     *
+     * Query params:
+     *   search      string  Substring filter on team name (default: '')
+     *   page        int     1-based page (default: 1)
+     *   per_page    int     Rows per page: 10|20|50|100 (default: 20)
+     *   orphans_only int    1 = only teams with no owner (default: 0)
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function getAllTeams(
+        string $search = '',
+        int    $page = 1,
+        int    $per_page = 20,
+        int    $orphans_only = 0,
+    ): JSONResponse {
+
+        // Validate inputs
+        $search      = trim(substr($search, 0, 200));
+        $page        = max(1, $page);
+        $per_page    = in_array($per_page, [10, 20, 50, 100], true) ? $per_page : 20;
+        $orphansOnly = $orphans_only === 1;
+
+        try {
+            $result = $this->maintenanceService->getAllTeams($search, $page, $per_page, $orphansOnly);
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Maintenance — orphaned teams (legacy)
     // -------------------------------------------------------------------------
 
     /**
@@ -138,5 +175,39 @@ class MaintenanceController extends Controller {
             ];
         }
         return new JSONResponse($users);
+    }
+
+    // -------------------------------------------------------------------------
+    // Membership integrity check and repair
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/v1/admin/maintenance/membership-check
+     * Scans every team and returns any whose circles_membership cache row count
+     * does not match the circles_member source-of-truth count.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function checkMembershipIntegrity(): JSONResponse {
+        try {
+            $result = $this->maintenanceService->checkMembershipIntegrity();
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/membership-repair/{teamId}
+     * Rebuilds the circles_membership cache for a single team.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function repairMembershipCache(string $teamId): JSONResponse {
+        try {
+            $this->maintenanceService->repairMembershipCache($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
     }
 }

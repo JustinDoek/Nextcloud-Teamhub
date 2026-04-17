@@ -248,6 +248,29 @@ class MemberService {
     }
 
     /**
+     * Asserts the current user is the team owner (level 9).
+     * Used for actions that only an owner may perform (e.g. transfer ownership).
+     *
+     * @throws \Exception if user is not authenticated, not a member, or not owner
+     */
+    public function requireOwnerLevel(string $teamId): void {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+
+        $db    = $this->container->get(\OCP\IDBConnection::class);
+        $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+
+        if ($level === 0) {
+            throw new \Exception('You are not a member of this team');
+        }
+        if ($level < 9) {
+            throw new \Exception('Insufficient permissions. Owner role required.');
+        }
+    }
+
+    /**
      * Asserts the current user has moderator (level >= 4), admin, or owner in the team.
      * Uses a direct indexed DB query — avoids the full Circles API member-list fetch.
      *

@@ -324,7 +324,7 @@
 
             <!-- Files — Favourites widget -->
             <grid-item
-                v-if="getGridItem('widget-files-favorites')"
+                v-if="resources.files && getGridItem('widget-files-favorites')"
                 v-bind="getGridItem('widget-files-favorites')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
@@ -352,7 +352,7 @@
 
             <!-- Files — Recent widget -->
             <grid-item
-                v-if="getGridItem('widget-files-recent')"
+                v-if="resources.files && getGridItem('widget-files-recent')"
                 v-bind="getGridItem('widget-files-recent')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">

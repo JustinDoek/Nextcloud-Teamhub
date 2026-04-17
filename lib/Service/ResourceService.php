@@ -100,8 +100,9 @@ class ResourceService {
                             ->executeQuery();
                         if ($roomRow = $roomResult->fetch()) {
                             $resources['talk'] = [
-                                'token' => $roomRow['token'],
-                                'name'  => $roomRow['name'],
+                                'room_id' => $roomId,
+                                'token'   => $roomRow['token'],
+                                'name'    => $roomRow['name'],
                             ];
                         }
                         $roomResult->closeCursor();

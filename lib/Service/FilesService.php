@@ -215,6 +215,24 @@ class FilesService {
 
     public function createSharedFolder(string $teamId, string $teamName, string $uid): array {
 
+        $user = $this->container->get(\OCP\IUserManager::class)->get($uid);
+        if (!$user) {
+            throw new \Exception('User not found: ' . $uid);
+        }
+
+        // Bootstrap the Circles session context so the share provider can resolve
+        // the circle. Without this, IShare::TYPE_CIRCLE shares throw "Circle not found"
+        // even when the circle exists — the FederatedUserService session is not
+        // initialised by default in non-Circles request contexts.
+        try {
+            $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $federatedUserService->setLocalCurrentUser($user);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[FilesService] createSharedFolder — Circles session bootstrap failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
         $userFolder = $this->container->get(\OCP\Files\IRootFolder::class)->getUserFolder($uid);
         $folderName = $teamName;
         $counter    = 1;
@@ -223,15 +241,34 @@ class FilesService {
         }
         $folder = $userFolder->newFolder($folderName);
 
-        $shareManager = $this->container->get(\OCP\Share\IManager::class);
-        $share = $shareManager->newShare();
-        $share->setShareType(7) // IShare::TYPE_CIRCLE
-              ->setSharedWith($teamId)
-              ->setSharedBy($uid)
-              ->setNode($folder)
-              ->setPermissions(\OCP\Constants::PERMISSION_ALL);
-        $share = $shareManager->createShare($share);
-
+        try {
+            $shareManager = $this->container->get(\OCP\Share\IManager::class);
+            $share = $shareManager->newShare();
+            $share->setShareType(\OCP\Share\IShare::TYPE_CIRCLE)
+                  ->setSharedWith($teamId)
+                  ->setSharedBy($uid)
+                  ->setNode($folder)
+                  ->setPermissions(\OCP\Constants::PERMISSION_ALL);
+            $share = $shareManager->createShare($share);
+        } catch (\Throwable $e) {
+            // Share failed — delete the folder we just created to avoid orphans,
+            // then re-throw so the caller can surface the real error.
+            $this->logger->error('[FilesService] createSharedFolder — share failed, deleting folder', [
+                'teamId'     => $teamId,
+                'folderName' => $folderName,
+                'error'      => $e->getMessage(),
+                'app'        => Application::APP_ID,
+            ]);
+            try {
+                $folder->delete();
+            } catch (\Throwable $deleteEx) {
+                $this->logger->warning('[FilesService] createSharedFolder — orphan folder delete also failed', [
+                    'error' => $deleteEx->getMessage(),
+                    'app'   => Application::APP_ID,
+                ]);
+            }
+            throw $e;
+        }
 
         return ['folder_id' => $folder->getId(), 'path' => $folder->getPath(), 'share_id' => $share->getId()];
     }

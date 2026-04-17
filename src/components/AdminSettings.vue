@@ -278,90 +278,284 @@
             role="tabpanel"
             class="teamhub-admin-panel">
 
-            <NcSettingsSection
-                :name="t('teamhub', 'Orphaned teams')"
-                :description="t('teamhub', 'Teams that have no owner, usually because the owner account was deleted. You can delete these teams or assign a new owner.')">
+            <!-- Title + description outside NcSettingsSection so the grid below is full-width -->
+            <div class="maint-header">
+                <h2 class="maint-header__title">{{ t('teamhub', 'All teams') }}</h2>
+                <p class="maint-header__desc">
+                    {{ t('teamhub', 'All user-created teams on this Nextcloud instance. You can assign a new owner or delete any team.') }}
+                </p>
+            </div>
 
-                <div v-if="orphanedLoading" class="admin-loading">
-                    <NcLoadingIcon :size="24" />
+            <!-- ── Toolbar ─────────────────────────────────────────────── -->
+            <div class="maint-toolbar">
+                <NcTextField
+                    v-model="teamsSearch"
+                    :label="t('teamhub', 'Search teams')"
+                    :placeholder="t('teamhub', 'Search by name…')"
+                    class="maint-search"
+                    @input="onTeamsSearchInput" />
+
+                <NcCheckboxRadioSwitch
+                    :checked="teamsOrphansOnly"
+                    type="switch"
+                    class="maint-orphan-toggle"
+                    @update:checked="onOrphansToggle">
+                    {{ t('teamhub', 'Show only teams without an owner') }}
+                </NcCheckboxRadioSwitch>
+
+                <div class="maint-perpage">
+                    <label for="maint-perpage-select" class="maint-perpage-label">
+                        {{ t('teamhub', 'Per page:') }}
+                    </label>
+                    <select
+                        id="maint-perpage-select"
+                        v-model="teamsPerPage"
+                        class="admin-select"
+                        @change="reloadTeams">
+                        <option :value="10">10</option>
+                        <option :value="20">20</option>
+                        <option :value="50">50</option>
+                        <option :value="100">100</option>
+                    </select>
                 </div>
-                <div v-else-if="orphanedError" class="admin-error">
-                    {{ orphanedError }}
-                </div>
-                <div v-else-if="orphanedTeams.length === 0" class="admin-empty">
-                    {{ t('teamhub', 'No orphaned teams found.') }}
-                </div>
-                <div v-else class="admin-orphan-list">
+            </div>
+
+            <!-- ── Loading / error / empty states ─────────────────────── -->
+            <div v-if="teamsLoading" class="admin-loading">
+                <NcLoadingIcon :size="24" />
+                <span>{{ t('teamhub', 'Loading teams…') }}</span>
+            </div>
+            <div v-else-if="teamsError" class="admin-error">
+                {{ teamsError }}
+            </div>
+            <div v-else-if="teamsTotal === 0" class="admin-empty">
+                {{ teamsOrphansOnly
+                    ? t('teamhub', 'No teams without an owner found.')
+                    : t('teamhub', 'No teams found.') }}
+            </div>
+
+            <!-- ── Grid ────────────────────────────────────────────────── -->
+            <template v-else>
+                <div class="maint-grid" role="table" :aria-label="t('teamhub', 'Teams')">
+
+                    <!-- header row -->
+                    <div class="maint-grid__head" role="row">
+                        <div class="maint-grid__cell maint-grid__cell--name" role="columnheader">{{ t('teamhub', 'Team name') }}</div>
+                        <div class="maint-grid__cell maint-grid__cell--desc" role="columnheader">{{ t('teamhub', 'Description') }}</div>
+                        <div class="maint-grid__cell maint-grid__cell--members" role="columnheader">{{ t('teamhub', 'Members') }}</div>
+                        <div class="maint-grid__cell maint-grid__cell--owner" role="columnheader">{{ t('teamhub', 'Owner') }}</div>
+                        <div class="maint-grid__cell maint-grid__cell--created" role="columnheader">{{ t('teamhub', 'Created') }}</div>
+                        <div class="maint-grid__cell maint-grid__cell--actions" role="columnheader">{{ t('teamhub', 'Actions') }}</div>
+                    </div>
+
+                    <!-- data rows -->
                     <div
-                        v-for="team in orphanedTeams"
+                        v-for="team in teamsPage"
                         :key="team.id"
-                        class="admin-orphan-row">
-                        <div class="admin-orphan-info">
-                            <span class="admin-orphan-name">{{ team.name || team.raw_name }}</span>
-                            <span class="admin-orphan-meta">
-                                {{ t('teamhub', '{n} members', { n: team.member_count }) }}
-                                <template v-if="team.description"> · {{ team.description }}</template>
-                            </span>
-                            <span class="admin-orphan-meta admin-orphan-meta--id">
-                                <code class="admin-orphan-id">{{ team.id }}</code>
-                            </span>
+                        class="maint-grid__row"
+                        role="row">
+
+                        <!-- Name -->
+                        <div class="maint-grid__cell maint-grid__cell--name" role="cell">
+                            <span class="maint-team-name">{{ team.name }}</span>
                         </div>
 
-                        <!-- Owner assignment inline form -->
-                        <div v-if="assignTeamId === team.id" class="admin-assign-owner">
-                            <NcTextField
-                                v-model="ownerQuery"
-                                :label="t('teamhub', 'Search user')"
-                                :placeholder="t('teamhub', 'Type a username or display name…')"
-                                @input="onOwnerSearch" />
-                            <ul v-if="ownerResults.length" class="admin-owner-results">
-                                <li
-                                    v-for="u in ownerResults"
-                                    :key="u.uid"
-                                    class="admin-owner-result"
-                                    @mousedown.prevent="confirmAssignOwner(team, u)">
-                                    {{ u.displayName }} <span class="admin-owner-result__uid">({{ u.uid }})</span>
-                                </li>
-                            </ul>
-                            <p v-else-if="ownerSearching" class="admin-section-hint">
-                                <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
-                            </p>
-                            <NcButton type="tertiary" @click="cancelAssign">
-                                {{ t('teamhub', 'Cancel') }}
-                            </NcButton>
+                        <!-- Description -->
+                        <div class="maint-grid__cell maint-grid__cell--desc" role="cell">
+                            <span class="maint-team-desc">{{ team.description || '—' }}</span>
                         </div>
 
-                        <div v-else class="admin-orphan-actions">
-                            <NcButton
-                                type="secondary"
-                                :disabled="assigningOwner"
-                                @click="startAssignOwner(team)">
-                                <template #icon><AccountEditIcon :size="18" /></template>
-                                {{ t('teamhub', 'Assign owner') }}
-                            </NcButton>
-                            <NcButton
-                                type="error"
-                                :disabled="deletingTeam === team.id"
-                                @click="confirmDeleteOrphan(team)">
-                                <template #icon>
-                                    <NcLoadingIcon v-if="deletingTeam === team.id" :size="18" />
-                                    <DeleteIcon v-else :size="18" />
-                                </template>
-                                {{ t('teamhub', 'Delete') }}
-                            </NcButton>
+                        <!-- Members -->
+                        <div class="maint-grid__cell maint-grid__cell--members" role="cell">
+                            {{ team.member_count }}
+                        </div>
+
+                        <!-- Owner -->
+                        <div class="maint-grid__cell maint-grid__cell--owner" role="cell">
+                            <span v-if="team.owner" class="maint-owner-name">
+                                {{ team.owner_display_name || team.owner }}
+                                <span class="maint-owner-uid">({{ team.owner }})</span>
+                            </span>
+                            <span v-else class="maint-no-owner">{{ t('teamhub', 'No owner') }}</span>
+                        </div>
+
+                        <!-- Created -->
+                        <div class="maint-grid__cell maint-grid__cell--created" role="cell">
+                            <span :title="team.creation">{{ formatDate(team.creation) }}</span>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="maint-grid__cell maint-grid__cell--actions" role="cell">
+
+                            <!-- Inline assign-owner form -->
+                            <div v-if="assignTeamId === team.id" class="maint-assign-form">
+                                <NcTextField
+                                    v-model="ownerQuery"
+                                    :label="t('teamhub', 'Search user')"
+                                    :placeholder="t('teamhub', 'Type a username…')"
+                                    @input="onOwnerSearch" />
+                                <ul v-if="ownerResults.length" class="admin-owner-results">
+                                    <li
+                                        v-for="u in ownerResults"
+                                        :key="u.uid"
+                                        class="admin-owner-result"
+                                        @mousedown.prevent="confirmAssignOwner(team, u)">
+                                        {{ u.displayName }}
+                                        <span class="admin-owner-result__uid">({{ u.uid }})</span>
+                                    </li>
+                                </ul>
+                                <p v-else-if="ownerSearching" class="admin-section-hint">
+                                    <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
+                                </p>
+                                <NcButton type="tertiary" @click="cancelAssign">
+                                    {{ t('teamhub', 'Cancel') }}
+                                </NcButton>
+                            </div>
+
+                            <!-- Icon-only action buttons -->
+                            <div v-else class="maint-row-actions">
+                                <NcButton
+                                    type="secondary"
+                                    :disabled="assigningOwner"
+                                    :aria-label="t('teamhub', 'Set owner for {name}', { name: team.name })"
+                                    :title="t('teamhub', 'Set owner')"
+                                    @click="startAssignOwner(team)">
+                                    <template #icon><AccountEditIcon :size="18" /></template>
+                                </NcButton>
+                                <NcButton
+                                    type="error"
+                                    :disabled="deletingTeam === team.id"
+                                    :aria-label="t('teamhub', 'Delete {name}', { name: team.name })"
+                                    :title="t('teamhub', 'Delete team')"
+                                    @click="confirmDeleteTeamRow(team)">
+                                    <template #icon>
+                                        <NcLoadingIcon v-if="deletingTeam === team.id" :size="18" />
+                                        <DeleteIcon v-else :size="18" />
+                                    </template>
+                                </NcButton>
+                            </div>
                         </div>
                     </div>
                 </div>
 
+                <!-- ── Pagination ──────────────────────────────────── -->
+                <div class="maint-pagination" role="navigation" :aria-label="t('teamhub', 'Pagination')">
+                    <NcButton
+                        type="tertiary"
+                        :disabled="teamsPage_current <= 1"
+                        @click="goToPage(1)">
+                        «
+                    </NcButton>
+                    <NcButton
+                        type="tertiary"
+                        :disabled="teamsPage_current <= 1"
+                        @click="goToPage(teamsPage_current - 1)">
+                        ‹
+                    </NcButton>
+
+                    <span class="maint-page-info">
+                        {{ t('teamhub', 'Page {page} of {total}', { page: teamsPage_current, total: teamsTotalPages }) }}
+                        · {{ t('teamhub', '{n} teams', { n: teamsTotal }) }}
+                    </span>
+
+                    <NcButton
+                        type="tertiary"
+                        :disabled="teamsPage_current >= teamsTotalPages"
+                        @click="goToPage(teamsPage_current + 1)">
+                        ›
+                    </NcButton>
+                    <NcButton
+                        type="tertiary"
+                        :disabled="teamsPage_current >= teamsTotalPages"
+                        @click="goToPage(teamsTotalPages)">
+                        »
+                    </NcButton>
+
+                    <NcButton
+                        type="tertiary"
+                        :disabled="teamsLoading"
+                        @click="reloadTeams">
+                        {{ t('teamhub', 'Refresh') }}
+                    </NcButton>
+                </div>
+            </template>
+
+            <!-- ── Membership integrity ─────────────────────────────────── -->
+            <div class="maint-divider"></div>
+            <div class="maint-header">
+                <h2 class="maint-header__title">{{ t('teamhub', 'Membership cache integrity') }}</h2>
+                <p class="maint-header__desc">
+                    {{ t('teamhub', 'Checks whether each team\'s member count in circles_member matches the denormalised circles_membership cache used by share pickers. A mismatch means the team will be unshareable from Files, Calendar, Deck, etc. — run Repair to rebuild the cache for that team.') }}
+                </p>
+            </div>
+
+            <div class="maint-integrity-actions">
                 <NcButton
-                    type="tertiary"
-                    class="admin-orphan-refresh"
-                    :disabled="orphanedLoading"
-                    @click="loadOrphanedTeams">
-                    <template #icon><NcLoadingIcon v-if="orphanedLoading" :size="18" /></template>
-                    {{ t('teamhub', 'Refresh') }}
+                    type="primary"
+                    :disabled="membershipCheckLoading"
+                    @click="runMembershipCheck">
+                    <template #icon>
+                        <NcLoadingIcon v-if="membershipCheckLoading" :size="18" />
+                        <WrenchIcon v-else :size="18" />
+                    </template>
+                    {{ membershipCheckLoading
+                        ? t('teamhub', 'Scanning…')
+                        : t('teamhub', 'Run integrity check') }}
                 </NcButton>
-            </NcSettingsSection>
+            </div>
+
+            <div v-if="membershipCheckError" class="admin-error">
+                {{ membershipCheckError }}
+            </div>
+
+            <div v-if="membershipCheck" class="maint-integrity-result">
+                <div class="maint-integrity-summary">
+                    <span class="maint-integrity-summary__item">
+                        {{ t('teamhub', 'Total teams scanned') }}: <strong>{{ membershipCheck.total_teams }}</strong>
+                    </span>
+                    <span class="maint-integrity-summary__item maint-integrity-summary__item--ok">
+                        {{ t('teamhub', 'Healthy') }}: <strong>{{ membershipCheck.healthy }}</strong>
+                    </span>
+                    <span
+                        class="maint-integrity-summary__item"
+                        :class="{ 'maint-integrity-summary__item--bad': membershipCheck.mismatched > 0 }">
+                        {{ t('teamhub', 'Mismatched') }}: <strong>{{ membershipCheck.mismatched }}</strong>
+                    </span>
+                </div>
+
+                <div v-if="membershipCheck.mismatched === 0" class="admin-empty">
+                    {{ t('teamhub', 'All team membership caches are consistent.') }}
+                </div>
+
+                <div v-else class="maint-integrity-list">
+                    <div
+                        v-for="issue in membershipCheck.issues"
+                        :key="issue.id"
+                        class="maint-integrity-row">
+                        <div class="maint-integrity-row__info">
+                            <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                            <span class="maint-integrity-row__detail">
+                                {{ t('teamhub', 'Members: {m}, Cache rows: {c}', {
+                                    m: issue.member_count,
+                                    c: issue.membership_count,
+                                }) }}
+                            </span>
+                        </div>
+                        <NcButton
+                            type="secondary"
+                            :disabled="!!membershipRepairing[issue.id]"
+                            @click="repairMembership(issue.id)">
+                            <template #icon>
+                                <NcLoadingIcon v-if="membershipRepairing[issue.id]" :size="18" />
+                                <WrenchIcon v-else :size="18" />
+                            </template>
+                            {{ membershipRepairing[issue.id]
+                                ? t('teamhub', 'Repairing…')
+                                : t('teamhub', 'Repair') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ── Save row — only for settings tabs, not statistics/maintenance ─ -->
@@ -467,10 +661,16 @@ export default {
             telemetry: { enabled: true, report_url: '', preview: {} },
             telemetryLoading: false,
             telemetrySaving: false,
-            // Maintenance tab
-            orphanedTeams: [],
-            orphanedLoading: false,
-            orphanedError: null,
+            // Maintenance — teams grid
+            teamsPage: [],
+            teamsTotal: 0,
+            teamsPage_current: 1,
+            teamsPerPage: 20,
+            teamsSearch: '',
+            teamsOrphansOnly: false,
+            teamsLoading: false,
+            teamsError: null,
+            teamsSearchTimer: null,
             deletingTeam: null,
             // Delete confirmation dialog
             confirmDeleteDialog: false,
@@ -482,6 +682,11 @@ export default {
             ownerSearching: false,
             ownerSearchTimer: null,
             assigningOwner: false,
+            // Membership integrity
+            membershipCheck: null,     // { total_teams, healthy, mismatched, issues }
+            membershipCheckLoading: false,
+            membershipCheckError: null,
+            membershipRepairing: {},   // { teamId: bool }
         }
     },
     computed: {
@@ -505,6 +710,10 @@ export default {
         externalIntegrations() {
             return this.integrations.filter(i => !i.is_builtin)
         },
+
+        teamsTotalPages() {
+            return Math.max(1, Math.ceil(this.teamsTotal / this.teamsPerPage))
+        },
     },
     watch: {
         activeTab(tab) {
@@ -514,8 +723,8 @@ export default {
             if (tab === 'statistics' && !this.telemetryLoading && !this.telemetry.preview.uuid) {
                 this.loadTelemetry()
             }
-            if (tab === 'maintenance' && !this.orphanedLoading && this.orphanedTeams.length === 0 && !this.orphanedError) {
-                this.loadOrphanedTeams()
+            if (tab === 'maintenance' && !this.teamsLoading && this.teamsPage.length === 0 && !this.teamsError) {
+                this.loadTeams()
             }
         },
     },
@@ -696,32 +905,90 @@ export default {
         },
 
         // ------------------------------------------------------------------
-        // Maintenance — orphaned teams
+        // Maintenance — teams grid
         // ------------------------------------------------------------------
 
-        async loadOrphanedTeams() {
-            this.orphanedLoading = true
-            this.orphanedError = null
+        /**
+         * Load a page of teams from the server.
+         * Called on: tab activate, page change, search, perPage change, orphan toggle, refresh.
+         */
+        async loadTeams() {
+            this.teamsLoading = true
+            this.teamsError = null
             try {
                 const { data } = await axios.get(
-                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/orphaned-teams')
+                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/teams'),
+                    {
+                        params: {
+                            page:         this.teamsPage_current,
+                            per_page:     this.teamsPerPage,
+                            search:       this.teamsSearch,
+                            orphans_only: this.teamsOrphansOnly ? 1 : 0,
+                        },
+                    }
                 )
-                this.orphanedTeams = Array.isArray(data) ? data : []
+                this.teamsPage  = Array.isArray(data.teams) ? data.teams : []
+                this.teamsTotal = typeof data.total === 'number' ? data.total : 0
             } catch (e) {
-                this.orphanedError = this.t('teamhub', 'Failed to load orphaned teams')
+                this.teamsError = this.t('teamhub', 'Failed to load teams')
             } finally {
-                this.orphanedLoading = false
+                this.teamsLoading = false
             }
         },
 
-        confirmDeleteOrphan(team) {
-            this.confirmDeleteTeam = team
+        /** Reload from page 1 — used after filter/perPage changes. */
+        reloadTeams() {
+            this.teamsPage_current = 1
+            this.loadTeams()
+        },
+
+        /** Debounced search input handler. */
+        onTeamsSearchInput() {
+            clearTimeout(this.teamsSearchTimer)
+            this.teamsSearchTimer = setTimeout(() => {
+                this.reloadTeams()
+            }, 300)
+        },
+
+        /** Orphans-only toggle handler. */
+        onOrphansToggle(val) {
+            this.teamsOrphansOnly = val
+            this.reloadTeams()
+        },
+
+        /** Navigate to a specific page. */
+        goToPage(page) {
+            const clamped = Math.max(1, Math.min(page, this.teamsTotalPages))
+            if (clamped === this.teamsPage_current) return
+            this.teamsPage_current = clamped
+            this.loadTeams()
+        },
+
+        /**
+         * Format a MySQL datetime string (e.g. "2024-03-15 14:22:00") as a
+         * localised short date. Returns '—' when value is null/empty.
+         */
+        formatDate(value) {
+            if (!value) return '—'
+            try {
+                const d = new Date(value.replace(' ', 'T'))
+                if (isNaN(d.getTime())) return value
+                return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            } catch (e) {
+                return value
+            }
+        },
+
+        // ── Delete team ───────────────────────────────────────────────────
+
+        confirmDeleteTeamRow(team) {
+            this.confirmDeleteTeam   = team
             this.confirmDeleteDialog = true
         },
 
         cancelDeleteOrphan() {
             this.confirmDeleteDialog = false
-            this.confirmDeleteTeam = null
+            this.confirmDeleteTeam   = null
         },
 
         async executeDeleteOrphan() {
@@ -732,9 +999,10 @@ export default {
                 await axios.delete(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/orphaned-teams/${team.id}`)
                 )
-                this.orphanedTeams = this.orphanedTeams.filter(t => t.id !== team.id)
                 this.cancelDeleteOrphan()
                 showSuccess(this.t('teamhub', 'Team deleted successfully'))
+                // Reload current page — it may now have fewer items
+                await this.loadTeams()
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
                 showError(this.t('teamhub', 'Failed to delete team') + (msg ? ': ' + msg : ''))
@@ -743,16 +1011,18 @@ export default {
             }
         },
 
+        // ── Assign owner ──────────────────────────────────────────────────
+
         startAssignOwner(team) {
-            this.assignTeamId  = team.id
-            this.ownerQuery    = ''
-            this.ownerResults  = []
+            this.assignTeamId = team.id
+            this.ownerQuery   = ''
+            this.ownerResults = []
         },
 
         cancelAssign() {
-            this.assignTeamId  = null
-            this.ownerQuery    = ''
-            this.ownerResults  = []
+            this.assignTeamId = null
+            this.ownerQuery   = ''
+            this.ownerResults = []
         },
 
         onOwnerSearch() {
@@ -778,7 +1048,7 @@ export default {
         },
 
         async confirmAssignOwner(team, user) {
-            this.ownerResults  = []
+            this.ownerResults   = []
             this.assigningOwner = true
             try {
                 const params = new URLSearchParams()
@@ -788,15 +1058,52 @@ export default {
                     params.toString(),
                     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
                 )
-                // Remove from orphaned list — team now has an owner
-                this.orphanedTeams = this.orphanedTeams.filter(t => t.id !== team.id)
                 this.cancelAssign()
                 showSuccess(this.t('teamhub', 'Owner assigned successfully'))
+                // Reload so the owner column reflects the change
+                await this.loadTeams()
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
                 showError(this.t('teamhub', 'Failed to assign owner') + (msg ? ': ' + msg : ''))
             } finally {
                 this.assigningOwner = false
+            }
+        },
+
+        // ------------------------------------------------------------------
+        // Membership integrity
+        // ------------------------------------------------------------------
+
+        async runMembershipCheck() {
+            this.membershipCheckLoading = true
+            this.membershipCheckError   = null
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/membership-check')
+                )
+                this.membershipCheck = data
+            } catch (e) {
+                this.membershipCheckError = e?.response?.data?.error || 'Check failed'
+                this.membershipCheck      = null
+            } finally {
+                this.membershipCheckLoading = false
+            }
+        },
+
+        async repairMembership(teamId) {
+            this.$set(this.membershipRepairing, teamId, true)
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/membership-repair/${teamId}`)
+                )
+                showSuccess(this.t('teamhub', 'Membership cache rebuilt'))
+                // Re-run the check so the repaired row disappears from the list
+                await this.runMembershipCheck()
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(this.t('teamhub', 'Repair failed') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.$set(this.membershipRepairing, teamId, false)
             }
         },
     },
@@ -1115,7 +1422,12 @@ export default {
 
 /* ── Maintenance tab ───────────────────────────────────────────── */
 .admin-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 12px 0;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
 }
 
 .admin-error {
@@ -1130,62 +1442,187 @@ export default {
     padding: 8px 0;
 }
 
-.admin-orphan-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-bottom: 12px;
+/* ── Maintenance panel padding ───────────────────────────────────── */
+#tab-panel-maintenance {
+    padding: 10px;
 }
 
-.admin-orphan-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    padding: 12px 14px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    background: var(--color-background-dark);
-    flex-wrap: wrap;
+/* ── Header (replaces NcSettingsSection title) ───────────────────── */
+.maint-header {
+    margin-bottom: 16px;
 }
 
-.admin-orphan-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
+.maint-header__title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    color: var(--color-main-text);
 }
 
-.admin-orphan-name {
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.admin-orphan-meta {
-    font-size: 12px;
+.maint-header__desc {
+    font-size: 13px;
     color: var(--color-text-maxcontrast);
+    margin: 0;
 }
 
-.admin-orphan-id {
-    font-family: monospace;
-    font-size: 11px;
-}
-
-.admin-orphan-actions {
+/* ── Toolbar ─────────────────────────────────────────────────────── */
+.maint-toolbar {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.maint-search {
+    flex: 1;
+    min-width: 200px;
+    max-width: 300px;
+}
+
+.maint-orphan-toggle {
+    flex-shrink: 0;
+}
+
+.maint-perpage {
+    display: flex;
+    align-items: center;
     gap: 8px;
     flex-shrink: 0;
+    margin-left: auto;
+}
+
+.maint-perpage-label {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    white-space: nowrap;
+}
+
+/* ── Grid ────────────────────────────────────────────────────────── */
+.maint-grid {
+    width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    overflow: hidden;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.maint-grid__head,
+.maint-grid__row {
+    display: grid;
+    grid-template-columns:
+        minmax(120px, 1.5fr)   /* name */
+        minmax(100px, 2fr)     /* description */
+        52px                   /* members — narrow, number only */
+        minmax(140px, 1.6fr)   /* owner */
+        100px                  /* created — fixed, date is short */
+        260px;                 /* actions — wide enough for assign form */
+    align-items: start;
+}
+
+.maint-grid__head {
+    background: var(--color-background-dark);
+    border-bottom: 2px solid var(--color-border);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-maxcontrast);
     align-items: center;
 }
 
-.admin-assign-owner {
-    flex: 1;
-    min-width: 240px;
+.maint-grid__row {
+    border-bottom: 1px solid var(--color-border);
+    transition: background 0.1s;
+    align-items: center;
+}
+
+/* When the assign form is open the row needs to stretch to fit it */
+.maint-grid__row:has(.maint-assign-form) {
+    align-items: start;
+}
+
+.maint-grid__row:last-child {
+    border-bottom: none;
+}
+
+.maint-grid__row:hover {
+    background: var(--color-background-hover);
+}
+
+/* All cells — header and data — share the same padding so columns align */
+.maint-grid__head .maint-grid__cell,
+.maint-grid__row .maint-grid__cell {
+    padding: 10px 12px;
+    overflow: hidden;
+}
+
+.maint-grid__cell--members {
+    text-align: center;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+
+.maint-grid__cell--actions {
+    padding: 6px 8px;
+}
+
+/* ── Cell content ────────────────────────────────────────────────── */
+.maint-team-name {
+    font-weight: 600;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.maint-team-desc {
+    color: var(--color-text-maxcontrast);
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.maint-owner-name {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow: hidden;
+}
+
+.maint-owner-uid {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.maint-no-owner {
+    color: var(--color-warning, #e9822c);
+    font-weight: 500;
+    font-size: 12px;
+}
+
+/* ── Row actions — icon-only buttons ─────────────────────────────── */
+.maint-row-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+/* ── Assign-owner inline form ────────────────────────────────────── */
+.maint-assign-form {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding: 4px 0;
 }
 
+/* ── Owner results dropdown ──────────────────────────────────────── */
 .admin-owner-results {
     list-style: none;
     margin: 0;
@@ -1195,6 +1632,8 @@ export default {
     background: var(--color-main-background);
     max-height: 180px;
     overflow-y: auto;
+    position: relative;
+    z-index: 10;
 }
 
 .admin-owner-result {
@@ -1218,14 +1657,105 @@ export default {
     margin-left: 4px;
 }
 
-.admin-orphan-refresh {
-    margin-top: 4px;
+/* ── Pagination ──────────────────────────────────────────────────── */
+.maint-pagination {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding: 4px 0 8px;
+}
+
+.maint-page-info {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    padding: 0 8px;
+    white-space: nowrap;
 }
 
 .admin-section-hint {
     font-size: 13px;
     color: var(--color-text-maxcontrast);
     margin: 4px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── Membership integrity ─────────────────────────────────────────── */
+.maint-divider {
+    height: 1px;
+    background: var(--color-border);
+    margin: 40px 0 24px;
+}
+
+.maint-integrity-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 0 16px;
+}
+
+.maint-integrity-result {
+    padding: 0 16px;
+}
+
+.maint-integrity-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 12px 16px;
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+.maint-integrity-summary__item--ok strong {
+    color: var(--color-success);
+}
+
+.maint-integrity-summary__item--bad strong {
+    color: var(--color-error);
+}
+
+.maint-integrity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.maint-integrity-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-warning);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+}
+
+.maint-integrity-row__info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.maint-integrity-row__name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-main-text);
+}
+
+.maint-integrity-row__detail {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    font-family: monospace;
 }
 </style>
 
