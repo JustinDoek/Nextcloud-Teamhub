@@ -22,17 +22,15 @@ jobs:
           node-version: '24.14.1'
 
       - name: Install dependencies and build JS
-        run: 4
+        run: |
           npm install
           npm run build
 
-      - name: Prepare app for release
+      - name: Create App Folder for Signer
+        # Dit verplaatst je code naar de juiste map voor de R0Wi tool
         run: |
-          # Verwijder development bestanden om de app schoon te houden
-          rm -rf node_modules
-          rm -rf .github
-          rm -rf .git
-          # (Optioneel) Voeg hier andere mappen toe die niet in de release horen
+          mkdir teamhub
+          find . -maxdepth 1 ! -name 'teamhub' ! -name '.' ! -name '..' -exec mv {} teamhub/ \;
 
       - name: Sign and Package App
         uses: R0Wi/nextcloud-appstore-push-action@v1.0.1
