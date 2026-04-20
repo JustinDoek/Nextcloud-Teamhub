@@ -1,6 +1,7 @@
 # Dependencies
 /vendor/
 /node_modules/
+/.github/ 
 
 # Source maps (not needed in releases)
 /js/*.js.map

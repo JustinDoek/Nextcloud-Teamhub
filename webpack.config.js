@@ -9,7 +9,8 @@ module.exports = {
     output: {
         path: path.join(__dirname, 'js'),
         filename: '[name].js',
-        chunkFilename: 'chunks/[name]-[hash].js',
+        // [hash] is deprecated in webpack 5 — use [chunkhash] for chunk-level cache busting.
+        chunkFilename: 'chunks/[name]-[chunkhash].js',
     },
     module: {
         rules: [
@@ -29,6 +30,14 @@ module.exports = {
         extensions: ['.js', '.vue'],
         alias: { vue$: 'vue/dist/vue.esm.js' },
         fallback: { path: false, string_decoder: false },
+    },
+    // Nextcloud apps bundle @nextcloud/vue + Vue runtime together, so their
+    // output legitimately exceeds webpack's default 244 KiB hint threshold.
+    // Raise the threshold to 6 MiB so the warning only fires if something
+    // genuinely unexpected inflates the bundle.
+    performance: {
+        maxAssetSize:      6 * 1024 * 1024,
+        maxEntrypointSize: 6 * 1024 * 1024,
     },
     mode: 'production',
     devtool: 'source-map',
