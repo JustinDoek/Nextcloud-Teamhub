@@ -189,8 +189,13 @@ class TeamService {
                     'members'     => $memberCounts[$id] ?? 0,
                     'unread'      => $unread,
                     'image_url'   => $this->teamImageService->getImageUrl($id),
+                    // Circles config bitmask — exposed so the frontend can render
+                    // human-readable "team type" labels (open/invite/public/etc).
+                    'config'      => (int)($row['config'] ?? 0),
                 ];
             }
+
+            error_log('[TeamHub][TeamService] getUserTeams returning ' . count($teams) . ' teams with config flags');
 
             return $teams;
 
@@ -221,7 +226,7 @@ class TeamService {
         }
 
         $qb  = $db->getQueryBuilder();
-        $res = $qb->select('c.unique_id', 'c.name', 'c.description')
+        $res = $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config')
             ->from('circles_circle', 'c')
             ->where($qb->expr()->eq('c.unique_id', $qb->createNamedParameter($teamId)))
             ->setMaxResults(1)
@@ -243,12 +248,17 @@ class TeamService {
         $memberCount = $countRow ? (int)$countRow['cnt'] : 0;
         $countRes->closeCursor();
 
+        error_log('[TeamHub][TeamService] getTeam(' . $teamId . ') config=' . (int)($row['config'] ?? 0));
+
         return [
             'id'          => $row['unique_id'],
             'name'        => $row['name'],
             'description' => $row['description'] ?? '',
             'members'     => $memberCount,
             'image_url'   => $this->teamImageService->getImageUrl($row['unique_id']),
+            // Circles config bitmask — exposed so the frontend can render
+            // human-readable "team type" labels (open/invite/public/etc).
+            'config'      => (int)($row['config'] ?? 0),
         ];
     }
 

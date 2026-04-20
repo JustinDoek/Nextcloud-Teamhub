@@ -1,4 +1,4 @@
-# TeamHub API Endpoints — v3.2.0
+# TeamHub API Endpoints — v3.6.2
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
 All endpoints require an authenticated Nextcloud session unless noted.
@@ -24,7 +24,8 @@ All team-scoped membership checks use a direct indexed DB query against `circles
 ### GET `/teams`
 List all teams the current user is a member of.
 **Auth:** Authenticated.
-**Response:** `[ { id, name, description, members, unread, image_url } ]`
+**Response:** `[ { id, name, description, members, unread, image_url, config } ]`
+`config` is the raw Circles bitmask integer (see GET `/teams/{teamId}/config` for bit definitions).
 
 ### POST `/teams`
 Create a new team.
@@ -34,8 +35,9 @@ Create a new team.
 
 ### GET `/teams/{teamId}`
 Get details for a single team.
-**Auth:** Authenticated (Circles API verifies membership via `getCircle()`).
-**Response:** `{ id, name, description, members, image_url }`
+**Auth:** Team member (enforced via direct DB query against `circles_member` — does not use Circles API session).
+**Response:** `{ id, name, description, members, image_url, config }`
+`config` is the raw Circles bitmask integer.
 
 ### PUT `/teams/{teamId}`
 Update team description and/or config bitmask.

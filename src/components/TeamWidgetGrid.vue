@@ -113,6 +113,16 @@
                                 class="teamhub-teaminfo-logo" />
                             <p class="teamhub-team-description">{{ team.description || t('teamhub', 'No description') }}</p>
                         </div>
+                        <div v-if="teamLabels.length" class="teamhub-team-labels" role="list" :aria-label="t('teamhub', 'Team type')">
+                            <span
+                                v-for="label in teamLabels"
+                                :key="label.key"
+                                :class="['teamhub-team-label', 'teamhub-team-label--' + label.tone]"
+                                :title="label.tooltip"
+                                role="listitem">
+                                {{ label.text }}
+                            </span>
+                        </div>
                         <div v-if="teamOwner" class="teamhub-team-owner">
                             <span class="teamhub-info-label">{{ t('teamhub', 'Owner') }}</span>
                             <div class="teamhub-owner-row">
@@ -539,6 +549,114 @@ export default {
 
         team() { return this.currentTeam || {} },
 
+        /**
+         * Human-readable labels derived from the Circles config bitmask (team.config).
+         *
+         * Mapping (matches CFG_* constants in ManageTeamView.vue and TeamService.php):
+         *   1    CFG_OPEN       — anyone can join
+         *   2    CFG_INVITE     — members can invite others
+         *   4    CFG_REQUEST    — join requests need moderator approval (only with OPEN)
+         *   16   CFG_PROTECTED  — password-protected file shares
+         *   512  CFG_VISIBLE    — discoverable (public listing)
+         *   1024 CFG_SINGLE     — prevents team-of-team nesting
+         *
+         * Strategy: conditional — we only surface a label when it tells the member
+         * something meaningful. `CFG_VISIBLE=0` (hidden) and `CFG_INVITE=0` (no
+         * member invitations) are the defaults and get no label. `CFG_OPEN` is
+         * shown in both states because "open to join" vs "invite-only" is a
+         * first-class "what kind of team is this" fact.
+         *
+         * tone → CSS class → colour:
+         *   success (green)  — welcoming / openness
+         *   primary (blue)   — informational / neutral-positive state
+         *   warning (amber)  — requires attention / friction
+         *   neutral (grey)   — default / restrictive / niche
+         */
+        teamLabels() {
+            const config = Number(this.team?.config || 0)
+            if (!this.currentTeamId) return []
+
+            const CFG_OPEN      = 1
+            const CFG_INVITE    = 2
+            const CFG_REQUEST   = 4
+            const CFG_PROTECTED = 16
+            const CFG_VISIBLE   = 512
+            const CFG_SINGLE    = 1024
+
+            const labels = []
+
+            // Join mode — always shown (either state is informative)
+            if (config & CFG_OPEN) {
+                labels.push({
+                    key: 'open',
+                    text: t('teamhub', 'Open to join'),
+                    tooltip: t('teamhub', 'Anyone can join this team without an invitation.'),
+                    tone: 'success',
+                })
+            } else {
+                labels.push({
+                    key: 'invite-only',
+                    text: t('teamhub', 'Invite-only'),
+                    tooltip: t('teamhub', 'Only invited users can become members of this team.'),
+                    tone: 'neutral',
+                })
+            }
+
+            // Approval required — only meaningful together with OPEN
+            if ((config & CFG_OPEN) && (config & CFG_REQUEST)) {
+                labels.push({
+                    key: 'request',
+                    text: t('teamhub', 'Approval required'),
+                    tooltip: t('teamhub', 'Join requests must be approved by a moderator before membership is granted.'),
+                    tone: 'warning',
+                })
+            }
+
+            // Member-driven invitations
+            if (config & CFG_INVITE) {
+                labels.push({
+                    key: 'invite',
+                    text: t('teamhub', 'Members can invite'),
+                    tooltip: t('teamhub', 'Any member can invite other users to join this team.'),
+                    tone: 'primary',
+                })
+            }
+
+            // Discoverability
+            if (config & CFG_VISIBLE) {
+                labels.push({
+                    key: 'visible',
+                    text: t('teamhub', 'Public'),
+                    tooltip: t('teamhub', 'This team is visible to everyone in the Browse Teams list.'),
+                    tone: 'primary',
+                })
+            }
+
+            // Password-protected shares
+            if (config & CFG_PROTECTED) {
+                labels.push({
+                    key: 'protected',
+                    text: t('teamhub', 'Password-protected'),
+                    tooltip: t('teamhub', 'Files shared with this team are protected by a password.'),
+                    tone: 'warning',
+                })
+            }
+
+            // Nested team restriction (niche)
+            if (config & CFG_SINGLE) {
+                labels.push({
+                    key: 'single',
+                    text: t('teamhub', 'No nested teams'),
+                    tooltip: t('teamhub', 'This team cannot be added as a member of another team.'),
+                    tone: 'neutral',
+                })
+            }
+
+            console.log('[TeamHub][TeamWidgetGrid] teamLabels computed for config=' + config, labels.map(l => l.key))
+
+            return labels
+        },
+
         teamOwner() {
             if (!this.members || !Array.isArray(this.members)) return null
             return this.members.find(m => m.level >= 9) || null
@@ -835,6 +953,59 @@ export default {
     color: var(--color-text-maxcontrast);
     font-size: 13px;
     margin: 0;
+}
+
+/* Config-bitmask-derived "team type" labels (CFG_OPEN, CFG_VISIBLE, etc.) */
+.teamhub-team-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 2px 0;
+}
+
+.teamhub-team-label {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 10px;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: help;
+    border: 1px solid transparent;
+    user-select: none;
+}
+
+.teamhub-team-label--success {
+    background-color: var(--color-success);
+    /* Hardcoded dark text: NC's --color-success is a mid-tone green that
+       collides with white (--color-primary-text). Dark text reads cleanly
+       on the background in both light and dark mode. */
+    color: #1a1a1a;
+    border-color: var(--color-success);
+}
+
+.teamhub-team-label--primary {
+    background-color: var(--color-primary-element-light, var(--color-background-hover));
+    color: var(--color-primary-element, var(--color-main-text));
+    border-color: var(--color-primary-element-light, var(--color-border));
+}
+
+.teamhub-team-label--warning {
+    background-color: var(--color-warning);
+    /* Hardcoded dark text: same reason as --success — NC's --color-warning
+       is amber and too light for white foreground in most themes. */
+    color: #1a1a1a;
+    border-color: var(--color-warning);
+}
+
+.teamhub-team-label--neutral {
+    background-color: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+    border-color: var(--color-border);
 }
 
 .teamhub-info-label {

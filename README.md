@@ -2,7 +2,7 @@
 
 TeamHub gives every Nextcloud Team a proper home. It wraps the existing Teams (Circles) infrastructure and provisions a shared workspace — messages, Talk chat, Files folder, Calendar, Deck board — all accessible from one place.
 
-![TeamHub screenshot](screenshots/teamhub-main.svg)
+![TeamHub screenshot](screenshots/teamhub-main.jpg)
 
 ## Features
 
@@ -17,7 +17,7 @@ Each team gets a tab bar linking directly to its shared apps:
 
 ### Sidebar widgets
 Always visible next to the message stream:
-- **Team info** — description, owner, member avatar stack, admin actions
+- **Team info** — description, team type labels (open/invite-only/public etc.), owner, member avatar stack, admin actions
 - **Upcoming events** — next events pulled from the team calendar
 - **Open tasks** — cards from the team Deck board
 - **Pages** — pages from the team's IntraVox space (if installed)
@@ -33,12 +33,15 @@ Post announcements, questions and polls to your team. Members are notified. Mess
 - Create teams with name, description and visibility settings
 - Invite members by local user, group, email address or federated account (configurable per instance by admins)
 - Remove members, approve or reject join requests
-- Configure team options (open join, invite-only, protected, visible)
+- Configure team options (open join, invite-only, approval required, member invitations, visible, password-protected)
+- Transfer team ownership to another member (owner-only)
 - Browse and request access to teams you're not a member of
 
 ### Admin settings
 - Set a custom wizard description shown during team creation
 - Control which invite types (user / group / email / federated) are available to team admins
+- Set the minimum member level required to pin messages
+- Manage all teams: set owner, delete teams, repair membership cache
 
 ## Requirements
 
