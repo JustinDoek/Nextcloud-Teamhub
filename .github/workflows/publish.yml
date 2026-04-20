@@ -26,15 +26,11 @@ jobs:
           npm install
           npm run build
 
-      - name: Create App Folder for Signer
-        # Dit verplaatst je code naar de juiste map voor de R0Wi tool
-        run: |
-          mkdir teamhub
-          find . -maxdepth 1 ! -name 'teamhub' ! -name '.' ! -name '..' -exec mv {} teamhub/ \;
-
-      - name: Sign and Package App
-        uses: R0Wi/nextcloud-appstore-push-action@v1.0.1
+      - name: Check and Sign App
+        # Deze actie maakt de tarball, ondertekent hem en uploadt hem naar de GitHub Release
+        uses: skjnldsv/nextcloud-app-publishing@v2.1.4
         with:
-          app_name: teamhub
-          app_private_key: ${{ secrets.NEXTCLOUD_KEY }}
-          appstore_token: ${{ secrets.NEXTCLOUD_TOKEN }}
+          app-name: teamhub
+          nextcloud-key: ${{ secrets.NEXTCLOUD_KEY }}
+          nextcloud-certificate: ${{ secrets.NEXTCLOUD_CERT }}
+          token: ${{ secrets.NEXTCLOUD_TOKEN }}
