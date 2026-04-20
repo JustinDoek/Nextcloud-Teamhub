@@ -31,7 +31,7 @@ jobs:
         run: composer install --no-dev || true
 
       - name: Sign and Package App
-        uses: nextcloud/action-nextcloud-app-publishing@v1
+        uses: nextcloud/action-nextcloud-app-publishing@v1.2.1
         with:
           nextcloud-key: ${{ secrets.NEXTCLOUD_KEY }}
           nextcloud-certificate: ${{ secrets.NEXTCLOUD_CERT }}
