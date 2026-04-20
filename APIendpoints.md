@@ -1,4 +1,4 @@
-# TeamHub API Endpoints — v3.6.2
+# TeamHub API Endpoints — v3.8.0
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
 All endpoints require an authenticated Nextcloud session unless noted.
@@ -536,6 +536,25 @@ Rebuild the `circles_membership` cache for a single team. Equivalent to `occ cir
 Current telemetry settings and payload preview.
 **Auth:** NC admin.
 **Response:** `{ enabled: bool, report_url: string, preview: object }`
+
+The `preview` object reflects the exact JSON payload (minus the per-call `event` field) that will be POSTed to the remote receiver on installed/daily/uninstalled events. Shape:
+
+```
+{
+  uuid:                 string (anonymous v4 UUID),
+  app_version:          string (e.g. "3.8.0"),
+  nc_version:           string (e.g. "32.0.4.1"),
+  team_count:           int,
+  user_count:           int,      // total NC users across all backends
+  member_total:         int,      // sum of team memberships (not unique users)
+  message_count:        int,      // total rows in teamhub_messages
+  integrations:         string[], // non-builtin registered integration app IDs
+  builtin_integrations: object,   // { appId: teamCount } for teams that have enabled each builtin app
+  link_domains:         object    // { domain: count } for custom web links, aggregated by bare hostname
+}
+```
+
+Privacy: no URLs, no IDs, no content, no hostnames/instance URLs are included. Link domains have scheme, path, query, port, fragment, localhost, and numeric IPs stripped before aggregation.
 
 ### PUT `/admin/telemetry`
 Enable or disable daily usage reporting.

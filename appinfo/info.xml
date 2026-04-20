@@ -16,16 +16,16 @@ Each team gets a shared home with:
 - **Integrations** — developers can integrate their app with teamhub
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>3.7.2</version>
+    <version>3.8.0</version>
     <licence>agpl</licence>
     <author>Justin Doek</author>
     <namespace>TeamHub</namespace>
     <category>organization</category>
     <category>dashboard</category>
     <website>https://tldr.host/teamhub</website>
-    <bugs>https://github.com/justindoek/teamhub/issues</bugs>
-    <repository type="git">https://github.com/justindoek/teamhub.git</repository>
-    <screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-main.jpg</screenshot>
+    <bugs>https://github.com/JustinDoek/nextcloud-teamhub/issues</bugs>
+    <repository>https://github.com/JustinDoek/Nextcloud-Teamhub</repository>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-main.jpg</screenshot>
     
     <dependencies>
         <nextcloud min-version="31" max-version="34"/>

@@ -1,3 +1,24 @@
+# Changelog
+
+All notable changes to TeamHub are documented in this file.
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [3.8.0] — 2026-04-20
+
+### Added
+- Telemetry payload expanded with six new anonymous metrics: `nc_version`, `user_count`, `member_total`, `message_count`, `builtin_integrations` (per-builtin-app team counts), and `link_domains` (custom-link hostname frequency map).
+- `link_domains` aggregates custom web-link URLs down to their bare lowercase hostname before sending — no paths, query strings, ports, fragments, localhost entries, or numeric IPs leave the instance.
+
+### Changed
+- `GET /api/v1/admin/telemetry` preview object now includes all new fields; admin UI automatically renders them via the existing JSON preview.
+- `TelemetryService` now depends on `IUserManager` for user counting.
+
+### Security
+- All new collection paths are read-only DB queries using `QueryBuilder` with named parameters — no new user-input surface.
+- No new endpoints; existing telemetry endpoint remains `#[AuthorizedAdminSetting]`-guarded.
+
+---
+
 # TeamHub v3.5 — Changes
 
 
