@@ -1,0 +1,39 @@
+name: Publish to Nextcloud App Store
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies and build JS
+        run: |
+          npm install
+          npm run build
+
+      - name: Install Composer dependencies
+        # Ook al doe je weinig met PHP, Nextcloud verwacht vaak dat dit gedraaid is
+        run: composer install --no-dev || true
+
+      - name: Sign and Package App
+        uses: nextcloud/action-nextcloud-app-publishing@v1
+        with:
+          nextcloud-key: ${{ secrets.NEXTCLOUD_KEY }}
+          nextcloud-certificate: ${{ secrets.NEXTCLOUD_CERT }}
+          app-name: teamhub
+          token: ${{ secrets.NEXTCLOUD_TOKEN }}
