@@ -35,10 +35,8 @@ jobs:
           # (Optioneel) Voeg hier andere mappen toe die niet in de release horen
 
       - name: Sign and Package App
-        # We gebruiken hier de actie die in de Nextcloud docs wordt aangeraden
-        uses: R0Wi/nextcloud-appstore-push-action@v2
+        uses: R0Wi/nextcloud-appstore-push-action@v1.0.1
         with:
           app_name: teamhub
           app_private_key: ${{ secrets.NEXTCLOUD_KEY }}
           appstore_token: ${{ secrets.NEXTCLOUD_TOKEN }}
-          # De actie maakt zelf de tarball en de signature.json aan
