@@ -20,12 +20,13 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
     <namespace>TeamHub</namespace>
     <category>organization</category>
     <category>social</category>
-    <website>https://github.com/jdoek/teamhub</website>
-    <bugs>https://github.com/jdoek/teamhub/issues</bugs>
-    <repository type="git">https://github.com/jdoek/teamhub.git</repository>
+    <website>https://tldr.host/teamhub</website>
+    <bugs>https://github.com/justindoek/teamhub/issues</bugs>
+    <repository type="git">https://github.com/justindoek/teamhub.git</repository>
+    <screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-main.jpg</screenshot>
     
     <dependencies>
-        <nextcloud min-version="32" max-version="34"/>
+        <nextcloud min-version="31" max-version="34"/>
         <php min-version="8.1" max-version="8.4"/>
     </dependencies>
     
