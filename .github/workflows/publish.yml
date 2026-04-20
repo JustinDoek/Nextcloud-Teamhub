@@ -27,11 +27,10 @@ jobs:
           npm run build
 
       - name: Install Composer dependencies
-        # Ook al doe je weinig met PHP, Nextcloud verwacht vaak dat dit gedraaid is
         run: composer install --no-dev || true
 
       - name: Sign and Package App
-        uses: nextcloud/action-nextcloud-app-publishing@v1.2.1
+        uses: nextcloud/action-nextcloud-app-publishing@v1
         with:
           nextcloud-key: ${{ secrets.NEXTCLOUD_KEY }}
           nextcloud-certificate: ${{ secrets.NEXTCLOUD_CERT }}
