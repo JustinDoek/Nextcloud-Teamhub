@@ -7,6 +7,10 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Geeft de workflow toestemming om bestanden te uploaden naar de release
+    permissions:
+      contents: write
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,30 +28,28 @@ jobs:
         run: |
           npm install
           npm run build
-          # Verwijder ballast voor de release
+          # Verwijder ballast
           rm -rf node_modules .git .github
 
       - name: Create App Folder and Tarball
-        # We maken de tarball handmatig zodat we de URL alvast weten
         run: |
           mkdir teamhub
           find . -maxdepth 1 ! -name 'teamhub' ! -name '.' ! -name '..' -exec mv {} teamhub/ \;
           tar -czf teamhub.tar.gz teamhub/
 
       - name: Upload Tarball to GitHub Release
-        # DIT IS DE CRUCIALE STAP: De file moet eerst op GitHub staan
         uses: softprops/action-gh-release@v2
         with:
           files: teamhub.tar.gz
+          # Zorg dat we de exacte tag gebruiken
+          tag_name: ${{ github.event.release.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Register in Nextcloud App Store
-        # Nu roepen we R0Wi aan met de DIRECTE link naar de file op GitHub
         uses: R0Wi/nextcloud-appstore-push-action@v1.0.1
         with:
           app_name: teamhub
           app_private_key: ${{ secrets.NEXTCLOUD_KEY }}
           appstore_token: ${{ secrets.NEXTCLOUD_TOKEN }}
-          # We vertellen de actie exact waar de download staat:
           download_url: https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/teamhub.tar.gz
