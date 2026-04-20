@@ -4,7 +4,7 @@
     <id>teamhub</id>
     <name>TeamHub</name>
     <summary>Team collaboration hub — messaging, activity feed and app widgets for Nextcloud Teams</summary>
-    <description><![CDATA[TeamHub provides a unified collaboration workspace built on top of Nextcloud Teams (Circles).
+    <description><![CDATA[TeamHub started as a visual mock up to discus team based working in Nextcloud and grew into a workspace built on top of Nextcloud Teams (Circles).
 
 Each team gets a shared home with:
 - **Messages** — post announcements, questions and polls to your team
@@ -12,14 +12,16 @@ Each team gets a shared home with:
 - **App tabs** — quick-links to the team's shared Talk chat, Files folder, Calendar and Deck board
 - **Sidebar widgets** — upcoming calendar events, open Deck tasks, Pages, and the activity snapshot
 - **Team management** — invite members by user, group, email or federated account; manage roles and pending requests
+- **Customizable view** — users can create their own layout
+- **Integrations** — developers can integrate their app with teamhub
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>3.7.1</version>
+    <version>3.7.2</version>
     <licence>agpl</licence>
     <author>Justin Doek</author>
     <namespace>TeamHub</namespace>
     <category>organization</category>
-    <category>social</category>
+    <category>dashboard</category>
     <website>https://tldr.host/teamhub</website>
     <bugs>https://github.com/justindoek/teamhub/issues</bugs>
     <repository type="git">https://github.com/justindoek/teamhub.git</repository>
