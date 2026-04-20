@@ -19,20 +19,26 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24.14.1'
 
       - name: Install dependencies and build JS
-        run: |
+        run: 4
           npm install
           npm run build
 
-      - name: Install Composer dependencies
-        run: composer install --no-dev || true
+      - name: Prepare app for release
+        run: |
+          # Verwijder development bestanden om de app schoon te houden
+          rm -rf node_modules
+          rm -rf .github
+          rm -rf .git
+          # (Optioneel) Voeg hier andere mappen toe die niet in de release horen
 
       - name: Sign and Package App
-        uses: nextcloud-releases/nextcloud-releaser@v1
+        # We gebruiken hier de actie die in de Nextcloud docs wordt aangeraden
+        uses: R0Wi/nextcloud-appstore-push-action@v2
         with:
-          nextcloud-key: ${{ secrets.NEXTCLOUD_KEY }}
-          nextcloud-certificate: ${{ secrets.NEXTCLOUD_CERT }}
-          app-name: teamhub
-          token: ${{ secrets.NEXTCLOUD_TOKEN }}
+          app_name: teamhub
+          app_private_key: ${{ secrets.NEXTCLOUD_KEY }}
+          appstore_token: ${{ secrets.NEXTCLOUD_TOKEN }}
+          # De actie maakt zelf de tarball en de signature.json aan
