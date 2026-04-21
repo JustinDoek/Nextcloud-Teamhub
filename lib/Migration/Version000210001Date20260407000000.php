@@ -12,7 +12,7 @@ use OCP\Migration\SimpleMigrationStep;
 /**
  * v2.41.0 — Replace HTTP-based widget data transport with PHP interface contract.
  *
- * Changes to teamhub_integration_registry:
+ * Changes to teamhub_integ_registry:
  *   ADD    php_class   VARCHAR(255) NULL  — fully-qualified class name implementing ITeamHubWidget
  *   DROP   data_url                       — replaced by php_class for same-server NC apps
  *   DROP   action_url                     — replaced by dynamic actions returned from getWidgetData()
@@ -31,12 +31,12 @@ class Version000210001Date20260407000000 extends SimpleMigrationStep {
         /** @var ISchemaWrapper $schema */
         $schema = $schemaClosure();
 
-        if (!$schema->hasTable('teamhub_integration_registry')) {
+        if (!$schema->hasTable('teamhub_integ_registry')) {
             // Table does not exist yet — nothing to migrate.
             return null;
         }
 
-        $table   = $schema->getTable('teamhub_integration_registry');
+        $table   = $schema->getTable('teamhub_integ_registry');
         $changed = false;
 
         // ADD php_class — nullable, not required for menu_item registrations.
@@ -46,28 +46,28 @@ class Version000210001Date20260407000000 extends SimpleMigrationStep {
                 'length'  => 255,
                 'default' => null,
             ]);
-            $output->info('teamhub_integration_registry: added php_class column');
+            $output->info('teamhub_integ_registry: added php_class column');
             $changed = true;
         }
 
         // DROP data_url — replaced by php_class.
         if ($table->hasColumn('data_url')) {
             $table->dropColumn('data_url');
-            $output->info('teamhub_integration_registry: dropped data_url column');
+            $output->info('teamhub_integ_registry: dropped data_url column');
             $changed = true;
         }
 
         // DROP action_url — replaced by dynamic actions from ITeamHubWidget::getWidgetData().
         if ($table->hasColumn('action_url')) {
             $table->dropColumn('action_url');
-            $output->info('teamhub_integration_registry: dropped action_url column');
+            $output->info('teamhub_integ_registry: dropped action_url column');
             $changed = true;
         }
 
         // DROP action_label — no longer needed without action_url.
         if ($table->hasColumn('action_label')) {
             $table->dropColumn('action_label');
-            $output->info('teamhub_integration_registry: dropped action_label column');
+            $output->info('teamhub_integ_registry: dropped action_label column');
             $changed = true;
         }
 
