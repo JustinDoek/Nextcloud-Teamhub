@@ -1,4 +1,4 @@
-# TeamHub API Endpoints — v3.8.0
+# TeamHub API Endpoints — v3.9.0
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
 All endpoints require an authenticated Nextcloud session unless noted.

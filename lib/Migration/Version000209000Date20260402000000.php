@@ -131,9 +131,9 @@ class Version000209000Date20260402000000 extends SimpleMigrationStep {
 
             // TRUE for Talk/Files/Calendar/Deck rows seeded by TeamHub itself.
             // Built-in integrations cannot be deregistered via the external API.
-            $table->addColumn('is_builtin', Types::BOOLEAN, [
+            $table->addColumn('is_builtin', Types::SMALLINT, [
                 'notnull' => true,
-                'default' => false,
+                'default' => 0,
             ]);
 
             $table->addColumn('created_at', Types::BIGINT, [

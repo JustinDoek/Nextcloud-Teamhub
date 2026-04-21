@@ -105,7 +105,7 @@ class Version000200000Date20240101000000 extends SimpleMigrationStep {
             $table->addColumn('id', Types::BIGINT, ['autoincrement' => true, 'notnull' => true, 'length' => 8]);
             $table->addColumn('team_id', Types::STRING, ['notnull' => true, 'length' => 64]);
             $table->addColumn('app_id', Types::STRING, ['notnull' => true, 'length' => 64]);
-            $table->addColumn('enabled', Types::BOOLEAN, ['notnull' => true, 'default' => true]);
+            $table->addColumn('enabled', Types::SMALLINT, ['notnull' => true, 'default' => 1]);
             $table->addColumn('config', Types::TEXT, ['notnull' => false]);
 
             $table->setPrimaryKey(['id']);
