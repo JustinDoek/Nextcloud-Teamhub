@@ -28,19 +28,19 @@ class Version000210002Date20260409000000 extends SimpleMigrationStep {
         /** @var ISchemaWrapper $schema */
         $schema = $schemaClosure();
 
-        if (!$schema->hasTable('teamhub_integration_registry')) {
+        if (!$schema->hasTable('teamhub_integ_registry')) {
             // Table not yet created — the base migration will set the right index.
             return null;
         }
 
-        $table   = $schema->getTable('teamhub_integration_registry');
+        $table   = $schema->getTable('teamhub_integ_registry');
         $changed = false;
 
         // Drop the old single-column unique index on app_id.
         // Index name matches what Version000209000 created.
         if ($table->hasIndex('th_integ_registry_app_id')) {
             $table->dropIndex('th_integ_registry_app_id');
-            $output->info('teamhub_integration_registry: dropped unique index th_integ_registry_app_id');
+            $output->info('teamhub_integ_registry: dropped unique index th_integ_registry_app_id');
             $changed = true;
         }
 
@@ -48,7 +48,7 @@ class Version000210002Date20260409000000 extends SimpleMigrationStep {
         // Allows one widget row + one menu_item row per app_id.
         if (!$table->hasIndex('th_integ_registry_app_type')) {
             $table->addUniqueIndex(['app_id', 'integration_type'], 'th_integ_registry_app_type');
-            $output->info('teamhub_integration_registry: added unique index th_integ_registry_app_type on (app_id, integration_type)');
+            $output->info('teamhub_integ_registry: added unique index th_integ_registry_app_type on (app_id, integration_type)');
             $changed = true;
         }
 

@@ -50,7 +50,7 @@ class TeamIntegrationMapper {
             ->from('teamhub_team_integrations', 'ti')
             ->innerJoin(
                 'ti',
-                'teamhub_integration_registry',
+                'teamhub_integ_registry',
                 'ir',
                 $qb->expr()->eq('ti.registry_id', 'ir.id')
             )
@@ -96,7 +96,7 @@ class TeamIntegrationMapper {
             ->from('teamhub_team_integrations', 'ti')
             ->innerJoin(
                 'ti',
-                'teamhub_integration_registry',
+                'teamhub_integ_registry',
                 'ir',
                 $qb->expr()->eq('ti.registry_id', 'ir.id')
             )
@@ -143,7 +143,7 @@ class TeamIntegrationMapper {
             ->selectAlias('ir.id',         'ir_id')
             ->selectAlias('ir.created_at', 'ir_created_at')
             ->selectAlias('ti.sort_order', 'ti_sort_order')
-            ->from('teamhub_integration_registry', 'ir')
+            ->from('teamhub_integ_registry', 'ir')
             ->leftJoin(
                 'ir',
                 'teamhub_team_integrations',

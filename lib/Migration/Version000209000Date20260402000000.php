@@ -25,7 +25,7 @@ use OCP\Migration\SimpleMigrationStep;
  * they can be enabled/disabled per team through the unified Manage Team → Integrations UI.
  *
  * Tables created:
- *   teamhub_integration_registry   one row per registered integration (global)
+ *   teamhub_integ_registry   one row per registered integration (global)
  *   teamhub_team_integrations      per-team opt-in (enabled/sort_order)
  *
  * NOTE: teamhub_widget_registry and teamhub_team_widgets are dropped if they exist
@@ -50,12 +50,12 @@ class Version000209000Date20260402000000 extends SimpleMigrationStep {
         }
 
         // ----------------------------------------------------------------
-        // 1. teamhub_integration_registry
+        // 1. teamhub_integ_registry
         //    Global table — one row per registered integration.
         //    Built-in rows (Talk, Files, Calendar, Deck) seeded on first boot.
         // ----------------------------------------------------------------
-        if (!$schema->hasTable('teamhub_integration_registry')) {
-            $table = $schema->createTable('teamhub_integration_registry');
+        if (!$schema->hasTable('teamhub_integ_registry')) {
+            $table = $schema->createTable('teamhub_integ_registry');
 
             $table->addColumn('id', Types::INTEGER, [
                 'autoincrement' => true,
@@ -141,11 +141,11 @@ class Version000209000Date20260402000000 extends SimpleMigrationStep {
                 'length'  => 8,
             ]);
 
-            $table->setPrimaryKey(['id']);
+            $table->setPrimaryKey(['id'], 'th_integ_reg_pk');
             $table->addUniqueIndex(['app_id'], 'th_integ_registry_app_id');
             $table->addIndex(['integration_type'], 'th_integ_registry_type');
 
-            $output->info('Version000209000: created teamhub_integration_registry');
+            $output->info('Version000209000: created teamhub_integ_registry');
         }
 
         // ----------------------------------------------------------------
@@ -161,7 +161,7 @@ class Version000209000Date20260402000000 extends SimpleMigrationStep {
                 'unsigned'      => true,
             ]);
 
-            // FK to teamhub_integration_registry.id (enforced in service, not DB FK).
+            // FK to teamhub_integ_registry.id (enforced in service, not DB FK).
             $table->addColumn('registry_id', Types::INTEGER, [
                 'notnull'  => true,
                 'unsigned' => true,
@@ -183,7 +183,7 @@ class Version000209000Date20260402000000 extends SimpleMigrationStep {
                 'length'  => 8,
             ]);
 
-            $table->setPrimaryKey(['id']);
+            $table->setPrimaryKey(['id'], 'th_team_integ_pk');
             $table->addUniqueIndex(['registry_id', 'team_id'], 'th_team_integ_unique');
             $table->addIndex(['team_id'], 'th_team_integ_team_id');
 

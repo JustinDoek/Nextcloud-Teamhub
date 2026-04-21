@@ -18,7 +18,7 @@ use OCP\Migration\SimpleMigrationStep;
  *
  * Affected columns fixed here (existing installs):
  *   teamhub_team_apps.enabled               → SMALLINT, default 1
- *   teamhub_integration_registry.is_builtin → SMALLINT, default 0
+ *   teamhub_integ_registry.is_builtin → SMALLINT, default 0
  *
  * Fresh installs are covered by the corrected base migrations
  * (Version000200000 and Version000209000). This migration no-ops gracefully
@@ -52,10 +52,10 @@ class Version000300801Date20260421000000 extends SimpleMigrationStep {
         }
 
         // ------------------------------------------------------------------
-        // 2. teamhub_integration_registry.is_builtin
+        // 2. teamhub_integ_registry.is_builtin
         // ------------------------------------------------------------------
-        if ($schema->hasTable('teamhub_integration_registry')) {
-            $table = $schema->getTable('teamhub_integration_registry');
+        if ($schema->hasTable('teamhub_integ_registry')) {
+            $table = $schema->getTable('teamhub_integ_registry');
 
             if ($table->hasColumn('is_builtin')) {
                 $column = $table->getColumn('is_builtin');
@@ -63,10 +63,10 @@ class Version000300801Date20260421000000 extends SimpleMigrationStep {
                 if ($column->getType()->getName() === 'boolean') {
                     $column->setType(\Doctrine\DBAL\Types\Type::getType('smallint'));
                     $column->setOptions(['notnull' => true, 'default' => 0]);
-                    $output->info('teamhub_integration_registry.is_builtin changed BOOLEAN → SMALLINT (notnull, default 0)');
+                    $output->info('teamhub_integ_registry.is_builtin changed BOOLEAN → SMALLINT (notnull, default 0)');
                     $changed = true;
                 } else {
-                    $output->info('teamhub_integration_registry.is_builtin already correct type — skipping');
+                    $output->info('teamhub_integ_registry.is_builtin already correct type — skipping');
                 }
             }
         }
