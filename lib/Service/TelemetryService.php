@@ -193,7 +193,7 @@ class TelemetryService {
             // a menu_item row). Without this the telemetry payload contained
             // duplicate entries like ["teamhublists", "teamhublists"].
             $result = $qb->selectDistinct('app_id')
-                ->from('teamhub_integration_registry')
+                ->from('teamhub_integ_registry')
                 ->where($qb->expr()->eq('is_builtin', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeQuery();
             $apps = [];

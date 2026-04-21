@@ -67,7 +67,7 @@ class Version000210000Date20260403000000 extends SimpleMigrationStep {
             'default'  => 0,
         ]);
 
-        $table->setPrimaryKey(['id']);
+        $table->setPrimaryKey(['id'], 'th_widget_lyt_pk');
 
         // One row per user+team combination.
         $table->addUniqueIndex(['user_id', 'team_id'], 'teamhub_wl_user_team');

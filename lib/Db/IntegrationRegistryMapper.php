@@ -7,7 +7,7 @@ use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 /**
- * Data-access layer for teamhub_integration_registry.
+ * Data-access layer for teamhub_integ_registry.
  *
  * One row per (app_id, integration_type) pair. An external app may register
  * both a 'widget' row and a 'menu_item' row — they are fully independent
@@ -50,7 +50,7 @@ class IntegrationRegistryMapper {
 
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
-            ->from('teamhub_integration_registry')
+            ->from('teamhub_integ_registry')
             ->orderBy('is_builtin', 'DESC')
             ->addOrderBy('created_at', 'ASC');
 
@@ -74,7 +74,7 @@ class IntegrationRegistryMapper {
 
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
-            ->from('teamhub_integration_registry')
+            ->from('teamhub_integ_registry')
             ->where($qb->expr()->eq('integration_type', $qb->createNamedParameter($type)))
             ->orderBy('is_builtin', 'DESC')
             ->addOrderBy('created_at', 'ASC');
@@ -97,7 +97,7 @@ class IntegrationRegistryMapper {
 
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
-            ->from('teamhub_integration_registry')
+            ->from('teamhub_integ_registry')
             ->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
         $result = $qb->executeQuery();
@@ -122,7 +122,7 @@ class IntegrationRegistryMapper {
 
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
-            ->from('teamhub_integration_registry')
+            ->from('teamhub_integ_registry')
             ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
             ->orderBy('integration_type', 'ASC'); // deterministic: menu_item before widget
 
@@ -146,7 +146,7 @@ class IntegrationRegistryMapper {
 
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
-            ->from('teamhub_integration_registry')
+            ->from('teamhub_integ_registry')
             ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
             ->andWhere($qb->expr()->eq('integration_type', $qb->createNamedParameter($integrationType)));
 
@@ -180,7 +180,7 @@ class IntegrationRegistryMapper {
         $qb  = $this->db->getQueryBuilder();
         $now = time();
 
-        $qb->insert('teamhub_integration_registry')
+        $qb->insert('teamhub_integ_registry')
             ->values([
                 'app_id'           => $qb->createNamedParameter($appId),
                 'integration_type' => $qb->createNamedParameter($integrationType),
@@ -212,7 +212,7 @@ class IntegrationRegistryMapper {
     ): array {
 
         $qb = $this->db->getQueryBuilder();
-        $qb->update('teamhub_integration_registry')
+        $qb->update('teamhub_integ_registry')
             ->set('title',       $qb->createNamedParameter($title))
             ->set('description', $qb->createNamedParameter($description))
             ->set('icon',        $qb->createNamedParameter($icon))
@@ -238,7 +238,7 @@ class IntegrationRegistryMapper {
     public function suspendByAppId(string $appId): void {
 
         $qb = $this->db->getQueryBuilder();
-        $qb->update('teamhub_integration_registry')
+        $qb->update('teamhub_integ_registry')
             ->set('php_class',  $qb->createNamedParameter(null))
             ->set('iframe_url', $qb->createNamedParameter(null))
             ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)));
@@ -255,7 +255,7 @@ class IntegrationRegistryMapper {
     public function deleteByAppId(string $appId): void {
 
         $qb = $this->db->getQueryBuilder();
-        $qb->delete('teamhub_integration_registry')
+        $qb->delete('teamhub_integ_registry')
             ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)));
         $qb->executeStatement();
     }

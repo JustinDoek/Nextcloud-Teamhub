@@ -47,15 +47,17 @@
                     </template>
                 </NcEmptyContent>
 
-                <!-- Feedback link at bottom of list, visually separated -->
+                <!-- Feedback icon-button at bottom of list, visually separated -->
                 <div class="teamhub-feedback-separator" />
-                <NcAppNavigationItem
-                    :name="t('teamhub', 'Feedback & Feature Requests')"
-                    @click="openFeedbackForm">
-                    <template #icon>
+                <li class="teamhub-feedback-item">
+                    <button
+                        class="teamhub-feedback-btn"
+                        :title="t('teamhub', 'Feedback & Feature Requests')"
+                        :aria-label="t('teamhub', 'Feedback & Feature Requests')"
+                        @click="openFeedbackModal">
                         <MessageAlertIcon :size="20" />
-                    </template>
-                </NcAppNavigationItem>
+                    </button>
+                </li>
             </template>
         </NcAppNavigation>
 
@@ -90,6 +92,10 @@
                 @show-manage-team="showView('manage')"
                 @team-left="onTeamLeft" />
         </NcAppContent>
+
+        <FeedbackModal
+            v-if="showFeedbackModal"
+            @close="showFeedbackModal = false" />
     </NcContent>
 </template>
 
@@ -107,18 +113,20 @@ import TeamView from './components/TeamView.vue'
 import BrowseTeamsView from './components/BrowseTeamsView.vue'
 import ManageTeamView from './components/ManageTeamView.vue'
 import CreateTeamView from './components/CreateTeamView.vue'
+import FeedbackModal from './components/FeedbackModal.vue'
 
 export default {
     name: 'App',
     components: {
         NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble,
         AccountGroup, Plus, Magnify, MessageAlertIcon,
-        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView,
+        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView, FeedbackModal,
     },
     data() {
         return {
             activeView: null,
             canCreateTeam: true, // default true; overwritten after mount
+            showFeedbackModal: false,
         }
     },
     computed: {
@@ -149,10 +157,9 @@ export default {
             this.activeView = view
         },
 
-        openFeedbackForm() {
-            // URL is a constant — never constructed from user input (rule #22)
-            const url = 'https://docs.google.com/forms/d/e/1FAIpQLSeq429Avzz5v-2FMGnjv51VXTmtQYhXVDw6fyut6rApzPCmEw/viewform?usp=publish-editor'
-            window.open(url, '_blank', 'noopener,noreferrer')
+        openFeedbackModal() {
+            console.log('[TeamHub][App] openFeedbackModal called')
+            this.showFeedbackModal = true
         },
 
         startCreateTeam() {
@@ -207,5 +214,38 @@ export default {
     height: 1px;
     margin: 4px 12px;
     background-color: var(--color-border);
+}
+
+// Icon-only feedback button — sits in the nav list but shows only the icon.
+.teamhub-feedback-item {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 0;
+}
+
+.teamhub-feedback-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: none;
+    background: transparent;
+    border-radius: var(--border-radius-pill);
+    color: var(--color-main-text);
+    cursor: pointer;
+    transition: background-color 0.15s;
+
+    &:hover,
+    &:focus-visible {
+        background-color: var(--color-background-hover);
+        outline: none;
+    }
+
+    &:focus-visible {
+        box-shadow: 0 0 0 2px var(--color-primary-element);
+    }
 }
 </style>

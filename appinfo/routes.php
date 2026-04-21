@@ -136,6 +136,11 @@ return [
         ['name' => 'layout#saveDefaultLayout', 'url' => '/api/v1/layout/default',        'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
+        // Feedback & feature requests
+        // ----------------------------------------------------------------
+        ['name' => 'feedback#submit', 'url' => '/api/v1/feedback', 'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
         // Integration API — external-app registration (NC admin required)
         // ----------------------------------------------------------------
         ['name' => 'integration#listRegisteredIntegrations', 'url' => '/api/v1/ext/integrations',          'verb' => 'GET'],
