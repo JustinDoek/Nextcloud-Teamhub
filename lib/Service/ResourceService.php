@@ -57,7 +57,7 @@ class ResourceService {
             throw new \Exception('Access denied');
         }
 
-        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false];
+        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false, 'tasks' => false];
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -269,6 +269,9 @@ class ResourceService {
                 'app'    => Application::APP_ID,
             ]);
         }
+
+        // ── Tasks app availability ────────────────────────────────────────────
+        $resources['tasks'] = $this->appManager->isInstalled('tasks');
 
 
         return $resources;

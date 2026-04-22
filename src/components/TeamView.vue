@@ -28,7 +28,8 @@
                 @invite="showInviteModal = true"
                 @schedule-meeting="showScheduleMeeting = true"
                 @add-event="showAddEvent = true"
-                @add-task="showAddTask = true"
+                @add-deck-task="showAddTask = true"
+                @add-personal-task="showAddPersonalTask = true"
                 @create-page="openCreatePage"
                 @delete-page="openDeletePage"
                 @pages-loaded="onPagesLoaded"
@@ -146,6 +147,11 @@
             @close="showAddTask = false"
             @created="$store.dispatch('fetchDeckTasks', resources.deck && resources.deck.board_id)" />
 
+        <AddPersonalTaskModal v-if="showAddPersonalTask"
+            :team-id="currentTeamId"
+            @close="showAddPersonalTask = false"
+            @created="$store.dispatch('fetchTeamTasks', currentTeamId)" />
+
     </div>
 </template>
 
@@ -167,6 +173,7 @@ import InviteMemberModal from './InviteMemberModal.vue'
 import ScheduleMeetingModal from './ScheduleMeetingModal.vue'
 import AddEventModal from './AddEventModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
+import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
 
 function debounce(fn, delay) {
@@ -185,7 +192,7 @@ export default {
         FileDocumentOutline,
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
-        ScheduleMeetingModal, AddEventModal, AddTaskModal, AppEmbed,
+        ScheduleMeetingModal, AddEventModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
     },
 
     data() {
@@ -208,6 +215,7 @@ export default {
             showScheduleMeeting: false,
             showAddEvent:        false,
             showAddTask:         false,
+            showAddPersonalTask: false,
             widgetDynamicActions: {},
         }
     },
@@ -378,7 +386,10 @@ export default {
             active.add('widget-activity')
             // Resource-gated widgets.
             if (this.resources && this.resources.calendar) active.add('widget-calendar')
-            if (this.resources && this.resources.deck)     active.add('widget-deck')
+            // Tasks widget shows for Deck OR when Tasks app + calendar are both active.
+            if (this.resources && (this.resources.deck || (this.resources.tasks && this.resources.calendar))) {
+                active.add('widget-deck')
+            }
             if (this.resources && this.resources.intravox) active.add('widget-pages')
             // Dynamic integration widgets.
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))

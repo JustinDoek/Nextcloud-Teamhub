@@ -227,9 +227,9 @@
                 </div>
             </grid-item>
 
-            <!-- Deck widget -->
+            <!-- Upcoming Tasks widget (Deck cards + NC Tasks VTODOs) -->
             <grid-item
-                v-if="resources.deck && getGridItem('widget-deck')"
+                v-if="showTasksWidget && getGridItem('widget-deck')"
                 v-bind="getGridItem('widget-deck')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
@@ -242,9 +242,13 @@
                         <CardText :size="25" />
                         <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</span>
                         <NcActions class="teamhub-widget-actions">
-                            <NcActionButton @click="$emit('add-task')">
+                            <NcActionButton v-if="resources.deck" @click="$emit('add-deck-task')">
                                 <template #icon><CheckboxMarkedOutline :size="20" /></template>
-                                {{ t('teamhub', 'Add task') }}
+                                {{ t('teamhub', 'Create Deck task') }}
+                            </NcActionButton>
+                            <NcActionButton v-if="resources.tasks && resources.calendar" @click="$emit('add-personal-task')">
+                                <template #icon><ClipboardPlusOutline :size="20" /></template>
+                                {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
                         </NcActions>
                         <button
@@ -490,6 +494,7 @@ import ContentSaveAll from 'vue-material-design-icons/ContentSaveAll.vue'
 import Restore from 'vue-material-design-icons/Restore.vue'
 import StarOutlineIcon from 'vue-material-design-icons/StarOutline.vue'
 import ClockOutlineIcon from 'vue-material-design-icons/ClockOutline.vue'
+import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -514,7 +519,7 @@ export default {
         ChevronUp, ChevronDown, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         ContentSaveAll, Restore,
-        StarOutlineIcon, ClockOutlineIcon,
+        StarOutlineIcon, ClockOutlineIcon, ClipboardPlusOutline,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
         FilesFavoritesWidget, FilesRecentWidget,
@@ -533,11 +538,11 @@ export default {
 
     emits: [
         'layout-updated', 'manage-team', 'copy-link', 'invite',
-        'schedule-meeting', 'add-event', 'add-task',
+        'schedule-meeting', 'add-event', 'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded', 'set-view',
         'widget-actions-loaded',
-        'set-as-default',    // user clicked "Save as my default layout"
-        'reset-to-default',  // user clicked "Reset to my default layout"
+        'set-as-default',
+        'reset-to-default',
     ],
 
     computed: {
@@ -548,6 +553,15 @@ export default {
         ...mapGetters(['currentTeam']),
 
         team() { return this.currentTeam || {} },
+
+        /**
+         * Show the Upcoming Tasks widget when Deck is active for the team
+         * OR when the NC Tasks app is installed and the team has a calendar.
+         * The widget renders whichever subset of tasks is available.
+         */
+        showTasksWidget() {
+            return !!(this.resources.deck || (this.resources.tasks && this.resources.calendar))
+        },
 
         /**
          * Human-readable labels derived from the Circles config bitmask (team.config).
@@ -652,7 +666,6 @@ export default {
                 })
             }
 
-            console.log('[TeamHub][TeamWidgetGrid] teamLabels computed for config=' + config, labels.map(l => l.key))
 
             return labels
         },

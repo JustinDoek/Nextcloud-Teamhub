@@ -17,9 +17,10 @@ export default new Vuex.Store({
         pinMinLevel: 4,        // minimum Circles level to pin (loaded from admin settings)
         comments: {},          // { messageId: [comments] }
         members: [],
-        resources: {},         // { talk, files, calendar, deck }
+        resources: {},         // { talk, files, calendar, deck, tasks }
         webLinks: [],
         deckTasks: [],
+        teamTasks: [],         // VTODO tasks from the team calendar (NC Tasks app)
         teamWidgets: [],        // enabled sidebar widgets for the current team
         teamMenuItems: [],      // enabled menu_item integrations for the current team
         intravoxAvailable: false,
@@ -119,6 +120,7 @@ export default new Vuex.Store({
         SET_RESOURCES(state, resources) { state.resources = resources },
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
+        SET_TEAM_TASKS(state, tasks) { state.teamTasks = tasks },
         SET_TEAM_WIDGETS(state, widgets) { state.teamWidgets = widgets },
         SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
         SET_LOADING(state, { key, value }) { Vue.set(state.loading, key, value) },
@@ -269,8 +271,15 @@ export default new Vuex.Store({
                 if (data?.deck?.board_id) {
                     dispatch('fetchDeckTasks', data.deck.board_id)
                 }
+                // Fetch team calendar tasks when Tasks app is installed AND the team has a calendar.
+                if (data?.tasks && data?.calendar) {
+                    dispatch('fetchTeamTasks', teamId)
+                } else {
+                    commit('SET_TEAM_TASKS', [])
+                }
             } catch (e) {
                 commit('SET_RESOURCES', {})
+                commit('SET_TEAM_TASKS', [])
             } finally {
                 commit('SET_LOADING', { key: 'resources', value: false })
             }
@@ -336,6 +345,22 @@ export default new Vuex.Store({
                 commit('SET_DECK_TASKS', cards.slice(0, 5))
             } catch (e) {
                 commit('SET_DECK_TASKS', [])
+            }
+        },
+
+        /**
+         * Fetch VTODO tasks from the team calendar via the TeamHub backend.
+         * Only called when resources.tasks === true AND resources.calendar is set.
+         */
+        async fetchTeamTasks({ commit }, teamId) {
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/tasks`),
+                )
+                const tasks = Array.isArray(data) ? data : []
+                commit('SET_TEAM_TASKS', tasks)
+            } catch (e) {
+                commit('SET_TEAM_TASKS', [])
             }
         },
 

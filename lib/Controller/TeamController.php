@@ -11,6 +11,7 @@ use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\ResourceService;
+use OCA\TeamHub\Service\TaskService;
 use OCA\TeamHub\Service\TeamService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -34,6 +35,7 @@ class TeamController extends Controller {
         private IntravoxService $intravoxService,
         private FilesService $filesService,
         private MaintenanceService $maintenanceService,
+        private TaskService $taskService,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
         private LoggerInterface $logger,
@@ -393,6 +395,65 @@ class TeamController extends Controller {
         } catch (\Exception $e) {
             $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
                 ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/tasks
+     *
+     * Returns upcoming VTODO tasks from the team calendar.
+     * Requires the Tasks app to be installed and the user to be a team member.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTeamTasks(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            if (!$this->taskService->isTasksAppAvailable()) {
+                return new JSONResponse([]);
+            }
+
+            $tasks = $this->taskService->getTeamTasks($teamId);
+            return new JSONResponse($tasks);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->warning('[TeamHub][TeamController] getTeamTasks failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/tasks
+     *
+     * Creates a VTODO task in the team calendar.
+     * Body: { title: string, duedate?: string (ISO 8601), description?: string }
+     */
+    #[NoAdminRequired]
+    public function createTeamTask(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            $title       = trim((string)$this->request->getParam('title', ''));
+            $duedate     = $this->request->getParam('duedate') ?: null;
+            $description = $this->request->getParam('description') ?: null;
+
+            if ($title === '') {
+                return new JSONResponse(['error' => 'Title is required'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $result = $this->taskService->createTeamTask($teamId, $title, $duedate, $description);
+            return new JSONResponse($result, Http::STATUS_CREATED);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->warning('[TeamHub][TeamController] createTeamTask failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
             return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }

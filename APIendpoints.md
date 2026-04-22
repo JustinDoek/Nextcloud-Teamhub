@@ -1,4 +1,4 @@
-# TeamHub API Endpoints — v3.9.0
+# TeamHub API Endpoints — v3.11.0
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
 All endpoints require an authenticated Nextcloud session unless noted.
@@ -149,6 +149,25 @@ Provision resources for the specified apps.
 ### DELETE `/teams/{teamId}/resources/{app}`
 Hard-delete the resource for a specific app. `app` is allowlisted: `spreed`, `files`, `calendar`, `deck`, `intravox`.
 **Auth:** Team admin.
+
+---
+
+## Team tasks (NC Tasks app — VTODO)
+
+### GET `/teams/{teamId}/tasks`
+Fetch upcoming VTODO tasks from the team's shared calendar. Only works when the NC Tasks app (`tasks`) is installed and the team has a provisioned calendar. Returns tasks due within the next 14 days that are not completed or cancelled, sorted by due date ascending.
+**Auth:** Team member.
+**Response:** `[ { id, title, duedate, priority, status, url } ]`
+- `duedate` — ISO 8601 string or `null`
+- `priority` — iCal integer (0 = none, 1 = highest, 9 = lowest)
+- `status` — iCal STATUS value (e.g. `NEEDS-ACTION`)
+- `url` — always `/apps/tasks` (deep-links not yet supported by the Tasks app)
+
+### POST `/teams/{teamId}/tasks`
+Create a VTODO task in the team's shared calendar. Persisted via `CalDavBackend::createCalendarObject()` (QB insert fallback if CalDavBackend is unavailable). CSRF protection active.
+**Auth:** Team member.
+**Body:** `{ title: string, duedate?: string (ISO 8601), description?: string }`
+**Response:** `{ uri: string, title: string }` — HTTP 201 on success.
 
 ---
 

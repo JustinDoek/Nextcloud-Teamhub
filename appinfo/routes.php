@@ -34,6 +34,10 @@ return [
 
         // Team resources & activity
         ['name' => 'team#getTeamResources',       'url' => '/api/v1/teams/{teamId}/resources',               'verb' => 'GET'],
+
+        // Tasks (NC Tasks app — VTODO objects in the team calendar)
+        ['name' => 'team#getTeamTasks',           'url' => '/api/v1/teams/{teamId}/tasks',                   'verb' => 'GET'],
+        ['name' => 'team#createTeamTask',         'url' => '/api/v1/teams/{teamId}/tasks',                   'verb' => 'POST'],
         ['name' => 'team#getTeamActivity',        'url' => '/api/v1/teams/{teamId}/activity',                'verb' => 'GET'],
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
