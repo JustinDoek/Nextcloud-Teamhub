@@ -45,6 +45,8 @@ return [
         // Files widgets — favourite files and recently modified files
         ['name' => 'team#getTeamFavoriteFiles',   'url' => '/api/v1/teams/{teamId}/files/favorites',         'verb' => 'GET'],
         ['name' => 'team#getTeamRecentFiles',      'url' => '/api/v1/teams/{teamId}/files/recent',            'verb' => 'GET'],
+        // Shared files widget — files/folders shared directly with the team circle
+        ['name' => 'team#getTeamSharedFiles',      'url' => '/api/v1/teams/{teamId}/files/shared',            'verb' => 'GET'],
 
         // Team apps (enable/disable per team)
         ['name' => 'team#getTeamApps',            'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'GET'],

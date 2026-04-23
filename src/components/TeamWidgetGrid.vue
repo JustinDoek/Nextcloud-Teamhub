@@ -392,6 +392,34 @@
                 </div>
             </grid-item>
 
+            <!-- Files — Shared with team widget -->
+            <grid-item
+                v-if="resources.shared_files && getGridItem('widget-files-shared')"
+                v-bind="getGridItem('widget-files-shared')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                        <DragVariant :size="16" />
+                        <span>{{ t('teamhub', 'Shared files') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <ShareVariantIcon :size="25" />
+                        <span class="teamhub-widget-title">{{ t('teamhub', 'Shared Files') }}</span>
+                        <button
+                            class="teamhub-widget-collapse-btn"
+                            :aria-label="isCollapsed('widget-files-shared') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            @click.stop="toggleCollapse('widget-files-shared')">
+                            <ChevronUp v-if="!isCollapsed('widget-files-shared')" :size="16" />
+                            <ChevronDown v-else :size="16" />
+                        </button>
+                    </div>
+                    <div v-show="!isCollapsed('widget-files-shared')" class="teamhub-widget-content">
+                        <FilesSharedWidget />
+                    </div>
+                </div>
+            </grid-item>
+
             <!-- External integration widgets -->
             <grid-item
                 v-for="widget in teamWidgets"
@@ -495,6 +523,7 @@ import Restore from 'vue-material-design-icons/Restore.vue'
 import StarOutlineIcon from 'vue-material-design-icons/StarOutline.vue'
 import ClockOutlineIcon from 'vue-material-design-icons/ClockOutline.vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
+import ShareVariantIcon from 'vue-material-design-icons/ShareVariant.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -504,6 +533,7 @@ import ActivityWidget from './ActivityWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
 import FilesFavoritesWidget from './FilesFavoritesWidget.vue'
 import FilesRecentWidget from './FilesRecentWidget.vue'
+import FilesSharedWidget from './FilesSharedWidget.vue'
 
 export default {
     name: 'TeamWidgetGrid',
@@ -519,10 +549,10 @@ export default {
         ChevronUp, ChevronDown, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         ContentSaveAll, Restore,
-        StarOutlineIcon, ClockOutlineIcon, ClipboardPlusOutline,
+        StarOutlineIcon, ClockOutlineIcon, ClipboardPlusOutline, ShareVariantIcon,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
-        FilesFavoritesWidget, FilesRecentWidget,
+        FilesFavoritesWidget, FilesRecentWidget, FilesSharedWidget,
     },
 
     props: {

@@ -118,6 +118,15 @@ class LayoutController extends Controller {
             'collapsed'   => false,
             'hSaved'      => 3,
         ],
+        [
+            'i'           => 'widget-files-shared',
+            'x'           => 9, 'y' => 22,
+            'w'           => 3, 'h' => 3,
+            'minW'        => 2, 'minH' => 1,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 3,
+        ],
     ];
 
     private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck'];
@@ -141,6 +150,7 @@ class LayoutController extends Controller {
         'widget-pages',
         'widget-files-favorites',
         'widget-files-recent',
+        'widget-files-shared',
     ];
 
     // Allowed built-in tab keys.

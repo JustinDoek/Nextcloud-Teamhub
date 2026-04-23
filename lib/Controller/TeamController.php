@@ -244,7 +244,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function deleteTeamResource(string $teamId, string $app): JSONResponse {
         // Allowlist valid app values — reject anything unexpected before it reaches the service
-        $allowed = ['spreed', 'files', 'calendar', 'deck', 'intravox'];
+        $allowed = ['spreed', 'files', 'calendar', 'deck', 'intravox', 'shared_files'];
         if (!in_array($app, $allowed, true)) {
             return new JSONResponse(['error' => 'Invalid app identifier'], Http::STATUS_BAD_REQUEST);
         }
@@ -455,6 +455,74 @@ class TeamController extends Controller {
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/files/shared
+     *
+     * Returns files and folders shared directly with this team circle by its members,
+     * paginated (newest first). The team folder share itself is excluded.
+     *
+     * Query params: page (1-based, default 1), limit (default 10, max 50)
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTeamSharedFiles(string $teamId): JSONResponse {
+        try {
+            $this->logger->debug('[TeamHub][TeamController] getTeamSharedFiles — teamId: ' . $teamId, [
+                'app' => 'teamhub',
+            ]);
+
+            // Membership check — throws if not a member.
+            $this->memberService->requireMemberLevel($teamId);
+
+            // Resolve current uid for node lookups in FilesService.
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            $uid = $user->getUID();
+
+            // Check the shared_files toggle for this team.
+            $resources = $this->resourceService->getTeamResources($teamId);
+            if (empty($resources['shared_files'])) {
+                $this->logger->debug('[TeamHub][TeamController] getTeamSharedFiles — toggle off', [
+                    'teamId' => $teamId, 'app' => 'teamhub',
+                ]);
+                return new JSONResponse(['items' => [], 'total' => 0, 'page' => 1, 'limit' => 10]);
+            }
+
+            // Pagination params — clamp limit to 1–50.
+            $page   = max(1, (int)$this->request->getParam('page', 1));
+            $limit  = min(50, max(1, (int)$this->request->getParam('limit', 10)));
+            $offset = ($page - 1) * $limit;
+
+            // Team folder ID to exclude (null when no team folder configured).
+            $teamFolderId = isset($resources['files']['folder_id'])
+                ? (int)$resources['files']['folder_id']
+                : null;
+
+            $result = $this->filesService->getSharedWithTeam($teamId, $uid, $teamFolderId, $limit, $offset);
+
+            $this->logger->debug('[TeamHub][TeamController] getTeamSharedFiles — returning ' . count($result['items']) . ' items', [
+                'total' => $result['total'], 'page' => $page, 'app' => 'teamhub',
+            ]);
+
+            return new JSONResponse([
+                'items' => $result['items'],
+                'total' => $result['total'],
+                'page'  => $page,
+                'limit' => $limit,
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('[TeamHub][TeamController] getTeamSharedFiles failed', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => 'teamhub',
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 

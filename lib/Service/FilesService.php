@@ -29,16 +29,6 @@ class FilesService {
     // Files widget data
     // -------------------------------------------------------------------------
 
-    /**
-     * Return files starred by $uid that live inside the team's shared folder
-     * (identified by $folderId — the file_source from the share row).
-     *
-     * Uses NC's ITagManager to get the user's favourited file IDs, then
-     * intersects with IRootFolder::getById() nodes that are descendants of the
-     * team folder.
-     *
-     * @return array  Array of file-info maps, or empty array.
-     */
     public function getFavoriteFiles(int $folderId, string $uid): array {
         $this->logger->debug('[TeamHub][FilesService] getFavoriteFiles — start', [
             'folderId' => $folderId, 'uid' => $uid, 'app' => Application::APP_ID,
@@ -48,7 +38,6 @@ class FilesService {
             $rootFolder = $this->container->get(IRootFolder::class);
             $userFolder = $rootFolder->getUserFolder($uid);
 
-            // Resolve the team folder node from its file-source ID.
             $teamFolderNodes = $userFolder->getById($folderId);
             if (empty($teamFolderNodes)) {
                 $this->logger->warning('[TeamHub][FilesService] getFavoriteFiles — team folder not found', [
@@ -59,7 +48,6 @@ class FilesService {
             $teamFolder     = $teamFolderNodes[0];
             $teamFolderPath = rtrim($teamFolder->getPath(), '/') . '/';
 
-            // Get all file IDs the user has marked as favourite.
             $tagger      = $this->tagManager->load('files', [], false, $uid);
             $favoriteIds = $tagger->getFavorites();
 
@@ -79,7 +67,6 @@ class FilesService {
                         continue;
                     }
                     $node = $nodes[0];
-                    // Only include files (not folders) that are inside the team folder.
                     if ($node->getType() !== \OCP\Files\FileInfo::TYPE_FILE) {
                         continue;
                     }
@@ -109,15 +96,6 @@ class FilesService {
         }
     }
 
-    /**
-     * Return the $limit most recently modified files inside the team folder,
-     * newest first.
-     *
-     * Walks the folder tree recursively using NC's Folder::search() with a
-     * SearchQuery that orders by mtime DESC and filters for files only.
-     *
-     * @return array  Array of file-info maps, or empty array.
-     */
     public function getRecentFiles(int $folderId, string $uid, int $limit = 5): array {
         $this->logger->debug('[TeamHub][FilesService] getRecentFiles — start', [
             'folderId' => $folderId, 'uid' => $uid, 'limit' => $limit, 'app' => Application::APP_ID,
@@ -137,9 +115,6 @@ class FilesService {
             $teamFolder     = $teamFolderNodes[0];
             $teamFolderPath = rtrim($teamFolder->getPath(), '/') . '/';
 
-            // Collect all files via a recursive walk. The team folder is
-            // typically small so this is safe. The internal SearchQuery API
-            // proved unreliable across NC versions for negated comparators.
             $allFiles = [];
             $this->collectFiles($teamFolder, $allFiles);
 
@@ -147,7 +122,6 @@ class FilesService {
                 'uid' => $uid, 'app' => Application::APP_ID,
             ]);
 
-            // Sort by mtime descending (newest first) and take the top $limit.
             usort($allFiles, static function (Node $a, Node $b): int {
                 return $b->getMTime() <=> $a->getMTime();
             });
@@ -172,46 +146,149 @@ class FilesService {
     }
 
     /**
-     * Recursively collect all file nodes (not folders) under $folder.
-     * Results are appended to $files by reference.
+     * Return files and folders shared directly with the team circle,
+     * excluding the team folder share itself, paginated (newest first).
      *
-     * @param \OCP\Files\Folder $folder
-     * @param Node[]            $files
+     * Note: oc_share has no mimetype column — mimetype is resolved via the file node.
+     *
+     * @param string   $teamId        Circle single ID
+     * @param string   $uid           Current user UID (kept for API consistency)
+     * @param int|null $teamFolderId  file_source of the team folder share to exclude
+     * @param int      $limit         Items per page (max 50)
+     * @param int      $offset        Pagination offset
+     * @return array{ items: array, total: int }
      */
-    private function collectFiles(\OCP\Files\Folder $folder, array &$files): void {
-        foreach ($folder->getDirectoryListing() as $node) {
-            if ($node->getType() === \OCP\Files\FileInfo::TYPE_FILE) {
-                $files[] = $node;
-            } elseif ($node instanceof \OCP\Files\Folder) {
-                $this->collectFiles($node, $files);
+    public function getSharedWithTeam(
+        string $teamId,
+        string $uid,
+        ?int $teamFolderId,
+        int $limit = 10,
+        int $offset = 0
+    ): array {
+        $this->logger->debug('[TeamHub][FilesService] getSharedWithTeam — start', [
+            'teamId'       => $teamId,
+            'teamFolderId' => $teamFolderId,
+            'limit'        => $limit,
+            'offset'       => $offset,
+            'app'          => Application::APP_ID,
+        ]);
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            $buildBase = function () use ($db, $teamId, $teamFolderId) {
+                $qb = $db->getQueryBuilder();
+                $qb->from('share', 's')
+                    ->where($qb->expr()->eq('s.share_with', $qb->createNamedParameter($teamId)))
+                    ->andWhere($qb->expr()->eq('s.share_type', $qb->createNamedParameter(7)))
+                    ->andWhere($qb->expr()->in(
+                        's.item_type',
+                        $qb->createNamedParameter(['file', 'folder'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)
+                    ));
+
+                if ($teamFolderId !== null) {
+                    $qb->andWhere($qb->expr()->neq(
+                        's.file_source',
+                        $qb->createNamedParameter($teamFolderId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+                    ));
+                }
+                return $qb;
+            };
+
+            $countQb  = $buildBase();
+            $countQb->select($countQb->func()->count('s.id', 'total'));
+            $countRes = $countQb->executeQuery();
+            $total    = (int)($countRes->fetchOne() ?? 0);
+            $countRes->closeCursor();
+
+            $this->logger->debug('[TeamHub][FilesService] getSharedWithTeam — total: ' . $total, [
+                'app' => Application::APP_ID,
+            ]);
+
+            if ($total === 0) {
+                return ['items' => [], 'total' => 0];
             }
+
+            $dataQb = $buildBase();
+            $dataQb->select('s.id', 's.file_source', 's.file_target', 's.item_type', 's.uid_initiator', 's.stime')
+                   ->orderBy('s.stime', 'DESC')
+                   ->setMaxResults($limit)
+                   ->setFirstResult($offset);
+
+            $dataRes = $dataQb->executeQuery();
+            $rows    = $dataRes->fetchAll();
+            $dataRes->closeCursor();
+
+            $this->logger->debug('[TeamHub][FilesService] getSharedWithTeam — fetched ' . count($rows) . ' rows', [
+                'app' => Application::APP_ID,
+            ]);
+
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+            $rootFolder  = $this->container->get(IRootFolder::class);
+
+            $items = [];
+            foreach ($rows as $row) {
+                $fileId    = (int)$row['file_source'];
+                $sharerUid = (string)$row['uid_initiator'];
+                $itemType  = (string)$row['item_type'];
+                $sharedAt  = (int)$row['stime'];
+
+                $sharerUser        = $userManager->get($sharerUid);
+                $sharerDisplayName = $sharerUser ? $sharerUser->getDisplayName() : $sharerUid;
+
+                $name      = '';
+                $mimetype  = '';
+                $extension = '';
+                try {
+                    $userFolder = $rootFolder->getUserFolder($sharerUid);
+                    $nodes      = $userFolder->getById($fileId);
+                    if (!empty($nodes)) {
+                        $node      = $nodes[0];
+                        $name      = $node->getName();
+                        $mimetype  = $node->getMimetype();
+                        $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->debug('[TeamHub][FilesService] getSharedWithTeam — could not resolve node ' . $fileId, [
+                        'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+
+                if ($name === '' && !empty($row['file_target'])) {
+                    $name = basename((string)$row['file_target']);
+                }
+
+                $items[] = [
+                    'id'           => $fileId,
+                    'name'         => $name,
+                    'item_type'    => $itemType,
+                    'mimetype'     => $mimetype,
+                    'extension'    => $extension,
+                    'shared_by'    => $sharerDisplayName,
+                    'shared_by_id' => $sharerUid,
+                    'shared_at'    => $sharedAt,
+                ];
+            }
+
+            $this->logger->debug('[TeamHub][FilesService] getSharedWithTeam — returning ' . count($items) . ' items', [
+                'app' => Application::APP_ID,
+            ]);
+
+            return ['items' => $items, 'total' => $total];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][FilesService] getSharedWithTeam failed', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+            return ['items' => [], 'total' => 0];
         }
     }
 
     // -------------------------------------------------------------------------
-    // Private helpers
+    // Shared folder management
     // -------------------------------------------------------------------------
-
-    /**
-     * Convert a Node to the array shape returned to the frontend.
-     * Path is made relative to the team folder root for display.
-     */
-    private function nodeToArray(Node $node, string $teamFolderPath): array {
-        $fullPath     = $node->getPath();
-        $relativePath = ltrim(substr($fullPath, strlen($teamFolderPath) - 1), '/');
-        $name         = $node->getName();
-        $ext          = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-
-        return [
-            'id'           => $node->getId(),
-            'name'         => $name,
-            'path'         => $relativePath,
-            'mtime'        => $node->getMTime(),
-            'size'         => $node->getSize(),
-            'mimetype'     => $node->getMimetype(),
-            'extension'    => $ext,
-        ];
-    }
 
     public function createSharedFolder(string $teamId, string $teamName, string $uid): array {
 
@@ -220,10 +297,6 @@ class FilesService {
             throw new \Exception('User not found: ' . $uid);
         }
 
-        // Bootstrap the Circles session context so the share provider can resolve
-        // the circle. Without this, IShare::TYPE_CIRCLE shares throw "Circle not found"
-        // even when the circle exists — the FederatedUserService session is not
-        // initialised by default in non-Circles request contexts.
         try {
             $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
             $federatedUserService->setLocalCurrentUser($user);
@@ -233,7 +306,7 @@ class FilesService {
             ]);
         }
 
-        $userFolder = $this->container->get(\OCP\Files\IRootFolder::class)->getUserFolder($uid);
+        $userFolder = $this->container->get(IRootFolder::class)->getUserFolder($uid);
         $folderName = $teamName;
         $counter    = 1;
         while ($userFolder->nodeExists($folderName)) {
@@ -251,8 +324,6 @@ class FilesService {
                   ->setPermissions(\OCP\Constants::PERMISSION_ALL);
             $share = $shareManager->createShare($share);
         } catch (\Throwable $e) {
-            // Share failed — delete the folder we just created to avoid orphans,
-            // then re-throw so the caller can surface the real error.
             $this->logger->error('[FilesService] createSharedFolder — share failed, deleting folder', [
                 'teamId'     => $teamId,
                 'folderName' => $folderName,
@@ -273,18 +344,14 @@ class FilesService {
         return ['folder_id' => $folder->getId(), 'path' => $folder->getPath(), 'share_id' => $share->getId()];
     }
 
-    /**
-     * Create a calendar and share it with the circle via the dav_shares table.
-     * The circle principal is principals/circles/{teamId}.
-     */
     public function deleteSharedFolder(string $teamId, \OCP\IDBConnection $db): array {
         try {
-            // Find the share row: share_type=7 (TYPE_CIRCLE), share_with=teamId
-            $qb = $db->getQueryBuilder();
+            $qb  = $db->getQueryBuilder();
             $res = $qb->select('id', 'uid_initiator', 'file_source')
                 ->from('share')
                 ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
                 ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
                 ->setMaxResults(1)
                 ->executeQuery();
             $row = $res->fetch();
@@ -294,17 +361,15 @@ class FilesService {
                 return ['deleted' => false, 'detail' => 'No Files share found for this team'];
             }
 
-            $shareId   = (int)$row['id'];
-            $ownerUid  = $row['uid_initiator'];
-            $fileId    = (int)$row['file_source'];
+            $shareId  = (int)$row['id'];
+            $ownerUid = $row['uid_initiator'];
+            $fileId   = (int)$row['file_source'];
 
-            // Delete the share via IManager (triggers proper cleanup)
             try {
                 $shareManager = $this->container->get(\OCP\Share\IManager::class);
                 $share = $shareManager->getShareById('ocinternal:' . $shareId);
                 $shareManager->deleteShare($share);
             } catch (\Throwable $e) {
-                // Fallback: direct DB delete of the share row
                 $this->logger->warning('[FilesService] deleteSharedFolder: IManager delete failed, using QB', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
@@ -314,10 +379,8 @@ class FilesService {
                     ->executeStatement();
             }
 
-            // Delete the folder node itself
             try {
-                $rootFolder = $this->container->get(\OCP\Files\IRootFolder::class);
-                $userFolder = $rootFolder->getUserFolder($ownerUid);
+                $userFolder = $this->container->get(IRootFolder::class)->getUserFolder($ownerUid);
                 $nodes = $userFolder->getById($fileId);
                 if (!empty($nodes)) {
                     $nodes[0]->delete();
@@ -338,9 +401,35 @@ class FilesService {
         }
     }
 
-    /**
-     * Delete the calendar shared with this team circle.
-     * Uses CalDavBackend::deleteCalendar() which cascades all events.
-     */
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
+    private function collectFiles(\OCP\Files\Folder $folder, array &$files): void {
+        foreach ($folder->getDirectoryListing() as $node) {
+            if ($node->getType() === \OCP\Files\FileInfo::TYPE_FILE) {
+                $files[] = $node;
+            } elseif ($node instanceof \OCP\Files\Folder) {
+                $this->collectFiles($node, $files);
+            }
+        }
+    }
+
+    private function nodeToArray(Node $node, string $teamFolderPath): array {
+        $fullPath     = $node->getPath();
+        $relativePath = ltrim(substr($fullPath, strlen($teamFolderPath) - 1), '/');
+        $name         = $node->getName();
+        $ext          = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+
+        return [
+            'id'        => $node->getId(),
+            'name'      => $name,
+            'path'      => $relativePath,
+            'mtime'     => $node->getMTime(),
+            'size'      => $node->getSize(),
+            'mimetype'  => $node->getMimetype(),
+            'extension' => $ext,
+        ];
+    }
 
 }

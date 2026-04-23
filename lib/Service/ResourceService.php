@@ -57,7 +57,7 @@ class ResourceService {
             throw new \Exception('Access denied');
         }
 
-        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false, 'tasks' => false];
+        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false, 'tasks' => false, 'shared_files' => false];
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -119,12 +119,15 @@ class ResourceService {
             }
 
             // ── Files ────────────────────────────────────────────────────────
+            // Filter on item_type='folder' so that individual file shares
+            // (e.g. from Nextcloud Notes) are never mistaken for the team folder.
             try {
                 $qb = $db->getQueryBuilder();
                 $result = $qb->select('file_source', 'file_target')
                     ->from('share')
                     ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
                     ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                    ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
                     ->setMaxResults(1)
                     ->executeQuery();
 
@@ -135,8 +138,39 @@ class ResourceService {
                     ];
                 }
                 $result->closeCursor();
+                $this->logger->debug('[TeamHub][ResourceService] Files resource resolved', [
+                    'teamId'   => $teamId,
+                    'resolved' => $resources['files'] !== null,
+                    'app'      => Application::APP_ID,
+                ]);
             } catch (\Throwable $e) {
                 $this->logger->warning('[ResourceService] Files resource query failed', [
+                    'teamId' => $teamId,
+                    'error'  => $e->getMessage(),
+                    'app'    => Application::APP_ID,
+                ]);
+            }
+
+            // ── Shared Files toggle ───────────────────────────────────────────
+            // Independent toggle — does not require a team folder to be configured.
+            try {
+                $sfQb  = $db->getQueryBuilder();
+                $sfRes = $sfQb->select('enabled')
+                    ->from('teamhub_team_apps')
+                    ->where($sfQb->expr()->eq('team_id', $sfQb->createNamedParameter($teamId)))
+                    ->andWhere($sfQb->expr()->eq('app_id', $sfQb->createNamedParameter('shared_files')))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $sfRow = $sfRes->fetch();
+                $sfRes->closeCursor();
+                $resources['shared_files'] = $sfRow ? (bool)$sfRow['enabled'] : false;
+                $this->logger->debug('[TeamHub][ResourceService] shared_files toggle', [
+                    'teamId'  => $teamId,
+                    'enabled' => $resources['shared_files'],
+                    'app'     => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][ResourceService] shared_files toggle query failed', [
                     'teamId' => $teamId,
                     'error'  => $e->getMessage(),
                     'app'    => Application::APP_ID,
