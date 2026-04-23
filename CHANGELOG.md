@@ -3,7 +3,18 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.11.0] — 2026-04-22
+## [3.12.0] — 2026-04-23
+
+### Added
+- **Shared Files widget** — new dashboard widget showing files and folders that team members have shared directly with the team circle (e.g. from Nextcloud Notes or Files). Displays item name, type icon (including a dedicated note icon for `.md` files), sharer display name with avatar, and share date. Paginated at 10 items per page, sorted newest first.
+- New `GET /api/v1/teams/{teamId}/files/shared` endpoint — returns paginated list of files/folders shared with the team circle, excluding the team folder itself. Accepts `page` and `limit` query parameters.
+- New `shared_files` app toggle in the Team Apps section of Manage Team — defaults to off; team owners enable it explicitly. Independent of the Files (team folder) toggle.
+
+### Fixed
+- Fixed team folder query in `ResourceService` incorrectly picking up individual file shares (e.g. Notes shares) as the team folder when no folder was configured — query now filters on `item_type = 'folder'`.
+- Fixed `shared_files` toggle defaulting to on in Manage Team UI for teams that had no saved state yet — default is now off.
+
+
 
 ### Added
 - **Upcoming Tasks widget now shows personal tasks alongside Deck tasks.** When the NC Tasks app is installed and the team has a calendar, VTODO tasks from the team calendar are fetched server-side (Sabre/VObject, direct DB query on `calendarobjects`) and merged with Deck cards into a single sorted list. Each task row shows a source pill — blue "Deck" or teal "Personal task" — so users can distinguish at a glance. The two task types also use different badge icons.
