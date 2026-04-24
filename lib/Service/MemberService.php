@@ -70,9 +70,21 @@ class MemberService {
     // -------------------------------------------------------------------------
 
     /**
-     * Get team members with roles.
+     * Get team members for the MembersWidget and store.
      *
-     * @throws \Exception if user is not authenticated or team not found
+     * Returns a wrapped shape:
+     *   {
+     *     members:        array  — up to 30 direct users sorted by last_login DESC,
+     *     effective_count: int   — total users with access (from circles_membership),
+     *     has_more:        bool  — true when effective_count > count(members)
+     *   }
+     *
+     * Only direct user rows (user_type=1, status=Member) are included in the
+     * members list. Users added via groups or other teams are counted in
+     * effective_count but do NOT appear in the list (use getMembersForManage()
+     * for the full structured breakdown).
+     *
+     * @throws \Exception if user is not authenticated
      */
     public function getTeamMembers(string $teamId): array {
 
@@ -81,10 +93,20 @@ class MemberService {
             throw new \Exception('User not authenticated');
         }
 
-        // Read directly from DB — getCircle() via CirclesManager fails on circles with
-        // a non-zero config bitmask. Filtering to status='Member' ensures Requesting
-        // rows don't appear in the member list (they appear in getPendingRequests instead).
-        $db  = $this->container->get(\OCP\IDBConnection::class);
+        // Membership gate — only team members can enumerate the member list.
+        // requireMemberLevel accepts both direct rows and indirect access
+        // (via group or sub-team), which matches the intent for read-only
+        // widgets shown on the team home page.
+        $this->requireMemberLevel($teamId);
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // ── Effective count from circles_membership (source of truth) ─────────
+        $effectiveCount = $this->getEffectiveMemberCount($teamId, $db);
+
+        // ── Direct user members sorted by role level, limit 30 ────────────────
+        // user_type=1 → local NC user
+        // Sorted by level DESC puts owners/admins first, then members alphabetically.
         $qb  = $db->getQueryBuilder();
         $res = $qb->select('m.user_id', 'm.level', 'm.status', 'u.displayname')
             ->from('circles_member', 'm')
@@ -93,9 +115,12 @@ class MemberService {
             ->andWhere($qb->expr()->eq('m.status',   $qb->createNamedParameter('Member')))
             ->andWhere($qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->orderBy('m.level', 'DESC')
+            ->addOrderBy('u.displayname', 'ASC')
             ->executeQuery();
 
-        $members = [];
+        // First pass: collect rows (we need last-login sort below, applied in PHP
+        // rather than SQL because lastLogin is stored in oc_preferences, not oc_users)
+        $allDirect = [];
         while ($row = $res->fetch()) {
             $userId      = (string)$row['user_id'];
             $displayName = !empty($row['displayname']) ? $row['displayname'] : $userId;
@@ -108,25 +133,402 @@ class MemberService {
                 default     => 'Member',
             };
 
-            $members[] = [
+            $allDirect[] = [
                 'userId'      => $userId,
                 'displayName' => $displayName,
                 'role'        => $role,
                 'level'       => $level,
                 'status'      => 'Member',
+                'lastLogin'   => 0, // filled in below
             ];
         }
         $res->closeCursor();
 
-        $this->logger->info('[MemberService] getTeamMembers: loaded via DB', [
-            'teamId' => $teamId, 'count' => count($members), 'app' => Application::APP_ID,
+        // Second pass: look up last-login timestamps from oc_preferences in a single query.
+        // NC stores the last-login value under app='login', configkey='lastLogin' (ms since epoch).
+        // Table name is 'preferences' on <= NC29, 'user_preferences' on NC30+.
+        if (!empty($allDirect)) {
+            $uids = array_column($allDirect, 'userId');
+            $loginByUid = [];
+            foreach (['user_preferences', 'preferences'] as $prefTable) {
+                try {
+                    $pQb = $db->getQueryBuilder();
+                    // Column names differ: 'appid'/'app' and 'configkey'/'key' between versions.
+                    // Try the NC30+ shape first; on failure fall through to the older one.
+                    $pRes = $pQb->select('userid', 'configvalue')
+                        ->from($prefTable)
+                        ->where($pQb->expr()->eq('appid',     $pQb->createNamedParameter('login')))
+                        ->andWhere($pQb->expr()->eq('configkey', $pQb->createNamedParameter('lastLogin')))
+                        ->andWhere($pQb->expr()->in('userid', $pQb->createNamedParameter($uids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                        ->executeQuery();
+                    while ($pRow = $pRes->fetch()) {
+                        $loginByUid[(string)$pRow['userid']] = (int)$pRow['configvalue'];
+                    }
+                    $pRes->closeCursor();
+                    break;
+                } catch (\Throwable $e) {
+                    // Try the next table name
+                    continue;
+                }
+            }
+            foreach ($allDirect as &$d) {
+                $d['lastLogin'] = $loginByUid[$d['userId']] ?? 0;
+            }
+            unset($d);
+        }
+
+        // Sort: owner first, then admins, then moderators, then by lastLogin DESC
+        // (most-recently-active users surface in the widget's top-16 avatar stack)
+        usort($allDirect, function ($a, $b) {
+            if ($a['level'] !== $b['level']) {
+                return $b['level'] <=> $a['level'];
+            }
+            return $b['lastLogin'] <=> $a['lastLogin'];
+        });
+
+        // Top 16 go to the widget avatar stack.
+        // Strip the internal lastLogin key so it is not exposed in the API response —
+        // only used above for sort order.
+        $members = array_map(
+            fn ($m) => [
+                'userId'      => $m['userId'],
+                'displayName' => $m['displayName'],
+                'role'        => $m['role'],
+                'level'       => $m['level'],
+                'status'      => $m['status'],
+            ],
+            array_slice($allDirect, 0, 16)
+        );
+
+        $this->logger->debug('[MemberService] getTeamMembers: loaded', [
+            'teamId'          => $teamId,
+            'direct_count'    => count($members),
+            'effective_count' => $effectiveCount,
+            'app'             => Application::APP_ID,
         ]);
 
-        return $members;
+        // Fetch group/circle member entries so the widget can show them in a
+        // flat list with a "Group" or "Team" pill on each row.
+        //
+        // CRITICAL: for user_type=2 (group) and user_type=16 (circle), the row's
+        //   user_id     = human-readable label (group GID or circle name)
+        //   single_id   = the unique_id of the corresponding circles_circle row
+        // So we must JOIN on m.single_id = cc.unique_id, NOT user_id.
+        //
+        // circles_circle.source values for NC32:
+        //   1  = user circle (personal)
+        //   2  = group circle (wraps an NC group)
+        //   16 = user-created team (TeamHub / NC Teams app)
+        $memberships = [];
+        $gcQb  = $db->getQueryBuilder();
+        $gcRes = $gcQb->select('m.user_id', 'm.single_id', 'm.user_type',
+                               'cc.name AS circle_name', 'cc.source AS circle_source')
+            ->from('circles_member', 'm')
+            ->leftJoin('m', 'circles_circle', 'cc', 'm.single_id = cc.unique_id')
+            ->where($gcQb->expr()->eq('m.circle_id', $gcQb->createNamedParameter($teamId)))
+            ->andWhere($gcQb->expr()->eq('m.status',  $gcQb->createNamedParameter('Member')))
+            ->andWhere($gcQb->expr()->in(
+                'm.user_type',
+                $gcQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+            ))
+            ->executeQuery();
+
+        while ($gcRow = $gcRes->fetch()) {
+            $subLabel   = (string)$gcRow['user_id'];
+            $subSingle  = (string)$gcRow['single_id'];
+            $subType    = (int)$gcRow['user_type'];
+            $subSource  = (int)($gcRow['circle_source'] ?? 0);
+            $circleName = (string)($gcRow['circle_name'] ?? '');
+
+            $subCount = $this->getEffectiveMemberCount($subSingle, $db);
+
+            // Classify: NC group OR group-backed circle → 'group'; else → 'circle'
+            $isGroup = ($subType === 2) || ($subSource === 2);
+
+            // Resolve display name
+            $displayName = $subLabel;
+            if ($circleName !== '') {
+                if (str_starts_with($circleName, 'group:')) {
+                    $displayName = substr($circleName, 6);
+                } elseif (!str_starts_with($circleName, 'user:')) {
+                    $displayName = $circleName;
+                }
+            }
+
+            if ($isGroup) {
+                try {
+                    $groupManager = $this->container->get(\OCP\IGroupManager::class);
+                    $group = $groupManager->get($displayName);
+                    if ($group) {
+                        $displayName = $group->getDisplayName() ?: $displayName;
+                    }
+                } catch (\Throwable $e) {
+                    // Keep derived name
+                }
+            }
+
+            $memberships[] = [
+                'type'        => $isGroup ? 'group' : 'circle',
+                'displayName' => $displayName,
+                'memberCount' => $subCount,
+            ];
+        }
+        $gcRes->closeCursor();
+
+        // Flag whether the current user is a DIRECT member (user_type=1 row).
+        $isDirectMember = $this->getMemberLevelFromDb($db, $teamId, $user->getUID()) > 0;
+
+        return [
+            'members'          => $members,
+            'memberships'      => $memberships,
+            'effective_count'  => $effectiveCount,
+            'has_more'         => $effectiveCount > count($members),
+            'is_direct_member' => $isDirectMember,
+        ];
     }
 
     /**
-     * Update a member's level in a team. Requires admin or owner level.
+     * Get the full flat, deduplicated list of all effective members of a team
+     * for the "Show all" modal. Includes users added directly AND users added
+     * via groups or sub-teams.
+     *
+     * Reads from circles_membership (Circles' denormalised cache). That cache
+     * already deduplicates — if a user is both directly added and in a group
+     * that was added, they appear only once.
+     *
+     * Returns a flat array of { userId, displayName } sorted by displayName.
+     *
+     * @throws \Exception if user is not authenticated or not a member
+     */
+    public function getAllEffectiveMembers(string $teamId): array {
+
+        $this->requireMemberLevel($teamId);
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // Step 1: pull all single_ids with non-zero level from circles_membership.
+        // Only keep rows whose single_id points to a user circle (source=1),
+        // since circles_membership also contains sub-circle entries — those rows
+        // represent "this sub-circle is reachable from this parent", not a user.
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('ms.single_id')
+            ->from('circles_membership', 'ms')
+            ->innerJoin('ms', 'circles_circle', 'cc', 'ms.single_id = cc.unique_id')
+            ->where($qb->expr()->eq('ms.circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('cc.source',
+                $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeQuery();
+
+        $singleIds = [];
+        while ($r = $res->fetch()) {
+            $singleIds[] = (string)$r['single_id'];
+        }
+        $res->closeCursor();
+
+        if (empty($singleIds)) {
+            return [];
+        }
+
+        // Step 2: resolve each single_id to a NC user. Circles stores a user-circle
+        // row in circles_member for each personal circle: circle_id = the user's
+        // personal-circle unique_id (= single_id), user_type=1, user_id=NC uid.
+        $uQb  = $db->getQueryBuilder();
+        $uRes = $uQb->select('m.user_id', 'u.displayname')
+            ->from('circles_member', 'm')
+            ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
+            ->where($uQb->expr()->in('m.circle_id',
+                $uQb->createNamedParameter($singleIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+            ->andWhere($uQb->expr()->eq('m.user_type',
+                $uQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeQuery();
+
+        $seen = [];
+        $list = [];
+        while ($r = $uRes->fetch()) {
+            $uid = (string)$r['user_id'];
+            if ($uid === '' || isset($seen[$uid])) {
+                continue;
+            }
+            $seen[$uid] = true;
+            $list[] = [
+                'userId'      => $uid,
+                'displayName' => !empty($r['displayname']) ? $r['displayname'] : $uid,
+            ];
+        }
+        $uRes->closeCursor();
+
+        // Sort by display name, case-insensitive
+        usort($list, fn ($a, $b) => strcasecmp($a['displayName'], $b['displayName']));
+
+        return $list;
+    }
+
+    /**
+     * Get the full structured member breakdown for the Manage Team → Members tab.
+     * Requires admin or owner level.
+     *
+     * Returns three buckets:
+     *   direct   — local users (user_type=1) added individually
+     *   groups   — NC groups (user_type=2) — each row has groupId, displayName, memberCount
+     *   circles  — other teams/circles (user_type=16) — each row has circleId, displayName, memberCount
+     *
+     * Plus effective_count (from circles_membership) representing ALL users with
+     * access including those expanded from groups/circles.
+     */
+    public function getMembersForManage(string $teamId): array {
+
+        $this->requireAdminLevel($teamId);
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // ── effective count ────────────────────────────────────────────────────
+        $effectiveCount = $this->getEffectiveMemberCount($teamId, $db);
+
+        // ── direct users (user_type=1) ─────────────────────────────────────────
+        $dQb  = $db->getQueryBuilder();
+        $dRes = $dQb->select('m.user_id', 'm.level', 'm.status', 'u.displayname')
+            ->from('circles_member', 'm')
+            ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
+            ->where($dQb->expr()->eq('m.circle_id',  $dQb->createNamedParameter($teamId)))
+            ->andWhere($dQb->expr()->eq('m.status',   $dQb->createNamedParameter('Member')))
+            ->andWhere($dQb->expr()->eq('m.user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->orderBy('m.level', 'DESC')
+            ->executeQuery();
+
+        $direct = [];
+        while ($row = $dRes->fetch()) {
+            $userId = (string)$row['user_id'];
+            $level  = (int)$row['level'];
+            $direct[] = [
+                'userId'      => $userId,
+                'displayName' => !empty($row['displayname']) ? $row['displayname'] : $userId,
+                'role'        => match (true) {
+                    $level >= 9 => 'Owner',
+                    $level >= 8 => 'Admin',
+                    $level >= 4 => 'Moderator',
+                    default     => 'Member',
+                },
+                'level'  => $level,
+                'status' => 'Member',
+            ];
+        }
+        $dRes->closeCursor();
+
+        // ── groups (user_type=2) and circles (user_type=16) ────────────────────
+        //
+        // Single unified query — both share the same join pattern.
+        //
+        // CRITICAL: for user_type=2 (group) and user_type=16 (circle):
+        //   m.user_id   = human-readable label (group GID or circle display name)
+        //   m.single_id = unique_id of the corresponding circles_circle row
+        //
+        // To resolve the name and classify the row, JOIN on m.single_id = cc.unique_id.
+        // To count effective members, use circles_membership WHERE circle_id = single_id.
+        //
+        // Classification:
+        //   - user_type=2 OR cc.source=2 → Groups section (NC group)
+        //   - user_type=16 AND cc.source=16 → Teams section (user-created team)
+        //
+        // The remove handle is always m.single_id + the original user_type, because
+        // circles_member deletes require (circle_id, single_id, user_type) to target
+        // the exact row uniquely.
+        $groups  = [];
+        $circles = [];
+
+        $gcQb  = $db->getQueryBuilder();
+        $gcRes = $gcQb->select('m.user_id', 'm.single_id', 'm.user_type',
+                               'cc.name AS circle_name', 'cc.source AS circle_source')
+            ->from('circles_member', 'm')
+            ->leftJoin('m', 'circles_circle', 'cc', 'm.single_id = cc.unique_id')
+            ->where($gcQb->expr()->eq('m.circle_id',  $gcQb->createNamedParameter($teamId)))
+            ->andWhere($gcQb->expr()->eq('m.status',   $gcQb->createNamedParameter('Member')))
+            ->andWhere($gcQb->expr()->in(
+                'm.user_type',
+                $gcQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+            ))
+            ->executeQuery();
+
+        while ($row = $gcRes->fetch()) {
+            $subLabel   = (string)$row['user_id'];      // human label
+            $subSingle  = (string)$row['single_id'];    // → circles_circle.unique_id
+            $subType    = (int)$row['user_type'];
+            $subSource  = (int)($row['circle_source'] ?? 0);
+            $circleName = (string)($row['circle_name'] ?? '');
+
+            // Effective count from circles_membership using single_id as the key
+            $subCount = $this->getEffectiveMemberCount($subSingle, $db);
+
+            // Resolve display name
+            $displayName = $subLabel;
+            if ($circleName !== '') {
+                if (str_starts_with($circleName, 'group:')) {
+                    $displayName = substr($circleName, 6);
+                } elseif (!str_starts_with($circleName, 'user:')) {
+                    $displayName = $circleName;
+                }
+            }
+
+            // Classify as group when row is user_type=2 OR circle source=2
+            $isGroup = ($subType === 2) || ($subSource === 2);
+
+            if ($isGroup) {
+                // Resolve the friendly group display name via IGroupManager
+                try {
+                    $groupManager = $this->container->get(\OCP\IGroupManager::class);
+                    $g = $groupManager->get($displayName);
+                    if ($g) {
+                        $displayName = $g->getDisplayName() ?: $displayName;
+                    }
+                } catch (\Throwable $e) {
+                    // Keep derived name
+                }
+                $groups[] = [
+                    // singleId is the DELETE key for this row in circles_member.
+                    // userType tells the frontend which type to send in the remove call.
+                    'groupId'     => $subSingle,
+                    'singleId'    => $subSingle,
+                    'userType'    => $subType,
+                    'displayName' => $displayName,
+                    'memberCount' => $subCount,
+                ];
+            } else {
+                $circles[] = [
+                    'circleId'    => $subSingle,
+                    'singleId'    => $subSingle,
+                    'userType'    => $subType,
+                    'displayName' => $displayName,
+                    'memberCount' => $subCount,
+                ];
+            }
+
+            $this->logger->debug('[MemberService] getMembersForManage: row resolved', [
+                'user_id' => $subLabel, 'single_id' => $subSingle,
+                'user_type' => $subType, 'circle_source' => $subSource,
+                'circle_name' => $circleName, 'display' => $displayName,
+                'count' => $subCount, 'is_group' => $isGroup,
+                'app' => Application::APP_ID,
+            ]);
+        }
+        $gcRes->closeCursor();
+
+        $this->logger->debug('[MemberService] getMembersForManage', [
+            'teamId'          => $teamId,
+            'direct'          => count($direct),
+            'groups'          => count($groups),
+            'circles'         => count($circles),
+            'effective_count' => $effectiveCount,
+            'app'             => Application::APP_ID,
+        ]);
+
+        return [
+            'direct'          => $direct,
+            'groups'          => $groups,
+            'circles'         => $circles,
+            'effective_count' => $effectiveCount,
+        ];
+    }
+
+    /**
      * Valid target levels: 1 (Member), 4 (Moderator), 8 (Admin).
      * Owner (9) cannot be demoted through this endpoint.
      * The caller cannot change their own level.
@@ -219,9 +621,19 @@ class MemberService {
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
 
-        if ($level === 0) {
-            throw new \Exception('You are not a member of this team');
+        // Direct member — fast path
+        if ($level > 0) {
+            return;
         }
+
+        // Indirect member (added via a group or another team) — also allowed
+        // for read-only operations. Admin/moderator gates use requireAdminLevel()
+        // / requireModeratorLevel() which require a direct row with the correct level.
+        if ($this->isEffectiveMember($teamId, $user->getUID(), $db)) {
+            return;
+        }
+
+        throw new \Exception('You are not a member of this team');
     }
 
     /**
@@ -340,7 +752,12 @@ class MemberService {
     /**
      * Leave a team (remove current user from circle).
      *
-     * @throws \Exception if owner tries to leave with members still in the team
+     * Throws a specific exception when the user is only an INDIRECT member
+     * (added via a group or another team) so the frontend can show a tooltip
+     * instead of a generic error.
+     *
+     * @throws \Exception if owner tries to leave with members still in the team,
+     *                    or if user is only an indirect member
      */
     public function leaveTeam(string $teamId): void {
 
@@ -359,6 +776,11 @@ class MemberService {
             $level = $this->getMemberLevelFromDb($db, $teamId, $uid);
 
             if ($level === 0) {
+                // Check if the user has indirect access (via group/team) before
+                // returning a confusing "not a member" error.
+                if ($this->isEffectiveMember($teamId, $uid, $db)) {
+                    throw new \Exception('indirect_member');
+                }
                 throw new \Exception('You are not a member of this team.');
             }
 
@@ -404,58 +826,94 @@ class MemberService {
      *
      * @throws \Exception if target is the owner or not found
      */
-    public function removeMember(string $teamId, string $userId): void {
+    /**
+     * Remove a member, group, or team from a team. Requires admin or owner level.
+     *
+     * @param string $teamId    Circle unique_id of the parent team
+     * @param string $targetId  For type=1: NC user ID (stored in circles_member.user_id)
+     *                          For type=2 or 16: single_id of the row
+     *                          (i.e. the sub-circle's unique_id)
+     * @param int    $userType  Circles member type: 1=user, 2=group, 16=circle
+     * @throws \Exception on invalid state or insufficient permissions
+     */
+    public function removeMember(string $teamId, string $targetId, int $userType = 1): void {
 
         $this->requireAdminLevel($teamId);
 
-        $user = $this->userSession->getUser();
-
-        // Look up the target member's single_id and level from DB.
-        // This avoids getCircle() failing on non-zero config circles, and gives
-        // us the memberId needed by Circles MemberService::removeMember().
         $db = $this->container->get(\OCP\IDBConnection::class);
-        $mQb = $db->getQueryBuilder();
-        $mRes = $mQb->select('single_id', 'level')
-            ->from('circles_member')
-            ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
-            ->andWhere($mQb->expr()->eq('user_id',   $mQb->createNamedParameter($userId)))
-            ->andWhere($mQb->expr()->eq('user_type', $mQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $mRow = $mRes->fetch();
-        $mRes->closeCursor();
 
-        if (!$mRow) {
-            throw new \Exception('Member not found in this team');
-        }
-        if ((int)$mRow['level'] >= 9) {
-            throw new \Exception('Cannot remove the team owner');
-        }
+        if ($userType === 1) {
+            // User rows: lookup by user_id (NC uid), verify not the owner
+            $mQb  = $db->getQueryBuilder();
+            $mRes = $mQb->select('level')
+                ->from('circles_member')
+                ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
+                ->andWhere($mQb->expr()->eq('user_id',  $mQb->createNamedParameter($targetId)))
+                ->andWhere($mQb->expr()->eq('user_type', $mQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $mRow = $mRes->fetch();
+            $mRes->closeCursor();
 
-        try {
-            // Delete directly from circles_member. The Circles MemberService::removeMember()
-            // API fails on hidden circles (non-zero config bitmask) because getMemberById()
-            // cannot find the member from the initiator's perspective. A direct DB delete
-            // is safe here — we have already verified admin level and target existence above.
+            if (!$mRow) {
+                throw new \Exception('Member not found in this team');
+            }
+            if ((int)$mRow['level'] >= 9) {
+                throw new \Exception('Cannot remove the team owner');
+            }
+
+            // Delete by user_id
             $delQb = $db->getQueryBuilder();
             $delQb->delete('circles_member')
                 ->where($delQb->expr()->eq('circle_id', $delQb->createNamedParameter($teamId)))
-                ->andWhere($delQb->expr()->eq('user_id',   $delQb->createNamedParameter($userId)))
+                ->andWhere($delQb->expr()->eq('user_id',  $delQb->createNamedParameter($targetId)))
                 ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
+        } else {
+            // Group (type=2) or circle (type=16) rows:
+            // user_id stores a display label, NOT a lookup key.
+            // The delete key is single_id (which = the sub-circle's unique_id).
+            $mQb  = $db->getQueryBuilder();
+            $mRes = $mQb->select($mQb->func()->count('*', 'cnt'))
+                ->from('circles_member')
+                ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
+                ->andWhere($mQb->expr()->eq('single_id', $mQb->createNamedParameter($targetId)))
+                ->andWhere($mQb->expr()->eq('user_type', $mQb->createNamedParameter($userType, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeQuery();
+            $cnt = (int)$mRes->fetchOne();
+            $mRes->closeCursor();
+            if ($cnt === 0) {
+                $typeName = $userType === 2 ? 'Group' : 'Team';
+                throw new \Exception($typeName . ' not found in this team');
+            }
 
-            $this->logger->info('[MemberService] removeMember: member removed via direct DB delete', [
-                'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
-            ]);
-        } catch (\Exception $e) {
-            $this->logger->error('[MemberService] Error removing member', [
-                'teamId'    => $teamId,
-                'userId'    => $userId,
-                'exception' => $e,
-                'app'       => Application::APP_ID,
-            ]);
-            throw $e;
+            // Delete by single_id
+            $delQb = $db->getQueryBuilder();
+            $delQb->delete('circles_member')
+                ->where($delQb->expr()->eq('circle_id', $delQb->createNamedParameter($teamId)))
+                ->andWhere($delQb->expr()->eq('single_id', $delQb->createNamedParameter($targetId)))
+                ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter($userType, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
         }
+
+        // Rebuild the circles_membership cache for this team so users added via
+        // the removed group/circle disappear from share pickers. Non-fatal —
+        // the admin maintenance UI can also rebuild manually.
+        try {
+            $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
+            $membershipService->onUpdate($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MemberService] removeMember: cache rebuild failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        $this->logger->info('[MemberService] removeMember: removed via direct DB delete', [
+            'teamId'   => $teamId,
+            'targetId' => $targetId,
+            'userType' => $userType,
+            'app'      => Application::APP_ID,
+        ]);
     }
 
     /**
@@ -493,10 +951,11 @@ class MemberService {
                 $memberId   = $entry['id'] ?? '';
                 $typeStr    = $entry['type'] ?? 'user';
                 $memberType = match($typeStr) {
-                    'group'     => 2,  // NC group
-                    'federated' => 4,  // federated NC user
-                    'email'     => 7,  // email (requires Circles federation)
-                    default     => 1,  // local NC user
+                    'group'     => 2,   // NC group
+                    'federated' => 4,   // federated NC user
+                    'email'     => 7,   // email (requires Circles federation)
+                    'circle'    => 16,  // another NC circle/team
+                    default     => 1,   // local NC user
                 };
             }
 
@@ -810,7 +1269,104 @@ class MemberService {
         }
     }
 
-    private function resolveUserSingleId(string $uid, \OCP\IDBConnection $db): ?string {
+    // -------------------------------------------------------------------------
+    // Effective-membership helpers (circles_membership as source of truth)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Return the total number of users who effectively have access to a team
+     * (or sub-circle), including those added via groups or nested teams.
+     *
+     * Uses circles_membership — Nextcloud Circles' own denormalised cache.
+     * This is the same table that share pickers and the NC frontend use.
+     * It is populated by Circles itself when members are managed via its API,
+     * and can be rebuilt with `occ circles:memberships`.
+     *
+     * Confirmed working: admin settings grid uses this query and shows correct
+     * counts (e.g. 34 = 2 direct + 32 via group) for teams with group members.
+     *
+     * @param string        $teamId Circle unique_id (parent OR sub-circle)
+     * @param IDBConnection $db     Open DB connection
+     * @return int
+     */
+    public function getEffectiveMemberCount(string $teamId, \OCP\IDBConnection $db): int {
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select($qb->func()->count('*', 'cnt'))
+                ->from('circles_membership')
+                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+                ->executeQuery();
+            $cnt = (int)$res->fetchOne();
+            $res->closeCursor();
+            $this->logger->debug('[MemberService] getEffectiveMemberCount', [
+                'teamId' => $teamId, 'count' => $cnt, 'app' => Application::APP_ID,
+            ]);
+            return $cnt;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MemberService] getEffectiveMemberCount failed, returning 0', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return 0;
+        }
+    }
+
+    /**
+     * Check whether a user has effective access to a team — directly
+     * (user_type=1 row in circles_member) or indirectly (via a group or
+     * another team that is a member of this team).
+     *
+     * Falls back gracefully when circles_membership is unavailable.
+     */
+    public function isEffectiveMember(string $teamId, string $uid, \OCP\IDBConnection $db): bool {
+        // Fast path: direct user row
+        if ($this->getMemberLevelFromDb($db, $teamId, $uid) > 0) {
+            return true;
+        }
+        // Slow path: check circles_membership via the user's personal-circle single_id
+        try {
+            $singleId = $this->resolveUserSingleId($uid, $db);
+            if (!$singleId) {
+                return false;
+            }
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select($qb->func()->count('*', 'cnt'))
+                ->from('circles_membership')
+                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('single_id', $qb->createNamedParameter($singleId)))
+                ->executeQuery();
+            $cnt = (int)$res->fetchOne();
+            $res->closeCursor();
+            $this->logger->debug('[MemberService] isEffectiveMember via circles_membership', [
+                'teamId' => $teamId, 'uid' => $uid, 'found' => $cnt > 0, 'app' => Application::APP_ID,
+            ]);
+            return $cnt > 0;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MemberService] isEffectiveMember circles_membership lookup failed', [
+                'teamId' => $teamId, 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Check whether the current user is a DIRECT member (user_type=1 row in
+     * circles_member). Used by the browse endpoint to return isDirectMember
+     * so the frontend can show/disable the Leave button appropriately.
+     */
+    public function isCurrentUserDirectMember(string $teamId): bool {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            return false;
+        }
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        return $this->getMemberLevelFromDb($db, $teamId, $user->getUID()) > 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // resolveUserSingleId (public — also called by TeamService for browse query)
+    // -------------------------------------------------------------------------
+
+    public function resolveUserSingleId(string $uid, \OCP\IDBConnection $db): ?string {
 
         // Strategy 1: NC preferences — 'circles' app, 'userSingleId' key.
         // NC QueryBuilder adds the oc_ prefix automatically, so we pass bare names.
@@ -1140,6 +1696,51 @@ class MemberService {
                 'type'        => 'federated',
                 'icon'        => 'federation',
             ];
+        }
+
+        // Circles / Teams — search user-created circles by name (source=16).
+        // Always shown when circles app is available; no separate admin toggle needed
+        // since they are just other teams within the same NC instance.
+        // Excludes personal circles (name starts with 'user:') and
+        // group-backed circles (name starts with 'group:').
+        if ($this->appManager->isInstalled('circles')) {
+            try {
+                $db   = $this->container->get(\OCP\IDBConnection::class);
+                $cQb  = $db->getQueryBuilder();
+                $cRes = $cQb->select('unique_id', 'name')
+                    ->from('circles_circle')
+                    ->where(
+                        $cQb->expr()->like(
+                            'name',
+                            $cQb->createNamedParameter('%' . $db->escapeLikeParameter($query) . '%')
+                        )
+                    )
+                    ->andWhere($cQb->expr()->eq('source', $cQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->setMaxResults($limit)
+                    ->executeQuery();
+
+                while ($cRow = $cRes->fetch()) {
+                    $name = (string)$cRow['name'];
+                    // Skip personal and group-backed circles
+                    if (str_starts_with($name, 'user:') || str_starts_with($name, 'group:')) {
+                        continue;
+                    }
+                    if (count($results) >= $limit * 3) {
+                        break;
+                    }
+                    $results[] = [
+                        'id'          => (string)$cRow['unique_id'],
+                        'displayName' => $name,
+                        'type'        => 'circle',
+                        'icon'        => 'circle',
+                    ];
+                }
+                $cRes->closeCursor();
+            } catch (\Throwable $e) {
+                $this->logger->warning('[MemberService] searchUsers: circle search failed', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
         }
 
         return $results;

@@ -3,18 +3,34 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.12.0] — 2026-04-23
+## [3.13.0] — 2026-04-24
 
 ### Added
-- **Shared Files widget** — new dashboard widget showing files and folders that team members have shared directly with the team circle (e.g. from Nextcloud Notes or Files). Displays item name, type icon (including a dedicated note icon for `.md` files), sharer display name with avatar, and share date. Paginated at 10 items per page, sorted newest first.
-- New `GET /api/v1/teams/{teamId}/files/shared` endpoint — returns paginated list of files/folders shared with the team circle, excluding the team folder itself. Accepts `page` and `limit` query parameters.
-- New `shared_files` app toggle in the Team Apps section of Manage Team — defaults to off; team owners enable it explicitly. Independent of the Files (team folder) toggle.
+- **Group and team members are now fully recognised.** When a Nextcloud group or another team is added to a team, its users count towards the team's member total and gain access to the team. The members widget shows direct users as avatars (up to 16, sorted by role then last activity), followed by a flat list of added groups and teams with a `GROUP` or `TEAM` pill and their user count. A "Show all N members" link opens a searchable modal listing every effective user, deduplicated.
+- **Manage Team → Members tab** displays three buckets: Direct Members, Groups & Teams (with name and effective user count), and Pending Join Requests. Admins can remove whole groups or teams, which also clears their users' indirect access.
+- **Invite modal** can now search for and add other user-created teams (circles) in addition to users, groups, email invites, and federated contacts.
+- New `GET /api/v1/teams/{teamId}/members/all` endpoint — returns the flat deduplicated list of all effective users (direct plus expanded from groups and sub-teams) for the Show All modal. Requires member-level access.
+- New `GET /api/v1/teams/{teamId}/members/manage` endpoint — structured response (direct, groups, circles, effective_count) for the Manage Team members tab. Requires admin-level access.
+- `BrowseTeamsView` teams now return an `isDirectMember` flag so indirect members see a disabled Leave button with an explanatory tooltip rather than being allowed to "leave" a team they were never directly added to.
+- `leaveTeam` now detects indirect membership and returns a 403 with an `indirect_member` sentinel so the UI can show the tooltip explanation.
+
+### Changed
+- The `GET /api/v1/teams/{teamId}/members` response shape changed from a flat array to `{members, memberships, effective_count, has_more, is_direct_member}`. `members` is limited to the top 16 direct users (sorted by role then last login), `memberships` is the flat list of added groups and teams for the widget.
+- Admin Settings → Maintenance team member count column now reflects effective membership (direct users plus users from added groups and sub-teams) instead of only the three top-level rows in `circles_member`.
+- `removeMember()` now correctly handles groups (`user_type=2`) and teams (`user_type=16`) by using `single_id` as the delete key. It also calls `MembershipService::onUpdate()` after deletion so removed indirect users actually disappear from share pickers.
+- Pending Join Requests in Manage Team has extra top padding to separate it from the membership summary.
+- Group and Team icons/pills use the primary-element (blue) and warning (amber) tones respectively — the previous success-green was too low-contrast.
 
 ### Fixed
-- Fixed team folder query in `ResourceService` incorrectly picking up individual file shares (e.g. Notes shares) as the team folder when no folder was configured — query now filters on `item_type = 'folder'`.
-- Fixed `shared_files` toggle defaulting to on in Manage Team UI for teams that had no saved state yet — default is now off.
+- Integrity check in Admin Settings → Maintenance no longer flags teams as mismatched just because they have a group or sub-team as a member. It now flags only teams whose `circles_membership` cache is genuinely empty while direct members exist.
+- `getTeamMembers` no longer fails on the `u.last_login` column (which does not exist on `oc_users`); last-login sorting now reads from `oc_user_preferences` / `oc_preferences`.
+- `browseAllTeams` correctly detects membership via groups or sub-teams in addition to direct rows.
 
+### Security
+- `getTeamMembers` now enforces `requireMemberLevel` — previously any authenticated user could enumerate any team's member list by guessing a circle ID.
+- `lastLogin` timestamps (used internally for sort order) are stripped from the `members` response so they are never exposed to the client.
 
+## [3.11.0] — 2026-04-22
 
 ### Added
 - **Upcoming Tasks widget now shows personal tasks alongside Deck tasks.** When the NC Tasks app is installed and the team has a calendar, VTODO tasks from the team calendar are fetched server-side (Sabre/VObject, direct DB query on `calendarobjects`) and merged with Deck cards into a single sorted list. Each task row shows a source pill — blue "Deck" or teal "Personal task" — so users can distinguish at a glance. The two task types also use different badge icons.

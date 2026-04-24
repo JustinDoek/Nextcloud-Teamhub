@@ -173,14 +173,16 @@ class MaintenanceService {
                 return ['total' => $total, 'page' => $page, 'per_page' => $perPage, 'teams' => []];
             }
 
-            // ── Step 4: member counts for this page only ──────────────────────
+            // ── Step 4: effective member counts from circles_membership ──────────
+            // circles_membership is the denormalised cache that Circles maintains.
+            // It expands all groups and sub-circles, giving the true user count.
+            // Using circles_member instead would undercount when groups/teams are members.
             $pageIds = array_column($page_rows, '_id');
 
             $cqb = $this->db->getQueryBuilder();
             $cqb->select('circle_id', $cqb->func()->count('*', 'cnt'))
-                ->from('circles_member')
+                ->from('circles_membership')
                 ->where($cqb->expr()->in('circle_id', $cqb->createNamedParameter($pageIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
-                ->andWhere($cqb->expr()->eq('status', $cqb->createNamedParameter('Member')))
                 ->groupBy('circle_id');
             $cRes = $cqb->executeQuery();
             $memberCounts = [];
@@ -739,23 +741,34 @@ class MaintenanceService {
     // -------------------------------------------------------------------------
 
     /**
-     * Scan every user-created team and compare:
-     *   - member_count     : rows in circles_member    where level >= 1 AND status='Member'
-     *   - membership_count : rows in circles_membership (the denormalised cache)
+     * Scan every user-created team and check that the circles_membership
+     * denormalised cache is populated for every team that has direct members.
      *
-     * Any mismatch indicates a stale cache — typically caused by raw SQL writes
-     * to circles_member that did not trigger MembershipService::onUpdate().
+     * OLD (wrong) logic compared circles_member count vs circles_membership count.
+     * Those numbers are expected to differ whenever groups or sub-teams are added:
+     *   circles_member  = direct entries (1 row per user/group/team added)
+     *   circles_membership = expanded cache (1 row per effective user)
      *
-     * Returns { total_teams, healthy, mismatched, issues: [ {id, name, member_count, membership_count} ] }
+     * NEW logic:
+     *   A team is HEALTHY when either:
+     *     • it has 0 direct member rows (empty team — cache is correctly empty), OR
+     *     • it has ≥1 effective user rows in circles_membership (cache is populated)
+     *
+     *   A team is UNHEALTHY (stale cache) when:
+     *     • it has ≥1 direct member rows in circles_member AND
+     *     • it has 0 rows in circles_membership
+     *     → The cache needs rebuilding (run Repair).
+     *
+     * Returns { total_teams, healthy, mismatched, issues: [{id, name, direct_count, effective_count}] }
      */
     public function checkMembershipIntegrity(): array {
         $this->requireNcAdmin();
 
-        $issues = [];
-        $total  = 0;
+        $issues  = [];
+        $total   = 0;
         $healthy = 0;
 
-        // Fetch all user-created circles (filter out system/user/group/etc. circles by source)
+        // Fetch all user-created circles (source=16 = Nextcloud app-created circles)
         $qb = $this->db->getQueryBuilder();
         $res = $qb->select('c.unique_id', 'c.name')
             ->from('circles_circle', 'c')
@@ -768,34 +781,40 @@ class MaintenanceService {
             $total++;
             $teamId = $circle['unique_id'];
 
-            // Count active members in the source-of-truth table
+            // Count ANY direct member entries (all user_types, all statuses that matter)
             $mqb = $this->db->getQueryBuilder();
             $mqb->select($mqb->func()->count('*', 'c'))
                 ->from('circles_member')
                 ->where($mqb->expr()->eq('circle_id', $mqb->createNamedParameter($teamId)))
-                ->andWhere($mqb->expr()->gte('level', $mqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($mqb->expr()->eq('status', $mqb->createNamedParameter('Member')));
-            $mRes = $mqb->executeQuery();
-            $memberCount = (int)$mRes->fetchOne();
+            $mRes        = $mqb->executeQuery();
+            $directCount = (int)$mRes->fetchOne();
             $mRes->closeCursor();
 
-            // Count rows in the denormalised cache
+            // Count rows in the expanded cache
             $cqb = $this->db->getQueryBuilder();
             $cqb->select($cqb->func()->count('*', 'c'))
                 ->from('circles_membership')
                 ->where($cqb->expr()->eq('circle_id', $cqb->createNamedParameter($teamId)));
-            $cRes = $cqb->executeQuery();
-            $membershipCount = (int)$cRes->fetchOne();
+            $cRes          = $cqb->executeQuery();
+            $effectiveCount = (int)$cRes->fetchOne();
             $cRes->closeCursor();
 
-            if ($memberCount === $membershipCount) {
+            // Healthy: empty team OR cache populated
+            $isHealthy = ($directCount === 0) || ($effectiveCount > 0);
+
+            if ($isHealthy) {
                 $healthy++;
             } else {
+                // Stale cache: has members but cache is empty
                 $issues[] = [
-                    'id'               => $teamId,
-                    'name'             => $circle['name'],
-                    'member_count'     => $memberCount,
-                    'membership_count' => $membershipCount,
+                    'id'              => $teamId,
+                    'name'            => $circle['name'],
+                    'direct_count'    => $directCount,
+                    'effective_count' => $effectiveCount,
+                    // Keep legacy keys so the frontend stays compatible
+                    'member_count'     => $directCount,
+                    'membership_count' => $effectiveCount,
                 ];
             }
         }

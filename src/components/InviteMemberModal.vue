@@ -31,6 +31,7 @@
                         @click="addItem(item)">
                         <div class="invite-modal__result-avatar" :class="'invite-modal__result-avatar--' + item.type">
                             <AccountGroup v-if="item.type === 'group'" :size="20" />
+                            <AccountMultiple v-else-if="item.type === 'circle'" :size="20" />
                             <EmailOutline v-else-if="item.type === 'email'" :size="20" />
                             <EarthArrowRight v-else-if="item.type === 'federated'" :size="20" />
                             <NcAvatar v-else :user="item.id" :display-name="item.label" :size="32" :disable-menu="true" />
@@ -39,6 +40,7 @@
                             <span class="invite-modal__result-name">{{ item.label }}</span>
                             <span class="invite-modal__result-id">
                                 <span v-if="item.type === 'group'">{{ t('teamhub', 'Group') }}</span>
+                                <span v-else-if="item.type === 'circle'">{{ t('teamhub', 'Team') }}</span>
                                 <span v-else-if="item.type === 'email'">{{ t('teamhub', 'Email invite') }}</span>
                                 <span v-else-if="item.type === 'federated'">{{ t('teamhub', 'Federated user') }}</span>
                                 <span v-else>{{ item.id }}</span>
@@ -58,6 +60,7 @@
                 <div class="invite-modal__chips">
                     <span v-for="u in staged" :key="u.type + ':' + u.id" class="invite-modal__chip">
                         <AccountGroup v-if="u.type === 'group'" :size="16" />
+                        <AccountMultiple v-else-if="u.type === 'circle'" :size="16" />
                         <EmailOutline v-else-if="u.type === 'email'" :size="16" />
                         <EarthArrowRight v-else-if="u.type === 'federated'" :size="16" />
                         <NcAvatar v-else :user="u.id" :display-name="u.label" :size="20" :disable-menu="true" />
@@ -95,13 +98,14 @@ import axios from '@nextcloud/axios'
 import { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon } from '@nextcloud/vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
+import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 import EarthArrowRight from 'vue-material-design-icons/EarthArrowRight.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 
 export default {
     name: 'InviteMemberModal',
-    components: { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, AccountPlus, AccountGroup, EmailOutline, EarthArrowRight, Plus },
+    components: { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, AccountPlus, AccountGroup, AccountMultiple, EmailOutline, EarthArrowRight, Plus },
     props: {
         teamId: { type: String, required: true },
     },
@@ -124,6 +128,7 @@ export default {
             if (this.allowedTypes.includes('group'))     labels.push(t('teamhub', 'group'))
             if (this.allowedTypes.includes('email'))     labels.push(t('teamhub', 'email address'))
             if (this.allowedTypes.includes('federated')) labels.push(t('teamhub', 'user@remote.example'))
+            labels.push(t('teamhub', 'team name'))
             return labels.join(', ') + '…'
         },
     },
@@ -251,6 +256,7 @@ export default {
 }
 
 .invite-modal__result-avatar--group,
+.invite-modal__result-avatar--circle,
 .invite-modal__result-avatar--email,
 .invite-modal__result-avatar--federated {
     background: var(--color-primary-element-light);

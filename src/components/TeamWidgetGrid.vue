@@ -91,7 +91,12 @@
                                 <template #icon><AccountPlus :size="20" /></template>
                                 {{ t('teamhub', 'Invite user') }}
                             </NcActionButton>
-                            <NcActionButton @click="onLeaveTeamClick">
+                            <NcActionButton
+                                :disabled="!isCurrentUserDirectMember"
+                                :title="!isCurrentUserDirectMember
+                                    ? t('teamhub', 'You were added via a group or team. Ask your administrator to remove you.')
+                                    : ''"
+                                @click="isCurrentUserDirectMember && onLeaveTeamClick()">
                                 <template #icon><LocationExit :size="20" /></template>
                                 {{ t('teamhub', 'Leave team') }}
                             </NcActionButton>
@@ -152,7 +157,7 @@
                     </div>
                     <div class="teamhub-widget-header">
                         <AccountGroup :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ members.length }})</span>
+                        <span class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ effectiveMemberCount }})</span>
                         <button
                             v-if="isTeamModerator && !editMode"
                             class="teamhub-widget-invite-btn"
@@ -170,9 +175,10 @@
                         </button>
                     </div>
                     <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content">
-                        <div class="teamhub-avatar-stack">
+                        <!-- Direct user avatars (up to 16, sorted by activity) -->
+                        <div v-if="members.length" class="teamhub-avatar-stack">
                             <NcAvatar
-                                v-for="member in members.slice(0, 10)"
+                                v-for="member in members"
                                 v-if="member.userId"
                                 :key="member.userId"
                                 :user="member.userId"
@@ -181,10 +187,40 @@
                                 :disable-menu="false"
                                 :size="32"
                                 class="teamhub-stacked-avatar" />
-                            <span v-if="members.length > 10" class="teamhub-more-members">
-                                +{{ members.length - 10 }}
-                            </span>
                         </div>
+
+                        <!-- Flat list of group/team memberships with pills -->
+                        <div v-if="memberships && memberships.length" class="teamhub-memberships-list">
+                            <div
+                                v-for="m in memberships"
+                                :key="m.type + ':' + m.displayName"
+                                class="teamhub-membership-row">
+                                <div
+                                    class="teamhub-membership-icon"
+                                    :class="'teamhub-membership-icon--' + m.type">
+                                    <AccountGroup v-if="m.type === 'group'" :size="18" />
+                                    <AccountMultipleIcon v-else :size="18" />
+                                </div>
+                                <span class="teamhub-membership-name">{{ m.displayName }}</span>
+                                <span
+                                    class="teamhub-membership-pill"
+                                    :class="'teamhub-membership-pill--' + m.type">
+                                    {{ m.type === 'group' ? t('teamhub', 'Group') : t('teamhub', 'Team') }}
+                                </span>
+                                <span class="teamhub-membership-count">
+                                    {{ t('teamhub', '{n} users', { n: m.memberCount }) }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Show all button — reveals modal with every effective user -->
+                        <button
+                            v-if="effectiveMemberCount > members.length"
+                            class="teamhub-members-show-all"
+                            type="button"
+                            @click="openAllMembersModal">
+                            {{ t('teamhub', 'Show all {n} members', { n: effectiveMemberCount }) }}
+                        </button>
                     </div>
                 </div>
             </grid-item>
@@ -475,15 +511,65 @@
             </grid-item>
 
         </grid-layout>
+
+        <!-- Show all effective members modal — opened from the members widget -->
+        <NcModal
+            v-if="allMembersModalOpen"
+            :name="t('teamhub', 'All members ({n})', { n: allMembersList.length || effectiveMemberCount })"
+            size="normal"
+            @close="closeAllMembersModal">
+            <div class="teamhub-all-members-modal">
+                <h2 class="teamhub-all-members-modal__title">
+                    {{ t('teamhub', 'All members') }}
+                    <span v-if="!allMembersLoading" class="teamhub-all-members-modal__count">
+                        ({{ allMembersList.length }})
+                    </span>
+                </h2>
+
+                <NcTextField
+                    v-if="!allMembersLoading && allMembersList.length > 0"
+                    :value.sync="allMembersSearch"
+                    :label="t('teamhub', 'Search members')"
+                    :placeholder="t('teamhub', 'Search by name…')"
+                    class="teamhub-all-members-modal__search" />
+
+                <div v-if="allMembersLoading" class="teamhub-all-members-modal__loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+
+                <ul v-else-if="filteredAllMembers.length" class="teamhub-all-members-modal__list">
+                    <li
+                        v-for="m in filteredAllMembers"
+                        :key="m.userId"
+                        class="teamhub-all-members-modal__row">
+                        <NcAvatar
+                            :user="m.userId"
+                            :display-name="m.displayName"
+                            :show-user-status="true"
+                            :disable-menu="false"
+                            :size="36" />
+                        <div class="teamhub-all-members-modal__info">
+                            <span class="teamhub-all-members-modal__name">{{ m.displayName }}</span>
+                            <span class="teamhub-all-members-modal__uid">{{ m.userId }}</span>
+                        </div>
+                    </li>
+                </ul>
+
+                <div v-else class="teamhub-all-members-modal__empty">
+                    {{ t('teamhub', 'No members match your search.') }}
+                </div>
+            </div>
+        </NcModal>
     </div>
 </template>
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
 import { mapState, mapGetters } from 'vuex'
-import { NcAvatar, NcActions, NcActionButton } from '@nextcloud/vue'
+import { NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'vue-grid-layout'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
@@ -494,6 +580,7 @@ import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
+import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
 import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
@@ -539,10 +626,10 @@ export default {
     name: 'TeamWidgetGrid',
 
     components: {
-        NcAvatar, NcActions, NcActionButton,
+        NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon,
         GridLayout, GridItem,
         MessageOutline, Folder, Calendar, CalendarPlus, CardText,
-        CheckboxMarkedOutline, InformationOutline, AccountGroup,
+        CheckboxMarkedOutline, InformationOutline, AccountGroup, AccountMultipleIcon,
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus,
         Cog, VideoIcon, Puzzle, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
@@ -575,10 +662,21 @@ export default {
         'reset-to-default',
     ],
 
+    data() {
+        return {
+            // "Show all members" modal state
+            allMembersModalOpen: false,
+            allMembersList:      [],
+            allMembersLoading:   false,
+            allMembersSearch:    '',
+        }
+    },
+
     computed: {
         ...mapState([
-            'currentTeamId', 'resources', 'members',
-            'intravoxAvailable', 'teamWidgets',
+            'currentTeamId', 'resources', 'members', 'memberships',
+            'effectiveMemberCount',
+            'intravoxAvailable', 'teamWidgets', 'isCurrentUserDirectMember',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -720,6 +818,19 @@ export default {
             const m = this.members.find(m => m.userId === uid)
             return m && m.level >= 4
         },
+
+        /**
+         * Filtered subset of allMembersList based on allMembersSearch.
+         * Case-insensitive match against displayName and userId.
+         */
+        filteredAllMembers() {
+            const q = (this.allMembersSearch || '').trim().toLowerCase()
+            if (!q) return this.allMembersList
+            return this.allMembersList.filter(m =>
+                (m.displayName || '').toLowerCase().includes(q)
+                || (m.userId || '').toLowerCase().includes(q)
+            )
+        },
     },
 
     methods: {
@@ -727,6 +838,32 @@ export default {
 
         onLayoutUpdated(newLayout) {
             this.$emit('layout-updated', newLayout)
+        },
+
+        /**
+         * Open the "Show all members" modal and lazy-load the full flat list
+         * of effective members (direct + expanded from groups/teams, deduplicated).
+         */
+        async openAllMembersModal() {
+            this.allMembersModalOpen = true
+            this.allMembersSearch    = ''
+            this.allMembersLoading   = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/members/all`)
+                )
+                this.allMembersList = Array.isArray(data.members) ? data.members : []
+            } catch (e) {
+                this.allMembersList = []
+            } finally {
+                this.allMembersLoading = false
+            }
+        },
+
+        closeAllMembersModal() {
+            this.allMembersModalOpen = false
+            this.allMembersList      = []
+            this.allMembersSearch    = ''
         },
 
         onLeaveTeamClick() {
@@ -1080,6 +1217,181 @@ export default {
 
 .teamhub-stacked-avatar { border: 2px solid var(--color-main-background); }
 .teamhub-more-members { font-size: 12px; color: var(--color-text-maxcontrast); }
+
+/* ── Members widget — flat memberships list with pills ──────────── */
+.teamhub-memberships-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border);
+}
+
+.teamhub-membership-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    min-width: 0;
+    border-radius: var(--border-radius);
+}
+
+.teamhub-membership-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.teamhub-membership-icon--group {
+    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
+    color: var(--color-primary-element);
+}
+
+.teamhub-membership-icon--circle {
+    background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+    color: var(--color-warning);
+}
+
+.teamhub-membership-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teamhub-membership-pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: var(--border-radius-pill);
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.teamhub-membership-pill--group {
+    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
+    color: var(--color-primary-element);
+}
+
+.teamhub-membership-pill--circle {
+    background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+    color: var(--color-warning);
+}
+
+.teamhub-membership-count {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Show all link */
+.teamhub-members-show-all {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 6px 8px;
+    border: none;
+    background: transparent;
+    font-size: 12px;
+    color: var(--color-primary-element);
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    text-align: center;
+}
+.teamhub-members-show-all:hover {
+    background: var(--color-background-hover);
+    text-decoration: underline;
+}
+
+/* ── All members modal ─────────────────────────────────────────── */
+.teamhub-all-members-modal {
+    padding: 18px 22px 22px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.teamhub-all-members-modal__title {
+    margin: 0 0 12px;
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.teamhub-all-members-modal__count {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--color-text-maxcontrast);
+}
+
+.teamhub-all-members-modal__search {
+    margin-bottom: 12px;
+}
+
+.teamhub-all-members-modal__loading {
+    display: flex;
+    justify-content: center;
+    padding: 40px 0;
+}
+
+.teamhub-all-members-modal__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.teamhub-all-members-modal__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 4px;
+    border-radius: var(--border-radius);
+}
+.teamhub-all-members-modal__row:hover {
+    background: var(--color-background-hover);
+}
+
+.teamhub-all-members-modal__info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.teamhub-all-members-modal__name {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teamhub-all-members-modal__uid {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teamhub-all-members-modal__empty {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--color-text-maxcontrast);
+}
 
 .teamhub-teaminfo-body {
     display: flex;

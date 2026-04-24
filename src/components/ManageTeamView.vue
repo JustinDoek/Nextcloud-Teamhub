@@ -188,15 +188,20 @@
 
         <!-- TAB: Members -->
         <div v-else-if="activeTab === 'members'" class="manage-tab-content">
+
+            <!-- Direct members -->
             <div class="manage-section">
-                <h3>{{ t('teamhub', 'Team Members') }} ({{ members.length }})</h3>
+                <h3>{{ t('teamhub', 'Direct Members') }} ({{ manageMembers.direct.length }})</h3>
                 <div v-if="loadingMembers" class="section-loading">
                     <NcLoadingIcon :size="32" />
                 </div>
+                <div v-else-if="manageMembers.direct.length === 0" class="no-pending">
+                    {{ t('teamhub', 'No direct members') }}
+                </div>
                 <div v-else class="members-list">
                     <div
-                        v-for="member in members"
-                        :key="member.userId || member.displayName"
+                        v-for="member in manageMembers.direct"
+                        :key="member.userId"
                         class="member-item">
                         <NcAvatar
                             v-if="member.userId"
@@ -226,7 +231,7 @@
                             v-if="canRemoveMember(member)"
                             type="error"
                             :aria-label="t('teamhub', 'Remove member')"
-                            @click="confirmRemoveMember(member)">
+                            @click="removeMember(member.userId, 'user')">
                             <template #icon><AccountRemove :size="20" /></template>
                             {{ t('teamhub', 'Remove') }}
                         </NcButton>
@@ -234,7 +239,76 @@
                 </div>
             </div>
 
-            <div class="manage-section">
+            <!-- Groups -->
+            <div v-if="!loadingMembers && (manageMembers.groups.length > 0 || manageMembers.circles.length > 0)" class="manage-section">
+                <h3>{{ t('teamhub', 'Groups & Teams') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'These groups and teams have been added as members. All their users count towards the total effective membership of {count}.', { count: manageMembers.effective_count }) }}
+                </p>
+
+                <!-- Groups -->
+                <div v-if="manageMembers.groups.length > 0" class="group-circle-list">
+                    <div class="group-circle-section-label">{{ t('teamhub', 'Groups') }}</div>
+                    <div
+                        v-for="group in manageMembers.groups"
+                        :key="'group-' + group.groupId"
+                        class="group-circle-item">
+                        <div class="group-circle-icon group-circle-icon--group">
+                            <AccountGroup :size="20" />
+                        </div>
+                        <div class="group-circle-info">
+                            <span class="group-circle-name">{{ group.displayName }}</span>
+                            <span class="group-circle-count">
+                                {{ t('teamhub', '{n} users', { n: group.memberCount }) }}
+                            </span>
+                        </div>
+                        <NcButton
+                            type="error"
+                            :aria-label="t('teamhub', 'Remove group {name}', { name: group.displayName })"
+                            @click="removeMember(group.singleId, group.userType === 16 ? 'circle' : 'group')">
+                            <template #icon><AccountRemove :size="20" /></template>
+                            {{ t('teamhub', 'Remove') }}
+                        </NcButton>
+                    </div>
+                </div>
+
+                <!-- Teams / Circles -->
+                <div v-if="manageMembers.circles.length > 0" class="group-circle-list" :class="{ 'group-circle-list--spaced': manageMembers.groups.length > 0 }">
+                    <div class="group-circle-section-label">{{ t('teamhub', 'Teams') }}</div>
+                    <div
+                        v-for="circle in manageMembers.circles"
+                        :key="'circle-' + circle.circleId"
+                        class="group-circle-item">
+                        <div class="group-circle-icon group-circle-icon--circle">
+                            <AccountMultipleIcon :size="20" />
+                        </div>
+                        <div class="group-circle-info">
+                            <span class="group-circle-name">{{ circle.displayName }}</span>
+                            <span class="group-circle-count">
+                                {{ t('teamhub', '{n} users', { n: circle.memberCount }) }}
+                            </span>
+                        </div>
+                        <NcButton
+                            type="error"
+                            :aria-label="t('teamhub', 'Remove team {name}', { name: circle.displayName })"
+                            @click="removeMember(circle.singleId, 'circle')">
+                            <template #icon><AccountRemove :size="20" /></template>
+                            {{ t('teamhub', 'Remove') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Effective count summary -->
+            <div v-if="!loadingMembers" class="manage-section manage-section--summary">
+                <span class="effective-count-label">
+                    {{ t('teamhub', 'Total users with access to this team:') }}
+                    <strong>{{ manageMembers.effective_count }}</strong>
+                </span>
+            </div>
+
+            <!-- Pending join requests -->
+            <div class="manage-section manage-section--pending">
                 <h3>{{ t('teamhub', 'Pending Join Requests') }}</h3>
                 <div v-if="loadingPending" class="section-loading">
                     <NcLoadingIcon :size="32" />
@@ -531,7 +605,8 @@ export default {
         return {
             activeTab: 'description',
             editedDescription: this.team.description || '',
-            members: [],
+            // Structured member data from /members/manage endpoint
+            manageMembers: { direct: [], groups: [], circles: [], effective_count: 0 },
             pendingRequests: [],
             loadingMembers: false,
             loadingPending: false,
@@ -615,7 +690,7 @@ export default {
             return getCurrentUser()?.uid
         },
         currentUserLevel() {
-            const me = this.members.find(m => m.userId === this.currentUserId)
+            const me = this.manageMembers.direct.find(m => m.userId === this.currentUserId)
             return me ? (me.level || 1) : 1
         },
         currentUserIsOwner() {
@@ -732,12 +807,12 @@ export default {
             if (newLevel === member.level) return
             this.changingLevel = member.userId
             try {
-                const { data } = await axios.put(
+                await axios.put(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/${member.userId}/level`),
                     { level: newLevel }
                 )
-                this.members = Array.isArray(data) ? data : this.members
                 showSuccess(t('teamhub', 'Role updated'))
+                await this.loadMembers()
             } catch (error) {
                 const msg = error.response?.data?.error || ''
                 showError(t('teamhub', 'Failed to update role') + (msg ? `: ${msg}` : ''))
@@ -800,9 +875,14 @@ export default {
             this.loadingMembers = true
             try {
                 const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members`)
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/manage`)
                 )
-                this.members = Array.isArray(data) ? data : []
+                this.manageMembers = {
+                    direct:          Array.isArray(data.direct)  ? data.direct  : [],
+                    groups:          Array.isArray(data.groups)  ? data.groups  : [],
+                    circles:         Array.isArray(data.circles) ? data.circles : [],
+                    effective_count: data.effective_count || 0,
+                }
             } catch (e) {
                 showError(t('teamhub', 'Failed to load members'))
             } finally {
@@ -824,15 +904,20 @@ export default {
             }
         },
 
-        async confirmRemoveMember(member) {
+        async removeMember(userId, type = 'user') {
             try {
                 await axios.delete(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/${member.userId}`)
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/${userId}`),
+                    { params: { type } }
                 )
-                showSuccess(t('teamhub', 'Member removed'))
+                const typeLabel = type === 'group'
+                    ? t('teamhub', 'Group removed')
+                    : type === 'circle'
+                        ? t('teamhub', 'Team removed')
+                        : t('teamhub', 'Member removed')
+                showSuccess(typeLabel)
                 await this.loadMembers()
             } catch (e) {
-                console.log('[TeamHub][ManageTeamView] removeMember failed:', e)
                 showError(t('teamhub', 'Failed to remove member'))
             }
         },
@@ -869,10 +954,8 @@ export default {
                 this.ownerSuggestions = []
                 return
             }
-            // Team owners can only transfer ownership to an existing member.
-            // Filter the already-loaded members list locally — exclude the
-            // current user (no point in "transferring" to self).
-            const matches = this.members
+            // Team owners can only transfer ownership to an existing direct member.
+            const matches = this.manageMembers.direct
                 .filter(m => m.userId && m.userId !== this.currentUserId)
                 .filter(m => {
                     const name = (m.displayName || '').toLowerCase()
@@ -1708,5 +1791,90 @@ export default {
     font-size: 14px;
     font-weight: 500;
     flex: 1;
+}
+
+/* ── Pending section spacing ─────────────────────────────────────── */
+.manage-section--pending {
+    margin-top: 24px;
+}
+
+/* ── Effective count summary ─────────────────────────────────────── */
+.manage-section--summary {
+    border: none;
+    margin-bottom: 0;
+    padding: 10px 14px;
+    background: var(--color-background-dark);
+    border-radius: var(--border-radius-large);
+    display: flex;
+    align-items: center;
+}
+.effective-count-label {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+}
+.effective-count-label strong {
+    color: var(--color-main-text);
+    margin-left: 4px;
+}
+
+/* ── Groups & Circles list ───────────────────────────────────────── */
+.group-circle-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.group-circle-list--spaced {
+    margin-top: 16px;
+}
+.group-circle-section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-maxcontrast);
+    margin-bottom: 4px;
+}
+.group-circle-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-dark);
+}
+.group-circle-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--border-radius);
+    flex-shrink: 0;
+}
+.group-circle-icon--group {
+    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
+    color: var(--color-primary-element);
+}
+.group-circle-icon--circle {
+    background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+    color: var(--color-warning);
+}
+.group-circle-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.group-circle-name {
+    font-size: 14px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.group-circle-count {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
 }
 </style>

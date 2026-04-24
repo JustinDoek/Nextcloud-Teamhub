@@ -56,9 +56,37 @@ Transfer team ownership to an existing team member. The caller is demoted to adm
 **Response:** `{ success: true }`
 
 ### GET `/teams/{teamId}/members`
-List all members of a team.
+List members of a team for the home-page members widget.
+**Auth:** Team member (direct or indirect via group/sub-team).
+**Response:**
+```
+{
+  members:          [ { userId, displayName, level, role, status } ],   // top 16 direct users, sorted by role then last login desc
+  memberships:      [ { type: 'group'|'circle', displayName, memberCount } ],  // flat list of added groups/teams
+  effective_count:  int,     // total users with access (direct + expanded, deduplicated)
+  has_more:         bool,    // true when effective_count > len(members)
+  is_direct_member: bool,    // false when caller is only in the team via a group/sub-team
+}
+```
+
+### GET `/teams/{teamId}/members/all`
+Flat deduplicated list of every effective user of the team (direct + expanded from groups/sub-teams). Used by the "Show all members" modal.
 **Auth:** Team member.
-**Response:** `[ { userId, displayName, level, role } ]`
+**Response:** `{ members: [ { userId, displayName } ] }` — sorted by displayName case-insensitive.
+
+### GET `/teams/{teamId}/members/manage`
+Structured member breakdown for the Manage Team → Members tab.
+**Auth:** Team admin.
+**Response:**
+```
+{
+  direct:          [ { userId, displayName, role, level, status } ],
+  groups:          [ { groupId, singleId, userType, displayName, memberCount } ],
+  circles:         [ { circleId, singleId, userType, displayName, memberCount } ],
+  effective_count: int,
+}
+```
+`singleId` is the handle to pass to DELETE for groups and teams.
 
 ### PUT `/teams/{teamId}/members/{userId}/level`
 Change a member's role.
@@ -66,18 +94,22 @@ Change a member's role.
 **Body:** `{ level: 1|4|8 }`
 
 ### DELETE `/teams/{teamId}/members/{userId}`
-Remove a member from the team. Cannot remove the owner.
-**Auth:** Team admin.
+Remove a member, group, or team from the team.
+**Auth:** Team admin. Cannot remove the team owner.
+**Query:** `?type=user|group|circle` — default `user`.
+- For `type=user` the URL `userId` is the NC uid.
+- For `type=group` or `type=circle` the URL `userId` is the `singleId` returned from the manage endpoint.
 
 ### POST `/teams/{teamId}/invite-members`
-Invite users/groups/emails/federated users to the team.
+Invite users/groups/teams/emails/federated users to the team.
 **Auth:** Team moderator (level >= 4).
-**Body:** `{ members: [ { id, type } ] }` — type: `user` | `group` | `email` | `federated`
+**Body:** `{ members: [ { id, type } ] }` — type: `user` | `group` | `circle` | `email` | `federated`
 **Response:** `{ userId: 'invited'|'failed: ...' }`
 
 ### POST `/teams/{teamId}/leave`
 Leave the team. Owner cannot leave if other members remain.
 **Auth:** Team member.
+**Errors:** Returns HTTP 403 with `{ error: 'indirect_member' }` when the caller is only in the team via a group or sub-team (they cannot leave such access themselves).
 
 ### POST `/teams/{teamId}/join`
 Request to join a team. Creates a pending membership request.

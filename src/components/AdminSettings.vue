@@ -485,7 +485,7 @@
             <div class="maint-header">
                 <h2 class="maint-header__title">{{ t('teamhub', 'Membership cache integrity') }}</h2>
                 <p class="maint-header__desc">
-                    {{ t('teamhub', 'Checks whether each team\'s member count in circles_member matches the denormalised circles_membership cache used by share pickers. A mismatch means the team will be unshareable from Files, Calendar, Deck, etc. — run Repair to rebuild the cache for that team.') }}
+                    {{ t('teamhub', 'Checks that each team\'s membership cache (circles_membership) is populated. A stale/empty cache means users added via groups or other teams won\'t appear in share pickers for Files, Calendar, Deck, etc. Run Repair to rebuild the cache.') }}
                 </p>
             </div>
 
@@ -519,12 +519,12 @@
                     <span
                         class="maint-integrity-summary__item"
                         :class="{ 'maint-integrity-summary__item--bad': membershipCheck.mismatched > 0 }">
-                        {{ t('teamhub', 'Mismatched') }}: <strong>{{ membershipCheck.mismatched }}</strong>
+                        {{ t('teamhub', 'Stale cache') }}: <strong>{{ membershipCheck.mismatched }}</strong>
                     </span>
                 </div>
 
                 <div v-if="membershipCheck.mismatched === 0" class="admin-empty">
-                    {{ t('teamhub', 'All team membership caches are consistent.') }}
+                    {{ t('teamhub', 'All team membership caches are populated and consistent.') }}
                 </div>
 
                 <div v-else class="maint-integrity-list">
@@ -535,9 +535,9 @@
                         <div class="maint-integrity-row__info">
                             <span class="maint-integrity-row__name">{{ issue.name }}</span>
                             <span class="maint-integrity-row__detail">
-                                {{ t('teamhub', 'Members: {m}, Cache rows: {c}', {
-                                    m: issue.member_count,
-                                    c: issue.membership_count,
+                                {{ t('teamhub', 'Direct members: {m} — Effective cache: {c} (stale)', {
+                                    m: issue.direct_count,
+                                    c: issue.effective_count,
                                 }) }}
                             </span>
                         </div>

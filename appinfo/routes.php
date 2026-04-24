@@ -26,6 +26,8 @@ return [
 
         // Team members
         ['name' => 'team#getTeamMembers',         'url' => '/api/v1/teams/{teamId}/members',                 'verb' => 'GET'],
+        ['name' => 'team#getAllEffectiveMembers',   'url' => '/api/v1/teams/{teamId}/members/all',             'verb' => 'GET'],
+        ['name' => 'team#getMembersForManage',     'url' => '/api/v1/teams/{teamId}/members/manage',          'verb' => 'GET'],
         ['name' => 'team#removeMember',           'url' => '/api/v1/teams/{teamId}/members/{userId}',        'verb' => 'DELETE'],
         ['name' => 'team#updateMemberLevel',      'url' => '/api/v1/teams/{teamId}/members/{userId}/level',  'verb' => 'PUT'],
         ['name' => 'team#getPendingRequests',     'url' => '/api/v1/teams/{teamId}/pending-requests',        'verb' => 'GET'],

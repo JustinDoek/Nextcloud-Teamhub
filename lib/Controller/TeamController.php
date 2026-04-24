@@ -135,10 +135,52 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamMembers(string $teamId): JSONResponse {
         try {
-            $members = $this->memberService->getTeamMembers($teamId);
-            return new JSONResponse($members);
+            // Returns {members: [...], effective_count: int, has_more: bool}
+            $data = $this->memberService->getTeamMembers($teamId);
+            return new JSONResponse($data);
         } catch (\Throwable $e) {
-            $this->logger->error('Failed to get team members', [
+            $this->logger->error('[TeamController] Failed to get team members', [
+                'teamId' => $teamId,
+                'exception' => $e,
+                'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Flat deduplicated list of all users with effective access to the team.
+     * Used by the "Show all members" modal in the widget.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getAllEffectiveMembers(string $teamId): JSONResponse {
+        try {
+            $data = $this->memberService->getAllEffectiveMembers($teamId);
+            return new JSONResponse(['members' => $data]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamController] Failed to get all effective members', [
+                'teamId' => $teamId,
+                'exception' => $e,
+                'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Structured member breakdown for the Manage Team → Members tab.
+     * Returns {direct: [...], groups: [...], circles: [...], effective_count: int}.
+     * Requires admin or owner level (enforced in service).
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getMembersForManage(string $teamId): JSONResponse {
+        try {
+            $data = $this->memberService->getMembersForManage($teamId);
+            return new JSONResponse($data);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamController] Failed to get manage members', [
                 'teamId' => $teamId,
                 'exception' => $e,
                 'app' => Application::APP_ID,
@@ -349,7 +391,12 @@ class TeamController extends Controller {
             $this->memberService->leaveTeam($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            // indirect_member is a sentinel from MemberService — pass it through
+            // so the frontend can show a tooltip rather than a generic error.
+            $code = $e->getMessage() === 'indirect_member'
+                ? Http::STATUS_FORBIDDEN
+                : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $code);
         }
     }
 
@@ -687,7 +734,14 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function removeMember(string $teamId, string $userId): JSONResponse {
         try {
-            $this->memberService->removeMember($teamId, $userId);
+            // type=user (default), group, or circle — maps to Circles user_type
+            $typeStr  = (string)($this->request->getParam('type', 'user'));
+            $userType = match ($typeStr) {
+                'group'  => 2,
+                'circle' => 16,
+                default  => 1,
+            };
+            $this->memberService->removeMember($teamId, $userId, $userType);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);

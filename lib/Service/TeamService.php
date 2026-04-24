@@ -482,22 +482,25 @@ class TeamService {
             $db  = $this->container->get(\OCP\IDBConnection::class);
             $uid = $user->getUID();
 
+            // Resolve the current user's personal-circle single_id once, so we can
+            // check circles_membership for indirect (group/team) membership below.
+            $userSingleId = $this->memberService->resolveUserSingleId($uid, $db);
+
             // CFG_VISIBLE bitmask (bit 9 = 512): circles with this bit set are
             // discoverable by non-members. We push the filter into SQL so we never
             // load all circles into PHP — critical for scalability to 1,000+ groups.
             //
-            // Strategy: LEFT JOIN on the current user's membership row.
+            // Strategy: LEFT JOIN on direct membership (user_type=1) AND on the
+            // circles_membership cache (indirect via group/team).
             // Include the circle if:
-            //   (a) the user is already a member (m.user_id IS NOT NULL), OR
-            //   (b) the circle has CFG_VISIBLE set (config & 512 != 0)
-            //
-            // Note: bitwise AND in portable QueryBuilder requires createFunction().
-            // We use a raw expression here — safe because $CFG_VISIBLE is a PHP
-            // integer literal, not user input.
+            //   (a) the user has a direct member row (m.user_id IS NOT NULL), OR
+            //   (b) the user appears in circles_membership (ms.single_id IS NOT NULL), OR
+            //   (c) the circle has CFG_VISIBLE set (config & 512 != 0)
             $CFG_VISIBLE = 512;
 
             $qb = $db->getQueryBuilder();
-            $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config', 'm.user_id AS member_uid')
+            $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config',
+                        'm.user_id AS member_uid')
                ->from('circles_circle', 'c')
                ->leftJoin(
                    'c',
@@ -509,11 +512,30 @@ class TeamService {
                        $qb->expr()->eq('m.user_type',  $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
                        $qb->expr()->eq('m.status',     $qb->createNamedParameter('Member'))
                    )
-               )
-               ->where(
+               );
+
+            // Add LEFT JOIN on circles_membership for indirect access detection
+            if ($userSingleId) {
+                $qb->addSelect('ms.single_id AS ms_single_id')
+                   ->leftJoin(
+                       'c',
+                       'circles_membership',
+                       'ms',
+                       $qb->expr()->andX(
+                           $qb->expr()->eq('ms.circle_id', 'c.unique_id'),
+                           $qb->expr()->eq('ms.single_id', $qb->createNamedParameter($userSingleId))
+                       )
+                   );
+            } else {
+                $qb->addSelect($qb->createFunction("NULL AS ms_single_id"));
+            }
+
+            $qb->where(
                    $qb->expr()->orX(
-                       // User is a member
+                       // User is a direct member
                        $qb->expr()->isNotNull('m.user_id'),
+                       // User appears in circles_membership (indirect via group/team)
+                       $qb->expr()->isNotNull('ms.single_id'),
                        // Circle is publicly visible (CFG_VISIBLE bit set)
                        $qb->expr()->neq(
                            $qb->createFunction('(c.config & ' . $CFG_VISIBLE . ')'),
@@ -533,16 +555,17 @@ class TeamService {
                     continue;
                 }
 
-                // CFG_OPEN = bit 1: when set the circle auto-approves joins (no approval needed).
-                // We invert it so the frontend gets a positive "requiresApproval" flag.
                 $config           = (int)($row['config'] ?? 0);
                 $isOpen           = ($config & 1) > 0;
+                $isDirectMember   = $row['member_uid'] !== null;
+                $isIndirectMember = !$isDirectMember && ($row['ms_single_id'] ?? null) !== null;
 
                 $teams[] = [
                     'id'               => $row['unique_id'],
                     'name'             => $name,
                     'description'      => $row['description'] ?? '',
-                    'isMember'         => $row['member_uid'] !== null,
+                    'isMember'         => $isDirectMember || $isIndirectMember,
+                    'isDirectMember'   => $isDirectMember,
                     'requiresApproval' => !$isOpen,
                     'image_url'        => $this->teamImageService->getImageUrl($row['unique_id']),
                 ];

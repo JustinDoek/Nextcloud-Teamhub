@@ -70,9 +70,9 @@
 
                 <!-- Actions always pinned to card bottom -->
                 <div class="team-card__actions">
-                    <!-- Member: show Leave button -->
+                    <!-- Direct member: can leave -->
                     <NcButton
-                        v-if="team.isMember"
+                        v-if="team.isMember && team.isDirectMember"
                         type="error"
                         :disabled="actionInProgress[team.id]"
                         @click="leaveTeam(team)">
@@ -82,6 +82,18 @@
                         </template>
                         {{ t('teamhub', 'Leave') }}
                     </NcButton>
+
+                    <!-- Indirect member (via group/team): Leave disabled with tooltip -->
+                    <span
+                        v-else-if="team.isMember && !team.isDirectMember"
+                        class="team-card__indirect-label"
+                        :title="t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.')">
+                        <NcButton type="tertiary" :disabled="true">
+                            <template #icon><ExitToApp :size="20" /></template>
+                            {{ t('teamhub', 'Leave') }}
+                        </NcButton>
+                        <span class="team-card__via-badge">{{ t('teamhub', 'via group') }}</span>
+                    </span>
 
                     <!-- Non-member open circle: Join immediately -->
                     <NcButton
@@ -189,6 +201,7 @@ export default {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/join`), {})
                 showSuccess(t('teamhub', 'You have joined {team}', { team: team.name }))
                 this.$set(team, 'isMember', true)
+                this.$set(team, 'isDirectMember', true)
                 this.$emit('team-joined', team.id)
             } catch (error) {
                 showError(t('teamhub', 'Failed to join team'))
@@ -368,6 +381,23 @@ export default {
     display: flex;
     justify-content: flex-end;
     margin-top: 0; /* header margin-bottom already provides separation */
+}
+
+/* Indirect member wrapper — wraps the disabled Leave button + badge */
+.team-card__indirect-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: default;
+}
+.team-card__via-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: var(--border-radius-pill);
+    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    color: var(--color-warning);
+    white-space: nowrap;
 }
 
 /* ── List view ───────────────────────────────────────────────────── */

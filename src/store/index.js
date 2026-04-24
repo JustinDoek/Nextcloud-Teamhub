@@ -17,6 +17,10 @@ export default new Vuex.Store({
         pinMinLevel: 4,        // minimum Circles level to pin (loaded from admin settings)
         comments: {},          // { messageId: [comments] }
         members: [],
+        memberships: [],           // flat list of {type: 'group'|'circle', displayName, memberCount}
+        effectiveMemberCount: 0,   // total users including those via groups/teams (from circles_membership)
+        hasMoreMembers: false,     // true when effective_count > members shown in widget
+        isCurrentUserDirectMember: true, // false when user is only in team via a group/team
         resources: {},         // { talk, files, calendar, deck, tasks }
         webLinks: [],
         deckTasks: [],
@@ -117,6 +121,10 @@ export default new Vuex.Store({
             state.comments[messageId].push(comment)
         },
         SET_MEMBERS(state, members) { state.members = members },
+        SET_MEMBERSHIPS(state, memberships) { state.memberships = memberships },
+        SET_EFFECTIVE_MEMBER_COUNT(state, count) { state.effectiveMemberCount = count },
+        SET_HAS_MORE_MEMBERS(state, val) { state.hasMoreMembers = val },
+        SET_IS_DIRECT_MEMBER(state, val) { state.isCurrentUserDirectMember = val },
         SET_RESOURCES(state, resources) { state.resources = resources },
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
@@ -255,9 +263,26 @@ export default new Vuex.Store({
             commit('SET_LOADING', { key: 'members', value: true })
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members`))
-                commit('SET_MEMBERS', Array.isArray(data) ? data : [])
+                // Response: { members, memberships, effective_count, has_more, is_direct_member }
+                if (Array.isArray(data)) {
+                    commit('SET_MEMBERS', data)
+                    commit('SET_MEMBERSHIPS', [])
+                    commit('SET_EFFECTIVE_MEMBER_COUNT', data.length)
+                    commit('SET_HAS_MORE_MEMBERS', false)
+                    commit('SET_IS_DIRECT_MEMBER', true)
+                } else {
+                    commit('SET_MEMBERS', Array.isArray(data.members) ? data.members : [])
+                    commit('SET_MEMBERSHIPS', Array.isArray(data.memberships) ? data.memberships : [])
+                    commit('SET_EFFECTIVE_MEMBER_COUNT', data.effective_count || 0)
+                    commit('SET_HAS_MORE_MEMBERS', !!data.has_more)
+                    commit('SET_IS_DIRECT_MEMBER', data.is_direct_member !== false)
+                }
             } catch (e) {
                 commit('SET_MEMBERS', [])
+                commit('SET_MEMBERSHIPS', [])
+                commit('SET_EFFECTIVE_MEMBER_COUNT', 0)
+                commit('SET_HAS_MORE_MEMBERS', false)
+                commit('SET_IS_DIRECT_MEMBER', true)
             } finally {
                 commit('SET_LOADING', { key: 'members', value: false })
             }
