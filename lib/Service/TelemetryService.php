@@ -174,13 +174,21 @@ class TelemetryService {
     private function countTeams(): int {
         try {
             $qb = $this->db->getQueryBuilder();
+            // source=16 → user-created circles (TeamHub / NC Teams).
+            // source=1  → personal user circles; source=2 → group-backed circles.
+            // Counting all rows inflates the number by every user and group on
+            // the instance, so we must filter to source=16 only.
             $result = $qb->select($qb->func()->count('*', 'cnt'))
                 ->from('circles_circle')
+                ->where($qb->expr()->eq('source', $qb->createNamedParameter(16, IQueryBuilder::PARAM_INT)))
                 ->executeQuery();
             $row = $result->fetch();
             $result->closeCursor();
-            return $row ? (int)$row['cnt'] : 0;
+            $count = $row ? (int)$row['cnt'] : 0;
+            error_log('[TeamHub][TelemetryService] countTeams (source=16): ' . $count);
+            return $count;
         } catch (\Throwable $e) {
+            error_log('[TeamHub][TelemetryService] countTeams error: ' . $e->getMessage());
             return 0;
         }
     }
@@ -291,32 +299,85 @@ class TelemetryService {
     }
 
     /**
-     * How many teams have each builtin NC-app integration explicitly enabled.
-     * Reads teamhub_team_apps, grouped by app_id, counting rows where enabled=true.
+     * How many teams have each builtin NC-app integration enabled.
+     *
+     * teamhub_team_apps only contains rows when a user has *explicitly* changed
+     * the default.  Most teams therefore have no rows at all, which means a
+     * simple COUNT(enabled=1) massively undercounts.
+     *
+     * Correct logic per app:
+     *   • Default-enabled apps  (files, calendar, deck, spreed, intravox):
+     *       count = total_teams − teams_with_explicit_disabled_row
+     *   • Default-disabled apps (shared_files):
+     *       count = teams_with_explicit_enabled_row
+     *
+     * The app IDs and defaults below mirror ManageTeamView.vue's appDefinitions().
      *
      * Example return:
-     *   ['files' => 30, 'calendar' => 20, 'deck' => 12, 'talk' => 8]
-     *
-     * Caveat: teams that have never touched their app toggles won't have rows,
-     * so this counts *explicit* enablement. That is still the signal we want —
-     * it shows engagement with the feature.
+     *   ['files' => 30, 'calendar' => 28, 'deck' => 18, 'spreed' => 25,
+     *    'intravox' => 12, 'shared_files' => 4]
      */
     private function getBuiltinIntegrationUsage(): array {
+        // Apps where the default is enabled — absence of a row means enabled.
+        $defaultEnabled  = ['files', 'calendar', 'deck', 'spreed', 'intravox'];
+        // Apps where the default is disabled — only explicit opt-ins count.
+        $defaultDisabled = ['shared_files'];
+        $allBuiltin      = array_merge($defaultEnabled, $defaultDisabled);
+
         try {
+            $totalTeams = $this->countTeams();
+            error_log('[TeamHub][TelemetryService] getBuiltinIntegrationUsage totalTeams=' . $totalTeams);
+
+            // Fetch counts of explicit enabled and disabled rows per app.
             $qb = $this->db->getQueryBuilder();
-            $result = $qb->select('app_id')
+            $result = $qb->select('app_id', 'enabled')
                 ->selectAlias($qb->func()->count('*'), 'cnt')
                 ->from('teamhub_team_apps')
-                ->where($qb->expr()->eq('enabled', $qb->createNamedParameter(true, IQueryBuilder::PARAM_BOOL)))
-                ->groupBy('app_id')
+                ->where($qb->expr()->in(
+                    'app_id',
+                    $qb->createNamedParameter($allBuiltin, IQueryBuilder::PARAM_STR_ARRAY)
+                ))
+                ->groupBy('app_id', 'enabled')
                 ->executeQuery();
-            $usage = [];
+
+            $explicitEnabled  = [];
+            $explicitDisabled = [];
             while ($row = $result->fetch()) {
-                $usage[(string)$row['app_id']] = (int)$row['cnt'];
+                $app = (string)$row['app_id'];
+                $cnt = (int)$row['cnt'];
+                if ((int)$row['enabled'] === 1) {
+                    $explicitEnabled[$app]  = $cnt;
+                } else {
+                    $explicitDisabled[$app] = $cnt;
+                }
             }
             $result->closeCursor();
+
+            error_log('[TeamHub][TelemetryService] explicit_enabled=' . json_encode($explicitEnabled)
+                . ' explicit_disabled=' . json_encode($explicitDisabled));
+
+            $usage = [];
+
+            // Default-enabled: total minus those explicitly turned off.
+            foreach ($defaultEnabled as $app) {
+                $count = max(0, $totalTeams - ($explicitDisabled[$app] ?? 0));
+                if ($count > 0) {
+                    $usage[$app] = $count;
+                }
+            }
+
+            // Default-disabled: only those explicitly turned on.
+            foreach ($defaultDisabled as $app) {
+                $count = $explicitEnabled[$app] ?? 0;
+                if ($count > 0) {
+                    $usage[$app] = $count;
+                }
+            }
+
+            error_log('[TeamHub][TelemetryService] builtin_usage=' . json_encode($usage));
             return $usage;
         } catch (\Throwable $e) {
+            error_log('[TeamHub][TelemetryService] getBuiltinIntegrationUsage error: ' . $e->getMessage());
             return [];
         }
     }
