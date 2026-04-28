@@ -346,7 +346,7 @@ export default {
 }
 
 .invite-modal__chip-remove:hover {
-    color: var(--color-error);
+    color: var(--color-error-text);
 }
 
 .invite-modal__actions {

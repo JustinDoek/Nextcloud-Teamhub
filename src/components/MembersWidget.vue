@@ -160,9 +160,9 @@ export default {
     flex-shrink: 0;
 }
 
-.member-item__role--owner   { background: var(--color-error-light);   color: var(--color-error); }
-.member-item__role--admin   { background: var(--color-warning-light);  color: var(--color-warning); }
-.member-item__role--moderator { background: var(--color-success-light); color: var(--color-success); }
+.member-item__role--owner   { background: var(--color-error-light);   color: var(--color-error-text); }
+.member-item__role--admin   { background: var(--color-warning-light);  color: var(--color-warning-text); }
+.member-item__role--moderator { background: var(--color-success-light); color: var(--color-success-text); }
 
 .members-widget__more {
     margin-top: 8px;
@@ -214,7 +214,7 @@ export default {
 
 .group-item__icon--group {
     background: color-mix(in srgb, var(--color-success) 15%, transparent);
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .group-item__icon--circle {

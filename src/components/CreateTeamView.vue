@@ -677,7 +677,7 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-.ctv__chip-remove:hover { color: var(--color-error); }
+.ctv__chip-remove:hover { color: var(--color-error-text); }
 
 /* App options */
 .ctv__apps { display: flex; flex-direction: column; gap: 10px; }
@@ -727,8 +727,8 @@ export default {
     font-size: 15px;
 }
 
-.ctv__progress-done { color: var(--color-success); }
-.ctv__progress-error { color: var(--color-error); }
+.ctv__progress-done { color: var(--color-success-text); }
+.ctv__progress-error { color: var(--color-error-text); }
 .ctv__progress-dot {
     width: 20px;
     height: 20px;

@@ -312,11 +312,32 @@ class ActivityService {
             $now         = time();
             $futureLimit = $now + (30 * 24 * 60 * 60);
 
+            // Fetch calendar owner (principaluri) and slug (uri) for building the NC Calendar edit URL.
+            // principaluri = "principals/users/{uid}", uri = the calendar's DAV slug.
+            $calQb  = $db->getQueryBuilder();
+            $calRes = $calQb->select('principaluri', 'uri')
+                ->from('calendars')
+                ->where($calQb->expr()->eq('id', $calQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $calRow = $calRes->fetch();
+            $calRes->closeCursor();
+
+            // Extract owner UID from "principals/users/{uid}"
+            $calOwner = '';
+            $calSlug  = '';
+            if ($calRow) {
+                $parts    = explode('/', $calRow['principaluri']);
+                $calOwner = end($parts);
+                $calSlug  = $calRow['uri'];
+            }
+
             $qb = $db->getQueryBuilder();
             $result = $qb->select('co.id', 'co.uri', 'co.calendardata', 'co.lastmodified')
                 ->from('calendarobjects', 'co')
                 ->where($qb->expr()->eq('co.calendarid', $qb->createNamedParameter($calendarId)))
                 ->andWhere($qb->expr()->eq('co.componenttype', $qb->createNamedParameter('VEVENT')))
+                ->andWhere($qb->expr()->notLike('co.uri', $qb->createNamedParameter('%-deleted.ics')))
                 ->orderBy('co.lastmodified', 'DESC')
                 ->setMaxResults($limit * 3)
                 ->executeQuery();
@@ -349,6 +370,15 @@ class ActivityService {
                         $endTime->add($vevent->DURATION->getDateInterval());
                     }
 
+                    // Build NC Calendar direct edit URL:
+                    // /apps/calendar/timeGridWeek/now/edit/sidebar/{base64(davPath)}/{startTimestamp}
+                    $editUrl = null;
+                    if ($calOwner !== '' && $calSlug !== '') {
+                        $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
+                        $objectId = rtrim(strtr(base64_encode($davPath), '+/', '-_'), '=');
+                        $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTimestamp;
+                    }
+
                     $events[] = [
                         'id'          => (string)($vevent->UID ?? $row['uri']),
                         'title'       => (string)($vevent->SUMMARY ?? 'Untitled'),
@@ -357,6 +387,7 @@ class ActivityService {
                         'location'    => isset($vevent->LOCATION)    ? (string)$vevent->LOCATION    : null,
                         'description' => isset($vevent->DESCRIPTION) ? (string)$vevent->DESCRIPTION : null,
                         'allDay'      => !$dtstart->hasTime(),
+                        'editUrl'     => $editUrl,
                     ];
                 } catch (\Exception $e) {
                     $this->logger->warning('[ActivityService] Error parsing calendar event', [
@@ -440,6 +471,41 @@ class ActivityService {
             throw new \Exception('Calendar not found');
         }
 
+        // Resolve team Talk room URL — write to LOCATION so Talk's scheduled
+        // meetings panel picks it up (Talk reads the LOCATION field, not DESCRIPTION).
+        $talkUrl = null;
+        if ($this->appManager->isInstalled('spreed')) {
+            try {
+                $talkQb  = $db->getQueryBuilder();
+                $talkRes = $talkQb->select('a.room_id')
+                    ->from('talk_attendees', 'a')
+                    ->where($talkQb->expr()->eq('a.actor_type', $talkQb->createNamedParameter('circles')))
+                    ->andWhere($talkQb->expr()->eq('a.actor_id', $talkQb->createNamedParameter($teamId)))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $talkRow = $talkRes->fetch();
+                $talkRes->closeCursor();
+
+                if ($talkRow) {
+                    $roomQb  = $db->getQueryBuilder();
+                    $roomRes = $roomQb->select('token')
+                        ->from('talk_rooms')
+                        ->where($roomQb->expr()->eq('id', $roomQb->createNamedParameter((int)$talkRow['room_id'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    $roomRow = $roomRes->fetch();
+                    $roomRes->closeCursor();
+
+                    if ($roomRow) {
+                        $urlGenerator = $this->container->get(\OCP\IURLGenerator::class);
+                        $talkUrl = $urlGenerator->linkToRouteAbsolute('spreed.Page.showCall', ['token' => $roomRow['token']]);
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Talk lookup failure is non-fatal — continue without Talk URL
+            }
+        }
+
         // Build iCalendar VEVENT string
         $uid     = strtoupper(bin2hex(random_bytes(16)));
         $startDt = new \DateTime($start);
@@ -458,7 +524,17 @@ class ActivityService {
         $ical .= "DTSTART:{$dtStart}\r\n";
         $ical .= "DTEND:{$dtEnd}\r\n";
         $ical .= "SUMMARY:" . $this->escapeIcalText($title) . "\r\n";
-        if ($location !== '') {
+        if ($talkUrl !== null) {
+            // Talk reads LOCATION to detect scheduled meetings and show them in the room panel.
+            // Combine with any user-supplied physical location if present.
+            if ($location !== '') {
+                $ical .= "LOCATION:" . $this->escapeIcalText($location . ' | ' . $talkUrl) . "\r\n";
+            } else {
+                $ical .= "LOCATION:" . $this->escapeIcalText($talkUrl) . "\r\n";
+            }
+            // URL field for calendar clients that render a dedicated Join button
+            $ical .= "URL:{$talkUrl}\r\n";
+        } elseif ($location !== '') {
             $ical .= "LOCATION:" . $this->escapeIcalText($location) . "\r\n";
         }
         if ($description !== '') {

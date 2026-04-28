@@ -240,13 +240,17 @@
                         <Calendar :size="25" />
                         <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Events') }}</span>
                         <NcActions class="teamhub-widget-actions">
-                            <NcActionButton v-if="resources.talk" @click="$emit('schedule-meeting')">
+                            <NcActionButton @click="$emit('add-event')">
+                                <template #icon><CalendarPlus :size="20" /></template>
+                                {{ t('teamhub', 'Add event') }}
+                            </NcActionButton>
+                            <NcActionButton @click="$emit('schedule-meeting')">
                                 <template #icon><VideoIcon :size="20" /></template>
                                 {{ t('teamhub', 'Schedule meeting') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('add-event')">
-                                <template #icon><CalendarPlus :size="20" /></template>
-                                {{ t('teamhub', 'Add agenda item') }}
+                            <NcActionButton @click="$emit('team-meeting')">
+                                <template #icon><AccountGroup :size="20" /></template>
+                                {{ t('teamhub', 'Team meeting') }}
                             </NcActionButton>
                         </NcActions>
                         <button
@@ -258,7 +262,7 @@
                         </button>
                     </div>
                     <div v-show="!isCollapsed('widget-calendar')" class="teamhub-widget-content">
-                        <CalendarWidget />
+                        <CalendarWidget ref="calendarWidget" />
                     </div>
                 </div>
             </grid-item>
@@ -655,7 +659,7 @@ export default {
 
     emits: [
         'layout-updated', 'manage-team', 'copy-link', 'invite',
-        'schedule-meeting', 'add-event', 'add-deck-task', 'add-personal-task',
+        'schedule-meeting', 'add-event', 'team-meeting', 'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded', 'set-view',
         'widget-actions-loaded',
         'set-as-default',
@@ -959,6 +963,11 @@ export default {
         refreshIntravox() {
             return this.$refs.intravoxWidget?.refresh() || Promise.resolve()
         },
+
+        /** Expose calendarWidget ref so parent can reload events after an event is created */
+        refreshCalendar() {
+            return this.$refs.calendarWidget?.refresh() || Promise.resolve()
+        },
     },
 }
 </script>
@@ -1225,14 +1234,13 @@ export default {
     gap: 4px;
     margin-top: 12px;
     padding-top: 10px;
-    border-top: 1px solid var(--color-border);
 }
 
 .teamhub-membership-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
+    padding: 6px 12px;
     min-width: 0;
     border-radius: var(--border-radius);
 }
@@ -1254,7 +1262,7 @@ export default {
 
 .teamhub-membership-icon--circle {
     background: color-mix(in srgb, var(--color-warning) 22%, transparent);
-    color: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .teamhub-membership-name {
@@ -1284,7 +1292,7 @@ export default {
 
 .teamhub-membership-pill--circle {
     background: color-mix(in srgb, var(--color-warning) 22%, transparent);
-    color: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .teamhub-membership-count {
@@ -1297,9 +1305,9 @@ export default {
 /* Show all link */
 .teamhub-members-show-all {
     display: block;
-    width: 100%;
+    width: 90%;
     margin-top: 10px;
-    padding: 6px 8px;
+    padding: 6px 12px;
     border: none;
     background: transparent;
     font-size: 12px;

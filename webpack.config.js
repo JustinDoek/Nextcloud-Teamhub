@@ -1,5 +1,9 @@
 const path = require('path')
 const { VueLoaderPlugin } = require('vue-loader')
+const webpack = require('webpack')
+
+// Read version from package.json so it stays in sync automatically.
+const { version, name } = require('./package.json')
 
 module.exports = {
     entry: {
@@ -25,7 +29,17 @@ module.exports = {
             { test: /\.scss$/, use: ['vue-style-loader', 'css-loader', 'sass-loader'] },
         ],
     },
-    plugins: [new VueLoaderPlugin()],
+    plugins: [
+        new VueLoaderPlugin(),
+        // @nextcloud/vue reads bare `appName` and `appVersion` identifiers at module
+        // evaluation time via try { Ve = appName } catch { … }. DefinePlugin replaces
+        // these identifiers with string literals at compile time, which is guaranteed
+        // to run before any module code — solving the "missing appName" console errors.
+        new webpack.DefinePlugin({
+            appName:    JSON.stringify(name),
+            appVersion: JSON.stringify(version),
+        }),
+    ],
     resolve: {
         extensions: ['.js', '.vue'],
         alias: { vue$: 'vue/dist/vue.esm.js' },

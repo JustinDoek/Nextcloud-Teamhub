@@ -1193,7 +1193,7 @@ export default {
 }
 
 .admin-group-chip__remove:hover {
-    color: var(--color-error);
+    color: var(--color-error-text);
 }
 
 /* ── Group typeahead ─────────────────────────────────────────────────────── */
@@ -1305,7 +1305,7 @@ export default {
     padding: 8px 0;
 }
 
-.admin-integrations-error { color: var(--color-error); }
+.admin-integrations-error { color: var(--color-error-text); }
 
 .admin-integrations-list {
     display: flex;
@@ -1384,7 +1384,7 @@ export default {
 .admin-integration-row__badge--menu_item,
 .admin-integration-row__badge--tab {
     background: color-mix(in srgb, var(--color-success) 15%, transparent);
-    color: var(--color-success, #46ba61);
+    color: var(--color-success-text);
 }
 .admin-save-row {
     display: flex;
@@ -1395,8 +1395,8 @@ export default {
     margin-top: 8px;
 }
 
-.admin-save-ok  { font-size: 14px; color: var(--color-success); font-weight: 500; }
-.admin-save-err { font-size: 14px; color: var(--color-error); }
+.admin-save-ok  { font-size: 14px; color: var(--color-success-text); font-weight: 500; }
+.admin-save-err { font-size: 14px; color: var(--color-error-text); }
 /* ── Statistics tab ────────────────────────────────────────────── */
 .admin-telemetry-details {
     margin-top: 16px;
@@ -1431,7 +1431,7 @@ export default {
 }
 
 .admin-error {
-    color: var(--color-error);
+    color: var(--color-error-text);
     font-size: 13px;
     padding: 8px 0;
 }
@@ -1602,7 +1602,7 @@ export default {
 }
 
 .maint-no-owner {
-    color: var(--color-warning, #e9822c);
+    color: var(--color-warning-text);
     font-weight: 500;
     font-size: 12px;
 }
@@ -1713,11 +1713,11 @@ export default {
 }
 
 .maint-integrity-summary__item--ok strong {
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .maint-integrity-summary__item--bad strong {
-    color: var(--color-error);
+    color: var(--color-error-text);
 }
 
 .maint-integrity-list {

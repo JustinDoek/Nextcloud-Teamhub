@@ -546,8 +546,8 @@ export default {
     flex-shrink: 0;
 }
 
-.post-form__attachment-status--done { color: var(--color-success); }
-.post-form__attachment-status--error { color: var(--color-error); }
+.post-form__attachment-status--done { color: var(--color-success-text); }
+.post-form__attachment-status--error { color: var(--color-error-text); }
 
 /* Actions */
 .post-form__actions {

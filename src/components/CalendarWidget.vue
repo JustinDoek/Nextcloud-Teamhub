@@ -18,7 +18,16 @@
                 <!-- Main content -->
                 <div class="th-widget__body">
                     <div class="th-widget__row-top">
-                        <span class="th-widget__title">{{ event.title }}</span>
+                        <a
+                            v-if="event.editUrl"
+                            :href="event.editUrl"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="th-widget__title th-widget__title--link"
+                            :title="t('teamhub', 'Open in Calendar')">
+                            {{ event.title }}
+                        </a>
+                        <span v-else class="th-widget__title">{{ event.title }}</span>
                         <!-- Join button — shown when location is a https URL (Talk or video link) -->
                         <a
                             v-if="joinUrl(event)"
@@ -70,19 +79,24 @@ export default {
         async loadEvents() {
             if (!this.currentTeamId) return
             this.loading = true
-            console.log('[TeamHub][CalendarWidget] loadEvents — team:', this.currentTeamId)
             try {
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/calendar/events`)
                 )
                 this.events = data || []
-                console.log('[TeamHub][CalendarWidget] loaded events:', this.events.length)
             } catch (e) {
-                console.error('[TeamHub][CalendarWidget] loadEvents error:', e)
                 this.events = []
             } finally {
                 this.loading = false
             }
+        },
+
+        /**
+         * Public method: called by parent (TeamWidgetGrid → TeamView) after an event
+         * is created to refresh the widget without a full page reload.
+         */
+        refresh() {
+            return this.loadEvents()
         },
 
         formatMonth(start) {
@@ -245,6 +259,17 @@ export default {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.th-widget__title--link {
+    color: var(--color-main-text);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.th-widget__title--link:hover {
+    color: var(--color-primary-element);
+    text-decoration: underline;
 }
 
 /* Meta line */

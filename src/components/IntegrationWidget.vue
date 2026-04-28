@@ -407,9 +407,9 @@ export default {
     opacity: 0.7;
 }
 
-.teamhub-int-widget__state--error { color: var(--color-error); }
+.teamhub-int-widget__state--error { color: var(--color-error-text); }
 .teamhub-int-widget__state--error .teamhub-int-widget__state-icon {
-    color: var(--color-error);
+    color: var(--color-error-text);
     opacity: 0.6;
 }
 
@@ -487,7 +487,7 @@ a.teamhub-int-widget__item-link:hover {
 
 .teamhub-int-widget__error-msg {
     font-size: 14px;
-    color: var(--color-error);
+    color: var(--color-error-text);
     margin: 0 0 12px;
 }
 

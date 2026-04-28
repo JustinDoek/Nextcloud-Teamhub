@@ -260,7 +260,7 @@ export default {
 }
 .th-widget__title--link { text-decoration: none; }
 .th-widget__title--link:hover { color: var(--color-primary-element); }
-.th-widget__title--overdue { color: var(--color-error); }
+.th-widget__title--overdue { color: var(--color-error-text); }
 
 .th-widget__meta {
     display: inline-flex;
@@ -270,7 +270,7 @@ export default {
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
 }
-.th-widget__meta--overdue { color: var(--color-error); }
+.th-widget__meta--overdue { color: var(--color-error-text); }
 
 /* Source pill */
 .th-widget__source-pill {

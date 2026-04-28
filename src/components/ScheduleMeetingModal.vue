@@ -228,7 +228,7 @@ export default {
 
 .schedule-modal__error {
     font-size: 13px;
-    color: var(--color-error);
+    color: var(--color-error-text);
     margin: 0 0 16px;
 }
 

@@ -1,7 +1,6 @@
 <template>
     <div class="message-stream">
         <div class="message-stream__header">
-            <h2 class="message-stream__title">{{ t('teamhub', 'Team Messages') }}</h2>
             <NcButton type="primary" @click="showPostForm = true">
                 <template #icon><Plus :size="20" /></template>
                 {{ t('teamhub', 'Post Message') }}
@@ -35,11 +34,6 @@
                 :name="t('teamhub', 'No messages yet')"
                 :description="t('teamhub', 'Be the first to post a message')">
                 <template #icon><MessageOutline :size="64" /></template>
-                <template #action>
-                    <NcButton type="primary" @click="showPostForm = true">
-                        {{ t('teamhub', 'Post First Message') }}
-                    </NcButton>
-                </template>
             </NcEmptyContent>
 
             <!-- Regular messages -->
@@ -88,17 +82,10 @@ export default {
 .message-stream__header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     margin-bottom: 24px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--color-border);
-}
-
-.message-stream__title {
-    font-size: 1.5em;
-    font-weight: 700;
-    margin: 0;
-    color: var(--color-main-text);
 }
 
 .message-stream__loading {

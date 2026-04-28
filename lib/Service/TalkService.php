@@ -390,6 +390,68 @@ class TalkService {
     }
 
     /**
+     * Post a plain-text chat message to a Talk room on behalf of a user.
+     *
+     * @param string $token  Talk room token
+     * @param string $uid    User ID of the sender
+     * @param string $message  Message text (plain text, max ~32000 chars)
+     * @return bool  True on success, false on any failure (non-fatal)
+     */
+    public function postChatMessage(string $token, string $uid, string $message): bool {
+        $this->logger->debug('[TalkService] postChatMessage — start', [
+            'token' => $token, 'uid' => $uid, 'app' => Application::APP_ID,
+        ]);
+
+        if (!$this->appManager->isInstalled('spreed')) {
+            $this->logger->warning('[TalkService] postChatMessage — spreed not installed', [
+                'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+
+        try {
+            $manager     = $this->container->get(\OCA\Talk\Manager::class);
+            $room        = $manager->getRoomByToken($token);
+
+            if (!$room) {
+                $this->logger->warning('[TalkService] postChatMessage — room not found', [
+                    'token' => $token, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
+
+            $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+            // getParticipant(Room $room, ?string $userId) — pass UID string, not User object
+            $participant = $participantService->getParticipant($room, $uid);
+
+            $chatManager = $this->container->get(\OCA\Talk\Chat\ChatManager::class);
+            $chatManager->sendMessage(
+                $room,
+                $participant,
+                'users',
+                $uid,
+                $message,
+                new \DateTime(),
+                null,   // replyTo
+                '',     // referenceId
+                false   // silent
+            );
+
+            $this->logger->debug('[TalkService] postChatMessage — success', [
+                'token' => $token, 'app' => Application::APP_ID,
+            ]);
+
+            return true;
+
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TalkService] postChatMessage failed', [
+                'token' => $token, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
      * Delete the shared Files folder for this team.
      * Removes the IShare record AND deletes the folder node itself.
      */

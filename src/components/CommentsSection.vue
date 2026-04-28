@@ -283,7 +283,7 @@ export default {
     padding: 2px 6px;
     border-radius: 10px;
     background: var(--color-main-background);
-    color: var(--color-success);
+    color: var(--color-success-text);
     margin-left: auto;
 }
 

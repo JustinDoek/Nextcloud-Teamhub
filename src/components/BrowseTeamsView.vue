@@ -396,7 +396,7 @@ export default {
     padding: 2px 7px;
     border-radius: var(--border-radius-pill);
     background: color-mix(in srgb, var(--color-warning) 15%, transparent);
-    color: var(--color-warning);
+    color: var(--color-warning-text);
     white-space: nowrap;
 }
 

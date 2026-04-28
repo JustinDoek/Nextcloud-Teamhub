@@ -28,6 +28,7 @@
                 @invite="showInviteModal = true"
                 @schedule-meeting="showScheduleMeeting = true"
                 @add-event="showAddEvent = true"
+                @team-meeting="showTeamMeeting = true"
                 @add-deck-task="showAddTask = true"
                 @add-personal-task="showAddPersonalTask = true"
                 @create-page="openCreatePage"
@@ -138,9 +139,13 @@
             @invited="$store.dispatch('fetchMembers', currentTeamId)" />
 
         <ScheduleMeetingModal v-if="showScheduleMeeting" :team-id="currentTeamId"
-            @close="showScheduleMeeting = false; $store.dispatch('fetchMessages', currentTeamId)" />
+            @close="showScheduleMeeting = false; $store.dispatch('fetchMessages', currentTeamId); $refs.widgetGrid?.refreshCalendar()" />
 
-        <AddEventModal v-if="showAddEvent" :team-id="currentTeamId" @close="showAddEvent = false" />
+        <AddEventModal v-if="showAddEvent" :team-id="currentTeamId"
+            @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar()" />
+
+        <TeamMeetingModal v-if="showTeamMeeting" :team-id="currentTeamId" :resources="resources"
+            @close="showTeamMeeting = false; $refs.widgetGrid?.refreshCalendar()" />
 
         <AddTaskModal v-if="showAddTask"
             :board-id="resources.deck && resources.deck.board_id"
@@ -172,6 +177,7 @@ import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import ScheduleMeetingModal from './ScheduleMeetingModal.vue'
 import AddEventModal from './AddEventModal.vue'
+import TeamMeetingModal from './TeamMeetingModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
@@ -193,6 +199,7 @@ export default {
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
         ScheduleMeetingModal, AddEventModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
+        TeamMeetingModal,
     },
 
     data() {
@@ -214,6 +221,7 @@ export default {
             showInviteModal:     false,
             showScheduleMeeting: false,
             showAddEvent:        false,
+            showTeamMeeting:     false,
             showAddTask:         false,
             showAddPersonalTask: false,
             widgetDynamicActions: {},

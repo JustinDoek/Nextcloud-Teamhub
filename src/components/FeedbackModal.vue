@@ -249,7 +249,7 @@ export default {
 
         &--required::after {
             content: ' *';
-            color: var(--color-error);
+            color: var(--color-error-text);
         }
     }
 
@@ -285,13 +285,13 @@ export default {
 
     &__error {
         font-size: 0.85em;
-        color: var(--color-error);
+        color: var(--color-error-text);
     }
 
     &__server-error {
         padding: 8px 12px;
         background: var(--color-error-light, #ffe0e0);
-        color: var(--color-error);
+        color: var(--color-error-text);
         border-radius: var(--border-radius);
         font-size: 0.9em;
     }
@@ -314,7 +314,7 @@ export default {
     }
 
     &__success-icon {
-        color: var(--color-success);
+        color: var(--color-success-text);
     }
 
     &__success-text {

@@ -144,6 +144,13 @@ return [
         ['name' => 'layout#saveDefaultLayout', 'url' => '/api/v1/layout/default',        'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
+        // Team meeting action — notes file + calendar event + Talk room
+        // ----------------------------------------------------------------
+        ['name' => 'meeting#createTeamMeeting',  'url' => '/api/v1/teams/{teamId}/meetings',          'verb' => 'POST'],
+        ['name' => 'meeting#getMeetingSettings', 'url' => '/api/v1/teams/{teamId}/meetings/settings', 'verb' => 'GET'],
+        ['name' => 'meeting#saveMeetingSettings','url' => '/api/v1/teams/{teamId}/meetings/settings', 'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
         // Feedback & feature requests
         // ----------------------------------------------------------------
         ['name' => 'feedback#submit', 'url' => '/api/v1/feedback', 'verb' => 'POST'],

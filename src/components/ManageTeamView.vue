@@ -152,6 +152,39 @@
                 </div>
             </div>
 
+            <!-- Meeting permissions -->
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Meeting permissions') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Set which membership level is required to create a team meeting.') }}
+                </p>
+                <div v-if="loadingMeetingSettings" class="section-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <div v-else class="manage-settings">
+                    <div class="manage-settings-group">
+                        <label class="manage-meeting-label" for="meeting-min-level">
+                            {{ t('teamhub', 'Who can create a team meeting?') }}
+                        </label>
+                        <select
+                            id="meeting-min-level"
+                            v-model="meetingMinLevel"
+                            class="manage-meeting-select"
+                            @change="saveMeetingSettings">
+                            <option :value="1">{{ t('teamhub', 'Any member') }}</option>
+                            <option :value="4">{{ t('teamhub', 'Moderator or above') }}</option>
+                            <option :value="8">{{ t('teamhub', 'Admin or above') }}</option>
+                        </select>
+                        <p v-if="meetingSettingsSaved" class="manage-settings-saved">
+                            <CheckCircle :size="14" />{{ t('teamhub', 'Settings saved') }}
+                        </p>
+                        <p v-if="meetingSettingsError" class="manage-settings-error">
+                            {{ meetingSettingsError }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Team Apps -->
             <div class="manage-section">
                 <h3>{{ t('teamhub', 'Team Apps') }}</h3>
@@ -498,7 +531,7 @@
                     <p style="margin: 0 0 12px;">
                         {{ t('teamhub', 'Are you sure you want to make {name} the new owner of this team? You will be demoted to admin.', { name: pendingOwnerTransfer.displayName }) }}
                     </p>
-                    <p style="margin: 0; font-weight: 600; color: var(--color-warning);">
+                    <p style="margin: 0; font-weight: 600; color: var(--color-warning-text);">
                         {{ t('teamhub', 'This action cannot be easily undone.') }}
                     </p>
                 </template>
@@ -533,7 +566,7 @@
                     <li v-if="pendingDisableApp.id === 'deck'">{{ t('teamhub', 'The Deck board and all cards') }}</li>
                     <li v-if="pendingDisableApp.id === 'intravox'">{{ t('teamhub', 'The Intravox team page') }}</li>
                 </ul>
-                <p style="margin: 0; font-weight: 600; color: var(--color-error);">
+                <p style="margin: 0; font-weight: 600; color: var(--color-error-text);">
                     {{ t('teamhub', 'This action cannot be undone.') }}
                 </p>
             </template>
@@ -636,6 +669,11 @@ export default {
             imageUploading: false,
             imageRemoving: false,
             imagePreviewUrl: this.team.image_url || null,
+            // Meeting permissions
+            loadingMeetingSettings: false,
+            meetingMinLevel: 1,
+            meetingSettingsSaved: false,
+            meetingSettingsError: null,
             // Owner transfer
             ownerSearch: '',
             ownerSuggestions: [],
@@ -783,6 +821,7 @@ export default {
             this.loadConfig()
             this.loadTeamApps()
             this.loadIntegrationRegistry()
+            this.loadMeetingSettings()
         },
 
         getMemberRoleLabel(level) {
@@ -1103,6 +1142,39 @@ export default {
         },
 
         // ------------------------------------------------------------------
+        // Meeting permissions
+        // ------------------------------------------------------------------
+
+        async loadMeetingSettings() {
+            this.loadingMeetingSettings = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/meetings/settings`)
+                )
+                this.meetingMinLevel = data.minLevel ?? 1
+            } catch (e) {
+                // Non-admin users get 403 — silently ignore, section won't be visible to them
+            } finally {
+                this.loadingMeetingSettings = false
+            }
+        },
+
+        async saveMeetingSettings() {
+            this.meetingSettingsSaved = false
+            this.meetingSettingsError = null
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/meetings/settings`),
+                    { minLevel: this.meetingMinLevel }
+                )
+                this.meetingSettingsSaved = true
+                setTimeout(() => { this.meetingSettingsSaved = false }, 3000)
+            } catch (e) {
+                const msg = e?.response?.data?.error || t('teamhub', 'Failed to save')
+                this.meetingSettingsError = msg
+            }
+        },
+
         // External integrations
         // ------------------------------------------------------------------
 
@@ -1337,10 +1409,10 @@ export default {
 
 /* Danger tab styling */
 .manage-tab--danger:hover {
-    color: var(--color-error);
+    color: var(--color-error-text);
 }
 .manage-tab--danger.manage-tab--active {
-    color: var(--color-error);
+    color: var(--color-error-text);
     border-bottom-color: var(--color-error);
 }
 
@@ -1411,11 +1483,45 @@ export default {
     align-items: center;
     gap: 6px;
     font-size: 13px;
-    color: var(--color-success);
+    color: var(--color-success-text);
     margin: 4px 0 0;
 }
 
-/* Team apps */
+.manage-settings-error {
+    font-size: 13px;
+    color: var(--color-error-text);
+    margin: 4px 0 0;
+}
+
+/* Meeting permissions */
+.manage-meeting-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-maxcontrast);
+    margin-bottom: 8px;
+}
+
+.manage-meeting-select {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    padding: 8px 12px;
+    border: 2px solid var(--color-border-maxcontrast);
+    border-radius: var(--border-radius-large);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.manage-meeting-select:focus {
+    outline: none;
+    border-color: var(--color-primary-element);
+}
+
+
 .team-apps-list {
     display: flex;
     flex-direction: column;
@@ -1628,7 +1734,7 @@ export default {
 }
 .widget-badge--tab {
     background: color-mix(in srgb, var(--color-success) 15%, transparent);
-    color: var(--color-success, #46ba61);
+    color: var(--color-success-text);
 }
 
 /* Danger zone */
@@ -1640,7 +1746,7 @@ export default {
     background: color-mix(in srgb, var(--color-error) 5%, transparent);
 }
 .manage-section--danger h3 {
-    color: var(--color-error);
+    color: var(--color-error-text);
 }
 .manage-danger-row {
     display: flex;
@@ -1857,7 +1963,7 @@ export default {
 }
 .group-circle-icon--circle {
     background: color-mix(in srgb, var(--color-warning) 22%, transparent);
-    color: var(--color-warning);
+    color: var(--color-warning-text);
 }
 .group-circle-info {
     flex: 1;

@@ -1,9 +1,10 @@
-// CRITICAL: Set globals BEFORE any other imports.
-// @nextcloud/vue and @nextcloud/axios read OC.requestToken at import time.
-// Guarantee the token is present by reading it from the DOM attribute that
-// Nextcloud core always writes onto <head data-requesttoken="...">.
+// appName and appVersion are injected as bare compile-time globals by webpack
+// DefinePlugin (see webpack.config.js). That satisfies @nextcloud/vue which reads
+// them via try { Ve = appName } at module evaluation time.
+// We also set window.* here as a runtime fallback for any code that reads them
+// from the global object directly.
 window.appName = 'teamhub'
-window.appVersion = '2.6.3'
+window.appVersion = '3.15.0'
 
 // Ensure OC.requestToken is populated before @nextcloud/axios is imported.
 // Nextcloud writes the token into two places; prefer the DOM attribute because

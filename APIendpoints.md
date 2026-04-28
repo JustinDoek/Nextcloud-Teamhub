@@ -611,3 +611,39 @@ Privacy: no URLs, no IDs, no content, no hostnames/instance URLs are included. L
 Enable or disable daily usage reporting.
 **Auth:** NC admin.
 **Body:** `enabled=1|0` (form-encoded)
+
+---
+
+## Team Meeting Action
+
+### POST `/api/v1/teams/{teamId}/meetings`
+Execute the full team meeting workflow: create meeting notes file, calendar event, and optional Talk integration.
+**Auth:** Team member at `meeting_min_level` or above (default: any member).
+**Body (JSON):**
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `title` | string | yes | Meeting title |
+| `date` | string | yes | Date in `YYYY-MM-DD` format |
+| `startTime` | string | yes | Start time in `HH:MM` format |
+| `endTime` | string | yes | End time in `HH:MM` format |
+| `location` | string | no | Optional physical location |
+| `filename` | string | no | Base filename for the notes `.md` file (defaults to title) |
+| `includeTalk` | int | no | `1` to link the team Talk room (default `1`) |
+| `talkToken` | string | no | Talk room token from frontend resources (avoids extra DB lookup) |
+| `askAgenda` | int | no | `1` to post an agenda request message in Talk (default `0`) |
+
+**Response 201:**
+```json
+{ "notesUrl": "string", "talkUrl": "string|null", "calendarEventCreated": true }
+```
+
+### GET `/api/v1/teams/{teamId}/meetings/settings`
+Get the `meeting_min_level` for this team.
+**Auth:** Team admin.
+**Response 200:** `{ "minLevel": 1|4|8 }`
+
+### PUT `/api/v1/teams/{teamId}/meetings/settings`
+Save the `meeting_min_level` for this team.
+**Auth:** Team admin.
+**Body:** `{ "minLevel": 1|4|8 }`
+**Response 200:** `{ "minLevel": 1|4|8 }`

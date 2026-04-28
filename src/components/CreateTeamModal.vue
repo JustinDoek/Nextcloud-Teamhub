@@ -355,7 +355,7 @@ export default {
     margin-bottom: 6px;
 }
 
-.ctm__required { color: var(--color-error); }
+.ctm__required { color: var(--color-error-text); }
 
 .ctm__field { position: relative; }
 
@@ -440,7 +440,7 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-.ctm__chip-remove:hover { color: var(--color-error); }
+.ctm__chip-remove:hover { color: var(--color-error-text); }
 
 /* App checkboxes */
 .ctm__hint {
