@@ -3,6 +3,67 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.18.0] — 2026-04-29
+
+### Added
+- **Audit tab info banner.** A permanent informational banner sits at the top of the Audit tab explaining that external activity is mirrored hourly, new events may take up to an hour to surface, and TeamHub-internal actions are recorded immediately. Always visible, no dismiss.
+- **Iframe loading skeleton.** `AppEmbed` shows an `NcLoadingIcon` overlay until the embedded app fires its `load` event.
+- **Iframe reload button.** New refresh button in the embed toolbar fully tears down and recreates the iframe element (`:key` bump), equivalent to a hard reload.
+- **Iframe error state.** When `iframe_url` fails frontend validation, `AppEmbed` shows an explicit `AlertCircleOutline` error message instead of an indefinite spinner.
+
+### Fixed
+- **NC 32 chrome stripping.** NC 32 renamed `#app-navigation` → `#app-navigation-vue`, `#content` → `#content-vue`, `#app-sidebar` → `#app-sidebar-vue`, `.app-menu-main` → `#app-menu-container`. Our injected CSS was targeting the old names. All old + new selectors now covered.
+- **NC 32 layout offset.** NC 32 drives the body container position from `--body-container-margin` / `--body-container-radius` CSS variables rather than fixed pixels. Now zeroed on `:root`.
+- **Custom Menu app chrome visible.** The "Custom Menu" NC app (`side_menu`) injects `#side-menu-container` and `.cm--topwidemenu` that no prior rule targeted. Now explicitly hidden.
+- **Files share dialog and details panel blocked.** `#app-sidebar-vue` was hidden globally — NC apps use it for share panels, file details, Calendar event editors, Deck card details. Removed from hide rules; the sidebar starts closed on page load so no chrome shows.
+- **App-internal modals trapped.** `position: fixed; inset: 0` on `#content-vue` flattened the stacking context, preventing app-internal modals from rendering above the content. Replaced with `width/height: 100%` only.
+- **Talk chat textarea cut off.** `.app-embed__viewport` used `height: 85%` which truncated the bottom of the Chat view. Replaced with `flex: 1 1 auto; min-height: 0` to fill available column height correctly.
+- **`onLoad` never fired / injection never ran.** `loading="lazy"` on the iframe caused the browser to defer `load` events (confirmed in console: *"Load events are deferred"*). Removed.
+- **`TypeError: Cannot read properties of undefined (reading 'forEach')`** in `clearRetryTimers()`. Vue 2 doesn't reliably maintain underscore-prefixed `data()` properties. Added `Array.isArray()` guard.
+- **MutationObserver infinite loop.** `injectCss()` removed and re-appended the `<style>` tag on every call — each DOM write re-triggered the observer. Now bails early if tag already present.
+
+### Security
+- **Origin-aware iframe sandbox.** Cross-origin `menu_item` integrations get `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"` — without `allow-same-origin` (blocks cookie/localStorage abuse) and without `allow-top-navigation` (blocks parent-window redirect). Same-origin built-ins unsandboxed (DOM access required for CSS injection).
+- **`referrerpolicy="strict-origin-when-cross-origin"`** on every iframe — prevents team-scoped URL leaking via `Referer` header.
+- **`allow=""`** (empty Permissions Policy) on every iframe — denies camera, mic, geolocation, payment, USB by default.
+- **`rel="noopener noreferrer"`** added to "Open in new tab" link (was `target="_blank"` only — leaked `window.opener`).
+- **Frontend URL re-validation** in `TeamView.menuItemUrl()`: rejects anything outside `https://`, `/apps/`, `/index.php/`. Defence-in-depth alongside backend validation in `IntegrationService`.
+
+
+
+### Added
+- **Audit tab info banner.** A permanent informational banner now sits at the top of the Audit tab (above the activity-disabled warning) explaining that external activity is mirrored hourly and that new events may take up to an hour to surface. Internal events (team creation, join requests) continue to be recorded immediately.
+- **Iframe loading state.** `AppEmbed` now shows an `NcLoadingIcon` skeleton until the iframe fires its `load` event — replaces the previous blank pane during reloads and tab switches.
+- **Iframe reload button.** New refresh control in the embed toolbar bumps a Vue `:key` to fully tear down and recreate the iframe element, equivalent to a hard reload (no cached app state).
+- **Iframe error state.** When the URL fails frontend validation (only `https://`, `/apps/`, `/index.php/` are accepted), `AppEmbed` shows an explicit error message with `AlertCircleOutline` icon instead of spinning indefinitely.
+
+### Security
+- **Origin-aware iframe sandbox.** Cross-origin iframes (external `menu_item` integrations) now ship with `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"` — deliberately *without* `allow-same-origin` (blocks cookie/localStorage abuse) and *without* `allow-top-navigation` (blocks parent-window phishing). Same-origin built-ins (Talk/Files/Calendar/Deck) remain unsandboxed because the chrome-stripping CSS injection requires DOM access.
+- **Iframe `referrerpolicy="strict-origin-when-cross-origin"`** on every embed — prevents the team-scoped TeamHub URL (which contains `?team={teamId}`) from leaking to third-party origins via the `Referer` header.
+- **Iframe `allow=""`** (empty Permissions Policy) on every embed — denies camera, microphone, geolocation, payment, USB, MIDI, and other powerful features by default.
+- **Frontend URL re-validation** in `TeamView.menuItemUrl()`: rejects anything not `https://`, `/apps/`, or `/index.php/`. Defence-in-depth alongside the existing backend validation in `IntegrationService`. Rejected URLs are logged with their `registry_id` so admins can locate poisoned rows.
+- **`rel="noopener noreferrer"`** added to the "Open in new tab" anchor in `AppEmbed`. The previous `target="_blank"` alone leaked `window.opener`.
+
+### Changed
+- Cross-origin iframes now skip the CSS-injection retry loop entirely (was running 4 doomed `setTimeout`s on every cross-origin load — silent throws but wasteful).
+- "Open in new tab" button is hidden when the URL is empty (rejected by validation); Reload button is disabled in the same case.
+
+## [3.16.0] — 2026-04-28
+
+### Added
+- **Admin governance — audit log.** New "Audit" tab in Admin Settings provides per-team activity logs with team picker, event-type filter, date range, paginated table (50/page, max 200), and ZIP export. NC admin only.
+- New table `oc_teamhub_audit_log` (immutable from the application layer — only insert, read, and bulk-purge are exposed) created by migration `Version000316000`.
+- `AuditService` — single write entry point with non-fatal failure handling and a 500-char-per-field metadata cap.
+- `AuditIngestionService` — hourly mirror from `oc_activity` (Circles + files, 14 mapped subjects across both apps) plus snapshot-diff against `oc_share` for `share.created` / `share.permissions_changed` / `share.deleted`.
+- `AuditMirrorJob` — hourly `TimedJob` orchestrating the mirror and the retention purge.
+- Direct audit logging in `TeamService` (`team.created`, `team.deleted`, `team.config_changed`, `team.app_enabled`, `team.app_disabled`), `MemberService` (`join.requested`, `join.approved`, `join.rejected`, `member.joined` for open-circle self-join), and `MaintenanceService` (`team.owner_transferred`).
+- 5 new admin endpoints under `/api/v1/admin/audit/...` for teams summary, paginated events, ZIP export, retention GET/PUT.
+- Configurable retention (7–3650 days, default 90) stored in `IAppConfig`. Mirror job clamps and enforces on every cycle.
+- Activity-app-disabled detection: when the NC Activity app is unavailable, the Audit tab shows a warning banner and only direct-logged events continue to be captured.
+
+### Changed
+- `AuditLogMapper` exposes a separate `insertWithTimestamp()` so the mirror job can preserve the original `oc_activity` timestamp on backdated rows without a follow-up UPDATE — keeps the immutability contract clean.
+
 ## [3.15.0] — 2026-04-28
 
 ### Fixed

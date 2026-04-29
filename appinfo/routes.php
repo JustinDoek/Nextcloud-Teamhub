@@ -172,5 +172,14 @@ return [
         ['name' => 'integration#getIntegrationRegistry', 'url' => '/api/v1/teams/{teamId}/integrations/registry',                    'verb' => 'GET'],
         ['name' => 'integration#toggleIntegration',      'url' => '/api/v1/teams/{teamId}/integrations/{registryId}/toggle',         'verb' => 'POST'],
         ['name' => 'integration#reorderIntegrations',    'url' => '/api/v1/teams/{teamId}/integrations/reorder',                     'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
+        // Audit log — admin governance (NC admin required)
+        // ----------------------------------------------------------------
+        ['name' => 'audit#listTeams',     'url' => '/api/v1/admin/audit/teams',                          'verb' => 'GET'],
+        ['name' => 'audit#listEvents',    'url' => '/api/v1/admin/audit/teams/{teamId}/events',         'verb' => 'GET'],
+        ['name' => 'audit#exportTeam',    'url' => '/api/v1/admin/audit/teams/{teamId}/export',         'verb' => 'GET'],
+        ['name' => 'audit#getRetention',  'url' => '/api/v1/admin/audit/retention',                      'verb' => 'GET'],
+        ['name' => 'audit#saveRetention', 'url' => '/api/v1/admin/audit/retention',                      'verb' => 'PUT'],
     ],
 ];

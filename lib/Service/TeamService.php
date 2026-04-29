@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\TeamAppMapper;
 use OCP\App\IAppManager;
@@ -52,6 +53,7 @@ class TeamService {
         private LoggerInterface $logger,
         private IUserManager $userManager,
         private TeamImageService $teamImageService,
+        private AuditService $auditService,
     ) {
     }
 
@@ -284,6 +286,21 @@ class TeamService {
         try {
             $circle = $circlesManager->createCircle($name);
             $result = $this->circleToArray($circle);
+
+            // Audit log — team creation. Use the circle's unique_id (== team_id) as target.
+            $teamId = (string)($result['id'] ?? $result['unique_id'] ?? '');
+            if ($teamId !== '') {
+                $this->auditService->log(
+                    $teamId,
+                    'team.created',
+                    $user->getUID(),
+                    'team',
+                    $teamId,
+                    ['name' => $name],
+                );
+            }
+
+
             return $result;
         } catch (\Exception $e) {
             $this->logger->error('[TeamService] Error creating team', ['exception' => $e, 'app' => Application::APP_ID]);
@@ -316,12 +333,45 @@ class TeamService {
         // the startSession()/stopSession() pattern that fails on hidden circles.
         $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);
         $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+
+        // Capture team name BEFORE destroy so the audit row carries useful context.
+        // After destroy, the circle row is gone and we can no longer look it up.
+        $teamName = null;
+        try {
+            $qb = $db->getQueryBuilder();
+            $r = $qb->select('name')
+                ->from('circles_circle')
+                ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $r->fetch();
+            $r->closeCursor();
+            if ($row !== false) {
+                $teamName = (string)$row['name'];
+            }
+        } catch (\Throwable $e) { /* non-fatal — name is just metadata */ }
+
         $federatedUserService->setLocalCurrentUser($user);
         $circleService->destroy($teamId);
 
         try {
             $db->executeStatement('DELETE FROM `*PREFIX*teamhub_team_apps` WHERE `team_id` = ?', [$teamId]);
         } catch (\Throwable $e) { /* Not fatal */ }
+
+        // Audit log — team deletion. Logged AFTER successful destroy, so a failed
+        // delete does not produce a misleading "team.deleted" row.
+        // Note: the mirror job will also see Circles' `circle_delete` activity
+        // event later; the AuditMirrorJob (Checkpoint B) is responsible for
+        // de-duplicating against this direct entry within a 5-second window.
+        $this->auditService->log(
+            $teamId,
+            'team.deleted',
+            $user->getUID(),
+            'team',
+            $teamId,
+            $teamName !== null ? ['name' => $teamName] : null,
+        );
+
     }
 
     // =========================================================================
@@ -346,6 +396,22 @@ class TeamService {
         if ($accessLevel < 4) { // moderator or above may update description
             throw new \Exception('Access denied');
         }
+
+        // Capture old description for the audit diff. Best-effort — falls back to ''.
+        $oldDescription = '';
+        try {
+            $qbRead = $db->getQueryBuilder();
+            $r = $qbRead->select('description', 'long_desc')
+                ->from('circles_circle')
+                ->where($qbRead->expr()->eq('unique_id', $qbRead->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $r->fetch();
+            $r->closeCursor();
+            if ($row !== false) {
+                $oldDescription = (string)($row['description'] ?? $row['long_desc'] ?? '');
+            }
+        } catch (\Throwable $e) { /* non-fatal */ }
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -372,6 +438,22 @@ class TeamService {
                 'app'       => Application::APP_ID,
             ]);
             throw new \Exception('Failed to update description: ' . $e->getMessage());
+        }
+
+        // Audit log — only if the value actually changed (buildDiff returns null otherwise).
+        $diff = $this->auditService->buildDiff(
+            ['description' => $oldDescription],
+            ['description' => $description],
+        );
+        if ($diff !== null) {
+            $this->auditService->log(
+                $teamId,
+                'team.config_changed',
+                $user->getUID(),
+                'team',
+                $teamId,
+                $diff,
+            );
         }
     }
 
@@ -437,6 +519,21 @@ class TeamService {
                     apcu_delete($item['key']);
                 }
             } catch (\Throwable $e) { /* non-fatal */ }
+        }
+
+        // Audit log — only the managed bits, since unmanaged bits are preserved
+        // verbatim and a "change" there is not user-driven.
+        $oldManaged = $currentConfig & $MANAGED_BITS;
+        $newManaged = $newConfig     & $MANAGED_BITS;
+        if ($oldManaged !== $newManaged) {
+            $this->auditService->log(
+                $teamId,
+                'team.config_changed',
+                $user->getUID(),
+                'team',
+                $teamId,
+                ['changed' => ['config_bits' => ['old' => $oldManaged, 'new' => $newManaged]]],
+            );
         }
     }
 
@@ -589,8 +686,41 @@ class TeamService {
     }
 
     public function updateTeamApps(string $teamId, array $apps): void {
+
+        // Capture previous state so we can emit accurate enabled/disabled events.
+        // We compare per-app rather than emitting one bulk event because each
+        // toggle is a discrete admin decision worth surfacing in the audit log.
+        $previous = [];
+        try {
+            foreach ($this->teamAppMapper->findByTeamId($teamId) as $row) {
+                $appId = (string)($row['app_id'] ?? '');
+                if ($appId !== '') {
+                    $previous[$appId] = (bool)($row['enabled'] ?? false);
+                }
+            }
+        } catch (\Throwable $e) { /* non-fatal — diff just won't have prior state */ }
+
+        $user      = $this->userSession->getUser();
+        $actorUid  = $user ? $user->getUID() : null;
+
         foreach ($apps as $app) {
             $this->teamAppMapper->upsert($teamId, $app['app_id'], $app['enabled'], $app['config'] ?? null);
+
+            $appId    = (string)($app['app_id'] ?? '');
+            $newState = (bool)($app['enabled'] ?? false);
+            $oldState = $previous[$appId] ?? null;
+
+            // Only emit when state actually transitioned.
+            if ($appId !== '' && $oldState !== $newState) {
+                $this->auditService->log(
+                    $teamId,
+                    $newState ? 'team.app_enabled' : 'team.app_disabled',
+                    $actorUid,
+                    'app',
+                    $appId,
+                    null,
+                );
+            }
         }
     }
 

@@ -1,4 +1,7 @@
-# TeamHub API Endpoints — v3.11.0
+# TeamHub API Endpoints — v3.18.0
+
+> No endpoint surface changes between 3.17.0 and 3.18.0.
+> v3.18.0 is a frontend-only release (iframe overhaul + Audit tab info banner).
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
 All endpoints require an authenticated Nextcloud session unless noted.
@@ -647,3 +650,104 @@ Save the `meeting_min_level` for this team.
 **Auth:** Team admin.
 **Body:** `{ "minLevel": 1|4|8 }`
 **Response 200:** `{ "minLevel": 1|4|8 }`
+
+---
+
+## Audit log (NC admin only)
+
+All audit endpoints require an NC server administrator session, enforced via the
+`#[AuthorizedAdminSetting]` controller attribute. The audit log can contain
+user-identifying data (uids, file paths, group names) — exposing any of it to
+non-admins would be a privacy violation.
+
+### GET `/admin/audit/teams`
+Summary list of teams that have at least one audit row.
+**Auth:** NC admin.
+**Response 200:**
+```
+{
+  "teams": [
+    { "team_id": "...", "display_name": "...", "event_count": N, "last_event_at": <unix-seconds> },
+    ...
+  ],
+  "activity_missing": false
+}
+```
+Sorted by `last_event_at` descending. `activity_missing` is `true` when the NC
+Activity app is disabled — used by the frontend to render a warning banner.
+
+### GET `/admin/audit/teams/{teamId}/events`
+Paginated audit rows for a single team.
+**Auth:** NC admin.
+**Query params:**
+| name | type | default | notes |
+|---|---|---|---|
+| `page` | int | 1 | 1-based |
+| `perPage` | int | 50 | Capped at 200 |
+| `eventTypes` | string | `""` | Comma-separated list. Empty = all |
+| `from` | int | 0 | Unix seconds, inclusive lower bound. 0 = no filter |
+| `to` | int | 0 | Unix seconds, inclusive upper bound. 0 = no filter |
+
+**Response 200:**
+```
+{
+  "rows": [
+    {
+      "id": 12345,
+      "team_id": "...",
+      "event_type": "member.joined",
+      "actor_uid": "alice",
+      "target_type": "member",
+      "target_id": "bob",
+      "metadata": { ... or null ... },
+      "created_at": 1714305600
+    },
+    ...
+  ],
+  "total": 412,
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 9
+}
+```
+
+### GET `/admin/audit/teams/{teamId}/export`
+Stream a ZIP archive containing the team's full audit history.
+**Auth:** NC admin.
+**Response 200:** `application/zip`. Contents:
+- `team-info.json` — `{ team_id, display_name, exported_at, event_count }`
+- `events.json` — full rows array, ordered ASC by `created_at`, pretty-printed.
+
+Filename: `teamhub-audit-{slug}-{YYYY-MM-DD}.zip` via `Content-Disposition`. Built with PHP `ZipArchive`.
+
+### GET `/admin/audit/retention`
+Current retention policy.
+**Auth:** NC admin.
+**Response 200:** `{ "retention_days": 90, "min": 7, "max": 3650, "default": 90 }`
+
+### PUT `/admin/audit/retention`
+Save the retention policy. Mirror job applies it on the next cycle.
+**Auth:** NC admin.
+**Body:** `{ "retentionDays": 30 }`
+**Response 200:** `{ "retention_days": 30 }`
+**Response 400:** `retentionDays must be between 7 and 3650`
+
+### Event types written to the audit log
+
+| Event | Source |
+|---|---|
+| `team.created` | Direct from `TeamService::createTeam` |
+| `team.deleted` | Direct from `TeamService::deleteTeam`; also from oc_activity `circle_delete` (deduped) |
+| `team.config_changed` | Direct from `TeamService::updateTeamDescription` and `updateTeamConfig` |
+| `team.owner_transferred` | Direct from `MaintenanceService::assignOwner` |
+| `team.app_enabled` / `team.app_disabled` | Direct from `TeamService::updateTeamApps` (per-app, only on transition) |
+| `member.joined` | oc_activity `member_added` and `member_circle_added`; also direct on open-circle self-join |
+| `member.left` | oc_activity `member_left` |
+| `member.removed` | oc_activity `member_remove` |
+| `member.level_changed` | oc_activity `member_level` |
+| `invite.sent` | oc_activity `member_invited` |
+| `join.requested` / `join.approved` / `join.rejected` | Direct from `MemberService` |
+| `file.created` | oc_activity `created_self`, `created_by`, `created_public` (path matched against team folders) |
+| `file.edited` | oc_activity `changed_self`, `changed_by` |
+| `file.deleted` | oc_activity `deleted_self`, `deleted_by` |
+| `share.created` / `share.permissions_changed` / `share.deleted` | Snapshot diff against `oc_share` |

@@ -43,28 +43,37 @@
             <!-- Activity feed -->
             <ActivityFeedView v-if="currentView === 'activity'" />
 
-            <!-- Embedded NC app views -->
+            <!-- Embedded NC app views.
+                 v-if  = render when this view is active OR has been preloaded.
+                 v-show = only display when it IS the active view.
+                 Together: iframes stay alive in the DOM once rendered (instant
+                 tab switches), but aren't created until needed or preloaded. -->
             <AppEmbed
-                v-if="currentView === 'talk' && resources.talk"
+                v-if="(preloadedViews.has('talk') || currentView === 'talk') && resources.talk"
+                v-show="currentView === 'talk'"
                 :url="talkUrl"
                 :label="t('teamhub', 'Chat')" />
             <AppEmbed
-                v-if="currentView === 'files' && resources.files"
+                v-if="(preloadedViews.has('files') || currentView === 'files') && resources.files"
+                v-show="currentView === 'files'"
                 :url="filesUrl"
                 :label="t('teamhub', 'Files')" />
             <AppEmbed
-                v-if="currentView === 'calendar'"
+                v-if="preloadedViews.has('calendar') || currentView === 'calendar'"
+                v-show="currentView === 'calendar'"
                 :url="calendarUrl"
                 :label="t('teamhub', 'Calendar')" />
             <AppEmbed
-                v-if="currentView === 'deck' && resources.deck"
+                v-if="(preloadedViews.has('deck') || currentView === 'deck') && resources.deck"
+                v-show="currentView === 'deck'"
                 :url="deckUrl"
                 :label="t('teamhub', 'Deck')" />
 
-            <!-- External menu_item integrations -->
+            <!-- External menu_item integrations — preloaded by registry_id -->
             <template v-for="menuItem in externalMenuItems">
                 <AppEmbed
-                    v-if="currentView === 'ext-' + menuItem.registry_id && menuItem.iframe_url"
+                    v-if="(preloadedViews.has('ext-' + menuItem.registry_id) || currentView === 'ext-' + menuItem.registry_id) && menuItem.iframe_url"
+                    v-show="currentView === 'ext-' + menuItem.registry_id"
                     :key="'ext-canvas-' + menuItem.registry_id"
                     :url="menuItemUrl(menuItem)"
                     :label="menuItem.title" />
@@ -225,6 +234,10 @@ export default {
             showAddTask:         false,
             showAddPersonalTask: false,
             widgetDynamicActions: {},
+            // Set of view keys whose iframe has been rendered at least once.
+            // Once a view is in this set the AppEmbed is kept in the DOM
+            // (v-show) rather than destroyed, so tab switches are instant.
+            preloadedViews: new Set(),
         }
     },
 
@@ -244,10 +257,10 @@ export default {
             return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
         },
         calendarUrl() {
-            const cal = this.resources.calendar
-            return cal?.public_token
-                ? generateUrl('/apps/calendar/p/' + cal.public_token)
-                : generateUrl('/apps/calendar')
+            // Always use the full authenticated Calendar app so events are
+            // editable. The public token URL (/apps/calendar/p/{token}) was
+            // read-only by design — dropped in v3.18.3.
+            return generateUrl('/apps/calendar')
         },
         deckUrl() {
             const id = this.resources.deck?.board_id
@@ -302,6 +315,7 @@ export default {
                 this.orderedTabs = []
                 this.layoutLoaded = false
                 this.editMode = false
+                this.preloadedViews = new Set()
                 this.loadLayout(newId)
             }
         },
@@ -331,6 +345,23 @@ export default {
         if (this.currentTeamId) {
             this.loadLayout(this.currentTeamId)
         }
+        // Background-preload the built-in iframe tabs after the team page has
+        // had time to render and settle. Staggered so they don't all hit the
+        // server at once. The active tab (if the user has already switched) is
+        // already rendered via the v-if currentView fallback, so we skip it.
+        const builtinViews = ['talk', 'files', 'calendar', 'deck']
+        builtinViews.forEach((view, i) => {
+            setTimeout(() => {
+                if (!this.preloadedViews.has(view)) {
+                    // Trigger Vue reactivity — replace the Set with a new one
+                    // so watchers/computed notice the change.
+                    const next = new Set(this.preloadedViews)
+                    next.add(view)
+                    this.preloadedViews = next
+                    console.log('[TeamHub][TeamView] Background preloaded iframe:', view)
+                }
+            }, 1500 + i * 800)
+        })
     },
 
     methods: {
@@ -552,8 +583,26 @@ export default {
 
         menuItemUrl(menuItem) {
             if (!menuItem.iframe_url) return ''
-            const sep = menuItem.iframe_url.includes('?') ? '&' : '?'
-            return menuItem.iframe_url + sep + 'teamId=' + encodeURIComponent(this.currentTeamId)
+            const raw = String(menuItem.iframe_url).trim()
+
+            // Defence in depth: backend already validates at registration time,
+            // but never trust stored data on the way out either. We accept only:
+            //   - https:// absolute URLs
+            //   - /apps/... or /index.php/... NC-relative paths
+            // Anything else (javascript:, data:, http://, file://, //evil.com)
+            // is rejected outright. Empty string causes <iframe> to render with
+            // no src and AppEmbed shows the loading skeleton without ever
+            // navigating — visible failure mode rather than silent risk.
+            const isHttps    = raw.startsWith('https://')
+            const isAppRel   = raw.startsWith('/apps/')
+            const isIndexRel = raw.startsWith('/index.php/')
+            if (!isHttps && !isAppRel && !isIndexRel) {
+                console.warn('[TeamHub][TeamView] Rejected unsafe iframe_url for registry_id=' + menuItem.registry_id + ': scheme not allowed')
+                return ''
+            }
+
+            const sep = raw.includes('?') ? '&' : '?'
+            return raw + sep + 'teamId=' + encodeURIComponent(this.currentTeamId)
         },
 
         // ── Widget / team actions ───────────────────────────────────

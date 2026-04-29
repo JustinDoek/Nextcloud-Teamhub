@@ -28,6 +28,7 @@ class MaintenanceService {
         private ContainerInterface $container,
         private LoggerInterface    $logger,
         private ResourceService    $resourceService,
+        private AuditService       $auditService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -505,6 +506,26 @@ class MaintenanceService {
             throw new \Exception('No authenticated session');
         }
 
+        // Capture the current owner UID *before* the demote step. Used in the
+        // audit metadata so the log shows from-whom -> to-whom, and so the
+        // event is meaningful when the previous owner has been deleted from NC.
+        $previousOwnerUid = null;
+        try {
+            $prevQb = $this->db->getQueryBuilder();
+            $prevRes = $prevQb->select('user_id')
+                ->from('circles_member')
+                ->where($prevQb->expr()->eq('circle_id', $prevQb->createNamedParameter($teamId)))
+                ->andWhere($prevQb->expr()->eq('level',     $prevQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($prevQb->expr()->eq('user_type', $prevQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $prevRow = $prevRes->fetch();
+            $prevRes->closeCursor();
+            if ($prevRow && !empty($prevRow['user_id'])) {
+                $previousOwnerUid = (string)$prevRow['user_id'];
+            }
+        } catch (\Throwable $e) { /* non-fatal — audit row will just lack prev-owner */ }
+
 
         // Validate the target user exists in NC
         $user = $this->userManager->get($userId);
@@ -627,6 +648,22 @@ class MaintenanceService {
 
         // ── Step 5: Send NC notification to the new owner ────────────────────
         $this->sendOwnerAssignedNotification($teamId, $userId, $adminUser);
+
+        // ── Step 6: Audit log ─────────────────────────────────────────────────
+        // Logged AFTER all verification + notification steps so a failed
+        // promotion never produces a misleading audit row.
+        $this->auditService->log(
+            $teamId,
+            'team.owner_transferred',
+            $adminUser->getUID(),
+            'team',
+            $teamId,
+            [
+                'previous_owner' => $previousOwnerUid,
+                'new_owner'      => $userId,
+                'enforced_admin' => $enforceNcAdmin,
+            ],
+        );
     }
 
     /**

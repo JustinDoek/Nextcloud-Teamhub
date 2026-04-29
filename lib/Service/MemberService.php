@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\AuditService;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
 use OCP\IUserSession;
@@ -41,6 +42,7 @@ class MemberService {
         private IUserManager $userManager,
         private ContainerInterface $container,
         private LoggerInterface $logger,
+        private AuditService $auditService,
     ) {
     }
 
@@ -1162,12 +1164,34 @@ class MemberService {
                 $this->logger->info('[MemberService] requestJoinTeam: open circle — auto-approved, no notification sent', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
+
+                // Audit: this is a direct join, not a pending request. Circles will
+                // also write a `member_added` activity row that the mirror job will
+                // pick up — this direct entry will be deduplicated against it.
+                $this->auditService->log(
+                    $teamId,
+                    'member.joined',
+                    $uid,
+                    'member',
+                    $uid,
+                    ['via' => 'open_circle_self_join'],
+                );
             } else {
                 // Closed circle: notify admins that approval is needed.
                 $this->sendJoinRequestNotification($teamId, $uid, $db);
                 $this->logger->info('[MemberService] requestJoinTeam: closed circle — notification sent to admins', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
+
+                // Audit: pending join request awaiting admin approval.
+                $this->auditService->log(
+                    $teamId,
+                    'join.requested',
+                    $uid,
+                    'member',
+                    $uid,
+                    null,
+                );
             }
         } catch (\Throwable $e) {
             // Non-fatal — user is Requesting and an admin can approve manually
@@ -1529,6 +1553,19 @@ class MemberService {
             $this->logger->info('[MemberService] approveRequest: member approved via direct DB update', [
                 'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
             ]);
+
+            // Audit: admin approved a pending join request. Logged AFTER the
+            // status flip so a failed approval does not produce a phantom row.
+            // The mirror job will also see Circles' `member_added` activity row
+            // and dedupe against this entry.
+            $this->auditService->log(
+                $teamId,
+                'join.approved',
+                $user ? $user->getUID() : null,
+                'member',
+                $userId,
+                null,
+            );
         } catch (\Exception $e) {
             $this->logger->error('[MemberService] Error approving request', [
                 'teamId'    => $teamId,
@@ -1580,6 +1617,19 @@ class MemberService {
             $this->logger->info('[MemberService] rejectRequest: request rejected via direct DB delete', [
                 'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
             ]);
+
+            // Audit: admin rejected a pending join request. There is NO
+            // corresponding Circles activity for this — the row is silently
+            // deleted and no `member_*` event fires — so this is the only
+            // place a `join.rejected` event is ever recorded.
+            $this->auditService->log(
+                $teamId,
+                'join.rejected',
+                $user ? $user->getUID() : null,
+                'member',
+                $userId,
+                null,
+            );
         } catch (\Exception $e) {
             $this->logger->error('[MemberService] Error rejecting request', [
                 'teamId'    => $teamId,

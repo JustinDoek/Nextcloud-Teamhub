@@ -558,8 +558,217 @@
             </div>
         </div>
 
-        <!-- ── Save row — only for settings tabs, not statistics/maintenance ─ -->
-        <div v-show="!(['statistics','maintenance'].includes(activeTab))" class="admin-save-row">
+        <!-- ─────────────────────────────────────────────────────────────────
+             Audit tab
+             ───────────────────────────────────────────────────────────────── -->
+        <NcSettingsSection
+            v-show="activeTab === 'audit'"
+            id="tab-panel-audit"
+            role="tabpanel"
+            :name="t('teamhub', 'Audit log')"
+            :description="t('teamhub', 'Per-team activity log capturing membership, file, and share events for governance and compliance.')">
+
+            <!-- Always-visible info banner: explains hourly cadence -->
+            <div class="audit-banner audit-banner--info">
+                <div class="audit-banner__head">
+                    <InformationOutline :size="18" />
+                    <strong>{{ t('teamhub', 'Audit log updates hourly') }}</strong>
+                </div>
+                <span>{{ t('teamhub', 'External activity (member, file, and share events) is mirrored from Nextcloud once per hour by a background job. New events may take up to an hour to appear here. TeamHub-internal actions (team creation, join requests) are recorded immediately.') }}</span>
+            </div>
+
+            <!-- Activity-app-missing banner -->
+            <div v-if="auditActivityMissing" class="audit-banner audit-banner--warn">
+                <strong>{{ t('teamhub', 'Activity app disabled') }}</strong>
+                <span>{{ t('teamhub', 'The Nextcloud Activity app is disabled. Audit logs will only contain TeamHub-internal events until it is re-enabled.') }}</span>
+            </div>
+
+            <!-- Retention setting -->
+            <div class="audit-retention">
+                <label class="audit-retention__label">
+                    {{ t('teamhub', 'Retention period') }}
+                    <span class="admin-section-hint">
+                        {{ t('teamhub', 'Audit rows older than this are automatically purged. Allowed range: {min}–{max} days.', { min: auditRetention.min, max: auditRetention.max }) }}
+                    </span>
+                </label>
+                <div class="audit-retention__controls">
+                    <NcTextField
+                        :value.sync="auditRetentionInput"
+                        type="number"
+                        :min="auditRetention.min"
+                        :max="auditRetention.max"
+                        :label="t('teamhub', 'Days')"
+                        :label-visible="false"
+                        :disabled="auditRetentionSaving"
+                        @input="auditRetentionInput = $event.target.value" />
+                    <span class="audit-retention__suffix">{{ t('teamhub', 'days') }}</span>
+                    <NcButton
+                        type="primary"
+                        :disabled="auditRetentionSaving || !canSaveRetention"
+                        @click="saveAuditRetention">
+                        <template #icon>
+                            <NcLoadingIcon v-if="auditRetentionSaving" :size="18" />
+                            <ContentSave v-else :size="18" />
+                        </template>
+                        {{ t('teamhub', 'Save') }}
+                    </NcButton>
+                </div>
+            </div>
+
+            <!-- Team picker + filters -->
+            <div class="audit-controls">
+                <div class="audit-controls__row">
+                    <label class="audit-controls__label" for="audit-team-select">
+                        {{ t('teamhub', 'Team') }}
+                    </label>
+                    <select
+                        id="audit-team-select"
+                        v-model="auditSelectedTeamId"
+                        class="audit-controls__team-select"
+                        :disabled="auditTeamsLoading"
+                        @change="onAuditTeamChanged">
+                        <option value="">— {{ t('teamhub', 'Select a team') }} —</option>
+                        <option
+                            v-for="t in auditTeams"
+                            :key="t.team_id"
+                            :value="t.team_id">
+                            {{ t.display_name }} ({{ t.event_count }})
+                        </option>
+                    </select>
+                    <NcButton
+                        type="tertiary"
+                        :disabled="auditTeamsLoading"
+                        :aria-label="t('teamhub', 'Reload teams')"
+                        @click="loadAuditTeams">
+                        <template #icon>
+                            <NcLoadingIcon v-if="auditTeamsLoading" :size="18" />
+                            <RefreshIcon v-else :size="18" />
+                        </template>
+                    </NcButton>
+                </div>
+
+                <div v-if="auditTeamsError" class="admin-save-err">{{ auditTeamsError }}</div>
+
+                <div v-if="auditSelectedTeamId" class="audit-controls__row">
+                    <label class="audit-controls__label" for="audit-event-filter">
+                        {{ t('teamhub', 'Event types') }}
+                    </label>
+                    <select
+                        id="audit-event-filter"
+                        v-model="auditEventTypeFilter"
+                        class="audit-controls__filter-select"
+                        @change="resetAndLoadAuditEvents">
+                        <option value="">{{ t('teamhub', 'All events') }}</option>
+                        <option
+                            v-for="ev in auditEventCatalogue"
+                            :key="ev"
+                            :value="ev">
+                            {{ ev }}
+                        </option>
+                    </select>
+                </div>
+
+                <div v-if="auditSelectedTeamId" class="audit-controls__row">
+                    <label class="audit-controls__label" for="audit-from">
+                        {{ t('teamhub', 'From') }}
+                    </label>
+                    <input
+                        id="audit-from"
+                        v-model="auditFromDate"
+                        type="date"
+                        class="audit-controls__date"
+                        @change="resetAndLoadAuditEvents">
+                    <label class="audit-controls__label" for="audit-to">
+                        {{ t('teamhub', 'To') }}
+                    </label>
+                    <input
+                        id="audit-to"
+                        v-model="auditToDate"
+                        type="date"
+                        class="audit-controls__date"
+                        @change="resetAndLoadAuditEvents">
+                    <NcButton
+                        type="secondary"
+                        :disabled="auditExporting || !auditSelectedTeamId"
+                        @click="exportAuditTeam">
+                        <template #icon>
+                            <NcLoadingIcon v-if="auditExporting" :size="18" />
+                            <DownloadIcon v-else :size="18" />
+                        </template>
+                        {{ auditExporting ? t('teamhub', 'Exporting…') : t('teamhub', 'Download ZIP') }}
+                    </NcButton>
+                </div>
+            </div>
+
+            <!-- Empty state when no team selected -->
+            <div v-if="!auditSelectedTeamId && !auditTeamsLoading" class="audit-empty">
+                <ShieldCheckIcon :size="40" />
+                <p>{{ t('teamhub', 'Select a team to view its audit log.') }}</p>
+            </div>
+
+            <!-- Events table -->
+            <div v-if="auditSelectedTeamId" class="audit-events">
+                <div v-if="auditEventsLoading" class="audit-events__loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+                <div v-else-if="auditEventsError" class="admin-save-err">{{ auditEventsError }}</div>
+                <div v-else-if="auditEvents.length === 0" class="audit-empty">
+                    <p>{{ t('teamhub', 'No events recorded for the selected filters.') }}</p>
+                </div>
+                <table v-else class="audit-table">
+                    <thead>
+                        <tr>
+                            <th>{{ t('teamhub', 'When') }}</th>
+                            <th>{{ t('teamhub', 'Event') }}</th>
+                            <th>{{ t('teamhub', 'Actor') }}</th>
+                            <th>{{ t('teamhub', 'Target') }}</th>
+                            <th>{{ t('teamhub', 'Details') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="ev in auditEvents" :key="ev.id">
+                            <td class="audit-table__when">{{ formatAuditTimestamp(ev.created_at) }}</td>
+                            <td class="audit-table__event">{{ ev.event_type }}</td>
+                            <td>{{ ev.actor_uid || '—' }}</td>
+                            <td class="audit-table__target">
+                                <span v-if="ev.target_type">{{ ev.target_type }}: </span>
+                                {{ ev.target_id || '—' }}
+                            </td>
+                            <td class="audit-table__details">
+                                <code v-if="ev.metadata">{{ summariseAuditMetadata(ev.metadata) }}</code>
+                                <span v-else>—</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- Pagination -->
+                <div v-if="auditEvents.length > 0" class="maint-pagination">
+                    <NcButton
+                        type="tertiary"
+                        :disabled="auditEventsPage <= 1 || auditEventsLoading"
+                        @click="changeAuditPage(auditEventsPage - 1)">
+                        ← {{ t('teamhub', 'Previous') }}
+                    </NcButton>
+                    <span class="maint-page-info">
+                        {{ t('teamhub', 'Page {p} of {n} ({total} events)', {
+                            p: auditEventsPage,
+                            n: auditEventsTotalPages,
+                            total: auditEventsTotal,
+                        }) }}
+                    </span>
+                    <NcButton
+                        type="tertiary"
+                        :disabled="auditEventsPage >= auditEventsTotalPages || auditEventsLoading"
+                        @click="changeAuditPage(auditEventsPage + 1)">
+                        {{ t('teamhub', 'Next') }} →
+                    </NcButton>
+                </div>
+            </div>
+        </NcSettingsSection>
+
+        <!-- ── Save row — only for settings tabs, not statistics/maintenance/audit ─ -->
+        <div v-show="!(['statistics','maintenance','audit'].includes(activeTab))" class="admin-save-row">
             <NcButton
                 type="primary"
                 :disabled="saving"
@@ -622,6 +831,10 @@ import ChartBarIcon from 'vue-material-design-icons/ChartBar.vue'
 import WrenchIcon from 'vue-material-design-icons/Wrench.vue'
 import DeleteIcon from 'vue-material-design-icons/Delete.vue'
 import AccountEditIcon from 'vue-material-design-icons/AccountEdit.vue'
+import ShieldCheckIcon from 'vue-material-design-icons/ShieldCheck.vue'
+import DownloadIcon from 'vue-material-design-icons/Download.vue'
+import RefreshIcon from 'vue-material-design-icons/Refresh.vue'
+import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 
 export default {
     name: 'AdminSettings',
@@ -629,7 +842,8 @@ export default {
         NcSettingsSection, NcButton, NcLoadingIcon,
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
-        ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon,
+        ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon,
+        InformationOutline,
     },
     data() {
         return {
@@ -687,6 +901,36 @@ export default {
             membershipCheckLoading: false,
             membershipCheckError: null,
             membershipRepairing: {},   // { teamId: bool }
+            // ── Audit tab ──────────────────────────────────────────────
+            auditTeams: [],            // [{ team_id, display_name, event_count, last_event_at }]
+            auditTeamsLoading: false,
+            auditTeamsError: null,
+            auditActivityMissing: false,
+            auditSelectedTeamId: '',
+            auditEvents: [],
+            auditEventsTotal: 0,
+            auditEventsPage: 1,
+            auditEventsPerPage: 50,
+            auditEventsLoading: false,
+            auditEventsError: null,
+            auditEventTypeFilter: '',  // comma-separated list, empty = all
+            auditFromDate: '',          // YYYY-MM-DD
+            auditToDate: '',            // YYYY-MM-DD
+            auditExporting: false,
+            auditRetention: { retention_days: 90, min: 7, max: 3650, default: 90 },
+            auditRetentionInput: 90,
+            auditRetentionSaving: false,
+            auditRetentionLoaded: false,
+            // Catalogue of known event types — feeds the multi-select filter
+            auditEventCatalogue: [
+                'team.created', 'team.deleted', 'team.config_changed',
+                'team.owner_transferred', 'team.app_enabled', 'team.app_disabled',
+                'member.joined', 'member.left', 'member.removed', 'member.level_changed',
+                'invite.sent',
+                'join.requested', 'join.approved', 'join.rejected',
+                'file.created', 'file.edited', 'file.deleted',
+                'share.created', 'share.permissions_changed', 'share.deleted',
+            ],
         }
     },
     computed: {
@@ -698,6 +942,7 @@ export default {
                 { id: 'integrations',  label: this.t('teamhub', 'Integrations'),  icon: 'PuzzleIcon'      },
                 { id: 'statistics',    label: this.t('teamhub', 'Statistics'),    icon: 'ChartBarIcon'    },
                 { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },
+                { id: 'audit',         label: this.t('teamhub', 'Audit'),          icon: 'ShieldCheckIcon' },
             ]
         },
 
@@ -714,6 +959,17 @@ export default {
         teamsTotalPages() {
             return Math.max(1, Math.ceil(this.teamsTotal / this.teamsPerPage))
         },
+
+        auditEventsTotalPages() {
+            return Math.max(1, Math.ceil(this.auditEventsTotal / this.auditEventsPerPage))
+        },
+
+        canSaveRetention() {
+            const n = parseInt(this.auditRetentionInput, 10)
+            if (isNaN(n)) return false
+            if (n < this.auditRetention.min || n > this.auditRetention.max) return false
+            return n !== this.auditRetention.retention_days
+        },
     },
     watch: {
         activeTab(tab) {
@@ -725,6 +981,14 @@ export default {
             }
             if (tab === 'maintenance' && !this.teamsLoading && this.teamsPage.length === 0 && !this.teamsError) {
                 this.loadTeams()
+            }
+            if (tab === 'audit') {
+                if (!this.auditRetentionLoaded) {
+                    this.loadAuditRetention()
+                }
+                if (!this.auditTeamsLoading && this.auditTeams.length === 0 && !this.auditTeamsError) {
+                    this.loadAuditTeams()
+                }
             }
         },
     },
@@ -1105,6 +1369,161 @@ export default {
             } finally {
                 this.$set(this.membershipRepairing, teamId, false)
             }
+        },
+
+        // ── Audit tab ──────────────────────────────────────────────────
+
+        async loadAuditRetention() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/audit/retention'))
+                this.auditRetention = data
+                this.auditRetentionInput = data.retention_days
+                this.auditRetentionLoaded = true
+            } catch (e) {
+                // Non-fatal — keep defaults.
+                this.auditRetentionLoaded = true
+            }
+        },
+
+        async saveAuditRetention() {
+            const n = parseInt(this.auditRetentionInput, 10)
+            if (isNaN(n)) return
+            this.auditRetentionSaving = true
+            try {
+                await axios.put(
+                    generateUrl('/apps/teamhub/api/v1/admin/audit/retention'),
+                    { retentionDays: n },
+                )
+                this.auditRetention.retention_days = n
+                showSuccess(this.t('teamhub', 'Retention saved'))
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(this.t('teamhub', 'Failed to save retention') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.auditRetentionSaving = false
+            }
+        },
+
+        async loadAuditTeams() {
+            this.auditTeamsLoading = true
+            this.auditTeamsError = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/audit/teams'))
+                this.auditTeams = Array.isArray(data.teams) ? data.teams : []
+                this.auditActivityMissing = !!data.activity_missing
+            } catch (e) {
+                this.auditTeamsError = e?.response?.data?.error || this.t('teamhub', 'Failed to load teams')
+                this.auditTeams = []
+            } finally {
+                this.auditTeamsLoading = false
+            }
+        },
+
+        onAuditTeamChanged() {
+            this.auditEventsPage = 1
+            this.auditEvents = []
+            this.auditEventsTotal = 0
+            if (this.auditSelectedTeamId) {
+                this.loadAuditEvents()
+            }
+        },
+
+        resetAndLoadAuditEvents() {
+            this.auditEventsPage = 1
+            this.loadAuditEvents()
+        },
+
+        changeAuditPage(p) {
+            if (p < 1 || p > this.auditEventsTotalPages) return
+            this.auditEventsPage = p
+            this.loadAuditEvents()
+        },
+
+        async loadAuditEvents() {
+            if (!this.auditSelectedTeamId) return
+            this.auditEventsLoading = true
+            this.auditEventsError = null
+            try {
+                const params = {
+                    page: this.auditEventsPage,
+                    perPage: this.auditEventsPerPage,
+                }
+                if (this.auditEventTypeFilter) {
+                    params.eventTypes = this.auditEventTypeFilter
+                }
+                if (this.auditFromDate) {
+                    params.from = Math.floor(new Date(this.auditFromDate + 'T00:00:00').getTime() / 1000)
+                }
+                if (this.auditToDate) {
+                    params.to = Math.floor(new Date(this.auditToDate + 'T23:59:59').getTime() / 1000)
+                }
+                const url = generateUrl(
+                    `/apps/teamhub/api/v1/admin/audit/teams/${encodeURIComponent(this.auditSelectedTeamId)}/events`
+                )
+                const { data } = await axios.get(url, { params })
+                this.auditEvents = Array.isArray(data.rows) ? data.rows : []
+                this.auditEventsTotal = data.total || 0
+            } catch (e) {
+                this.auditEventsError = e?.response?.data?.error || this.t('teamhub', 'Failed to load events')
+                this.auditEvents = []
+                this.auditEventsTotal = 0
+            } finally {
+                this.auditEventsLoading = false
+            }
+        },
+
+        async exportAuditTeam() {
+            if (!this.auditSelectedTeamId) return
+            this.auditExporting = true
+            try {
+                const url = generateUrl(
+                    `/apps/teamhub/api/v1/admin/audit/teams/${encodeURIComponent(this.auditSelectedTeamId)}/export`
+                )
+                const response = await axios.get(url, { responseType: 'blob' })
+                // Trigger a download in the browser without leaving the page.
+                const blob = new Blob([response.data], { type: 'application/zip' })
+                const link = document.createElement('a')
+                link.href = window.URL.createObjectURL(blob)
+                // Filename comes from server Content-Disposition; fall back to a default.
+                const team = this.auditTeams.find(t => t.team_id === this.auditSelectedTeamId)
+                const slug = team
+                    ? team.display_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+                    : 'team'
+                const date = new Date().toISOString().slice(0, 10)
+                link.download = `teamhub-audit-${slug || 'team'}-${date}.zip`
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+                window.URL.revokeObjectURL(link.href)
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(this.t('teamhub', 'Export failed') + (msg ? ': ' + msg : ''))
+            } finally {
+                this.auditExporting = false
+            }
+        },
+
+        formatAuditTimestamp(ts) {
+            if (!ts) return ''
+            const d = new Date(ts * 1000)
+            return d.toLocaleString()
+        },
+
+        summariseAuditMetadata(meta) {
+            if (!meta || typeof meta !== 'object') return ''
+            // Compact representation — first two top-level keys, truncated.
+            const entries = Object.entries(meta).slice(0, 3)
+            const parts = entries.map(([k, v]) => {
+                let s
+                if (typeof v === 'object' && v !== null) {
+                    s = JSON.stringify(v)
+                } else {
+                    s = String(v)
+                }
+                if (s.length > 80) s = s.slice(0, 80) + '…'
+                return `${k}=${s}`
+            })
+            return parts.join(' · ')
         },
     },
 }
@@ -1756,6 +2175,186 @@ export default {
     font-size: 12px;
     color: var(--color-text-maxcontrast);
     font-family: monospace;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Audit tab
+   ───────────────────────────────────────────────────────────────── */
+
+.audit-banner {
+    border-radius: var(--border-radius);
+    padding: 10px 14px;
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+}
+
+.audit-banner--warn {
+    background: var(--color-warning);
+    color: var(--color-main-background);
+}
+
+.audit-banner--info {
+    background: var(--color-background-hover);
+    border: 1px solid var(--color-border);
+    color: var(--color-main-text);
+}
+
+.audit-banner__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.audit-retention {
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    background: var(--color-background-hover);
+}
+
+.audit-retention__label {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.audit-retention__controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.audit-retention__controls .input-field,
+.audit-retention__controls .input-field input {
+    max-width: 120px;
+}
+
+.audit-retention__suffix {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+    padding-right: 6px;
+}
+
+.audit-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.audit-controls__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.audit-controls__label {
+    min-width: 100px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.audit-controls__team-select,
+.audit-controls__filter-select {
+    min-width: 280px;
+    max-width: 400px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+}
+
+.audit-controls__date {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+}
+
+.audit-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 40px 20px;
+    color: var(--color-text-maxcontrast);
+}
+
+.audit-events__loading {
+    display: flex;
+    justify-content: center;
+    padding: 40px;
+}
+
+.audit-events {
+    margin-top: 8px;
+}
+
+.audit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.audit-table thead th {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background-hover);
+}
+
+.audit-table tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+}
+
+.audit-table tbody tr:hover {
+    background: var(--color-background-hover);
+}
+
+.audit-table__when {
+    white-space: nowrap;
+    color: var(--color-text-maxcontrast);
+    font-variant-numeric: tabular-nums;
+}
+
+.audit-table__event {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--color-main-text);
+}
+
+.audit-table__target {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.audit-table__details {
+    max-width: 360px;
+}
+
+.audit-table__details code {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    word-break: break-word;
 }
 </style>
 
