@@ -166,10 +166,16 @@
             <div class="poll-footer">
                 <ClipboardCheckOutline :size="16" />
                 <span v-if="isPollClosed" class="poll-closed-label">
-                    {{ t('teamhub', '{total} total votes - Poll closed', { total: pollResults.totalVotes }) }}
+                    {{
+                        // TRANSLATORS: total vote count when poll is closed, e.g. "1 total vote – Poll closed"
+                        n('teamhub', '{total} total vote \u2013 Poll closed', '{total} total votes \u2013 Poll closed', pollResults.totalVotes, { total: pollResults.totalVotes })
+                    }}
                 </span>
                 <span v-else>
-                    {{ t('teamhub', '{total} total votes', { total: pollResults.totalVotes }) }}
+                    {{
+                        // TRANSLATORS: live vote count while poll is open, e.g. "1 total vote"
+                        n('teamhub', '{total} total vote', '{total} total votes', pollResults.totalVotes, { total: pollResults.totalVotes })
+                    }}
                 </span>
                 <NcButton
                     v-if="isAuthor && !isPollClosed"
@@ -213,7 +219,7 @@
 
 <script>
 import { mapGetters } from 'vuex'
-import { translate as t } from '@nextcloud/l10n'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl, generateRemoteUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import { NcAvatar, NcButton, NcLoadingIcon } from '@nextcloud/vue'
@@ -353,10 +359,10 @@ export default {
         },
         commentCount() { return this.message.comment_count || 0 },
         commentLabel() {
+            // TRANSLATORS: button label to open/add a comment (verb), shown when there are no comments yet
             if (this.commentCount === 0) return t('teamhub', 'Comment')
-            return this.commentCount === 1
-                ? t('teamhub', '1 comment')
-                : t('teamhub', '{n} comments', { n: this.commentCount })
+            // TRANSLATORS: count of comments on a message, e.g. "1 comment" or "5 comments"
+            return n('teamhub', '{n} comment', '{n} comments', this.commentCount, { n: this.commentCount })
         },
         pollOptions() {
             if (!this.message.pollOptions) {
@@ -383,7 +389,7 @@ export default {
         this.loadPreviews()
     },
     methods: {
-        t,
+        t, n,
         async doPin() {
             try {
                 await this.$store.dispatch('pinMessage', {

@@ -3,6 +3,38 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.20.0] — 2026-04-30
+
+### Fixed
+- **Double margin-top gap below NC top bar.** NC page frame and `NcContent` both applied `margin-top: var(--header-height)` to the same element. Added `#content-vue.app-teamhub { margin-top: 0 }` to zero the page-frame copy only.
+- **`TypeError: e.n is not a function` on team pages.** `translatePlural` imported at module scope is invisible to Vue 2 templates — added `n` to `methods: { t, n }` in all five affected components; `AdminSettings` gets an inline `n()` method matching its existing `t()` pattern.
+
+### Changed
+- **All error messages use `{error}` named placeholder** instead of string concatenation. Allows translators to reposition the error detail within the sentence (22 call sites across 10 components).
+- **All count-bearing strings converted to `n()` plural forms** (14 strings across 5 components). Translators can now supply correct plural rules per language.
+
+### Added
+- **Transifex plumbing.** `.tx/config` and `.l10nignore` added. Stale `l10n/en.js` / `l10n/en.json` removed. Ready for NC community bot once `@nextcloud-bot` is invited to the repo.
+- **`TRANSLATORS:` hints** on ambiguous strings: `Comment`, `Leave`, `Join` (team vs. meeting), poll vote labels.
+- **Translation standards** added to `SKILLS.md` — every string written in future sessions must be translation-ready immediately.
+
+### Removed
+- **Debug logging purged.** 23 JS (`console.log` / `console.error`) and 15 PHP (`error_log`) calls removed across `App.vue`, `FeedbackModal.vue`, `FilesSharedWidget.vue`, `TeamView.vue`, `FeedbackController.php`, `FeedbackService.php`, `TeamService.php`, `TelemetryService.php`. The `console.warn` in `TeamView.menuItemUrl()` is intentionally kept as a security signal.
+
+## [3.19.0] — 2026-04-30
+
+### Added
+- **Transifex plumbing.** Added `.tx/config` pointing at `o:nextcloud:p:nextcloud:r:teamhub` and `.l10nignore` excluding non-translatable paths. Enables NC community bot to open translation PRs.
+- **Plural forms for all count strings.** Converted all 14 count-bearing `t()` calls to `n()` (`translatePlural`): comment count, vote count, user count on group/sub-team pills, team count, member invited confirmation, "Show all members" button. Translators can now supply correct plural rules per language.
+- **`TRANSLATORS:` hints** on ambiguous strings: `Comment` (verb), `Leave` (depart team), `Join` (team vs. meeting context distinguished), poll vote labels.
+
+### Fixed
+- **String concatenation in error messages.** All 22 instances of `t('teamhub', 'Msg') + (msg ? ': ' + msg : '')` replaced with `msg ? t('teamhub', 'Msg: {error}', { error: msg }) : t('teamhub', 'Msg')` — server error detail is now a named placeholder translators can reposition.
+- **`margin-top` on main content area.** NC 32 applies a default `margin-top` to `.content` — overridden to `0` on `.app-teamhub` so the full viewport height is used.
+
+### Removed
+- Stale `l10n/en.js` and `l10n/en.json` (48 keys, 8% coverage) — these collide with the NC translation bot output and were not being maintained.
+
 ## [3.18.0] — 2026-04-29
 
 ### Added

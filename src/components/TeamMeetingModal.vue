@@ -317,9 +317,12 @@ export default {
                 if (status === 403) {
                     this.errors.general = t('teamhub', 'You do not have permission to create team meetings.')
                 } else if (status === 422) {
-                    this.errors.general = t('teamhub', 'Team setup incomplete: ') + serverMsg
+                    // TRANSLATORS: server returned a specific setup problem; {error} is the server message
+                    this.errors.general = t('teamhub', 'Team setup incomplete: {error}', { error: serverMsg })
                 } else {
-                    this.errors.general = t('teamhub', 'Failed to create team meeting') + (serverMsg ? `: ${serverMsg}` : '')
+                    this.errors.general = serverMsg
+                        ? t('teamhub', 'Failed to create team meeting: {error}', { error: serverMsg })
+                        : t('teamhub', 'Failed to create team meeting')
                 }
 
                 showError(t('teamhub', 'Failed to create team meeting'))

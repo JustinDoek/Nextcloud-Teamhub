@@ -161,7 +161,7 @@ export default {
                 this.$emit('close')
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                this.errors.general = t('teamhub', 'Failed to add event') + (msg ? `: ${msg}` : '')
+                this.errors.general = msg ? t('teamhub', 'Failed to add event: {error}', { error: msg }) : t('teamhub', 'Failed to add event')
                 showError(t('teamhub', 'Failed to add event'))
             } finally {
                 this.saving = false

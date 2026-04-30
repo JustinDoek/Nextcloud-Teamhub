@@ -156,7 +156,6 @@ export default {
         t,
 
         close() {
-            console.log('[TeamHub][FeedbackModal] close called')
             this.$emit('close')
         },
 
@@ -183,7 +182,6 @@ export default {
                 valid = false
             }
 
-            console.log('[TeamHub][FeedbackModal] validate result:', valid)
             return valid
         },
 
@@ -193,8 +191,6 @@ export default {
         },
 
         async submit() {
-            console.log('[TeamHub][FeedbackModal] submit called', this.form)
-
             if (!this.validate()) {
                 return
             }
@@ -209,10 +205,8 @@ export default {
                     body:    this.form.body.trim(),
                     contact: this.form.contact.trim(),
                 })
-                console.log('[TeamHub][FeedbackModal] feedback sent successfully')
                 this.submitted = true
             } catch (err) {
-                console.error('[TeamHub][FeedbackModal] send error:', err)
                 const msg = err.response?.data?.error
                 this.serverError = msg || t('teamhub', 'Something went wrong. Please try again.')
             } finally {

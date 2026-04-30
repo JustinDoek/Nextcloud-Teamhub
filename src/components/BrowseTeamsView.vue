@@ -80,7 +80,10 @@
                             <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
                             <ExitToApp v-else :size="20" />
                         </template>
-                        {{ t('teamhub', 'Leave') }}
+                        {{
+                            // TRANSLATORS: button label to leave (depart from) a team the user is currently a member of
+                            t('teamhub', 'Leave')
+                        }}
                     </NcButton>
 
                     <!-- Indirect member (via group/team): Leave disabled with tooltip -->
@@ -90,7 +93,10 @@
                         :title="t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.')">
                         <NcButton type="tertiary" :disabled="true">
                             <template #icon><ExitToApp :size="20" /></template>
-                            {{ t('teamhub', 'Leave') }}
+                            {{
+                                // TRANSLATORS: disabled button label; user cannot leave because they were added via a group
+                                t('teamhub', 'Leave')
+                            }}
                         </NcButton>
                         <span class="team-card__via-badge">{{ t('teamhub', 'via group') }}</span>
                     </span>
@@ -105,7 +111,10 @@
                             <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
                             <Plus v-else :size="20" />
                         </template>
-                        {{ t('teamhub', 'Join') }}
+                        {{
+                            // TRANSLATORS: button label to join (become a member of) a team
+                            t('teamhub', 'Join')
+                        }}
                     </NcButton>
 
                     <!-- Non-member closed circle: Request access -->

@@ -45,12 +45,10 @@ class FeedbackController extends Controller {
         $body    = trim((string) $this->request->getParam('body', ''));
         $contact = trim((string) $this->request->getParam('contact', ''));
 
-        error_log('[TeamHub][FeedbackController] submit: type=' . $type . ', subjectLen=' . strlen($subject));
 
         // --- Validation -------------------------------------------------------
 
         if (!in_array($type, self::ALLOWED_TYPES, true)) {
-            error_log('[TeamHub][FeedbackController] invalid type: ' . $type);
             return new JSONResponse(
                 ['error' => 'Invalid feedback type.'],
                 Http::STATUS_BAD_REQUEST,
@@ -106,7 +104,6 @@ class FeedbackController extends Controller {
         try {
             $this->feedbackService->submit($type, $subject, $body, $contact);
         } catch (\RuntimeException $e) {
-            error_log('[TeamHub][FeedbackController] send failed: ' . $e->getMessage());
             return new JSONResponse(
                 ['error' => 'Your feedback could not be sent. Please try again later.'],
                 Http::STATUS_INTERNAL_SERVER_ERROR,

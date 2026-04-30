@@ -91,7 +91,7 @@
 </template>
 
 <script>
-import { translate as t } from '@nextcloud/l10n'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
@@ -183,12 +183,13 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/invite-members`),
                     { members: this.staged.map(u => ({ id: u.id, type: u.type })) }
                 )
-                showSuccess(t('teamhub', '{n} member(s) invited', { n: this.staged.length }))
+                // TRANSLATORS: success message after inviting, e.g. "1 member invited" or "3 members invited"
+                showSuccess(n('teamhub', '{n} member invited', '{n} members invited', this.staged.length, { n: this.staged.length }))
                 this.$emit('invited')
                 this.$emit('close')
             } catch (e) {
                 const msg = e?.response?.data?.error || e?.message || ''
-                showError(t('teamhub', 'Failed to invite members') + (msg ? ': ' + msg : ''))
+                showError(msg ? t('teamhub', 'Failed to invite members: {error}', { error: msg }) : t('teamhub', 'Failed to invite members'))
             } finally {
                 this.sending = false
             }

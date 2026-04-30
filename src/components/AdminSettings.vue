@@ -455,7 +455,8 @@
 
                     <span class="maint-page-info">
                         {{ t('teamhub', 'Page {page} of {total}', { page: teamsPage_current, total: teamsTotalPages }) }}
-                        · {{ t('teamhub', '{n} teams', { n: teamsTotal }) }}
+                        <!-- TRANSLATORS: total team count shown in admin pagination, e.g. "1 team" or "42 teams" -->
+                        · {{ n('teamhub', '{n} team', '{n} teams', teamsTotal, { n: teamsTotal }) }}
                     </span>
 
                     <NcButton
@@ -1001,6 +1002,12 @@ export default {
             if (vars) return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
             return str
         },
+        n(app, singular, plural, count, vars) {
+            if (window.n) return window.n(app, singular, plural, count, vars)
+            const str = count === 1 ? singular : plural
+            if (vars) return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
+            return str
+        },
 
         async load() {
             try {
@@ -1269,7 +1276,7 @@ export default {
                 await this.loadTeams()
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                showError(this.t('teamhub', 'Failed to delete team') + (msg ? ': ' + msg : ''))
+                showError(msg ? this.t('teamhub', 'Failed to delete team: {error}', { error: msg }) : this.t('teamhub', 'Failed to delete team'))
             } finally {
                 this.deletingTeam = null
             }
@@ -1328,7 +1335,7 @@ export default {
                 await this.loadTeams()
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                showError(this.t('teamhub', 'Failed to assign owner') + (msg ? ': ' + msg : ''))
+                showError(msg ? this.t('teamhub', 'Failed to assign owner: {error}', { error: msg }) : this.t('teamhub', 'Failed to assign owner'))
             } finally {
                 this.assigningOwner = false
             }
@@ -1365,7 +1372,7 @@ export default {
                 await this.runMembershipCheck()
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                showError(this.t('teamhub', 'Repair failed') + (msg ? ': ' + msg : ''))
+                showError(msg ? this.t('teamhub', 'Repair failed: {error}', { error: msg }) : this.t('teamhub', 'Repair failed'))
             } finally {
                 this.$set(this.membershipRepairing, teamId, false)
             }
@@ -1398,7 +1405,7 @@ export default {
                 showSuccess(this.t('teamhub', 'Retention saved'))
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                showError(this.t('teamhub', 'Failed to save retention') + (msg ? ': ' + msg : ''))
+                showError(msg ? this.t('teamhub', 'Failed to save retention: {error}', { error: msg }) : this.t('teamhub', 'Failed to save retention'))
             } finally {
                 this.auditRetentionSaving = false
             }
@@ -1497,7 +1504,7 @@ export default {
                 window.URL.revokeObjectURL(link.href)
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                showError(this.t('teamhub', 'Export failed') + (msg ? ': ' + msg : ''))
+                showError(msg ? this.t('teamhub', 'Export failed: {error}', { error: msg }) : this.t('teamhub', 'Export failed'))
             } finally {
                 this.auditExporting = false
             }

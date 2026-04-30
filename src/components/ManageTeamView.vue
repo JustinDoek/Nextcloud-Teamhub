@@ -292,7 +292,10 @@
                         <div class="group-circle-info">
                             <span class="group-circle-name">{{ group.displayName }}</span>
                             <span class="group-circle-count">
-                                {{ t('teamhub', '{n} users', { n: group.memberCount }) }}
+                                {{
+                                    // TRANSLATORS: member count of a group, e.g. "1 user" or "12 users"
+                                    n('teamhub', '{n} user', '{n} users', group.memberCount, { n: group.memberCount })
+                                }}
                             </span>
                         </div>
                         <NcButton
@@ -318,7 +321,10 @@
                         <div class="group-circle-info">
                             <span class="group-circle-name">{{ circle.displayName }}</span>
                             <span class="group-circle-count">
-                                {{ t('teamhub', '{n} users', { n: circle.memberCount }) }}
+                                {{
+                                    // TRANSLATORS: member count of a sub-team, e.g. "1 user" or "8 users"
+                                    n('teamhub', '{n} user', '{n} users', circle.memberCount, { n: circle.memberCount })
+                                }}
                             </span>
                         </div>
                         <NcButton
@@ -583,7 +589,7 @@
 </template>
 
 <script>
-import { translate as t } from '@nextcloud/l10n'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { getCurrentUser } from '@nextcloud/auth'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
@@ -813,7 +819,7 @@ export default {
         this.loadAll()
     },
     methods: {
-        t,
+        t, n,
 
         loadAll() {
             this.loadMembers()
@@ -854,7 +860,7 @@ export default {
                 await this.loadMembers()
             } catch (error) {
                 const msg = error.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to update role') + (msg ? `: ${msg}` : ''))
+                showError(msg ? t('teamhub', 'Failed to update role: {error}', { error: msg }) : t('teamhub', 'Failed to update role'))
                 await this.loadMembers()
             } finally {
                 this.changingLevel = null
@@ -872,7 +878,7 @@ export default {
                 this.$emit('description-updated', this.editedDescription)
             } catch (error) {
                 const msg = error.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to update description') + (msg ? `: ${msg}` : ''))
+                showError(msg ? t('teamhub', 'Failed to update description: {error}', { error: msg }) : t('teamhub', 'Failed to update description'))
             } finally {
                 this.saving = false
             }
@@ -1046,7 +1052,7 @@ export default {
                 await this.loadMembers()
             } catch (e) {
                 const msg = e.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to transfer ownership') + (msg ? ': ' + msg : ''))
+                showError(msg ? t('teamhub', 'Failed to transfer ownership: {error}', { error: msg }) : t('teamhub', 'Failed to transfer ownership'))
             } finally {
                 this.transferringOwner = false
             }
@@ -1060,7 +1066,7 @@ export default {
                 this.$emit('team-deleted')
             } catch (error) {
                 const msg = error.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to delete team') + (msg ? ': ' + msg : ''))
+                showError(msg ? t('teamhub', 'Failed to delete team: {error}', { error: msg }) : t('teamhub', 'Failed to delete team'))
             } finally {
                 this.deleting = false
             }
@@ -1134,7 +1140,7 @@ export default {
                     this.teamApps = this.teamApps.filter(a => a.app_id !== app.id)
                 }
                 const msg = error.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to update {name}', { name: app.label }) + (msg ? `: ${msg}` : ''))
+                showError(msg ? t('teamhub', 'Failed to update {name}: {error}', { name: app.label, error: msg }) : t('teamhub', 'Failed to update {name}', { name: app.label }))
                 await this.loadTeamApps()
             } finally {
                 this.togglingApp = null
@@ -1208,7 +1214,7 @@ export default {
                 )
             } catch (error) {
                 const msg = error.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to update integration') + (msg ? `: ${msg}` : ''))
+                showError(msg ? t('teamhub', 'Failed to update integration: {error}', { error: msg }) : t('teamhub', 'Failed to update integration'))
             } finally {
                 this.togglingWidget = null
             }
@@ -1258,7 +1264,7 @@ export default {
                 showSuccess(t('teamhub', 'Team image updated'))
             } catch (e) {
                 const msg = e?.response?.data?.error || e.message || ''
-                showError(t('teamhub', 'Failed to upload image') + (msg ? ': ' + msg : ''))
+                showError(msg ? t('teamhub', 'Failed to upload image: {error}', { error: msg }) : t('teamhub', 'Failed to upload image'))
             } finally {
                 this.imageUploading = false
                 // Reset so the same file can be re-selected if needed

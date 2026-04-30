@@ -185,10 +185,8 @@ class TelemetryService {
             $row = $result->fetch();
             $result->closeCursor();
             $count = $row ? (int)$row['cnt'] : 0;
-            error_log('[TeamHub][TelemetryService] countTeams (source=16): ' . $count);
             return $count;
         } catch (\Throwable $e) {
-            error_log('[TeamHub][TelemetryService] countTeams error: ' . $e->getMessage());
             return 0;
         }
     }
@@ -326,7 +324,6 @@ class TelemetryService {
 
         try {
             $totalTeams = $this->countTeams();
-            error_log('[TeamHub][TelemetryService] getBuiltinIntegrationUsage totalTeams=' . $totalTeams);
 
             // Fetch counts of explicit enabled and disabled rows per app.
             $qb = $this->db->getQueryBuilder();
@@ -353,9 +350,6 @@ class TelemetryService {
             }
             $result->closeCursor();
 
-            error_log('[TeamHub][TelemetryService] explicit_enabled=' . json_encode($explicitEnabled)
-                . ' explicit_disabled=' . json_encode($explicitDisabled));
-
             $usage = [];
 
             // Default-enabled: total minus those explicitly turned off.
@@ -374,10 +368,8 @@ class TelemetryService {
                 }
             }
 
-            error_log('[TeamHub][TelemetryService] builtin_usage=' . json_encode($usage));
             return $usage;
         } catch (\Throwable $e) {
-            error_log('[TeamHub][TelemetryService] getBuiltinIntegrationUsage error: ' . $e->getMessage());
             return [];
         }
     }

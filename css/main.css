@@ -11,6 +11,16 @@
     height: 100%;
 }
 
+/*
+ * NC's page frame applies margin-top: var(--header-height) to #content-vue globally.
+ * NcContent's own scoped CSS also applies margin-top: var(--header-height) to .content internally.
+ * This causes a double gap (extra blue bar) below the NC top bar.
+ * Zero out the page-frame rule here — NcContent manages its own top offset correctly.
+ */
+#content-vue.app-teamhub {
+    margin-top: 0;
+}
+
 /* Widget headings - bold and distinct color */
 .teamhub-widget-item > .app-navigation-entry__name {
     font-weight: 700;

@@ -37,7 +37,10 @@
                             class="th-widget__join-btn"
                             :title="t('teamhub', 'Join meeting')">
                             <VideoIcon :size="14" />
-                            {{ t('teamhub', 'Join') }}
+                            {{
+                                // TRANSLATORS: short button label to join a video/conference meeting link
+                                t('teamhub', 'Join')
+                            }}
                         </a>
                     </div>
                     <div class="th-widget__row-bottom">

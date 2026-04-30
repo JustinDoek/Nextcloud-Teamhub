@@ -16,7 +16,7 @@ Each team gets a shared home with:
 - **Integrations** — developers can integrate their app with teamhub
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>3.18.3</version>
+    <version>3.20.1</version>
     <licence>agpl</licence>
     <author>Justin Doek</author>
     <namespace>TeamHub</namespace>

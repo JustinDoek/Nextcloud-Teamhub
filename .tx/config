@@ -1,0 +1,8 @@
+[main]
+host = https://www.transifex.com
+
+[o:nextcloud:p:nextcloud:r:teamhub]
+file_filter  = l10n/<lang>.json
+source_file  = l10n/templates/teamhub.pot
+source_lang  = en
+type         = PO

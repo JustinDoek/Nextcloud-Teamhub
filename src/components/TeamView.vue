@@ -358,7 +358,6 @@ export default {
                     const next = new Set(this.preloadedViews)
                     next.add(view)
                     this.preloadedViews = next
-                    console.log('[TeamHub][TeamView] Background preloaded iframe:', view)
                 }
             }, 1500 + i * 800)
         })
@@ -658,7 +657,7 @@ export default {
                 this.$refs.widgetGrid?.refreshIntravox()
             } catch (e) {
                 const msg = e?.response?.data?.message || e?.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to create page') + (msg ? ': ' + msg : ''))
+                showError(msg ? t('teamhub', 'Failed to create page: {error}', { error: msg }) : t('teamhub', 'Failed to create page'))
             } finally {
                 this.creatingPage = false
             }
@@ -679,7 +678,7 @@ export default {
                 this.$refs.widgetGrid?.refreshIntravox()
             } catch (e) {
                 const msg = e?.response?.data?.message || e?.response?.data?.error || ''
-                showError(t('teamhub', 'Failed to delete page') + (msg ? ': ' + msg : ''))
+                showError(msg ? t('teamhub', 'Failed to delete page: {error}', { error: msg }) : t('teamhub', 'Failed to delete page'))
             } finally {
                 this.deletingPage = false
             }

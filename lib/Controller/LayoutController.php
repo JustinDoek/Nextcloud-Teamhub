@@ -4,11 +4,11 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Db\LayoutMapper;
+use OCA\TeamHub\Service\MemberService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\JSONResponse;
-use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\IRequest;
@@ -164,6 +164,7 @@ class LayoutController extends Controller {
         private IDBConnection $db,
         private IConfig $config,
         private LoggerInterface $logger,
+        private MemberService $memberService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -190,7 +191,7 @@ class LayoutController extends Controller {
             return new JSONResponse(['error' => 'Invalid team ID'], Http::STATUS_BAD_REQUEST);
         }
 
-        if ($this->getMemberLevel($teamId, $userId) === 0) {
+        if (!$this->isMember($teamId, $userId)) {
             $this->logger->warning('[TeamHub][LayoutController] getLayout — non-member access attempt', [
                 'teamId' => $teamId, 'userId' => $userId,
             ]);
@@ -257,7 +258,7 @@ class LayoutController extends Controller {
             return new JSONResponse(['error' => 'Invalid team ID'], Http::STATUS_BAD_REQUEST);
         }
 
-        if ($this->getMemberLevel($teamId, $userId) === 0) {
+        if (!$this->isMember($teamId, $userId)) {
             $this->logger->warning('[TeamHub][LayoutController] saveLayout — non-member access attempt', [
                 'teamId' => $teamId, 'userId' => $userId,
             ]);
@@ -536,17 +537,15 @@ class LayoutController extends Controller {
         return false;
     }
 
-    private function getMemberLevel(string $teamId, string $userId): int {
-        $qb     = $this->db->getQueryBuilder();
-        $result = $qb->select('level')
-            ->from('circles_member')
-            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
-            ->andWhere($qb->expr()->eq('user_id',   $qb->createNamedParameter($userId)))
-            ->andWhere($qb->expr()->eq('status',    $qb->createNamedParameter('Member')))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $row = $result->fetch();
-        $result->closeCursor();
-        return $row ? (int)$row['level'] : 0;
+    /**
+     * Returns true when the user has direct OR indirect membership in the team.
+     * Delegates to MemberService so both circles_member (direct) and
+     * circles_membership (indirect via group/sub-team) are checked.
+     */
+    private function isMember(string $teamId, string $userId): bool {
+        $this->logger->debug('[TeamHub][LayoutController] isMember check', [
+            'teamId' => $teamId, 'userId' => $userId,
+        ]);
+        return $this->memberService->isEffectiveMember($teamId, $userId, $this->db);
     }
 }

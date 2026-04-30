@@ -208,7 +208,10 @@
                                     {{ m.type === 'group' ? t('teamhub', 'Group') : t('teamhub', 'Team') }}
                                 </span>
                                 <span class="teamhub-membership-count">
-                                    {{ t('teamhub', '{n} users', { n: m.memberCount }) }}
+                                    {{
+                                        // TRANSLATORS: user count on a group/team membership pill, e.g. "1 user" or "6 users"
+                                        n('teamhub', '{n} user', '{n} users', m.memberCount, { n: m.memberCount })
+                                    }}
                                 </span>
                             </div>
                         </div>
@@ -219,7 +222,10 @@
                             class="teamhub-members-show-all"
                             type="button"
                             @click="openAllMembersModal">
-                            {{ t('teamhub', 'Show all {n} members', { n: effectiveMemberCount }) }}
+                            {{
+                                // TRANSLATORS: button label showing total member count, e.g. "Show all 1 member" or "Show all 12 members"
+                                n('teamhub', 'Show all {n} member', 'Show all {n} members', effectiveMemberCount, { n: effectiveMemberCount })
+                            }}
                         </button>
                     </div>
                 </div>
@@ -568,7 +574,7 @@
 </template>
 
 <script>
-import { translate as t } from '@nextcloud/l10n'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
@@ -838,7 +844,7 @@ export default {
     },
 
     methods: {
-        t,
+        t, n,
 
         onLayoutUpdated(newLayout) {
             this.$emit('layout-updated', newLayout)

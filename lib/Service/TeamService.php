@@ -77,6 +77,12 @@ class TeamService {
 
     /**
      * Get all teams the current user is a member of.
+     *
+     * Covers both direct members (user_type=1 row in circles_member) AND
+     * indirect members (added via a group or another team that is a member).
+     * Indirect membership is tracked in circles_membership — Circles' own
+     * denormalised cache — keyed on the user's personal-circle single_id.
+     *
      * Reads directly from DB — probeCircles() on this instance filters out all
      * circles with non-zero config, so it cannot be used as the team list source.
      */
@@ -97,14 +103,61 @@ class TeamService {
             $db  = $this->container->get(\OCP\IDBConnection::class);
             $uid = $user->getUID();
 
-            // ── Step 1: fetch teams the user belongs to (1 query) ────────────
+            // Resolve the user's personal-circle single_id so we can check
+            // circles_membership for indirect (group/team) membership.
+            $userSingleId = $this->memberService->resolveUserSingleId($uid, $db);
+            $this->logger->debug('[TeamService] getUserTeams: resolved single_id', [
+                'uid' => $uid, 'singleId' => $userSingleId, 'app' => Application::APP_ID,
+            ]);
+
+            // ── Step 1: fetch teams the user belongs to (direct OR indirect) ─
+            //
+            // Strategy: LEFT JOIN on direct membership (user_type=1) AND on the
+            // circles_membership cache (indirect via group/team).
+            // Include the circle if:
+            //   (a) the user has a direct member row (m.user_id IS NOT NULL), OR
+            //   (b) the user appears in circles_membership (ms.single_id IS NOT NULL)
+            //
+            // This mirrors the same pattern used by browseAllTeams().
             $qb = $db->getQueryBuilder();
-            $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config', 'm.level')
+            $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config',
+                        'm.level', 'm.user_id AS direct_uid')
                ->from('circles_circle', 'c')
-               ->join('c', 'circles_member', 'm', 'c.unique_id = m.circle_id')
-               ->where($qb->expr()->eq('m.user_id',   $qb->createNamedParameter($uid)))
-               ->andWhere($qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-               ->andWhere($qb->expr()->eq('m.status',  $qb->createNamedParameter('Member')))
+               ->leftJoin(
+                   'c',
+                   'circles_member',
+                   'm',
+                   $qb->expr()->andX(
+                       $qb->expr()->eq('m.circle_id',  'c.unique_id'),
+                       $qb->expr()->eq('m.user_id',    $qb->createNamedParameter($uid)),
+                       $qb->expr()->eq('m.user_type',  $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                       $qb->expr()->eq('m.status',     $qb->createNamedParameter('Member'))
+                   )
+               );
+
+            // Add LEFT JOIN on circles_membership for indirect access detection
+            if ($userSingleId) {
+                $qb->addSelect('ms.single_id AS ms_single_id')
+                   ->leftJoin(
+                       'c',
+                       'circles_membership',
+                       'ms',
+                       $qb->expr()->andX(
+                           $qb->expr()->eq('ms.circle_id', 'c.unique_id'),
+                           $qb->expr()->eq('ms.single_id', $qb->createNamedParameter($userSingleId))
+                       )
+                   );
+            } else {
+                $qb->addSelect($qb->createFunction('NULL AS ms_single_id'));
+            }
+
+            // Only include circles where the user has direct OR indirect membership
+            $qb->where(
+                   $qb->expr()->orX(
+                       $qb->expr()->isNotNull('m.user_id'),         // direct member row
+                       $qb->expr()->isNotNull('ms.single_id')       // indirect via group/team
+                   )
+               )
                ->orderBy('c.name', 'ASC');
 
             $result = $qb->executeQuery();
@@ -116,10 +169,22 @@ class TeamService {
                 if (str_starts_with($name, 'user:') || str_starts_with($name, 'group:')) {
                     continue;
                 }
+                // Deduplicate: a user could match both the direct AND indirect JOIN
+                // (e.g. directly added AND member of an added group). unique_id is
+                // the dedup key; skip if already collected.
+                if (isset($ids[$row['unique_id']])) {
+                    continue;
+                }
+                $ids[$row['unique_id']] = true;
                 $rows[] = $row;
-                $ids[]  = $row['unique_id'];
             }
             $result->closeCursor();
+
+            $ids = array_keys($ids);
+
+            $this->logger->debug('[TeamService] getUserTeams: found teams', [
+                'uid' => $uid, 'count' => count($ids), 'singleId' => $userSingleId, 'app' => Application::APP_ID,
+            ]);
 
             if (empty($ids)) {
                 return [];
@@ -197,7 +262,6 @@ class TeamService {
                 ];
             }
 
-            error_log('[TeamHub][TeamService] getUserTeams returning ' . count($teams) . ' teams with config flags');
 
             return $teams;
 
@@ -217,14 +281,22 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        // Access check: verify the user is a member via direct DB query.
-        // getCircle() via CirclesManager fails when the circle config bitmask
-        // is non-zero (hidden from probeCircles), so we use the DB directly.
+        // Access check: verify the user is a member via direct DB query OR indirect
+        // via circles_membership (group/sub-team membership).
         $db  = $this->container->get(\OCP\IDBConnection::class);
         $uid = $user->getUID();
         $accessLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $uid);
         if ($accessLevel < 1) {
-            throw new \Exception('Team not found or access denied');
+            // Not a direct member — check indirect membership via circles_membership
+            if (!$this->memberService->isEffectiveMember($teamId, $uid, $db)) {
+                $this->logger->debug('[TeamService] getTeam: access denied (not direct or indirect member)', [
+                    'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                throw new \Exception('Team not found or access denied');
+            }
+            $this->logger->debug('[TeamService] getTeam: access granted via indirect membership', [
+                'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
         }
 
         $qb  = $db->getQueryBuilder();
@@ -250,7 +322,6 @@ class TeamService {
         $memberCount = $countRow ? (int)$countRow['cnt'] : 0;
         $countRes->closeCursor();
 
-        error_log('[TeamHub][TeamService] getTeam(' . $teamId . ') config=' . (int)($row['config'] ?? 0));
 
         return [
             'id'          => $row['unique_id'],

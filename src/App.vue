@@ -158,7 +158,6 @@ export default {
         },
 
         openFeedbackModal() {
-            console.log('[TeamHub][App] openFeedbackModal called')
             this.showFeedbackModal = true
         },
 
@@ -199,7 +198,6 @@ export default {
         },
 
         async onTeamLeft() {
-            console.log('[TeamHub][App] onTeamLeft: clearing team and refreshing list')
             this.$store.commit('SET_CURRENT_TEAM', null)
             await this.$store.dispatch('fetchTeams')
             this.activeView = null

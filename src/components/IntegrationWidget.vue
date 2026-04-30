@@ -364,7 +364,7 @@ export default {
                 }
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
-                this.actionError = this.t('teamhub', 'Action failed') + (msg ? ': ' + msg : '')
+                this.actionError = msg ? this.t('teamhub', 'Action failed: {error}', { error: msg }) : this.t('teamhub', 'Action failed')
             } finally {
                 this.actionSubmitting = false
             }

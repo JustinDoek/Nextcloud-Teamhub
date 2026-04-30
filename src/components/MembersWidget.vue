@@ -46,7 +46,12 @@
                         </div>
                         <div class="group-item__info">
                             <span class="group-item__name">{{ group.displayName }}</span>
-                            <span class="group-item__count">{{ t('teamhub', '{n} users', { n: group.memberCount }) }}</span>
+                            <span class="group-item__count">
+                                {{
+                                    // TRANSLATORS: member count for a group badge, e.g. "1 user" or "5 users"
+                                    n('teamhub', '{n} user', '{n} users', group.memberCount, { n: group.memberCount })
+                                }}
+                            </span>
                         </div>
                     </li>
                 </ul>
@@ -62,7 +67,12 @@
                         </div>
                         <div class="group-item__info">
                             <span class="group-item__name">{{ circle.displayName }}</span>
-                            <span class="group-item__count">{{ t('teamhub', '{n} users', { n: circle.memberCount }) }}</span>
+                            <span class="group-item__count">
+                                {{
+                                    // TRANSLATORS: member count for a sub-team badge, e.g. "1 user" or "5 users"
+                                    n('teamhub', '{n} user', '{n} users', circle.memberCount, { n: circle.memberCount })
+                                }}
+                            </span>
                         </div>
                     </li>
                 </ul>
@@ -73,7 +83,7 @@
 
 <script>
 import { mapState } from 'vuex'
-import { translate as t } from '@nextcloud/l10n'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { NcAvatar, NcLoadingIcon } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
@@ -84,7 +94,7 @@ export default {
     computed: {
         ...mapState(['members', 'memberGroups', 'memberCircles', 'loading', 'effectiveMemberCount', 'hasMoreMembers']),
     },
-    methods: { t },
+    methods: { t, n },
 }
 </script>
 

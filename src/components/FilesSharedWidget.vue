@@ -144,7 +144,6 @@ export default {
 
         async loadItems() {
             if (!this.currentTeamId) return
-            console.log('[TeamHub][FilesSharedWidget] loadItems — page:', this.page, 'team:', this.currentTeamId)
             this.loading = true
             this.items = []
             try {
@@ -152,11 +151,9 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/files/shared`),
                     { params: { page: this.page, limit: LIMIT } },
                 )
-                console.log('[TeamHub][FilesSharedWidget] response:', data)
                 this.items = Array.isArray(data.items) ? data.items : []
                 this.total = typeof data.total === 'number' ? data.total : 0
             } catch (e) {
-                console.error('[TeamHub][FilesSharedWidget] loadItems failed:', e)
                 this.items = []
                 this.total = 0
             } finally {

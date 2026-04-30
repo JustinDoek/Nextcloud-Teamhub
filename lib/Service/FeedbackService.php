@@ -38,7 +38,6 @@ class FeedbackService {
         $userId = $user ? $user->getUID() : 'anonymous';
         $displayName = $user ? $user->getDisplayName() : 'Unknown';
 
-        error_log('[TeamHub][FeedbackService] submit called: type=' . $type . ', userId=' . $userId);
 
         $typeLabel = match ($type) {
             'bug'     => 'Bug report',
@@ -67,17 +66,14 @@ class FeedbackService {
 
         // If the user provided a contact address, set it as reply-to.
         if ($contact !== '') {
-            error_log('[TeamHub][FeedbackService] setting reply-to: ' . $contact);
             $message->setReplyTo([$contact]);
         }
 
         $failed = $this->mailer->send($message);
 
         if (!empty($failed)) {
-            error_log('[TeamHub][FeedbackService] mailer reported failed recipients: ' . json_encode($failed));
             throw new \RuntimeException('Feedback email could not be delivered.');
         }
 
-        error_log('[TeamHub][FeedbackService] email sent successfully for userId=' . $userId);
     }
 }
