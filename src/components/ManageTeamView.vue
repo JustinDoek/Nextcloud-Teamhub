@@ -1523,8 +1523,12 @@ export default {
 }
 
 .manage-meeting-select:focus {
-    outline: none;
     border-color: var(--color-primary-element);
+}
+
+.manage-meeting-select:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 
@@ -1842,9 +1846,13 @@ export default {
 }
 
 .manage-owner-input:focus {
-    outline: none;
     border-color: var(--color-primary-element);
     box-shadow: 0 0 0 2px var(--color-primary-element-light);
+}
+
+.manage-owner-input:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 .manage-owner-suggestions {

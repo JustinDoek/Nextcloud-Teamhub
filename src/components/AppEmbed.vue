@@ -67,6 +67,7 @@
                 ref="frame"
                 :key="reloadKey"
                 :src="iframeSrc"
+                :title="label"
                 :sandbox="effectiveSandbox"
                 allow=""
                 referrerpolicy="strict-origin-when-cross-origin"

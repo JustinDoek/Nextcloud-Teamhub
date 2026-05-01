@@ -223,10 +223,10 @@ export default {
     color: var(--color-primary-element);
 }
 
-/* Tasks badge — muted dark teal, distinct from Deck's primary blue */
+/* Tasks badge — muted teal, distinct from Deck's primary blue */
 .th-widget__badge--tasks {
-    background: rgba(14, 116, 144, 0.10);
-    color: #0e7490;
+    background: var(--color-info-soft, rgba(14, 116, 144, 0.10));
+    color: var(--color-info-text, var(--color-main-text));
 }
 
 .th-widget__body {
@@ -293,11 +293,11 @@ export default {
     border: 1px solid var(--color-primary-element-light, rgba(0, 130, 201, 0.25));
 }
 
-/* Personal task pill — muted dark teal, distinct from Deck's primary blue */
+/* Personal task pill — muted teal, distinct from Deck's primary blue */
 .th-widget__source-pill--tasks {
-    background: rgba(14, 116, 144, 0.10);
-    color: #0e7490;
-    border: 1px solid rgba(14, 116, 144, 0.28);
+    background: var(--color-info-soft, rgba(14, 116, 144, 0.10));
+    color: var(--color-info-text, var(--color-main-text));
+    border: 1px solid var(--color-info-element-light, rgba(14, 116, 144, 0.28));
 }
 
 .th-widget__assignees {

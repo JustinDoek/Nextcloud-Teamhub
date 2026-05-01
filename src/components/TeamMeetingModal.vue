@@ -451,8 +451,12 @@ export default {
 }
 
 .team-meeting-modal__input:focus {
-    outline: none;
     border-color: var(--color-primary-element);
+}
+
+.team-meeting-modal__input:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 .team-meeting-modal__input--error {

@@ -1,19 +1,23 @@
 <template>
-    <div class="teamhub-tab-bar">
+    <div class="teamhub-tab-bar" role="tablist" :aria-label="t('teamhub', 'Team navigation')">
         <!--
-            Home tab is always first and excluded from the draggable set.
+            Home tab — always first, not reorderable.
         -->
         <button
+            id="tab-msgstream"
+            role="tab"
             class="teamhub-tab"
             :class="{ active: currentView === 'msgstream' }"
+            :aria-selected="currentView === 'msgstream' ? 'true' : 'false'"
             @click="setView('msgstream')">
             <MessageOutline :size="16" />
             {{ t('teamhub', 'Home') }}
         </button>
 
         <!--
-            vuedraggable wraps all other tabs.
-            Each rendered tab shows a six-dot handle on hover.
+            Draggable tabs.
+            Mouse: drag using the ⠿ handle.
+            Keyboard: Tab/Shift+Tab to focus a tab, then Left/Right arrow to reorder.
         -->
         <draggable
             v-model="orderedTabs"
@@ -23,15 +27,21 @@
             handle=".teamhub-tab-drag-handle"
             class="teamhub-tab-draggable"
             @end="$emit('tab-reorder', orderedTabs)">
-            <template v-for="tab in orderedTabs">
+            <template v-for="(tab, tabIndex) in orderedTabs">
                 <!-- Built-in: Talk -->
                 <button
                     v-if="tab.key === 'talk' && resources.talk && resources.talk.token"
+                    id="tab-talk"
                     :key="'tab-talk'"
+                    role="tab"
                     class="teamhub-tab"
                     :class="{ active: currentView === 'talk' }"
-                    @click="setView('talk')">
-                    <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                    :aria-selected="currentView === 'talk' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('talk')"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Chat :size="16" />
                     {{ t('teamhub', 'Chat') }}
                 </button>
@@ -39,11 +49,17 @@
                 <!-- Built-in: Files -->
                 <button
                     v-else-if="tab.key === 'files' && resources.files && resources.files.path"
+                    id="tab-files"
                     :key="'tab-files'"
+                    role="tab"
                     class="teamhub-tab"
                     :class="{ active: currentView === 'files' }"
-                    @click="setView('files')">
-                    <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                    :aria-selected="currentView === 'files' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('files')"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Folder :size="16" />
                     {{ t('teamhub', 'Files') }}
                 </button>
@@ -51,11 +67,17 @@
                 <!-- Built-in: Calendar -->
                 <button
                     v-else-if="tab.key === 'calendar' && resources.calendar"
+                    id="tab-calendar"
                     :key="'tab-calendar'"
+                    role="tab"
                     class="teamhub-tab"
                     :class="{ active: currentView === 'calendar' }"
-                    @click="setView('calendar')">
-                    <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                    :aria-selected="currentView === 'calendar' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('calendar')"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Calendar :size="16" />
                     {{ t('teamhub', 'Calendar') }}
                 </button>
@@ -63,11 +85,17 @@
                 <!-- Built-in: Deck -->
                 <button
                     v-else-if="tab.key === 'deck' && resources.deck && resources.deck.board_id"
+                    id="tab-deck"
                     :key="'tab-deck'"
+                    role="tab"
                     class="teamhub-tab"
                     :class="{ active: currentView === 'deck' }"
-                    @click="setView('deck')">
-                    <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                    :aria-selected="currentView === 'deck' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('deck')"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <CardText :size="16" />
                     {{ t('teamhub', 'Deck') }}
                 </button>
@@ -75,11 +103,17 @@
                 <!-- External app tabs -->
                 <button
                     v-else-if="tab.key.startsWith('ext-')"
+                    :id="'tab-' + tab.key"
                     :key="'tab-' + tab.key"
+                    role="tab"
                     class="teamhub-tab"
                     :class="{ active: currentView === tab.key }"
-                    @click="setView(tab.key)">
-                    <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                    :aria-selected="currentView === tab.key ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView(tab.key)"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <img
                         v-if="tab.appId"
                         :src="appIconUrl(tab.appId)"
@@ -90,15 +124,19 @@
                     {{ tab.label }}
                 </button>
 
-                <!-- Web link tabs -->
+                <!-- Web link tabs — navigate externally, no role="tab" -->
                 <a
                     v-else-if="tab.key.startsWith('link-')"
                     :key="'tab-' + tab.key"
+                    :id="'tab-' + tab.key"
                     :href="tab.url"
                     target="_blank"
-                    rel="noopener"
-                    class="teamhub-tab teamhub-tab--link">
-                    <span class="teamhub-tab-drag-handle" :aria-label="t('teamhub', 'Drag to reorder')">⠿</span>
+                    rel="noopener noreferrer"
+                    class="teamhub-tab teamhub-tab--link"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <OpenInNew :size="14" />
                     {{ tab.label }}
                 </a>
@@ -154,7 +192,6 @@ export default {
     },
 
     props: {
-        /** Ordered tab descriptors from parent's layout state */
         value: { type: Array, required: true },
         editMode: { type: Boolean, default: false },
     },
@@ -175,6 +212,42 @@ export default {
 
         setView(view) {
             this.$store.commit('SET_VIEW', view)
+        },
+
+        /**
+         * Move focused tab one position left.
+         * Triggered by Left arrow keydown (WCAG 2.5.7).
+         */
+        moveTabLeft(index) {
+            if (index === 0) return
+            const movedKey = this.orderedTabs[index].key
+            const tabs = [...this.orderedTabs]
+            ;[tabs[index - 1], tabs[index]] = [tabs[index], tabs[index - 1]]
+            this.orderedTabs = tabs
+            this.$emit('tab-reorder', tabs)
+            // Restore focus to the moved tab after Vue re-renders the list
+            this.$nextTick(() => {
+                const el = document.getElementById('tab-' + movedKey)
+                if (el) el.focus()
+            })
+        },
+
+        /**
+         * Move focused tab one position right.
+         * Triggered by Right arrow keydown (WCAG 2.5.7).
+         */
+        moveTabRight(index) {
+            if (index >= this.orderedTabs.length - 1) return
+            const movedKey = this.orderedTabs[index].key
+            const tabs = [...this.orderedTabs]
+            ;[tabs[index], tabs[index + 1]] = [tabs[index + 1], tabs[index]]
+            this.orderedTabs = tabs
+            this.$emit('tab-reorder', tabs)
+            // Restore focus to the moved tab after Vue re-renders the list
+            this.$nextTick(() => {
+                const el = document.getElementById('tab-' + movedKey)
+                if (el) el.focus()
+            })
         },
 
         appIconUrl(appId) {
@@ -210,6 +283,7 @@ export default {
 
 .teamhub-tab-bar::-webkit-scrollbar { display: none; }
 
+/* Draggable wrapper is invisible to the tab bar's flex layout */
 .teamhub-tab-draggable {
     display: contents;
 }
@@ -240,6 +314,12 @@ export default {
 .teamhub-tab.active {
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
+}
+
+/* Keyboard focus ring (WCAG 2.4.7) */
+.teamhub-tab:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 .teamhub-tab--link {

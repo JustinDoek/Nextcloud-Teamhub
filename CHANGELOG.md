@@ -3,7 +3,55 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.20.0] — 2026-04-30
+## [3.21.0] — 2026-05-01
+
+### Added
+- **WCAG 2.2 accessibility audit and remediation (Sessions 1–3).** Full codebase reviewed against all A and AA criteria. The following fixes were applied:
+
+#### 1.1.1 Non-text content
+- `AppEmbed.vue`: `<iframe>` now carries `:title="label"` so screen readers identify embedded apps (Chat, Files, Calendar, Deck).
+- `MessageCard.vue`: poll options now carry `role="button"`, `aria-pressed`, `aria-label`, `tabindex`, and `@keydown.enter/space` handlers — keyboard and AT users can vote in polls.
+
+#### 1.3.1 Info and relationships
+- `TeamWidgetGrid.vue`: all 11 widget title `<span>` elements replaced with `<h2>` (margin/padding reset added to prevent browser defaults from breaking layout). Screen reader users can now navigate widgets by heading.
+- `MessageCard.vue` edit mode: bare `<input>` and `<textarea>` now have associated `<label>` elements linked by unique per-message `id`.
+
+#### 1.4.1 Use of color
+- `MessageCard.vue`: voted poll option now shows a `CheckCircleOutline` icon alongside the background highlight — vote state is no longer conveyed by colour alone.
+
+#### 1.4.3 Contrast — hardcoded colours
+- `DeckWidget.vue`: `#0e7490` teal replaced with `var(--color-info-text, var(--color-main-text))`.
+- `FilesFavoritesWidget.vue`: `#f6c342` gold replaced with `var(--color-warning, #f6c342)`.
+- `TeamWidgetGrid.vue`: `#1a1a1a` on success/warning badges replaced with `var(--color-success-text, #1a1a1a)` and `var(--color-warning-text, #1a1a1a)`.
+
+#### 2.1.1 / 2.4.7 Keyboard access and focus visible
+- All 10 components with `outline: none` on `:focus` migrated to `:focus-visible` with `2px solid var(--color-primary-element)` ring. Mouse/touch users are unaffected; keyboard users now see focus indicators.
+- `App.vue`: duplicate `:focus-visible` blocks consolidated; `outline: none` removed.
+- `TeamTabBar.vue`: `role="tablist"`, `role="tab"`, and `aria-selected` added to all tab buttons. Tab/Shift+Tab moves focus; Left/Right arrow reorders the focused tab and restores focus after re-render via `$nextTick`.
+- `TeamWidgetGrid.vue` (edit mode): all 11 drag handles gain `tabindex="0"` and `@keydown` handlers for ↑ ↓ ← → to move widgets on the grid. `moveWidget()` swaps positions with the neighbour in sorted order (fixes vue-grid-layout vertical compaction cancelling `y ± 1` nudges).
+
+#### 2.4.6 Headings and labels
+- Same as 1.3.1 widget `<h2>` and edit input `<label>` changes above.
+
+#### 2.5.7 Dragging movements
+- **Tab bar**: Left/Right arrow keys on focused tab provide a keyboard alternative to drag-to-reorder (WCAG requires a pointer/keyboard alternative).
+- **Widget grid**: ↑ ↓ ← → on focused drag handle provide a keyboard alternative to grid drag-and-drop.
+
+#### 4.1.2 Name, role, value
+- `TeamTabBar.vue`: `role="tablist"` + `aria-label="Team navigation"` on wrapper; `role="tab"` + `aria-selected` on each button tab; web link tabs correctly excluded from tab role.
+- `TeamWidgetGrid.vue`: all 11 collapse/expand buttons now include the widget name in their `aria-label` (e.g. "Collapse Team Messages" instead of "Collapse").
+- `AppEmbed.vue`: `<iframe title>` fix (see 1.1.1).
+
+#### 4.1.3 Status messages
+- `PostMessageForm.vue`: attachment list wrapped in `aria-live="polite" aria-atomic="false"` — upload status changes (Uploading…, ✓, error) are now announced to screen readers. Checkmark symbol `✓` given `:aria-label="Upload complete"`.
+
+### Security
+- `renderMarkdown` (pre-existing): `v-html` binding in `MessageCard.vue` and `CommentsSection.vue` renders user content without HTML sanitization. Logged as open issue for a dedicated security session — fix requires `DOMPurify.sanitize()` before return.
+
+### Removed
+- Debug `console.log` calls in `TeamWidgetGrid.vue` (`moveWidget`) and `TeamTabBar.vue` (`moveTabLeft`, `moveTabRight`).
+
+
 
 ### Fixed
 - **Double margin-top gap below NC top bar.** NC page frame and `NcContent` both applied `margin-top: var(--header-height)` to the same element. Added `#content-vue.app-teamhub { margin-top: 0 }` to zero the page-frame copy only.

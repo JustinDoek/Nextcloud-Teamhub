@@ -72,8 +72,12 @@
                 </span>
             </div>
 
-            <!-- Upload progress list -->
-            <div v-if="attachments.length > 0" class="post-form__attachments">
+            <!-- Upload progress list — aria-live announces status changes to screen readers (WCAG 4.1.3) -->
+            <div
+                v-if="attachments.length > 0"
+                class="post-form__attachments"
+                aria-live="polite"
+                aria-atomic="false">
                 <div
                     v-for="(att, i) in attachments"
                     :key="i"
@@ -89,7 +93,8 @@
                         {{ att.error }}
                     </span>
                     <span v-else class="post-form__attachment-status post-form__attachment-status--done">
-                        ✓
+                        <!-- aria-label provides text alternative to the checkmark symbol -->
+                        <span :aria-label="t('teamhub', 'Upload complete')">✓</span>
                     </span>
                     <NcButton
                         type="tertiary"

@@ -224,8 +224,12 @@ export default {
 }
 
 .addevent-modal__input:focus {
-    outline: none;
     border-color: var(--color-primary-element);
+}
+
+.addevent-modal__input:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 .addevent-modal__error {

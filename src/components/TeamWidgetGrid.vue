@@ -45,16 +45,24 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card teamhub-widget-card--stream">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Message stream') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('msgstream', 'up')"
+                        @keydown.down.prevent="moveWidget('msgstream', 'down')"
+                        @keydown.left.prevent="moveWidget('msgstream', 'left')"
+                        @keydown.right.prevent="moveWidget('msgstream', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Message stream') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Message stream') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <MessageOutline :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</h2>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('msgstream') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('msgstream') ? t('teamhub', 'Expand Team Messages') : t('teamhub', 'Collapse Team Messages')"
                             @click.stop="toggleCollapse('msgstream')">
                             <ChevronUp v-if="!isCollapsed('msgstream')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -71,13 +79,21 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Team info') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-teaminfo', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-teaminfo', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-teaminfo', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-teaminfo', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Team info') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Team info') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <InformationOutline :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Team Info') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Info') }}</h2>
                         <NcActions class="teamhub-widget-actions">
                             <NcActionButton v-if="isTeamAdmin" @click="$emit('manage-team')">
                                 <template #icon><Cog :size="20" /></template>
@@ -103,7 +119,7 @@
                         </NcActions>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-teaminfo') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-teaminfo') ? t('teamhub', 'Expand Team Info') : t('teamhub', 'Collapse Team Info')"
                             @click.stop="toggleCollapse('widget-teaminfo')">
                             <ChevronUp v-if="!isCollapsed('widget-teaminfo')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -151,13 +167,21 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Members') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-members', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-members', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-members', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-members', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Members') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Members') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <AccountGroup :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ effectiveMemberCount }})</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ effectiveMemberCount }})</h2>
                         <button
                             v-if="isTeamModerator && !editMode"
                             class="teamhub-widget-invite-btn"
@@ -168,7 +192,7 @@
                         </button>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-members') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-members') ? t('teamhub', 'Expand Members') : t('teamhub', 'Collapse Members')"
                             @click.stop="toggleCollapse('widget-members')">
                             <ChevronUp v-if="!isCollapsed('widget-members')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -238,13 +262,21 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Upcoming events') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-calendar', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-calendar', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-calendar', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-calendar', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Upcoming events') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Upcoming events') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <Calendar :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Events') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Events') }}</h2>
                         <NcActions class="teamhub-widget-actions">
                             <NcActionButton @click="$emit('add-event')">
                                 <template #icon><CalendarPlus :size="20" /></template>
@@ -261,7 +293,7 @@
                         </NcActions>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-calendar') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-calendar') ? t('teamhub', 'Expand Upcoming Events') : t('teamhub', 'Collapse Upcoming Events')"
                             @click.stop="toggleCollapse('widget-calendar')">
                             <ChevronUp v-if="!isCollapsed('widget-calendar')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -280,13 +312,21 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Upcoming tasks') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-deck', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-deck', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-deck', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-deck', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Upcoming tasks') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Upcoming tasks') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <CardText :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</h2>
                         <NcActions class="teamhub-widget-actions">
                             <NcActionButton v-if="resources.deck" @click="$emit('add-deck-task')">
                                 <template #icon><CheckboxMarkedOutline :size="20" /></template>
@@ -299,7 +339,7 @@
                         </NcActions>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-deck') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-deck') ? t('teamhub', 'Expand Upcoming Tasks') : t('teamhub', 'Collapse Upcoming Tasks')"
                             @click.stop="toggleCollapse('widget-deck')">
                             <ChevronUp v-if="!isCollapsed('widget-deck')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -318,16 +358,24 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Team activity') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-activity', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-activity', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-activity', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-activity', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Team activity') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Team activity') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <ClockOutline :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Team Activity') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Activity') }}</h2>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-activity') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-activity') ? t('teamhub', 'Expand Team Activity') : t('teamhub', 'Collapse Team Activity')"
                             @click.stop="toggleCollapse('widget-activity')">
                             <ChevronUp v-if="!isCollapsed('widget-activity')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -346,13 +394,21 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Pages') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-pages', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-pages', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-pages', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-pages', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Pages') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Pages') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <FileDocumentOutline :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Pages') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Pages') }}</h2>
                         <NcActions v-if="isTeamModerator && !editMode" class="teamhub-widget-actions">
                             <NcActionButton @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="20" /></template>
@@ -367,7 +423,7 @@
                         </NcActions>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-pages') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-pages') ? t('teamhub', 'Expand Pages') : t('teamhub', 'Collapse Pages')"
                             @click.stop="toggleCollapse('widget-pages')">
                             <ChevronUp v-if="!isCollapsed('widget-pages')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -389,16 +445,24 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Favourite files') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-files-favorites', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-files-favorites', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-files-favorites', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-files-favorites', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Favourite files') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Favourite files') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <StarOutlineIcon :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Favourite Files') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Favourite Files') }}</h2>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-favorites') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-files-favorites') ? t('teamhub', 'Expand Favourite Files') : t('teamhub', 'Collapse Favourite Files')"
                             @click.stop="toggleCollapse('widget-files-favorites')">
                             <ChevronUp v-if="!isCollapsed('widget-files-favorites')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -417,16 +481,24 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Recently modified files') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-files-recent', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-files-recent', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-files-recent', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-files-recent', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Recently modified files') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Recently modified files') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <ClockOutlineIcon :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Recently Modified') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Recently Modified') }}</h2>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-recent') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-files-recent') ? t('teamhub', 'Expand Recently Modified') : t('teamhub', 'Collapse Recently Modified')"
                             @click.stop="toggleCollapse('widget-files-recent')">
                             <ChevronUp v-if="!isCollapsed('widget-files-recent')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -445,16 +517,24 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Shared files') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-files-shared', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-files-shared', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-files-shared', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-files-shared', 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ t('teamhub', 'Shared files') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Shared files') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <ShareVariantIcon :size="25" />
-                        <span class="teamhub-widget-title">{{ t('teamhub', 'Shared Files') }}</span>
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Shared Files') }}</h2>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-shared') ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-files-shared') ? t('teamhub', 'Expand Shared Files') : t('teamhub', 'Collapse Shared Files')"
                             @click.stop="toggleCollapse('widget-files-shared')">
                             <ChevronUp v-if="!isCollapsed('widget-files-shared')" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -474,9 +554,17 @@
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
-                    <div v-if="editMode" class="teamhub-widget-drag-handle">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="(widget.title || t('teamhub', 'Widget')) + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-int-' + widget.registry_id, 'up')"
+                        @keydown.down.prevent="moveWidget('widget-int-' + widget.registry_id, 'down')"
+                        @keydown.left.prevent="moveWidget('widget-int-' + widget.registry_id, 'left')"
+                        @keydown.right.prevent="moveWidget('widget-int-' + widget.registry_id, 'right')">
                         <DragVariant :size="16" />
-                        <span>{{ widget.title || t('teamhub', 'Widget') }}</span>
+                        <span aria-hidden="true">{{ widget.title || t('teamhub', 'Widget') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
                         <img
@@ -486,7 +574,7 @@
                             class="teamhub-widget-app-icon"
                             @error="onAppIconError($event)" />
                         <Puzzle v-else :size="25" />
-                        <span class="teamhub-widget-title">{{ widget.title }}</span>
+                        <h2 class="teamhub-widget-title">{{ widget.title }}</h2>
                         <NcActions
                             v-if="widgetDynamicActions[widget.registry_id] && widgetDynamicActions[widget.registry_id].length"
                             class="teamhub-widget-actions">
@@ -504,7 +592,7 @@
                         </NcActions>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-int-' + widget.registry_id) ? t('teamhub', 'Expand') : t('teamhub', 'Collapse')"
+                            :aria-label="isCollapsed('widget-int-' + widget.registry_id) ? t('teamhub', 'Expand {widget}', { widget: widget.title }) : t('teamhub', 'Collapse {widget}', { widget: widget.title })"
                             @click.stop="toggleCollapse('widget-int-' + widget.registry_id)">
                             <ChevronUp v-if="!isCollapsed('widget-int-' + widget.registry_id)" :size="16" />
                             <ChevronDown v-else :size="16" />
@@ -925,6 +1013,55 @@ export default {
             this.$emit('layout-updated', this.gridLayout)
         },
 
+        /**
+         * Move a widget one step in the given direction.
+         * WCAG 2.5.7: keyboard/pointer alternative to drag-and-drop reordering.
+         *
+         * Grid is 12 columns (col-num=12). x is clamped to [0, 12-w].
+         * y is adjusted by ±1; vue-grid-layout resolves vertical collisions
+         * automatically by pushing other items down.
+         *
+         * @param {string} id       - The widget's gridLayout i-key
+         * @param {'up'|'down'|'left'|'right'} direction
+         */
+        moveWidget(id, direction) {
+            const idx = this.gridLayout.findIndex(g => g.i === id)
+            if (idx === -1) return
+            const item = { ...this.gridLayout[idx] }
+            const cols = 12
+
+            if (direction === 'left') {
+                // Horizontal nudge — not affected by vertical compaction
+                if (item.x <= 0) return
+                this.$set(this.gridLayout, idx, { ...item, x: Math.max(0, item.x - 1) })
+
+            } else if (direction === 'right') {
+                if (item.x + item.w >= cols) return
+                this.$set(this.gridLayout, idx, { ...item, x: Math.min(cols - item.w, item.x + 1) })
+
+            } else {
+                // Up / down: simple y nudge is cancelled by vue-grid-layout's vertical
+                // compaction. Instead we sort all items by their current y (then x) to
+                // get a logical reading order and swap positions with the neighbour.
+                const sorted = [...this.gridLayout].sort((a, b) =>
+                    a.y !== b.y ? a.y - b.y : a.x - b.x,
+                )
+                const sortedIdx = sorted.findIndex(g => g.i === id)
+                const neighbourSortedIdx = direction === 'up' ? sortedIdx - 1 : sortedIdx + 1
+
+                if (neighbourSortedIdx < 0 || neighbourSortedIdx >= sorted.length) return
+
+                const neighbour = sorted[neighbourSortedIdx]
+                const neighbourIdx = this.gridLayout.findIndex(g => g.i === neighbour.i)
+
+                // Swap both x and y so the two widgets exchange grid positions exactly
+                this.$set(this.gridLayout, idx, { ...item, x: neighbour.x, y: neighbour.y })
+                this.$set(this.gridLayout, neighbourIdx, { ...neighbour, x: item.x, y: item.y })
+            }
+
+            this.$emit('layout-updated', this.gridLayout)
+        },
+
         appIconUrl(appId) {
             return generateUrl(`/apps/${appId}/img/app.svg`)
         },
@@ -1076,6 +1213,12 @@ export default {
 
 .teamhub-widget-drag-handle:active { cursor: grabbing; }
 
+/* Keyboard focus ring — Tab to reach the handle, then arrow keys to move (WCAG 2.5.7) */
+.teamhub-widget-drag-handle:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: -2px;
+}
+
 .teamhub-widget-header {
     display: flex;
     align-items: center;
@@ -1091,6 +1234,9 @@ export default {
 }
 
 .teamhub-widget-title {
+    /* Reset browser h2 defaults — element changed from span to h2 for WCAG 1.3.1 */
+    margin: 0;
+    padding: 0;
     font-weight: 600;
     font-size: 18px;
     color: var(--color-primary-element);
@@ -1176,10 +1322,10 @@ export default {
 
 .teamhub-team-label--success {
     background-color: var(--color-success);
-    /* Hardcoded dark text: NC's --color-success is a mid-tone green that
-       collides with white (--color-primary-text). Dark text reads cleanly
-       on the background in both light and dark mode. */
-    color: #1a1a1a;
+    /* Use NC's success-text variable where available; fall back to a dark
+       neutral that reads on the mid-tone green in both light and dark mode.
+       The explicit fallback keeps forced-colors / high-contrast modes safe. */
+    color: var(--color-success-text, #1a1a1a);
     border-color: var(--color-success);
 }
 
@@ -1191,9 +1337,9 @@ export default {
 
 .teamhub-team-label--warning {
     background-color: var(--color-warning);
-    /* Hardcoded dark text: same reason as --success — NC's --color-warning
-       is amber and too light for white foreground in most themes. */
-    color: #1a1a1a;
+    /* Use NC's warning-text variable where available; fall back to dark
+       neutral that reads on the amber background in light and dark mode. */
+    color: var(--color-warning-text, #1a1a1a);
     border-color: var(--color-warning);
 }
 

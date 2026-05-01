@@ -236,14 +236,14 @@ export default {
     cursor: pointer;
     transition: background-color 0.15s;
 
-    &:hover,
-    &:focus-visible {
+    &:hover {
         background-color: var(--color-background-hover);
-        outline: none;
     }
 
     &:focus-visible {
-        box-shadow: 0 0 0 2px var(--color-primary-element);
+        background-color: var(--color-background-hover);
+        outline: 2px solid var(--color-primary-element);
+        outline-offset: 2px;
     }
 }
 </style>

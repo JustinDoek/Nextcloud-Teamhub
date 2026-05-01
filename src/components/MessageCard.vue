@@ -59,11 +59,19 @@
 
         <!-- Edit mode -->
         <div v-if="editing" class="message-card__edit">
+            <label class="message-card__edit-label" :for="'edit-subject-' + message.id">
+                {{ t('teamhub', 'Subject') }}
+            </label>
             <input
+                :id="'edit-subject-' + message.id"
                 v-model="editSubject"
                 class="message-card__edit-subject"
                 :placeholder="t('teamhub', 'Subject')" />
+            <label class="message-card__edit-label" :for="'edit-body-' + message.id">
+                {{ t('teamhub', 'Message') }}
+            </label>
             <textarea
+                :id="'edit-body-' + message.id"
                 v-model="editBody"
                 class="message-card__edit-body"
                 rows="5" />
@@ -149,17 +157,36 @@
                 v-for="(option, index) in pollOptions"
                 :key="index"
                 class="poll-option"
-                :class="{ 
+                :class="{
                     'poll-option--voted': pollResults.userVote === index,
                     'poll-option--clickable': !isPollClosed && pollResults.userVote !== index
                 }"
-                @click="isPollClosed ? null : vote(index)">
+                :role="isPollClosed ? 'listitem' : 'button'"
+                :tabindex="isPollClosed || pollResults.userVote === index ? -1 : 0"
+                :aria-pressed="!isPollClosed ? pollResults.userVote === index : undefined"
+                :aria-label="isPollClosed
+                    ? t('teamhub', '{option}: {votes}', { option, votes: getPollVotes(index) })
+                    : (pollResults.userVote === index
+                        ? t('teamhub', '{option} — your vote', { option })
+                        : t('teamhub', 'Vote for: {option}', { option }))"
+                :aria-disabled="isPollClosed || pollResults.userVote === index ? 'true' : undefined"
+                @click="isPollClosed ? null : vote(index)"
+                @keydown.enter.prevent="isPollClosed ? null : vote(index)"
+                @keydown.space.prevent="isPollClosed ? null : vote(index)">
                 
                 <div class="poll-option__bar" :style="{ width: getPercentage(index) + '%' }" />
                 
                 <div class="poll-option__content">
                     <span class="poll-option__text">{{ option }}</span>
-                    <span class="poll-option__votes">{{ getPollVotes(index) }}</span>
+                    <span class="poll-option__right">
+                        <!-- Visible non-color indicator for "your vote" (WCAG 1.4.1) -->
+                        <CheckCircleOutline
+                            v-if="pollResults.userVote === index"
+                            :size="16"
+                            class="poll-option__voted-icon"
+                            aria-hidden="true" />
+                        <span class="poll-option__votes">{{ getPollVotes(index) }}</span>
+                    </span>
                 </div>
             </div>
             
@@ -227,6 +254,7 @@ import axios from '@nextcloud/axios'
 import CommentOutline from 'vue-material-design-icons/CommentOutline.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
 import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
+import CheckCircleOutline from 'vue-material-design-icons/CheckCircleOutline.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Lock from 'vue-material-design-icons/Lock.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
@@ -322,6 +350,7 @@ export default {
         CommentOutline,
         ClipboardCheckOutline,
         HelpCircleOutline,
+        CheckCircleOutline,
         CheckCircle,
         Lock,
         Delete,
@@ -932,6 +961,19 @@ export default {
     font-size: 14px;
 }
 
+/* Right-side cluster: checkmark + vote count */
+.poll-option__right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Checkmark shown on voted option — non-color indicator (WCAG 1.4.1) */
+.poll-option__voted-icon {
+    color: var(--color-primary-element);
+    flex-shrink: 0;
+}
+
 .poll-option__votes {
     font-size: 13px;
     color: var(--color-text-maxcontrast);
@@ -975,6 +1017,13 @@ export default {
     margin: 8px 0;
 }
 
+.message-card__edit-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-maxcontrast);
+    margin-bottom: -4px; /* tighten gap between label and its input */
+}
+
 .message-card__edit-subject,
 .message-card__edit-body {
     width: 100%;
@@ -991,8 +1040,21 @@ export default {
 
 .message-card__edit-subject:focus,
 .message-card__edit-body:focus {
-    outline: none;
     border-color: var(--color-primary-element);
+}
+
+/* Explicit keyboard focus ring — suppressed for pointer/touch (2.4.7) */
+.message-card__edit-subject:focus-visible,
+.message-card__edit-body:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+
+/* Voted poll option focus ring */
+.poll-option:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+    border-radius: var(--border-radius);
 }
 
 .message-card__edit-actions {
