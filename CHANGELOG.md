@@ -3,6 +3,14 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.22.0] — 2026-05-01
+
+### Fixed
+- **Indirect members (added via NC group/sub-team) could not see built-in app tabs (Talk, Files, Calendar, Deck).** `ResourceService::getTeamResources()` checked only for a direct `circles_member` row; indirect members have none, so the method threw and the controller returned all-null resources. Added `isEffectiveTeamMember()` helper in `ResourceService` that mirrors the two-step indirect-membership check (circles_member → circles_membership) used elsewhere, without introducing a circular dependency on `MemberService`.
+- **Member count in members widget was inflated when groups or sub-teams were present.** `getEffectiveMemberCount()` used `COUNT(*) FROM circles_membership`, which includes group-proxy and sub-team-proxy circles as rows alongside individual users. Replaced with a query that inner-joins `circles_member` on `user_type=1, level=9` to isolate personal user circles, and uses `COUNT(DISTINCT user_id)` to deduplicate users who appear via multiple membership paths.
+- **Pages widget hidden after team creation even when Intravox page was successfully created.** `create-resources` did not write to `teamhub_team_apps`, so `getTeamResources` found no `intravox` row and returned `resources.intravox = false`.
+- **Manage team → Settings → Team apps showed all apps enabled after creation, regardless of wizard selections.** Same missing write: `ManageTeamView` fell back to `defaultEnabled = true` for every app when no rows existed. The wizard now sends a complete `appStates` payload (all apps, enabled and disabled) with `create-resources`; the backend validates and persists these via `updateTeamApps()`.
+
 ## [3.21.0] — 2026-05-01
 
 ### Added

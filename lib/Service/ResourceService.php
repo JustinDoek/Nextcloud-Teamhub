@@ -42,26 +42,38 @@ class ResourceService {
 
         // Verify the current user is actually a member of this team before
         // returning Talk tokens, file paths, or calendar IDs.
+        // We check both direct membership (user_type=1 row in circles_member) AND
+        // indirect membership (user is in a group/sub-team that is in the circle,
+        // tracked via circles_membership). Users added via a group have no direct
+        // row in circles_member for the team, so a direct-only check incorrectly
+        // denies them access and hides all built-in app tabs.
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
         }
-        $db          = $this->container->get(\OCP\IDBConnection::class);
-        $memberLevel = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
-        if ($memberLevel === 0) {
+        $uid = $user->getUID();
+        $db  = $this->container->get(\OCP\IDBConnection::class);
+
+        $isDirectMember   = $this->getMemberLevelFromDb($db, $teamId, $uid) > 0;
+        $isEffectiveMember = $isDirectMember || $this->isEffectiveTeamMember($db, $teamId, $uid);
+
+        if (!$isEffectiveMember) {
             $this->logger->warning('[ResourceService] getTeamResources — non-member access attempt', [
                 'teamId' => $teamId,
-                'userId' => $user->getUID(),
+                'userId' => $uid,
                 'app'    => Application::APP_ID,
             ]);
             throw new \Exception('Access denied');
         }
+        $this->logger->debug('[ResourceService] getTeamResources — membership confirmed', [
+            'teamId' => $teamId, 'uid' => $uid,
+            'direct' => $isDirectMember, 'indirect' => !$isDirectMember,
+            'app' => Application::APP_ID,
+        ]);
 
         $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false, 'tasks' => false, 'shared_files' => false];
 
         try {
-            $db = $this->container->get(\OCP\IDBConnection::class);
-
             // ── IntraVox enabled flag ─────────────────────────────────────────
             // Check if the intravox app is enabled for this team in teamhub_team_apps
             if ($this->appManager->isInstalled('intravox')) {
@@ -466,8 +478,76 @@ class ResourceService {
     }
 
     // -------------------------------------------------------------------------
-    // Membership check
+    // Membership checks
     // -------------------------------------------------------------------------
+
+    /**
+     * Check whether a user has indirect (group/sub-team) access to a team.
+     *
+     * Cannot use MemberService::isEffectiveMember() directly because
+     * MemberService already injects ResourceService (circular dependency).
+     * This helper replicates the same two-step logic inline:
+     *
+     *  Step 1 — collect every circle the user belongs to directly
+     *           (circles_member WHERE user_id=uid AND user_type=1).
+     *           This includes their personal circle (level=9 owner) and any
+     *           team circles they are a direct member of.
+     *
+     *  Step 2 — check whether any of those circle IDs appears as single_id
+     *           in circles_membership for the target team. Circles populates
+     *           this denormalised cache when a group or sub-team is added to
+     *           a circle, expanding each member's personal-circle single_id
+     *           into one row per team.
+     *
+     * This approach requires no preferences-table lookup and no bitwise
+     * config-flag guessing, so it works even for users who have never
+     * opened the Circles/Teams UI and have no userSingleId preference set.
+     */
+    private function isEffectiveTeamMember(\OCP\IDBConnection $db, string $teamId, string $uid): bool {
+        try {
+            // Step 1: all circles this user is directly a member of (user_type=1)
+            $ucQb  = $db->getQueryBuilder();
+            $ucRes = $ucQb->select('circle_id')
+                ->from('circles_member')
+                ->where($ucQb->expr()->eq('user_id',   $ucQb->createNamedParameter($uid)))
+                ->andWhere($ucQb->expr()->eq('user_type', $ucQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeQuery();
+            $circleIds = [];
+            while ($row = $ucRes->fetch()) {
+                if (!empty($row['circle_id'])) {
+                    $circleIds[] = $row['circle_id'];
+                }
+            }
+            $ucRes->closeCursor();
+
+            if (empty($circleIds)) {
+                $this->logger->debug('[ResourceService] isEffectiveTeamMember: user has no circle memberships', [
+                    'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
+
+            // Step 2: check circles_membership for an intersection
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select($qb->func()->count('*', 'cnt'))
+                ->from('circles_membership')
+                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->in('single_id', $qb->createNamedParameter($circleIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                ->executeQuery();
+            $cnt = (int)$res->fetchOne();
+            $res->closeCursor();
+
+            $this->logger->debug('[ResourceService] isEffectiveTeamMember via circles_membership', [
+                'uid' => $uid, 'teamId' => $teamId, 'found' => $cnt > 0, 'app' => Application::APP_ID,
+            ]);
+            return $cnt > 0;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[ResourceService] isEffectiveTeamMember check failed', [
+                'teamId' => $teamId, 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
 
     private function getMemberLevelFromDb(\OCP\IDBConnection $db, string $teamId, string $userId): int {
         $qb     = $db->getQueryBuilder();

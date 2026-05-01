@@ -824,10 +824,36 @@ class TeamController extends Controller {
             // destructive/provisioning operation — requires team admin or owner.
             $this->memberService->requireAdminLevel($teamId);
 
-            $body = $this->request->getParams();
-            $apps = isset($body['apps']) && is_array($body['apps']) ? $body['apps'] : [];
+            $body     = $this->request->getParams();
+            $apps     = isset($body['apps']) && is_array($body['apps']) ? $body['apps'] : [];
             $teamName = isset($body['teamName']) ? (string)$body['teamName'] : '';
-            $results = $this->resourceService->createTeamResources($teamId, $apps, $teamName);
+            $results  = $this->resourceService->createTeamResources($teamId, $apps, $teamName);
+
+            // Persist the wizard's full app enabled/disabled state when provided.
+            // The wizard sends appStates for ALL apps (both selected and deselected)
+            // so that teamhub_team_apps has a complete picture from the moment the
+            // team is created. Without this, ManageTeamView falls back to
+            // defaultEnabled=true for all apps, and the pages widget stays hidden
+            // because there is no intravox row in teamhub_team_apps.
+            $appStates = isset($body['appStates']) && is_array($body['appStates']) ? $body['appStates'] : [];
+            if (!empty($appStates)) {
+                $stateRows = [];
+                $allowedAppIds = ['spreed', 'files', 'shared_files', 'calendar', 'deck', 'intravox'];
+                foreach ($appStates as $as) {
+                    $appId = isset($as['app_id']) ? (string)$as['app_id'] : '';
+                    if ($appId !== '' && in_array($appId, $allowedAppIds, true)) {
+                        $stateRows[] = [
+                            'app_id'  => $appId,
+                            'enabled' => !empty($as['enabled']),
+                            'config'  => null,
+                        ];
+                    }
+                }
+                if (!empty($stateRows)) {
+                    $this->teamService->updateTeamApps($teamId, $stateRows);
+                }
+            }
+
             // Always 200 — per-app errors are in the results payload, not HTTP status
             return new JSONResponse($results);
         } catch (\Throwable $e) {

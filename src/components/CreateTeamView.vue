@@ -353,6 +353,25 @@ export default {
             if (appsSelected.length > 0) tasks.push({ label: t('teamhub', 'Setting up app integrations'), status: 'waiting' })
             if (this.intravoxAvailable) tasks.push({ label: t('teamhub', 'Creating documentation page'), status: 'waiting' })
 
+            // Build the full app-state payload for ALL known apps so the backend can
+            // persist enabled/disabled in teamhub_team_apps immediately after team creation.
+            // This fixes two bugs:
+            //   1. Pages widget hidden  — intravox has no row → resources.intravox = false
+            //   2. Manage team shows all apps enabled — no rows → defaultEnabled fallback fires
+            //
+            // Note: the wizard uses 'talk' but teamhub_team_apps stores 'spreed' (NC app name).
+            const wizardToAppId = { talk: 'spreed' }
+            const appStates = Object.entries(this.form.apps).map(([k, v]) => ({
+                app_id: wizardToAppId[k] || k,
+                enabled: v,
+            }))
+            // Intravox is always enabled if installed — page is created unconditionally in step 6.
+            if (this.intravoxAvailable) {
+                appStates.push({ app_id: 'intravox', enabled: true })
+            }
+            // Shared files widget starts disabled — admin opts in explicitly.
+            appStates.push({ app_id: 'shared_files', enabled: false })
+
             this.progressTasks = tasks
             this.step = 5  // Progress is step 5
 
@@ -403,13 +422,13 @@ export default {
                     } catch { this.setTask(i++, 'error') }
                 }
 
-                // 5. Create app resources (new dedicated endpoint)
+                // 5. Create app resources + persist enabled/disabled state for all apps
                 if (appsSelected.length > 0) {
                     this.setTask(i, 'running')
                     try {
                         const { data: resourceResults } = await axios.post(
                             generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/create-resources`),
-                            { apps: appsSelected, teamName: team.name }
+                            { apps: appsSelected, teamName: team.name, appStates }
                         )
                         // Log full results so console shows which apps succeeded/failed
                         const anyError = Object.values(resourceResults).some(r => r?.error)
@@ -417,6 +436,13 @@ export default {
                     } catch (e) {
                         this.setTask(i++, 'error')
                     }
+                } else {
+                    // No resources to create, but still persist disabled states so that
+                    // manage team view and widget grid are correct from the start.
+                    axios.post(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/create-resources`),
+                        { apps: [], teamName: team.name, appStates }
+                    ).catch(() => {})
                 }
 
                 // 6. IntraVox page (only if installed)

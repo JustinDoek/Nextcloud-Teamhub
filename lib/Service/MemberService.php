@@ -1315,10 +1315,33 @@ class MemberService {
      */
     public function getEffectiveMemberCount(string $teamId, \OCP\IDBConnection $db): int {
         try {
+            // COUNT(*) on circles_membership is wrong: that table contains one row
+            // per ENTITY with access — including group-proxy circles and sub-team
+            // circles themselves, not just individual users. For a team with an owner
+            // (direct) and a group of 1 user, COUNT(*) gives 3:
+            //   - owner personal circle
+            //   - group proxy circle    ← should NOT be counted as a person
+            //   - group-user personal circle
+            //
+            // Correct approach: join circles_member to identify which single_id values
+            // are personal user circles (they have exactly one user_type=1, level=9
+            // owner row). Group and sub-team proxy circles have no such row, so they
+            // fall out of the INNER JOIN. COUNT(DISTINCT pm.user_id) then deduplicates
+            // users who appear via multiple paths (e.g. direct member AND in a group).
             $qb  = $db->getQueryBuilder();
-            $res = $qb->select($qb->func()->count('*', 'cnt'))
-                ->from('circles_membership')
-                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            $res = $qb->select($qb->createFunction('COUNT(DISTINCT pm.user_id)'))
+                ->from('circles_membership', 'ms')
+                ->join(
+                    'ms',
+                    'circles_member',
+                    'pm',
+                    $qb->expr()->andX(
+                        $qb->expr()->eq('pm.circle_id',  'ms.single_id'),
+                        $qb->expr()->eq('pm.user_type',  $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                        $qb->expr()->eq('pm.level',      $qb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    )
+                )
+                ->where($qb->expr()->eq('ms.circle_id', $qb->createNamedParameter($teamId)))
                 ->executeQuery();
             $cnt = (int)$res->fetchOne();
             $res->closeCursor();

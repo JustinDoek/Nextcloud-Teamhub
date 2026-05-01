@@ -176,9 +176,11 @@ Get provisioned resources (Talk token, Files path, Calendar id, Deck board id).
 **Response:** `{ talk: { token, name }|null, files: { folder_id, path }|null, calendar: { id, uri, name, public_token }|null, deck: { board_id, name, color }|null }`
 
 ### POST `/teams/{teamId}/resources`
-Provision resources for the specified apps.
+Provision resources for the specified apps and persist the full app enabled/disabled state.
 **Auth:** Team admin.
-**Body:** `{ apps: ['talk','files','calendar','deck'], teamName: string }`
+**Body:** `{ apps: string[], teamName: string, appStates?: [{ app_id: string, enabled: bool }] }`
+- `apps` — resource keys to provision: `talk`, `files`, `calendar`, `deck`, `intravox`
+- `appStates` — optional; full state for all apps including disabled ones. Used by the create-team wizard to seed `teamhub_team_apps` immediately. Each `app_id` is validated against the allowlist `spreed`, `files`, `shared_files`, `calendar`, `deck`, `intravox`.
 **Response:** Per-app results map. Each value has either resource details or `{ error: string }`.
 
 ### DELETE `/teams/{teamId}/resources/{app}`
