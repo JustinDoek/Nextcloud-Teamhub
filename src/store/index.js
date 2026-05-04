@@ -21,6 +21,7 @@ export default new Vuex.Store({
         effectiveMemberCount: 0,   // total users including those via groups/teams (from circles_membership)
         hasMoreMembers: false,     // true when effective_count > members shown in widget
         isCurrentUserDirectMember: true, // false when user is only in team via a group/team
+        currentUserLevel: 0,       // current user's direct Circles level on the active team (0 = no direct row)
         resources: {},         // { talk, files, calendar, deck, tasks }
         webLinks: [],
         deckTasks: [],
@@ -54,6 +55,14 @@ export default new Vuex.Store({
             if (!member) return false
             return (member.level || 0) >= state.pinMinLevel
         },
+
+        /**
+         * True if the current user is a team admin (Circles level >= 8) on the
+         * active team. Mirrors MemberService::requireAdminLevel() on the backend.
+         * Used to decide whether to show admin-only UI affordances (e.g. delete
+         * button on other users' comments).
+         */
+        currentUserIsTeamAdmin: state => (state.currentUserLevel || 0) >= 8,
     },
 
     mutations: {
@@ -125,6 +134,13 @@ export default new Vuex.Store({
         SET_EFFECTIVE_MEMBER_COUNT(state, count) { state.effectiveMemberCount = count },
         SET_HAS_MORE_MEMBERS(state, val) { state.hasMoreMembers = val },
         SET_IS_DIRECT_MEMBER(state, val) { state.isCurrentUserDirectMember = val },
+        SET_CURRENT_USER_LEVEL(state, val) { state.currentUserLevel = (typeof val === 'number') ? val : 0 },
+        REMOVE_COMMENT(state, { messageId, commentId }) {
+            const list = state.comments[messageId]
+            if (!list) return
+            const idx = list.findIndex(c => c.id === commentId)
+            if (idx !== -1) list.splice(idx, 1)
+        },
         SET_RESOURCES(state, resources) { state.resources = resources },
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
@@ -259,6 +275,22 @@ export default new Vuex.Store({
             return data
         },
 
+        /**
+         * Hard-delete a comment. Backend enforces author-or-admin permission.
+         * Response carries the updated parent message so comment_count and any
+         * cleared solved-question state refresh in one round trip.
+         */
+        async deleteComment({ commit }, { messageId, commentId }) {
+            const { data } = await axios.delete(
+                generateUrl(`/apps/teamhub/api/v1/comments/${commentId}`)
+            )
+            commit('REMOVE_COMMENT', { messageId, commentId })
+            if (data && data.message) {
+                commit('UPDATE_MESSAGE', data.message)
+            }
+            return data
+        },
+
         async fetchMembers({ commit }, teamId) {
             commit('SET_LOADING', { key: 'members', value: true })
             try {
@@ -270,12 +302,14 @@ export default new Vuex.Store({
                     commit('SET_EFFECTIVE_MEMBER_COUNT', data.length)
                     commit('SET_HAS_MORE_MEMBERS', false)
                     commit('SET_IS_DIRECT_MEMBER', true)
+                    commit('SET_CURRENT_USER_LEVEL', 0)
                 } else {
                     commit('SET_MEMBERS', Array.isArray(data.members) ? data.members : [])
                     commit('SET_MEMBERSHIPS', Array.isArray(data.memberships) ? data.memberships : [])
                     commit('SET_EFFECTIVE_MEMBER_COUNT', data.effective_count || 0)
                     commit('SET_HAS_MORE_MEMBERS', !!data.has_more)
                     commit('SET_IS_DIRECT_MEMBER', data.is_direct_member !== false)
+                    commit('SET_CURRENT_USER_LEVEL', typeof data.current_user_level === 'number' ? data.current_user_level : 0)
                 }
             } catch (e) {
                 commit('SET_MEMBERS', [])
@@ -283,6 +317,7 @@ export default new Vuex.Store({
                 commit('SET_EFFECTIVE_MEMBER_COUNT', 0)
                 commit('SET_HAS_MORE_MEMBERS', false)
                 commit('SET_IS_DIRECT_MEMBER', true)
+                commit('SET_CURRENT_USER_LEVEL', 0)
             } finally {
                 commit('SET_LOADING', { key: 'members', value: false })
             }

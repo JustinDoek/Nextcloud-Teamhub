@@ -43,6 +43,14 @@
                                 @click="startEditComment(c)">
                                 <template #icon><Pencil :size="14" /></template>
                             </NcButton>
+                            <!-- Delete button — author or team admin, hidden during edit -->
+                            <NcButton
+                                v-if="canDeleteComment(c) && editingCommentId !== c.id"
+                                type="tertiary"
+                                :aria-label="t('teamhub', 'Delete comment')"
+                                @click="askDeleteComment(c)">
+                                <template #icon><Delete :size="14" /></template>
+                            </NcButton>
                         </div>
 
                         <!-- Edit mode -->
@@ -82,11 +90,78 @@
                 <NcAvatar :user="currentUser" :display-name="currentUser" :size="28" />
                 <div class="comments-section__input">
                     <NcRichContenteditable
+                        ref="commentEditor"
                         v-model="newComment"
                         :placeholder="commentPlaceholder"
                         :multiline="true"
                         :disabled="questionSolved"
                         @keydown.ctrl.enter="submit" />
+                    <!-- Markdown formatting toolbar for comments -->
+                    <div class="comments-section__md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Bold')"
+                            :aria-label="t('teamhub', 'Bold')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyMarkdown('**', '**', t('teamhub', 'bold text'))">
+                            <template #icon><FormatBold :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Italic')"
+                            :aria-label="t('teamhub', 'Italic')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyMarkdown('*', '*', t('teamhub', 'italic text'))">
+                            <template #icon><FormatItalic :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Inline code')"
+                            :aria-label="t('teamhub', 'Inline code')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyMarkdown('`', '`', t('teamhub', 'code'))">
+                            <template #icon><CodeTags :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Code block')"
+                            :aria-label="t('teamhub', 'Code block')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyMarkdown('```\n', '\n```', t('teamhub', 'code block'))">
+                            <template #icon><CodeBraces :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Heading')"
+                            :aria-label="t('teamhub', 'Heading')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyMarkdown('## ', '', t('teamhub', 'Heading'))">
+                            <template #icon><FormatHeader2 :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Bullet list')"
+                            :aria-label="t('teamhub', 'Bullet list')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyMarkdown('- ', '', t('teamhub', 'list item'))">
+                            <template #icon><FormatListBulleted :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            type="tertiary"
+                            :title="t('teamhub', 'Link')"
+                            :aria-label="t('teamhub', 'Insert link')"
+                            :disabled="questionSolved"
+                            @mousedown.prevent
+                            @click="applyLink">
+                            <template #icon><LinkVariant :size="14" /></template>
+                        </NcButton>
+                    </div>
                     <NcButton
                         type="primary"
                         :disabled="!newComment.trim() || questionSolved"
@@ -96,6 +171,29 @@
                 </div>
             </div>
         </div>
+
+        <!-- Confirmation dialog for hard-deleting a comment.
+             Surfaces a warning when the comment being removed is the marked
+             answer to a solved question, since deletion will revert the
+             question to unsolved. -->
+        <NcDialog
+            v-if="pendingDeleteComment"
+            :name="t('teamhub', 'Delete comment')"
+            :message="deleteDialogMessage"
+            size="small"
+            @closing="cancelDeleteComment">
+            <template #actions>
+                <NcButton type="tertiary" :disabled="deletingComment" @click="cancelDeleteComment">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton type="error" :disabled="deletingComment" @click="executeDeleteComment">
+                    <template v-if="deletingComment" #icon>
+                        <NcLoadingIcon :size="18" />
+                    </template>
+                    {{ t('teamhub', 'Delete') }}
+                </NcButton>
+            </template>
+        </NcDialog>
     </div>
 </template>
 
@@ -104,19 +202,67 @@ import { mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { getCurrentUser } from '@nextcloud/auth'
 import { showError } from '@nextcloud/dialogs'
-import { NcAvatar, NcLoadingIcon, NcButton, NcRichContenteditable } from '@nextcloud/vue'
+import { NcAvatar, NcLoadingIcon, NcButton, NcRichContenteditable, NcDialog } from '@nextcloud/vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Close from 'vue-material-design-icons/Close.vue'
+import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
+import CodeTags from 'vue-material-design-icons/CodeTags.vue'
+import Delete from 'vue-material-design-icons/Delete.vue'
+import FormatBold from 'vue-material-design-icons/FormatBold.vue'
+import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
+import FormatItalic from 'vue-material-design-icons/FormatItalic.vue'
+import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
 
+import DOMPurify from 'dompurify'
+
+const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3']
+const ALLOWED_ATTR = ['href', 'target', 'rel']
+
+// Shared rendering pipeline — see MessageCard.vue for the full explanation of
+// the processing order. Both components use identical logic so that message
+// bodies and comment bodies render consistently.
 function renderMarkdown(text) {
     if (!text) return ''
-    return text
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+    const codeBlocks = []
+    let html = text.replace(/```([\s\S]+?)```/g, (_, code) => {
+        codeBlocks.push(`<pre><code>${code}</code></pre>`)
+        return `\u0000${codeBlocks.length - 1}\u0000`
+    })
+
+    const inlineCodes = []
+    html = html.replace(/`([^`]+)`/g, (_, code) => {
+        inlineCodes.push(`<code>${code}</code>`)
+        return `\u0001${inlineCodes.length - 1}\u0001`
+    })
+
+    html = html
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/__([^_]+)__/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/_([^_]+)_/g, '<em>$1</em>')
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-        .replace(/\n/g, '<br>')
+        .replace(/(?<!href=")(?<!\()https?:\/\/[^\s<>"'\)]+/g, '<a href="$&" target="_blank" rel="noopener">$&</a>')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+
+    html = html.replace(/((?:^- .+(?:\n|$))+)/gm, (block) => {
+        const items = block.trimEnd().split('\n')
+            .map(line => `<li>${line.replace(/^- /, '')}</li>`)
+            .join('')
+        return `<ul>${items}</ul>\n`
+    })
+
+    html = html.replace(/\n/g, '<br>')
+
+    html = html
+        .replace(/\u0000(\d+)\u0000/g, (_, i) => codeBlocks[+i])
+        .replace(/\u0001(\d+)\u0001/g, (_, i) => inlineCodes[+i])
+
+    return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR })
 }
 
 export default {
@@ -126,8 +272,17 @@ export default {
         NcLoadingIcon, 
         NcButton, 
         NcRichContenteditable,
+        NcDialog,
         CheckCircle,
         Close,
+        CodeBraces,
+        CodeTags,
+        Delete,
+        FormatBold,
+        FormatHeader2,
+        FormatItalic,
+        FormatListBulleted,
+        LinkVariant,
         Pencil,
     },
     props: {
@@ -145,10 +300,15 @@ export default {
             editingCommentId: null,
             editCommentText: '',
             savingComment: false,
+            // The comment object pending hard-delete confirmation, or null when no
+            // dialog is open. Keeping the full row (not just the id) so the dialog
+            // can show context-specific copy (e.g. solved-answer warning).
+            pendingDeleteComment: null,
+            deletingComment: false,
         }
     },
     computed: {
-        ...mapGetters(['commentsForMessage']),
+        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin']),
         comments() { return this.commentsForMessage(this.messageId) },
         currentUser() { return getCurrentUser()?.uid || '' },
         commentPlaceholder() {
@@ -156,6 +316,23 @@ export default {
                 return t('teamhub', 'This question has been solved')
             }
             return t('teamhub', 'Write a comment…')
+        },
+        /**
+         * Body copy for the delete-confirmation dialog. When the comment being
+         * removed is the marked answer to a solved question, we additionally
+         * warn that deletion will revert the question to unsolved (handled
+         * server-side, mirrored in the local store via UPDATE_MESSAGE).
+         */
+        deleteDialogMessage() {
+            if (!this.pendingDeleteComment) return ''
+            const isSolvedAnswer = this.messageType === 'question'
+                && this.solvedCommentId
+                && this.pendingDeleteComment.id === this.solvedCommentId
+            if (isSolvedAnswer) {
+                // TRANSLATORS: Shown in a confirmation dialog when the user tries to delete a comment that is the accepted answer to a question. Deletion will revert the question to unsolved.
+                return t('teamhub', 'This comment is the marked answer. Deleting it will mark the question as unsolved.')
+            }
+            return t('teamhub', 'This comment will be permanently deleted. This cannot be undone.')
         },
     },
     methods: {
@@ -195,6 +372,93 @@ export default {
                 comment: this.newComment.trim(),
             })
             this.newComment = ''
+        },
+
+        // ── Markdown toolbar ──────────────────────────────────────────────
+        // Same mechanic as PostMessageForm: @mousedown.prevent on the buttons
+        // keeps the contenteditable's cursor alive; execCommand fires into it.
+        applyMarkdown(before, after, placeholder = '') {
+        
+            const editorEl = this.$refs.commentEditor?.$el?.querySelector('.rich-contenteditable__input')
+                          || this.$refs.commentEditor?.$el
+
+            if (!editorEl) {
+                this.newComment += before + (placeholder || '') + after
+                return
+            }
+
+            const activeEl = document.activeElement
+            const editorHasFocus = editorEl === activeEl || editorEl.contains(activeEl)
+
+            if (editorHasFocus) {
+                const sel = window.getSelection()
+                const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : (placeholder || '')
+                document.execCommand('insertText', false, before + selectedText + after)
+            } else {
+                const selectedText = placeholder || ''
+                this.newComment += (this.newComment && !this.newComment.endsWith('\n') ? '\n' : '') + before + selectedText + after
+                this.$nextTick(() => editorEl.focus())
+            }
+        },
+
+        applyLink() {
+            const editorEl = this.$refs.commentEditor?.$el?.querySelector('.rich-contenteditable__input')
+                          || this.$refs.commentEditor?.$el
+
+            const sel = window.getSelection()
+            const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : ''
+            const label = selectedText || t('teamhub', 'link text')
+
+            if (editorEl && (editorEl === document.activeElement || editorEl.contains(document.activeElement))) {
+                document.execCommand('insertText', false, `[${label}](url)`)
+            } else {
+                this.newComment += `[${label}](url)`
+                this.$nextTick(() => editorEl?.focus())
+            }
+        },
+        /**
+         * Permission predicate for the delete button.
+         * Mirrors backend gating (CommentController::deleteComment): the comment
+         * author may always delete their own comment; team admins may delete
+         * any comment. The backend remains authoritative — this is purely a
+         * UI-affordance check, not a security boundary.
+         */
+        canDeleteComment(comment) {
+            if (!comment) return false
+            if (comment.author_id === this.currentUser) return true
+            return this.currentUserIsTeamAdmin
+        },
+        askDeleteComment(comment) {
+            this.pendingDeleteComment = comment
+        },
+        cancelDeleteComment() {
+            if (this.deletingComment) return
+            this.pendingDeleteComment = null
+        },
+        async executeDeleteComment() {
+            if (!this.pendingDeleteComment || this.deletingComment) return
+            const commentId = this.pendingDeleteComment.id
+            this.deletingComment = true
+            try {
+                await this.$store.dispatch('deleteComment', {
+                    messageId: this.messageId,
+                    commentId,
+                })
+                this.pendingDeleteComment = null
+            } catch (e) {
+                const status = e?.response?.status
+                let msg
+                if (status === 403) {
+                    msg = t('teamhub', 'You do not have permission to delete this comment.')
+                } else if (status === 404) {
+                    msg = t('teamhub', 'This comment no longer exists.')
+                } else {
+                    msg = t('teamhub', 'Failed to delete comment')
+                }
+                showError(msg)
+                        } finally {
+                this.deletingComment = false
+            }
         },
     },
 }
@@ -362,5 +626,13 @@ export default {
 .comment__edit-actions {
     display: flex;
     gap: 6px;
+}
+
+/* Markdown formatting toolbar below the comment input */
+.comments-section__md-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: wrap;
 }
 </style>

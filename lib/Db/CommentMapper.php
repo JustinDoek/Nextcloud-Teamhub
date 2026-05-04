@@ -12,6 +12,18 @@ class CommentMapper {
         $this->db = $db;
     }
 
+    public function find(int $id): ?array {
+        $qb = $this->db->getQueryBuilder();
+        $result = $qb->select('*')
+            ->from('teamhub_comments')
+            ->where($qb->expr()->eq('id', $qb->createNamedParameter($id, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ?: null;
+    }
+
     public function findByMessageId(int $messageId): array {
         $qb = $this->db->getQueryBuilder();
         $result = $qb->select('*')

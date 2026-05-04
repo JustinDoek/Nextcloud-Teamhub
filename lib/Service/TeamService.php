@@ -399,14 +399,10 @@ class TeamService {
             throw new \Exception('Only the team owner can delete a team.');
         }
 
-        // Use Circles CircleService::destroy() — same path as LocalController::destroy().
-        // FederatedUserService::setLocalCurrentUser() sets up the session context without
-        // the startSession()/stopSession() pattern that fails on hidden circles.
-        $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);
-        $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
-
-        // Capture team name BEFORE destroy so the audit row carries useful context.
-        // After destroy, the circle row is gone and we can no longer look it up.
+        // ── Step 1: Capture metadata BEFORE any destructive operation ─────────
+        // Both team name (for audit) and enabled app list (for resource cleanup)
+        // must be read now — after destroy() and after the teamhub_team_apps
+        // delete, neither is recoverable.
         $teamName = null;
         try {
             $qb = $db->getQueryBuilder();
@@ -422,18 +418,73 @@ class TeamService {
             }
         } catch (\Throwable $e) { /* non-fatal — name is just metadata */ }
 
+        // Collect the app_ids that currently have provisioned resources for
+        // this team. We read teamhub_team_apps directly (not via getTeamApps())
+        // so we don't need to go through TeamAppMapper and can catch any error.
+        // We delete resources for ALL apps found in the table, regardless of the
+        // `enabled` flag — a disabled app may still have its resource provisioned
+        // (the resource persists when an app tab is hidden; it is only deleted
+        // when the admin explicitly removes it via the manage-team interface).
+        $appsToClean = [];
+        try {
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('app_id')
+                ->from('teamhub_team_apps')
+                ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+                ->executeQuery();
+            while ($row = $res->fetch()) {
+                if (!empty($row['app_id'])) {
+                    $appsToClean[] = (string)$row['app_id'];
+                }
+            }
+            $res->closeCursor();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamService] deleteTeam: could not read teamhub_team_apps', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+        }
+
+        // ── Step 2: Delete provisioned Nextcloud app resources ────────────────
+        // Run BEFORE circle destruction so that sub-services that need to
+        // look up the circle (e.g. CalDAV principaluri = principals/circles/{id})
+        // still find it. Each app is independently try/caught so one failure
+        // does not prevent the others or the circle deletion from proceeding.
+        foreach ($appsToClean as $app) {
+            try {
+                $result = $this->resourceService->deleteTeamResource($teamId, $app);
+                $this->logger->debug('[TeamService] deleteTeam: resource deleted', [
+                    'teamId' => $teamId,
+                    'app'    => $app,
+                    'result' => $result,
+                    'class'  => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamService] deleteTeam: resource deletion failed', [
+                    'teamId' => $teamId,
+                    'app'    => $app,
+                    'error'  => $e->getMessage(),
+                    'class'  => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // ── Step 3: Destroy the circle ────────────────────────────────────────
+        $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);
+        $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+
         $federatedUserService->setLocalCurrentUser($user);
         $circleService->destroy($teamId);
 
+        // ── Step 4: Remove TeamHub metadata rows ──────────────────────────────
         try {
             $db->executeStatement('DELETE FROM `*PREFIX*teamhub_team_apps` WHERE `team_id` = ?', [$teamId]);
         } catch (\Throwable $e) { /* Not fatal */ }
 
-        // Audit log — team deletion. Logged AFTER successful destroy, so a failed
-        // delete does not produce a misleading "team.deleted" row.
-        // Note: the mirror job will also see Circles' `circle_delete` activity
-        // event later; the AuditMirrorJob (Checkpoint B) is responsible for
-        // de-duplicating against this direct entry within a 5-second window.
+        // ── Step 5: Audit log ─────────────────────────────────────────────────
+        // Logged AFTER successful destroy so a failed delete doesn't produce a
+        // misleading "team.deleted" row.
         $this->auditService->log(
             $teamId,
             'team.deleted',

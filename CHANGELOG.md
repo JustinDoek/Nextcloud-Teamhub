@@ -3,6 +3,28 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.23.0] — 2026-05-04
+
+### Added
+- **DELETE `/api/v1/comments/{commentId}`** — hard-delete a comment. Author may always delete their own; team admins (Circles level ≥ 8) may delete any comment. Audit event `comment.deleted` written with metadata `{ message_id, author_id, deleted_by_admin, cleared_solved }`.
+- **Solved-question revert on answer deletion.** If the deleted comment is the marked answer to a question, the parent message is automatically reverted to unsolved (`question_solved=0, solved_comment_id=NULL`). The confirmation dialog warns the user before proceeding.
+- **Delete button on comments.** Visible to the comment author and team admins. Confirmation dialog; disabled/spinner during async delete. Error messages are HTTP-status-aware (403, 404, generic).
+- **`currentUserIsTeamAdmin` Vuex getter** (level ≥ 8) — derived from `current_user_level` now returned by `GET /api/v1/teams/{teamId}/members`.
+- **Markdown formatting toolbar** in `PostMessageForm.vue` (new messages) and `CommentsSection.vue` (comments): Bold, Italic, Inline code, Code block, Heading (H2), Bullet list, Link. `@mousedown.prevent` preserves contenteditable selection; `execCommand('insertText')` fires at cursor.
+- **Markdown toolbar on edit message.** Same seven buttons in `MessageCard.vue` edit mode. Uses native `selectionStart/End` + `setSelectionRange` (plain textarea — no `execCommand` needed).
+
+### Fixed
+- **XSS via `v-html` in message and comment bodies.** Both `renderMarkdown` functions now pass output through `DOMPurify.sanitize()` with an explicit `ALLOWED_TAGS`/`ALLOWED_ATTR` allowlist before binding to `v-html`.
+- **Headings (`## text`) and bullet lists (`- item`) rendered as literal text.** `renderMarkdown` was a flat `.replace()` chain ending with `\n → <br>`, so heading and list regexes (which need multiline anchors) never matched. Rewrote using a null-byte placeholder pattern: code blocks and inline code are stashed before block-level rules run; restored after `<br>` conversion. Applied to `MessageCard.vue` and `CommentsSection.vue`.
+- **Deck boards created with `permission_edit = 0`.** Deck's `AclMapper` does not mark entity fields dirty when set via `__call` magic, so `setPermissionEdit(true)` was a no-op. Added `enforceAclEditPermissions()`: one independent QB `UPDATE` per column (`permission_edit`, `permission_share`, `permission_manage`), each try/caught so a missing column throws silently without blocking the others. Schema confirmed from live DB.
+- **All Deck boards and Calendars provisioned in the same blue colour.** `createTeamResources()` now picks one random colour per team (`$teamColour = self::randomTeamColour()`) and passes the same value to both `createCalendar()` and `createDeckBoard()`.
+- **Provisioned resources (Talk, Files, Calendar, Deck) not deleted when a team is deleted.** `deleteTeam()` now fetches the team's app list from `teamhub_team_apps` before destroying the circle, then calls `deleteTeamResource()` for each app. Resources are deleted before `circleService->destroy()` so CalDAV/Talk can still resolve the circle principal. All apps are cleaned regardless of their `enabled` flag.
+
+### Changed
+- `GET /api/v1/teams/{teamId}/members` response now includes `current_user_level` (integer) alongside `is_direct_member`.
+- `DELETE /teams/{teamId}` now deletes all provisioned Nextcloud app resources before destroying the circle.
+- `ResourceService::TEAM_COLOUR_PALETTE` — 12-colour curated palette for NC-friendly team colours.
+
 ## [3.22.0] — 2026-05-01
 
 ### Fixed

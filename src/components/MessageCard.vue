@@ -72,9 +72,73 @@
             </label>
             <textarea
                 :id="'edit-body-' + message.id"
+                ref="editBodyRef"
                 v-model="editBody"
                 class="message-card__edit-body"
                 rows="5" />
+            <!-- Markdown formatting toolbar for the edit body textarea.
+                 Uses selectionStart/End (plain textarea API) rather than
+                 execCommand, so no contenteditable quirks.
+                 @mousedown.prevent keeps the textarea selection alive while
+                 the button click is processed. -->
+            <div class="message-card__edit-md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Bold (Ctrl+B)')"
+                    :aria-label="t('teamhub', 'Bold')"
+                    @mousedown.prevent
+                    @click="applyEditMarkdown('**', '**', t('teamhub', 'bold text'))">
+                    <template #icon><FormatBold :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Italic (Ctrl+I)')"
+                    :aria-label="t('teamhub', 'Italic')"
+                    @mousedown.prevent
+                    @click="applyEditMarkdown('*', '*', t('teamhub', 'italic text'))">
+                    <template #icon><FormatItalic :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Inline code')"
+                    :aria-label="t('teamhub', 'Inline code')"
+                    @mousedown.prevent
+                    @click="applyEditMarkdown('`', '`', t('teamhub', 'code'))">
+                    <template #icon><CodeTags :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Code block')"
+                    :aria-label="t('teamhub', 'Code block')"
+                    @mousedown.prevent
+                    @click="applyEditMarkdown('```\n', '\n```', t('teamhub', 'code block'))">
+                    <template #icon><CodeBraces :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Heading')"
+                    :aria-label="t('teamhub', 'Heading')"
+                    @mousedown.prevent
+                    @click="applyEditMarkdown('## ', '', t('teamhub', 'Heading'))">
+                    <template #icon><FormatHeader2 :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Bullet list')"
+                    :aria-label="t('teamhub', 'Bullet list')"
+                    @mousedown.prevent
+                    @click="applyEditMarkdown('- ', '', t('teamhub', 'list item'))">
+                    <template #icon><FormatListBulleted :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Link')"
+                    :aria-label="t('teamhub', 'Insert link')"
+                    @mousedown.prevent
+                    @click="applyEditLink">
+                    <template #icon><LinkVariant :size="16" /></template>
+                </NcButton>
+            </div>
             <div class="message-card__edit-actions">
                 <NcButton type="primary" :disabled="saving" @click="saveEdit">
                     <template #icon><NcLoadingIcon v-if="saving" :size="16" /></template>
@@ -261,6 +325,13 @@ import Delete from 'vue-material-design-icons/Delete.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
 import Pin from 'vue-material-design-icons/Pin.vue'
 import PinOff from 'vue-material-design-icons/PinOff.vue'
+import FormatBold from 'vue-material-design-icons/FormatBold.vue'
+import FormatItalic from 'vue-material-design-icons/FormatItalic.vue'
+import CodeTags from 'vue-material-design-icons/CodeTags.vue'
+import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
+import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
+import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import CommentsSection from './CommentsSection.vue'
 import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 
@@ -326,19 +397,82 @@ function extractUrlObjects(text) {
 }
 
 // Simple markdown renderer
+import DOMPurify from 'dompurify'
+
+// Tags and attributes that our regex renderer intentionally produces.
+// DOMPurify drops everything not on these lists — defence-in-depth even if
+// a future regex change accidentally widens the output.
+const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3']
+const ALLOWED_ATTR = ['href', 'target', 'rel']
+
+/**
+ * Convert a subset of Markdown to sanitised HTML.
+ *
+ * Processing order matters:
+ *   1. Code blocks   — replace with null-byte placeholders so that inner
+ *                      content is never touched by subsequent regexes.
+ *   2. Inline code   — same placeholder treatment for backtick spans.
+ *   3. Inline styles — bold, italic.
+ *   4. Links         — [text](url) then bare auto-links.
+ *   5. Block elements (headings, bullet lists) — must happen BEFORE \n→<br>
+ *      so that /^…$/m anchors still match line boundaries.
+ *   6. Remaining \n  — converted to <br>.
+ *   7. Restore placeholders.
+ *   8. DOMPurify sanitize.
+ */
 function renderMarkdown(text) {
     if (!text) return ''
-    let html = text
-        .replace(/```([\s\S]+?)```/g, '<pre><code>$1</code></pre>')
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+    // 1. Fenced code blocks
+    const codeBlocks = []
+    let html = text.replace(/```([\s\S]+?)```/g, (_, code) => {
+        codeBlocks.push(`<pre><code>${code}</code></pre>`)
+        return `\u0000${codeBlocks.length - 1}\u0000`
+    })
+
+    // 2. Inline code
+    const inlineCodes = []
+    html = html.replace(/`([^`]+)`/g, (_, code) => {
+        inlineCodes.push(`<code>${code}</code>`)
+        return `\u0001${inlineCodes.length - 1}\u0001`
+    })
+
+    // 3. Bold and italic
+    html = html
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
         .replace(/__([^_]+)__/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
         .replace(/_([^_]+)_/g, '<em>$1</em>')
+
+    // 4. Links — explicit [text](url) then bare https?:// URLs
+    html = html
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
         .replace(/(?<!href=")(?<!\()https?:\/\/[^\s<>"'\)]+/g, '<a href="$&" target="_blank" rel="noopener noreferrer">$&</a>')
-        .replace(/\n/g, '<br>')
-    return html
+
+    // 5a. Headings — match at start of line (multiline flag)
+    html = html
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+
+    // 5b. Bullet lists — group consecutive '- ' lines into one <ul>
+    html = html.replace(/((?:^- .+(?:\n|$))+)/gm, (block) => {
+        const items = block.trimEnd().split('\n')
+            .map(line => `<li>${line.replace(/^- /, '')}</li>`)
+            .join('')
+        return `<ul>${items}</ul>\n`
+    })
+
+    // 6. Remaining newlines → <br>
+    html = html.replace(/\n/g, '<br>')
+
+    // 7. Restore code placeholders (their content never saw steps 3–6)
+    html = html
+        .replace(/\u0000(\d+)\u0000/g, (_, i) => codeBlocks[+i])
+        .replace(/\u0001(\d+)\u0001/g, (_, i) => inlineCodes[+i])
+
+    // 8. Sanitize before injecting into v-html
+    return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR })
 }
 
 export default {
@@ -359,6 +493,13 @@ export default {
         PinOff,
         CommentsSection,
         PaperclipIcon,
+        FormatBold,
+        FormatItalic,
+        CodeTags,
+        CodeBraces,
+        FormatHeader2,
+        FormatListBulleted,
+        LinkVariant,
     },
     props: {
         message:      { type: Object,  required: true },
@@ -546,6 +687,67 @@ export default {
 
         cancelEdit() {
             this.editing = false
+        },
+
+        // ── Markdown toolbar for edit mode ───────────────────────────────
+        // The edit body is a plain <textarea>, so we use selectionStart /
+        // selectionEnd to locate the cursor and setSelectionRange to restore
+        // it after Vue re-renders. No execCommand needed.
+        //
+        // @mousedown.prevent on the toolbar buttons keeps the textarea's
+        // selection alive while the click fires.
+
+        /**
+         * Wrap the selected text in the textarea with markdown syntax,
+         * or insert `before + placeholder + after` at the cursor when nothing
+         * is selected.
+         *
+         * @param {string} before       Prefix (e.g. '**')
+         * @param {string} after        Suffix (e.g. '**'), empty for line-prefix syntax
+         * @param {string} placeholder  Fallback label when there is no selection
+         */
+        applyEditMarkdown(before, after, placeholder = '') {
+            const el = this.$refs.editBodyRef
+            if (!el) {
+                this.editBody += before + (placeholder || '') + after
+                return
+            }
+
+            const start = el.selectionStart ?? this.editBody.length
+            const end   = el.selectionEnd   ?? this.editBody.length
+            const selected = this.editBody.slice(start, end) || placeholder || ''
+            const replacement = before + selected + after
+
+            this.editBody = this.editBody.slice(0, start) + replacement + this.editBody.slice(end)
+
+            // Restore cursor to end of inserted text after Vue re-renders
+            this.$nextTick(() => {
+                const cursor = start + replacement.length
+                el.focus()
+                el.setSelectionRange(cursor, cursor)
+            })
+        },
+
+        /**
+         * Insert a Markdown link at the cursor, using the current selection
+         * (if any) as the link label.
+         */
+        applyEditLink() {
+            const el = this.$refs.editBodyRef
+            const start = el?.selectionStart ?? this.editBody.length
+            const end   = el?.selectionEnd   ?? this.editBody.length
+            const selected = this.editBody.slice(start, end)
+            const label = selected || t('teamhub', 'link text')
+            const replacement = `[${label}](url)`
+
+            this.editBody = this.editBody.slice(0, start) + replacement + this.editBody.slice(end)
+
+            this.$nextTick(() => {
+                if (el) {
+                    el.focus()
+                    el.setSelectionRange(start + replacement.length, start + replacement.length)
+                }
+            })
         },
 
         async saveEdit() {
@@ -1060,5 +1262,19 @@ export default {
 .message-card__edit-actions {
     display: flex;
     gap: 8px;
+}
+
+/* Markdown toolbar beneath the edit textarea — same border treatment as
+   PostMessageForm's toolbar so the chrome reads consistently. */
+.message-card__edit-md-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    border: 1px solid var(--color-border);
+    border-top: none;
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    background: var(--color-background-hover);
+    margin-top: -8px; /* close the gap from the textarea above */
 }
 </style>

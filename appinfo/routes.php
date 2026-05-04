@@ -133,6 +133,7 @@ return [
         ['name' => 'comment#listComments',        'url' => '/api/v1/messages/{messageId}/comments',          'verb' => 'GET'],
         ['name' => 'comment#createComment',       'url' => '/api/v1/messages/{messageId}/comments',          'verb' => 'POST'],
         ['name' => 'comment#updateComment',       'url' => '/api/v1/comments/{commentId}',                   'verb' => 'PUT'],
+        ['name' => 'comment#deleteComment',       'url' => '/api/v1/comments/{commentId}',                   'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
         // Layout — per-user, per-team Home-view grid + tab order

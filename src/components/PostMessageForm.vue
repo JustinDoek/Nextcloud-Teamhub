@@ -35,6 +35,70 @@
                 :link-autocomplete="true"
                 :user-data="mentions" />
 
+            <!-- Markdown formatting toolbar.
+                 @mousedown.prevent keeps focus+cursor in the contenteditable
+                 so execCommand fires into the correct element (mouse path).
+                 For keyboard activation, applyMarkdown focuses the editor
+                 manually before inserting. -->
+            <div class="post-form__md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Bold (Ctrl+B)')"
+                    :aria-label="t('teamhub', 'Bold')"
+                    @mousedown.prevent
+                    @click="applyMarkdown('**', '**', t('teamhub', 'bold text'))">
+                    <template #icon><FormatBold :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Italic (Ctrl+I)')"
+                    :aria-label="t('teamhub', 'Italic')"
+                    @mousedown.prevent
+                    @click="applyMarkdown('*', '*', t('teamhub', 'italic text'))">
+                    <template #icon><FormatItalic :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Inline code')"
+                    :aria-label="t('teamhub', 'Inline code')"
+                    @mousedown.prevent
+                    @click="applyMarkdown('`', '`', t('teamhub', 'code'))">
+                    <template #icon><CodeTags :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Code block')"
+                    :aria-label="t('teamhub', 'Code block')"
+                    @mousedown.prevent
+                    @click="applyMarkdown('```\n', '\n```', t('teamhub', 'code block'))">
+                    <template #icon><CodeBraces :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Heading')"
+                    :aria-label="t('teamhub', 'Heading')"
+                    @mousedown.prevent
+                    @click="applyMarkdown('## ', '', t('teamhub', 'Heading'))">
+                    <template #icon><FormatHeader2 :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Bullet list')"
+                    :aria-label="t('teamhub', 'Bullet list')"
+                    @mousedown.prevent
+                    @click="applyMarkdown('- ', '', t('teamhub', 'list item'))">
+                    <template #icon><FormatListBulleted :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    type="tertiary"
+                    :title="t('teamhub', 'Link')"
+                    :aria-label="t('teamhub', 'Insert link')"
+                    @mousedown.prevent
+                    @click="applyLink">
+                    <template #icon><LinkVariant :size="16" /></template>
+                </NcButton>
+            </div>
+
             <!-- Toolbar: Smart Picker + Attach file -->
             <div class="post-form__toolbar">
                 <!-- Smart Picker button -->
@@ -171,6 +235,12 @@ import Close from 'vue-material-design-icons/Close.vue'
 import Send from 'vue-material-design-icons/Send.vue'
 import Paperclip from 'vue-material-design-icons/Paperclip.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
+import FormatBold from 'vue-material-design-icons/FormatBold.vue'
+import FormatItalic from 'vue-material-design-icons/FormatItalic.vue'
+import CodeTags from 'vue-material-design-icons/CodeTags.vue'
+import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
+import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
+import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
 
 // TeamHub attachment folder inside the user's Files
 const ATTACH_FOLDER = 'TeamHub Attachments'
@@ -181,6 +251,8 @@ export default {
         NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon,
         MessageOutline, HelpCircleOutline, PollIcon, Plus, Close, Send,
         Paperclip, LinkVariant,
+        FormatBold, FormatItalic, CodeTags, CodeBraces,
+        FormatHeader2, FormatListBulleted,
     },
     emits: ['submitted', 'cancel'],
 
@@ -249,6 +321,74 @@ export default {
     methods: {
         t,
         ...mapActions(['postMessage']),
+
+        // ── Markdown toolbar ────────────────────────────────────────────────
+        /**
+         * Insert markdown syntax around the current selection (or around a
+         * placeholder if nothing is selected). Works for both mouse and keyboard
+         * activation:
+         *
+         * - Mouse path: @mousedown.prevent keeps the contenteditable focused and
+         *   selection alive; execCommand fires into the active element, the
+         *   component's 'input' listener updates v-model automatically.
+         *
+         * - Keyboard path: the button receives focus, so we re-focus the editor
+         *   and append to the model string as a reliable fallback (no cursor
+         *   position tracking when focus has left the editor).
+         *
+         * @param {string} before   Markdown prefix (e.g. '**')
+         * @param {string} after    Markdown suffix (e.g. '**'), empty for line prefixes
+         * @param {string} placeholder  Fallback text when there is no selection
+         */
+        applyMarkdown(before, after, placeholder = '') {
+        
+            const editorEl = this.$refs.editor?.$el?.querySelector('.rich-contenteditable__input')
+                          || this.$refs.editor?.$el
+
+            if (!editorEl) {
+                // No DOM reference — fall back to appending to the model.
+                this.body += before + (placeholder || '') + after
+                return
+            }
+
+            const activeEl = document.activeElement
+            const editorHasFocus = editorEl === activeEl || editorEl.contains(activeEl)
+
+            if (editorHasFocus) {
+                // Mouse path: selection is still live in the contenteditable.
+                const sel = window.getSelection()
+                const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : (placeholder || '')
+                document.execCommand('insertText', false, before + selectedText + after)
+            } else {
+                // Keyboard path: focus was elsewhere. Append to the model string
+                // and move the cursor to the body field for the user to continue.
+                const selectedText = placeholder || ''
+                this.body += (this.body && !this.body.endsWith('\n') ? '\n' : '') + before + selectedText + after
+                this.$nextTick(() => editorEl.focus())
+            }
+        },
+
+        /**
+         * Insert a Markdown link `[text](url)`.
+         * If text is selected, it becomes the link label;
+         * otherwise a placeholder is used.
+         * The user can tab through the brackets to complete the URL.
+         */
+        applyLink() {
+            const editorEl = this.$refs.editor?.$el?.querySelector('.rich-contenteditable__input')
+                          || this.$refs.editor?.$el
+
+            const sel = window.getSelection()
+            const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : ''
+            const label = selectedText || t('teamhub', 'link text')
+
+            if (editorEl && (editorEl === document.activeElement || editorEl.contains(document.activeElement))) {
+                document.execCommand('insertText', false, `[${label}](url)`)
+            } else {
+                this.body += `[${label}](url)`
+                this.$nextTick(() => editorEl?.focus())
+            }
+        },
 
         // ── Smart Picker ────────────────────────────────────────────────────
         async openSmartPicker() {
@@ -502,6 +642,23 @@ export default {
     border-top: none;
     border-radius: 0 0 var(--border-radius) var(--border-radius);
     background: var(--color-background-hover);
+}
+
+/* Markdown formatting toolbar — sits between the editor and the utility toolbar.
+   Uses the same border treatment so it reads as a unified editor chrome. */
+.post-form__md-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    border: 1px solid var(--color-border);
+    border-top: none;
+    background: var(--color-background-hover);
+}
+
+/* Thin separator between the md-toolbar and the utility toolbar */
+.post-form__md-toolbar + .post-form__toolbar {
+    border-top: 1px solid var(--color-border-dark);
 }
 
 .post-form__toolbar-hint {

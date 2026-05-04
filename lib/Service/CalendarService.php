@@ -23,12 +23,23 @@ class CalendarService {
         private LoggerInterface $logger,
     ) {}
 
-    public function createCalendar(string $teamId, string $teamName, string $uid): array {
+    /**
+     * Create a CalDAV calendar for $uid, shared with the team circle.
+     *
+     * @param string      $teamId   Team / circle unique ID
+     * @param string      $teamName Display name for the calendar
+     * @param string      $uid      NC user ID of the team creator (calendar owner)
+     * @param string|null $colour   6-char hex without '#' (e.g. '2eb52b').
+     *                              The CalDAV property requires '#RRGGBB' format —
+     *                              the '#' is prepended here. Defaults to NC blue.
+     */
+    public function createCalendar(string $teamId, string $teamName, string $uid, ?string $colour = null): array {
 
         if (!$this->appManager->isInstalled('calendar')) {
             return ['error' => 'Calendar app not installed'];
         }
 
+        $colour       = $colour ?? '0082c9';
         $caldav       = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
         $principalUri = 'principals/users/' . $uid;
         $calendarUri  = strtolower(preg_replace('/[^a-z0-9]+/', '-', $teamName))
@@ -36,7 +47,7 @@ class CalendarService {
 
         $calendarId = $caldav->createCalendar($principalUri, $calendarUri, [
             '{DAV:}displayname'                        => $teamName,
-            '{http://apple.com/ns/ical/}calendar-color' => '#0082c9',
+            '{http://apple.com/ns/ical/}calendar-color' => '#' . $colour,
         ]);
 
         $db = $this->container->get(\OCP\IDBConnection::class);

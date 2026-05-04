@@ -24,12 +24,23 @@ class DeckService {
         private DbIntrospectionService $dbIntrospection,
     ) {}
 
-    public function createDeckBoard(string $teamId, string $teamName, string $uid): array {
+    /**
+     * Create a Deck board owned by $uid, shared with the team circle, and with
+     * edit permissions set for all circle members.
+     *
+     * @param string      $teamId   Team / circle unique ID
+     * @param string      $teamName Board title
+     * @param string      $uid      NC user ID of the team creator (board owner)
+     * @param string|null $colour   6-char hex colour without '#' (e.g. '0082c9').
+     *                              Defaults to Nextcloud blue when null.
+     */
+    public function createDeckBoard(string $teamId, string $teamName, string $uid, ?string $colour = null): array {
 
         if (!$this->appManager->isInstalled('deck')) {
             return ['error' => 'Deck app not installed'];
         }
 
+        $colour = $colour ?? '0082c9';
         $db = $this->container->get(\OCP\IDBConnection::class);
 
         // ── Create board via Deck's ORM (preferred) ───────────────────────────
@@ -39,7 +50,7 @@ class DeckService {
             $board = new \OCA\Deck\Db\Board();
             $board->setTitle($teamName);
             $board->setOwner($uid);
-            $board->setColor('0082c9');
+            $board->setColor($colour);
             $board   = $boardMapper->insert($board);
             $boardId = $board->getId();
         } catch (\Throwable $e) {
@@ -56,7 +67,7 @@ class DeckService {
             $qb->insert('deck_boards')->values([
                 'title' => $qb->createNamedParameter($teamName),
                 'owner' => $qb->createNamedParameter($uid),
-                'color' => $qb->createNamedParameter('0082c9'),
+                'color' => $qb->createNamedParameter($colour),
             ]);
             foreach (['archived' => 0, 'deleted_at' => 0, 'last_modified' => time(), 'settings' => ''] as $col => $val) {
                 if (in_array($col, $boardCols, true)) {
@@ -193,8 +204,85 @@ class DeckService {
             ]);
         }
 
+        // ── Enforce edit permissions via direct QB UPDATE ─────────────────────
+        // All three ACL strategies above attempt to set edit rights, but ORM
+        // quirks across Deck versions can cause the permission columns to be
+        // written with their default (0 / false) even when the setter was called
+        // (e.g. the entity does not mark the field as dirty, or the installed
+        // Deck version uses different setter names). This UPDATE is the
+        // authoritative write — it runs regardless of which strategy succeeded.
+        if ($circleAdded) {
+            $this->enforceAclEditPermissions($boardId, $teamId, $db);
+        }
 
         return ['board_id' => $boardId, 'name' => $teamName, 'circle_added' => $circleAdded];
+    }
+
+    /**
+     * Directly UPDATE the ACL row(s) for this board+circle to ensure edit
+     * permission is granted, independent of ORM behaviour.
+     *
+     * Handles both Deck 1.x (separate boolean columns) and Deck 2.x
+     * (single `permissions` bitmask, value 3 = read|edit):
+     *
+     *   Deck 1.x columns: permission_read, permission_edit, permission_manage
+     *   Deck 2.x column:  permissions  (bitmask — PERMISSION_READ=1, PERMISSION_EDIT=2)
+     *
+     * Each column is set in its own try/catch so a missing column in one schema
+     * version does not prevent the other from being written.
+     *
+     * @param int    $boardId The board ID just created
+     * @param string $teamId  The circle/team unique ID used as the ACL participant
+     * @param \OCP\IDBConnection $db Active DB connection
+     */
+    /**
+     * Ensure edit permission is set on the circle ACL row for this board.
+     *
+     * DB confirmed schema (Deck 1.x / NC32):
+     *   oc_deck_board_acl: id, board_id, type, participant,
+     *                      permission_edit, permission_share, permission_manage
+     *
+     * We fire one targeted UPDATE per permission column, each independently
+     * try/caught. No column detection: if a column doesn't exist the DB
+     * throws and we catch it silently. This is more reliable than introspection
+     * because it avoids cache/prefix bugs that caused a single combined UPDATE
+     * to build with no SET clause and fail silently.
+     *
+     * Covers both Deck 1.x (individual boolean columns) and the hypothetical
+     * Deck 2.x bitmask column (`permissions`), whichever is present.
+     */
+    private function enforceAclEditPermissions(int $boardId, string $teamId, \OCP\IDBConnection $db): void {
+        foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+
+            // Deck 1.x individual boolean columns — one UPDATE per column so a
+            // missing column in one schema version never blocks the others.
+            foreach (['permission_edit' => 1, 'permission_share' => 0, 'permission_manage' => 0] as $col => $val) {
+                try {
+                    $qb = $db->getQueryBuilder();
+                    $qb->update($aclTable)
+                       ->set($col, $qb->createNamedParameter($val, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                       ->where($qb->expr()->eq('board_id',    $qb->createNamedParameter($boardId,  \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                       ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7,        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                       ->andWhere($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)));
+                    $qb->executeStatement();
+                } catch (\Throwable $e) {
+                    // Column doesn't exist in this Deck version — not an error.
+                }
+            }
+
+            // Deck 2.x bitmask column — PERMISSION_READ(1) | PERMISSION_EDIT(2) = 3
+            try {
+                $qb = $db->getQueryBuilder();
+                $qb->update($aclTable)
+                   ->set('permissions', $qb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                   ->where($qb->expr()->eq('board_id',    $qb->createNamedParameter($boardId,  \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                   ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7,        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                   ->andWhere($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)));
+                $qb->executeStatement();
+            } catch (\Throwable $e) {
+                // Column doesn't exist in this Deck version — not an error.
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

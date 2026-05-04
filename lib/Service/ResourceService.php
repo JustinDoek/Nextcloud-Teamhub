@@ -21,6 +21,41 @@ use Psr\Log\LoggerInterface;
  */
 class ResourceService {
 
+    /**
+     * Curated palette for team Deck boards and Calendars.
+     *
+     * Criteria: medium-to-dark saturation, legible on both white card headers
+     * (Deck) and white UI backgrounds (Calendar sidebar). Excludes colours that
+     * are near-white, near-black, or so desaturated they look grey.
+     *
+     * Each entry is a 6-character hex string without '#'.  Callers that need
+     * the CalDAV format (#RRGGBB) should prefix the string with '#'.
+     */
+    private const TEAM_COLOUR_PALETTE = [
+        '0082c9', // Nextcloud blue
+        '2eb52b', // green
+        'e08310', // amber
+        'e53935', // red
+        '9c27b0', // purple
+        '00897b', // teal
+        '3f51b5', // indigo
+        'd81b60', // raspberry
+        '795548', // warm brown
+        '546e7a', // steel blue-grey
+        '558b2f', // olive green
+        '00838f', // dark cyan
+    ];
+
+    /**
+     * Pick a random colour from the shared palette.
+     * Each call is independent — board and calendar can receive different colours.
+     *
+     * @return string 6-char hex without '#'
+     */
+    private static function randomTeamColour(): string {
+        return self::TEAM_COLOUR_PALETTE[array_rand(self::TEAM_COLOUR_PALETTE)];
+    }
+
     public function __construct(
         private IUserSession $userSession,
         private IAppManager $appManager,
@@ -344,7 +379,13 @@ class ResourceService {
         if (!$user) {
             throw new \Exception('User not authenticated');
         }
-        $uid     = $user->getUID();
+        $uid = $user->getUID();
+
+        // Pick one colour for the whole team — all colour-bearing resources
+        // (Deck board, Calendar) receive the same value so the team has a
+        // consistent visual identity across apps.
+        $teamColour = self::randomTeamColour();
+
         $results = [];
         foreach ($apps as $app) {
             try {
@@ -356,10 +397,14 @@ class ResourceService {
                         $results['files'] = $this->filesService->createSharedFolder($teamId, $teamName, $uid);
                         break;
                     case 'calendar':
-                        $results['calendar'] = $this->calendarService->createCalendar($teamId, $teamName, $uid);
+                        $results['calendar'] = $this->calendarService->createCalendar(
+                            $teamId, $teamName, $uid, $teamColour
+                        );
                         break;
                     case 'deck':
-                        $results['deck'] = $this->deckService->createDeckBoard($teamId, $teamName, $uid);
+                        $results['deck'] = $this->deckService->createDeckBoard(
+                            $teamId, $teamName, $uid, $teamColour
+                        );
                         break;
                     case 'intravox':
                         $results['intravox'] = $this->intravoxService->createPage($teamId, $teamName);

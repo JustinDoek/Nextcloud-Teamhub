@@ -277,15 +277,21 @@ class MemberService {
         }
         $gcRes->closeCursor();
 
-        // Flag whether the current user is a DIRECT member (user_type=1 row).
-        $isDirectMember = $this->getMemberLevelFromDb($db, $teamId, $user->getUID()) > 0;
+        // Flag whether the current user is a DIRECT member (user_type=1 row),
+        // and capture the level for admin-gated UI affordances.
+        // Indirect members (added via group / sub-team) have level=0 here, which
+        // is correct: they cannot perform admin actions. requireAdminLevel()
+        // applies the same direct-row rule on the backend.
+        $currentUserLevel = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+        $isDirectMember = $currentUserLevel > 0;
 
         return [
-            'members'          => $members,
-            'memberships'      => $memberships,
-            'effective_count'  => $effectiveCount,
-            'has_more'         => $effectiveCount > count($members),
-            'is_direct_member' => $isDirectMember,
+            'members'             => $members,
+            'memberships'         => $memberships,
+            'effective_count'     => $effectiveCount,
+            'has_more'            => $effectiveCount > count($members),
+            'is_direct_member'    => $isDirectMember,
+            'current_user_level'  => $currentUserLevel,
         ];
     }
 

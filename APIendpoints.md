@@ -1,4 +1,4 @@
-# TeamHub API Endpoints — v3.18.0
+# TeamHub API Endpoints — v3.23.0
 
 > No endpoint surface changes between 3.17.0 and 3.18.0.
 > v3.18.0 is a frontend-only release (iframe overhaul + Audit tab info banner).
@@ -49,7 +49,7 @@ Update team description and/or config bitmask.
 **Response:** `{ success: true, id }`
 
 ### DELETE `/teams/{teamId}`
-Delete a team. Does **not** delete provisioned resources (Talk room, Files folder, etc.).
+Delete a team and all its provisioned Nextcloud resources (Talk room, Files folder, Calendar, Deck board). Resources are deleted before the circle is destroyed so sub-services can still resolve the circle principal during cleanup.
 **Auth:** Team owner.
 
 ### POST `/teams/{teamId}/transfer-owner`
@@ -69,6 +69,7 @@ List members of a team for the home-page members widget.
   effective_count:  int,     // total users with access (direct + expanded, deduplicated)
   has_more:         bool,    // true when effective_count > len(members)
   is_direct_member: bool,    // false when caller is only in the team via a group/sub-team
+  current_user_level: int,   // caller's Circles level on this team (0 = indirect member only, 8 = admin, 9 = owner)
 }
 ```
 
@@ -320,9 +321,15 @@ Get comments on a message.
 Post a comment.
 **Auth:** Team member.
 
-### DELETE `/teams/{teamId}/messages/{messageId}/comments/{commentId}`
-Delete a comment.
-**Auth:** Comment author OR team admin.
+### DELETE `/api/v1/comments/{commentId}`
+Hard-delete a comment.
+**Auth:** Comment author OR team admin (Circles level ≥ 8). Backend enforces both checks.
+**Side effects:**
+- If the comment was the marked answer to a solved question, the parent message is reverted to unsolved (`question_solved=0, solved_comment_id=NULL`).
+- Audit event `comment.deleted` written with metadata `{ message_id, author_id, deleted_by_admin, cleared_solved }`.
+**Response:** `{ success: true, commentId, messageId, message: <updated parent message>, cleared_solved: bool }`
+The response includes the full updated parent message so the caller can refresh `comment_count` and solved-state UI in one round trip.
+**Error responses:** `401` unauthenticated, `403` insufficient permissions, `404` comment or parent message not found.
 
 ---
 
