@@ -1,6 +1,6 @@
 # TeamHub for Nextcloud
 
-TeamHub gives every Nextcloud Team a proper home. It wraps the existing Teams (Circles) infrastructure and provisions a shared workspace — messages, Talk chat, Files folder, Calendar, Deck board — all accessible from one place.
+TeamHub gives every Nextcloud Team a proper home. It wraps the existing Teams (Circles) infrastructure and provisions a shared workspace including: messages, Talk chat, Files folder, Calendar, Deck board and Intravox pages. All accessible from one team view.
 
 ![TeamHub screenshot](screenshots/teamhub-main.jpg)
 

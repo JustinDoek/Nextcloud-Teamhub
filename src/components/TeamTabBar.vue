@@ -151,9 +151,12 @@
             <template #icon><Plus :size="18" /></template>
         </NcButton>
 
-        <!-- Edit layout toggle — shown only on Home view -->
+        <!-- Edit layout toggle — shown only on Home view, and only on
+             non-mobile viewports. The mobile layout is fixed (one canvas
+             per widget) and not user-arrangeable, so the button is hidden
+             rather than disabled to keep the bar clean. -->
         <NcButton
-            v-if="currentView === 'msgstream'"
+            v-if="currentView === 'msgstream' && !isMobile && !isTablet"
             class="teamhub-edit-layout-btn"
             :type="editMode ? 'primary' : 'tertiary'"
             :aria-label="editMode ? t('teamhub', 'Done editing layout') : t('teamhub', 'Edit layout')"
@@ -194,6 +197,10 @@ export default {
     props: {
         value: { type: Array, required: true },
         editMode: { type: Boolean, default: false },
+        // True when the viewport ≤ 768px or tablet portrait — hides Edit layout button.
+        isMobile: { type: Boolean, default: false },
+        // True when tablet landscape (≤1200px landscape) — also hides Edit layout button.
+        isTablet: { type: Boolean, default: false },
     },
 
     emits: ['input', 'tab-reorder', 'manage-links', 'toggle-edit-mode'],

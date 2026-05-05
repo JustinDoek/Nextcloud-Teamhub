@@ -213,7 +213,7 @@ html, body {
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
-    height: 90% !important;
+    height: 100% !important;
     border-radius: 0 !important;
     box-sizing: border-box !important;
 }
@@ -224,7 +224,7 @@ html, body {
 .app-content {
     margin: 0 !important;
     padding: 0 !important;
-    height: 90% !important;
+    height: 100% !important;
     width: 100% !important;
     max-width: 100% !important;
     border-radius: 0 !important;

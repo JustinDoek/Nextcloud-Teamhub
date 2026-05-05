@@ -139,6 +139,17 @@ export default {
     gap: 20px;
 }
 
+/*
+ * On narrow viewports the 420px min-width forces horizontal overflow.
+ * Drop it so NcModal can scale to the available width.
+ */
+@media (max-width: 768px) {
+    .links-modal {
+        min-width: 0;
+        padding: 16px;
+    }
+}
+
 .links-modal h3 {
     font-size: 14px;
     font-weight: 600;

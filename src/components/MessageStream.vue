@@ -1,6 +1,6 @@
 <template>
-    <div class="message-stream">
-        <div class="message-stream__header">
+    <div class="message-stream" :class="{ 'message-stream--no-header': hideHeader }">
+        <div v-if="!hideHeader" class="message-stream__header">
             <NcButton type="primary" @click="showPostForm = true">
                 <template #icon><Plus :size="20" /></template>
                 {{ t('teamhub', 'Post Message') }}
@@ -62,6 +62,12 @@ import PostMessageForm from './PostMessageForm.vue'
 export default {
     name: 'MessageStream',
     components: { NcButton, NcLoadingIcon, NcEmptyContent, Plus, Pin, MessageOutline, MessageCard, PostMessageForm },
+    props: {
+        // When true, hides the inline "Post Message" button at the top of
+        // the stream. Used by the mobile view, where the FAB is the only
+        // entry point to the post form.
+        hideHeader: { type: Boolean, default: false },
+    },
     data() {
         return { showPostForm: false }
     },
@@ -69,7 +75,16 @@ export default {
         ...mapState(['messages', 'pinnedMessage', 'loading']),
         ...mapGetters(['canPin']),
     },
-    methods: { t },
+    methods: {
+        t,
+        /**
+         * Public entry point used by parents that hide the inline header.
+         * Mobile FAB calls this via $refs.messageStream.openPostForm().
+         */
+        openPostForm() {
+            this.showPostForm = true
+        },
+    },
 }
 </script>
 
@@ -77,6 +92,14 @@ export default {
 .message-stream {
     padding: 20px;
     min-height: 100%;
+}
+
+/*
+ * When the inline header is hidden (mobile view), shrink the side padding
+ * a touch so cards have more room on a narrow screen.
+ */
+.message-stream--no-header {
+    padding: 12px;
 }
 
 .message-stream__header {

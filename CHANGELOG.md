@@ -3,6 +3,20 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.24.0] — 2026-05-05
+
+### Added
+- **Mobile single-canvas layout** for viewports ≤ 768px and tablet portrait (≤ 1024px portrait). New `MobileWidgetView.vue`: scrollable canvas, collapsible icon bar at bottom with one icon per accessible widget, FAB action button.
+- **FAB widget actions** — in-canvas action button rows removed; actions surfaced via FAB: single action fires directly, multiple actions open a slide-up sheet.
+- **Tablet landscape layout** for viewports ≤ 1200px landscape: 60/40 split with message stream left and collapsible widget column right. Widget cards have spacing and rounded borders.
+- **NC sidebar auto-close on mobile/tablet-portrait** — uses `NcAppNavigation :open.sync` prop to close reactively after selecting a team or action, instead of fragile DOM manipulation.
+
+### Changed
+- Embedded app iframe content height set to 100% (previously 90%).
+- Edit layout button hidden on both mobile and tablet layouts (editing not available in these modes).
+- Seven modals (`ManageLinksModal`, `AddEventModal`, `AddTaskModal`, `AddPersonalTaskModal`, `InviteMemberModal`, `ScheduleMeetingModal`, `TeamMeetingModal`) now set `min-width: 0` on viewports ≤ 768px to prevent horizontal overflow on phones.
+- `MessageStream` accepts `hide-header` prop and exposes `openPostForm()` method for FAB integration.
+
 ## [3.23.0] — 2026-05-04
 
 ### Added

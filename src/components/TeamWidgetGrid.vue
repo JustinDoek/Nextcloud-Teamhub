@@ -1,10 +1,13 @@
 <template>
     <div
         class="teamhub-home-view"
-        :class="{ 'teamhub-home-view--editing': editMode }">
+        :class="{
+            'teamhub-home-view--editing': editMode,
+            'teamhub-home-view--mobile': isMobile || isTablet,
+        }">
 
         <!-- Edit mode hint banner -->
-        <div v-if="editMode" class="teamhub-edit-banner">
+        <div v-if="editMode && !isMobile && !isTablet" class="teamhub-edit-banner">
             <ViewDashboardEdit :size="16" />
             <span class="teamhub-edit-banner-text">{{ t('teamhub', 'Drag widgets to rearrange. Use the resize icon in the bottom-right corner of each widget to resize.') }}</span>
             <!-- Default layout actions — only shown when current layout differs from user default -->
@@ -27,7 +30,7 @@
         </div>
 
         <grid-layout
-            v-if="layoutLoaded && gridLayout.length > 0"
+            v-if="!isMobile && !isTablet && layoutLoaded && gridLayout.length > 0"
             :layout.sync="gridLayout"
             :col-num="12"
             :row-height="80"
@@ -610,6 +613,258 @@
 
         </grid-layout>
 
+        <!--
+            Tablet landscape layout (≤1200px landscape).
+            60/40 split: message stream left, widget column right.
+            Uses the same widget data and collapse state as the desktop
+            grid — the gridLayout array drives which widgets appear and in
+            what order (top to bottom). Each widget is collapsible.
+            Edit mode is not available (button hidden in TeamTabBar).
+        -->
+        <div
+            v-if="isTablet && layoutLoaded"
+            class="teamhub-tablet-layout">
+
+            <!-- ── Left: message stream (60%) ───────────────────── -->
+            <div class="teamhub-tablet-stream">
+                <MessageStream />
+            </div>
+
+            <!-- ── Right: widget column (40%) ───────────────────── -->
+            <div class="teamhub-tablet-widgets">
+
+                <!-- Team info -->
+                <div v-if="getGridItem('widget-teaminfo')" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-teaminfo')">
+                        <InformationOutline :size="18" />
+                        <span>{{ t('teamhub', 'Team info') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-teaminfo') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-teaminfo')" class="teamhub-tablet-widget__body">
+                        <!-- Inline team-info content (mirrors desktop grid) -->
+                        <div class="teamhub-tablet-teaminfo">
+                            <img v-if="team.image_url" :src="team.image_url" :alt="team.name" class="teamhub-tablet-teaminfo__logo" />
+                            <p class="teamhub-tablet-teaminfo__description">{{ team.description || t('teamhub', 'No description') }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Members -->
+                <div v-if="getGridItem('widget-members')" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-members')">
+                        <AccountGroup :size="18" />
+                        <span>{{ t('teamhub', 'Members') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-members') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-members')" class="teamhub-tablet-widget__body">
+                        <!-- Inline members content -->
+                        <div class="teamhub-tablet-members">
+                            <div class="teamhub-tablet-members__avatars">
+                                <NcAvatar
+                                    v-for="m in members.slice(0, 16)"
+                                    v-if="m.userId"
+                                    :key="m.userId"
+                                    :user="m.userId"
+                                    :display-name="m.displayName"
+                                    :show-user-status="false"
+                                    :size="28" />
+                            </div>
+                            <NcButton
+                                v-if="effectiveMemberCount > members.length"
+                                type="secondary"
+                                @click="openAllMembersModal">
+                                {{ n('teamhub', 'Show all {n} member', 'Show all {n} members', effectiveMemberCount, { n: effectiveMemberCount }) }}
+                            </NcButton>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calendar -->
+                <div v-if="getGridItem('widget-calendar') && resources.calendar" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-calendar')">
+                        <Calendar :size="18" />
+                        <span>{{ t('teamhub', 'Upcoming events') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-calendar') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-calendar')" class="teamhub-tablet-widget__body">
+                        <CalendarWidget ref="calendarWidgetTablet" />
+                    </div>
+                </div>
+
+                <!-- Tasks / Deck -->
+                <div v-if="getGridItem('widget-deck') && showTasksWidget" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-deck')">
+                        <CardText :size="18" />
+                        <span>{{ t('teamhub', 'Upcoming tasks') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-deck') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-deck')" class="teamhub-tablet-widget__body">
+                        <DeckWidget />
+                    </div>
+                </div>
+
+                <!-- Activity -->
+                <div v-if="getGridItem('widget-activity')" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-activity')">
+                        <ClockOutline :size="18" />
+                        <span>{{ t('teamhub', 'Team activity') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-activity') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-activity')" class="teamhub-tablet-widget__body">
+                        <ActivityWidget @show-more="$emit('set-view', 'activity')" />
+                    </div>
+                </div>
+
+                <!-- Pages (Intravox) -->
+                <div v-if="getGridItem('widget-pages') && resources.intravox" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-pages')">
+                        <FileDocumentOutline :size="18" />
+                        <span>{{ t('teamhub', 'Pages') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-pages') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-pages')" class="teamhub-tablet-widget__body">
+                        <IntravoxWidget :can-act="isTeamModerator" @pages-loaded="$emit('pages-loaded', $event)" />
+                    </div>
+                </div>
+
+                <!-- Files: Favourites -->
+                <div v-if="getGridItem('widget-files-favorites') && resources.files" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-files-favorites')">
+                        <StarOutlineIcon :size="18" />
+                        <span>{{ t('teamhub', 'Favourite files') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-favorites') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-files-favorites')" class="teamhub-tablet-widget__body">
+                        <FilesFavoritesWidget />
+                    </div>
+                </div>
+
+                <!-- Files: Recent -->
+                <div v-if="getGridItem('widget-files-recent') && resources.files" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-files-recent')">
+                        <ClockOutline :size="18" />
+                        <span>{{ t('teamhub', 'Recently modified') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-recent') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-files-recent')" class="teamhub-tablet-widget__body">
+                        <FilesRecentWidget />
+                    </div>
+                </div>
+
+                <!-- Files: Shared -->
+                <div v-if="getGridItem('widget-files-shared') && resources.shared_files" class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-files-shared')">
+                        <ShareVariantIcon :size="18" />
+                        <span>{{ t('teamhub', 'Shared files') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-shared') }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-files-shared')" class="teamhub-tablet-widget__body">
+                        <FilesSharedWidget />
+                    </div>
+                </div>
+
+                <!-- External integration widgets -->
+                <div
+                    v-for="ext in teamWidgets"
+                    :key="'tablet-int-' + ext.registry_id"
+                    class="teamhub-tablet-widget">
+                    <button
+                        class="teamhub-tablet-widget__header" type="button"
+                        @click="toggleCollapse('widget-int-' + ext.registry_id)">
+                        <Puzzle :size="18" />
+                        <span>{{ ext.title || t('teamhub', 'Widget') }}</span>
+                        <ChevronDown
+                            :size="18"
+                            class="teamhub-tablet-widget__chevron"
+                            :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-int-' + ext.registry_id) }" />
+                    </button>
+                    <div v-if="!isCollapsed('widget-int-' + ext.registry_id)" class="teamhub-tablet-widget__body">
+                        <IntegrationWidget
+                            :integration="ext"
+                            :team-id="currentTeamId"
+                            @actions-loaded="$emit('widget-actions-loaded', $event)" />
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!--
+            Mobile single-canvas view. Active when the parent passes
+            isMobile=true (viewport ≤ 768px). All event handlers below
+            re-emit upward so TeamView (which owns the modals & navigation)
+            handles them exactly the same way it does for the desktop grid.
+        -->
+        <MobileWidgetView
+            v-if="isMobile && layoutLoaded"
+            ref="mobileView"
+            :team-labels="teamLabels"
+            :team-owner="teamOwner"
+            :is-team-admin="isTeamAdmin"
+            :is-team-moderator="isTeamModerator"
+            :show-tasks-widget="showTasksWidget"
+            :pages-data="pagesData"
+            @manage-team="$emit('manage-team')"
+            @copy-link="$emit('copy-link')"
+            @invite="$emit('invite')"
+            @leave-team="onLeaveTeamClick"
+            @schedule-meeting="$emit('schedule-meeting')"
+            @add-event="$emit('add-event')"
+            @team-meeting="$emit('team-meeting')"
+            @add-deck-task="$emit('add-deck-task')"
+            @add-personal-task="$emit('add-personal-task')"
+            @create-page="$emit('create-page')"
+            @delete-page="$emit('delete-page')"
+            @pages-loaded="$emit('pages-loaded', $event)"
+            @set-view="$emit('set-view', $event)"
+            @widget-actions-loaded="$emit('widget-actions-loaded', $event)"
+            @show-all-members="openAllMembersModal" />
+
         <!-- Show all effective members modal — opened from the members widget -->
         <NcModal
             v-if="allMembersModalOpen"
@@ -667,7 +922,7 @@ import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
 import { mapState, mapGetters } from 'vuex'
-import { NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
+import { NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'vue-grid-layout'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
@@ -719,12 +974,13 @@ import IntegrationWidget from './IntegrationWidget.vue'
 import FilesFavoritesWidget from './FilesFavoritesWidget.vue'
 import FilesRecentWidget from './FilesRecentWidget.vue'
 import FilesSharedWidget from './FilesSharedWidget.vue'
+import MobileWidgetView from './MobileWidgetView.vue'
 
 export default {
     name: 'TeamWidgetGrid',
 
     components: {
-        NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon,
+        NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton,
         GridLayout, GridItem,
         MessageOutline, Folder, Calendar, CalendarPlus, CardText,
         CheckboxMarkedOutline, InformationOutline, AccountGroup, AccountMultipleIcon,
@@ -738,6 +994,7 @@ export default {
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
         FilesFavoritesWidget, FilesRecentWidget, FilesSharedWidget,
+        MobileWidgetView,
     },
 
     props: {
@@ -749,6 +1006,14 @@ export default {
         // True when the current team's layout differs from the user's personal default.
         // Controls visibility of the "Set as default" / "Reset to default" buttons.
         layoutDiffersFromDefault: { type: Boolean, default: false },
+        // True when the viewport is ≤ 768px. Switches rendering to the
+        // MobileWidgetView (single canvas + icon bar) instead of the
+        // vue-grid-layout. Edit-mode banner is also hidden in this mode.
+        isMobile: { type: Boolean, default: false },
+        // True when tablet landscape (≤1200px landscape). Switches rendering
+        // to the 60/40 split view (message stream left, widget column right).
+        // Edit-mode is suppressed in this mode.
+        isTablet: { type: Boolean, default: false },
     },
 
     emits: [
@@ -1123,6 +1388,18 @@ export default {
     padding: 12px;
     box-sizing: border-box;
     background: #f4f4f4;
+}
+
+/*
+ * Mobile mode: the MobileWidgetView component owns its own canvas, FAB
+ * placement, and background. The wrapper just needs to give it the full
+ * viewport — no padding, no grey backdrop. overflow:hidden because the
+ * mobile view manages its own scrolling internally.
+ */
+.teamhub-home-view--mobile {
+    padding: 0;
+    background: var(--color-main-background);
+    overflow: hidden;
 }
 
 .teamhub-home-view--editing {
@@ -1618,5 +1895,139 @@ export default {
     border: 2px dashed var(--color-primary-element);
     border-radius: var(--border-radius-large);
     opacity: 0.4;
+}
+
+/* ─── Tablet landscape layout ──────────────────────────────── */
+
+/*
+ * 60/40 side-by-side layout for landscape viewports ≤ 1200px.
+ * The .teamhub-home-view--mobile class already zeroes padding and
+ * sets overflow:hidden on the wrapper — the tablet layout then fills
+ * that space with a flex row.
+ */
+.teamhub-tablet-layout {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--color-main-background);
+}
+
+.teamhub-tablet-stream {
+    flex: 0 0 60%;
+    min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    border-right: 1px solid var(--color-border);
+}
+
+.teamhub-tablet-widgets {
+    flex: 0 0 40%;
+    min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 8px;
+    box-sizing: border-box;
+}
+
+/* ─── Individual tablet widget card ───────────────────────── */
+
+.teamhub-tablet-widget {
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    flex-shrink: 0;
+    overflow: hidden;
+    background: var(--color-main-background);
+}
+
+.teamhub-tablet-widget__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    background: var(--color-main-background);
+    transition: background 0.12s ease;
+    /* Button reset */
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    text-align: left;
+    color: var(--color-main-text);
+}
+
+.teamhub-tablet-widget__header:hover {
+    background: var(--color-background-hover);
+}
+
+.teamhub-tablet-widget__header:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: -2px;
+}
+
+.teamhub-tablet-widget__header span {
+    flex: 1 1 auto;
+}
+
+.teamhub-tablet-widget__chevron {
+    transition: transform 0.15s ease;
+    color: var(--color-text-maxcontrast);
+    flex-shrink: 0;
+}
+
+.teamhub-tablet-widget__chevron--collapsed {
+    transform: rotate(-90deg);
+}
+
+.teamhub-tablet-widget__body {
+    padding: 0 0 8px;
+    border-top: 1px solid var(--color-border);
+}
+
+/* ─── Tablet inline widget content ────────────────────────── */
+
+.teamhub-tablet-teaminfo {
+    padding: 0 14px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.teamhub-tablet-teaminfo__logo {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--border-radius-large);
+    object-fit: cover;
+}
+
+.teamhub-tablet-teaminfo__description {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-text-maxcontrast);
+}
+
+.teamhub-tablet-members {
+    padding: 4px 14px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.teamhub-tablet-members__avatars {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
 }
 </style>

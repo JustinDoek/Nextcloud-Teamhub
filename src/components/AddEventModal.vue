@@ -178,6 +178,14 @@ export default {
     min-width: 360px;
 }
 
+/* Allow the modal to shrink below 360px on narrow screens. */
+@media (max-width: 768px) {
+    .addevent-modal {
+        min-width: 0;
+        padding: 16px;
+    }
+}
+
 .addevent-modal__title {
     display: flex;
     align-items: center;

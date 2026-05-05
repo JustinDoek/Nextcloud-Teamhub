@@ -5,6 +5,8 @@
         <TeamTabBar
             v-model="orderedTabs"
             :edit-mode="editMode"
+            :is-mobile="isMobile"
+            :is-tablet="isTablet"
             @tab-reorder="onTabReorder"
             @manage-links="showManageLinks = true"
             @toggle-edit-mode="toggleEditMode" />
@@ -19,6 +21,8 @@
                 :grid-layout="gridLayout"
                 :layout-loaded="layoutLoaded"
                 :edit-mode="editMode"
+                :is-mobile="isMobile"
+                :is-tablet="isTablet"
                 :pages-data="pagesData"
                 :widget-dynamic-actions="widgetDynamicActions"
                 :layout-differs-from-default="layoutDiffersFromDefault"
@@ -214,11 +218,23 @@ export default {
     data() {
         return {
             gridLayout: [],
-            userDefaultLayout: [],      // user's personal default — returned by GET layout
+            userDefaultLayout: [],
             orderedTabs: [],
             editMode: false,
             layoutLoaded: false,
             _debouncedSave: null,
+            // ── Viewport flags ────────────────────────────────────────
+            // isMobile: phone (≤768px any) OR tablet portrait (≤1024px portrait)
+            //   → single-canvas layout with icon bar
+            // isTablet: landscape ≤1200px AND NOT mobile
+            //   → 60/40 split: message stream left, widget column right
+            // Neither flag true → full desktop grid layout (unchanged)
+            isMobile: false,
+            isTablet: false,
+            _mobileMql: null,
+            _mobileMqlHandler: null,
+            _tabletMql: null,
+            _tabletMqlHandler: null,
             showManageLinks:     false,
             pagesData:          { teamPage: null, subPages: [], teamhubRoot: null, allPages: [] },
             showCreatePage:     false,
@@ -341,26 +357,66 @@ export default {
     },
 
     async mounted() {
+        if (typeof window !== 'undefined' && window.matchMedia) {
+            // Mobile: phone portrait/landscape (≤768px) OR tablet portrait (≤1024px portrait)
+            const mobileQuery = '(max-width: 768px), (max-width: 1024px) and (orientation: portrait)'
+            this._mobileMql = window.matchMedia(mobileQuery)
+            this.isMobile = this._mobileMql.matches
+            this._mobileMqlHandler = (e) => {
+                this.isMobile = e.matches
+                // isTablet is the middle zone — recalculate when mobile changes
+                this.isTablet = !e.matches && this._tabletMql?.matches
+            }
+            if (typeof this._mobileMql.addEventListener === 'function') {
+                this._mobileMql.addEventListener('change', this._mobileMqlHandler)
+            } else if (typeof this._mobileMql.addListener === 'function') {
+                this._mobileMql.addListener(this._mobileMqlHandler)
+            }
+
+            // Tablet landscape: ≤1200px landscape AND not already mobile
+            const tabletQuery = '(max-width: 1200px) and (orientation: landscape)'
+            this._tabletMql = window.matchMedia(tabletQuery)
+            this.isTablet = !this.isMobile && this._tabletMql.matches
+            this._tabletMqlHandler = (e) => {
+                this.isTablet = !this.isMobile && e.matches
+            }
+            if (typeof this._tabletMql.addEventListener === 'function') {
+                this._tabletMql.addEventListener('change', this._tabletMqlHandler)
+            } else if (typeof this._tabletMql.addListener === 'function') {
+                this._tabletMql.addListener(this._tabletMqlHandler)
+            }
+        }
+
         await this.$store.dispatch('checkIntravox')
         if (this.currentTeamId) {
             this.loadLayout(this.currentTeamId)
         }
-        // Background-preload the built-in iframe tabs after the team page has
-        // had time to render and settle. Staggered so they don't all hit the
-        // server at once. The active tab (if the user has already switched) is
-        // already rendered via the v-if currentView fallback, so we skip it.
         const builtinViews = ['talk', 'files', 'calendar', 'deck']
         builtinViews.forEach((view, i) => {
             setTimeout(() => {
                 if (!this.preloadedViews.has(view)) {
-                    // Trigger Vue reactivity — replace the Set with a new one
-                    // so watchers/computed notice the change.
                     const next = new Set(this.preloadedViews)
                     next.add(view)
                     this.preloadedViews = next
                 }
             }, 1500 + i * 800)
         })
+    },
+
+    beforeDestroy() {
+        for (const key of ['_mobileMql', '_tabletMql']) {
+            const mql = this[key]
+            const handler = this[key.replace('Mql', 'MqlHandler')]
+            if (mql && handler) {
+                if (typeof mql.removeEventListener === 'function') {
+                    mql.removeEventListener('change', handler)
+                } else if (typeof mql.removeListener === 'function') {
+                    mql.removeListener(handler)
+                }
+            }
+            this[key] = null
+            this[key.replace('Mql', 'MqlHandler')] = null
+        }
     },
 
     methods: {
@@ -768,5 +824,12 @@ export default {
 <style>
 body[data-themes*="dark"] .teamhub-home-view {
     background: #000000;
+}
+
+/* Mobile keeps the standard NC theme background regardless of dark mode —
+   the MobileWidgetView body itself already adapts to dark mode through
+   var(--color-main-background). */
+body[data-themes*="dark"] .teamhub-home-view--mobile {
+    background: var(--color-main-background);
 }
 </style>

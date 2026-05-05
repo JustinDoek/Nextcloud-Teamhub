@@ -1,6 +1,6 @@
 <template>
     <NcContent app-name="teamhub">
-        <NcAppNavigation>
+        <NcAppNavigation :open.sync="navOpen">
             <template #list>
                 <!-- Spacer to clear the show/hide sidebar toggle button -->
                 <div style="height: 44px; flex-shrink: 0;" />
@@ -125,8 +125,15 @@ export default {
     data() {
         return {
             activeView: null,
-            canCreateTeam: true, // default true; overwritten after mount
+            canCreateTeam: true,
             showFeedbackModal: false,
+            // True when the NC sidebar renders as an overlay that should
+            // auto-close on selection: phone portrait (≤768px) OR tablet
+            // portrait (≤1024px and orientation:portrait).
+            isMobileSidebar: false,
+            navOpen: true, // NcAppNavigation open state — set to false to close on mobile
+            _mobileSidebarMql: null,
+            _mobileSidebarMqlHandler: null,
         }
     },
     computed: {
@@ -134,10 +141,38 @@ export default {
         ...mapGetters(['currentTeam']),
     },
     async mounted() {
+        // Detect viewport states where NC's sidebar renders as an overlay.
+        // We auto-close it after the user selects a team / action, matching
+        // expected mobile nav behaviour without building a custom drawer.
+        // Matches: phone (≤768px any orientation) OR tablet portrait (≤1024px portrait).
+        if (typeof window !== 'undefined' && window.matchMedia) {
+            const query = '(max-width: 768px), (max-width: 1024px) and (orientation: portrait)'
+            this._mobileSidebarMql = window.matchMedia(query)
+            this.isMobileSidebar = this._mobileSidebarMql.matches
+            this._mobileSidebarMqlHandler = (e) => { this.isMobileSidebar = e.matches }
+            if (typeof this._mobileSidebarMql.addEventListener === 'function') {
+                this._mobileSidebarMql.addEventListener('change', this._mobileSidebarMqlHandler)
+            } else if (typeof this._mobileSidebarMql.addListener === 'function') {
+                this._mobileSidebarMql.addListener(this._mobileSidebarMqlHandler)
+            }
+        }
+
         await Promise.all([
             this.fetchTeams(),
             this.fetchCanCreateTeam(),
         ])
+    },
+
+    beforeDestroy() {
+        if (this._mobileSidebarMql && this._mobileSidebarMqlHandler) {
+            if (typeof this._mobileSidebarMql.removeEventListener === 'function') {
+                this._mobileSidebarMql.removeEventListener('change', this._mobileSidebarMqlHandler)
+            } else if (typeof this._mobileSidebarMql.removeListener === 'function') {
+                this._mobileSidebarMql.removeListener(this._mobileSidebarMqlHandler)
+            }
+            this._mobileSidebarMql = null
+            this._mobileSidebarMqlHandler = null
+        }
     },
     methods: {
         t,
@@ -155,19 +190,33 @@ export default {
 
         showView(view) {
             this.activeView = view
+            this.closeSidebarIfOverlay()
         },
 
         openFeedbackModal() {
             this.showFeedbackModal = true
+            this.closeSidebarIfOverlay()
         },
 
         startCreateTeam() {
             this.activeView = 'create'
+            this.closeSidebarIfOverlay()
         },
 
         selectTeamFromSidebar(teamId) {
             this.activeView = 'team'
             this.selectTeam(teamId)
+            this.closeSidebarIfOverlay()
+        },
+
+        /**
+         * Close NC's sidebar when it is in overlay mode (phone / tablet portrait).
+         * Uses the official NcAppNavigation :open.sync prop — no DOM touching.
+         */
+        closeSidebarIfOverlay() {
+            if (this.isMobileSidebar) {
+                this.navOpen = false
+            }
         },
 
         async onTeamCreated(team) {

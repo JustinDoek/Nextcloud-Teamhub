@@ -160,6 +160,14 @@ export default {
     min-width: 340px;
 }
 
+/* Allow the modal to shrink below 340px on narrow screens. */
+@media (max-width: 768px) {
+    .addtask-modal {
+        min-width: 0;
+        padding: 16px;
+    }
+}
+
 .addtask-modal__title {
     display: flex;
     align-items: center;

@@ -207,6 +207,14 @@ export default {
     min-width: 340px;
 }
 
+/* Allow the modal to shrink below 340px on narrow screens. */
+@media (max-width: 768px) {
+    .invite-modal {
+        min-width: 0;
+        padding: 16px;
+    }
+}
+
 .invite-modal__title {
     font-size: 18px;
     font-weight: 700;

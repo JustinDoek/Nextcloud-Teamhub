@@ -341,6 +341,14 @@ export default {
     min-width: 340px;
 }
 
+/* Allow the modal to shrink below 340px on narrow screens. */
+@media (max-width: 768px) {
+    .team-meeting-modal {
+        min-width: 0;
+        padding: 16px;
+    }
+}
+
 /* Header */
 .team-meeting-modal__header {
     display: flex;
