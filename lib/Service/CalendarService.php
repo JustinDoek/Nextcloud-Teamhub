@@ -205,6 +205,156 @@ class CalendarService {
         }
     }
 
+    /**
+     * List calendars owned by $uid that are eligible to be connected to a team.
+     *
+     * Returns user-owned calendars only (not contact birthday calendars,
+     * not deleted calendars, not subscriptions). Caller should pass the current
+     * NC user's UID — this method does no auth itself.
+     *
+     * @return array<int, array{id:int, name:string, color:string, uri:string}>
+     */
+    public function listOwnedCalendars(string $uid): array {
+        if (!$this->appManager->isInstalled('calendar')) {
+            return [];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $principalUri = 'principals/users/' . $uid;
+            $qb = $db->getQueryBuilder();
+
+            // We select displayname and calendarcolor from oc_calendars where principaluri matches.
+            // Exclude the contact birthday calendar (uri = 'contact_birthdays') and any soft-deleted
+            // calendars (deleted_at IS NULL).
+            $qb->select('id', 'uri', 'displayname', 'calendarcolor')
+                ->from('calendars')
+                ->where($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                ->andWhere($qb->expr()->neq('uri', $qb->createNamedParameter('contact_birthdays')));
+
+            // deleted_at column may not exist on older NC versions — wrap in try/catch
+            try {
+                $qb->andWhere($qb->expr()->isNull('deleted_at'));
+            } catch (\Throwable) {
+                // Column doesn't exist — proceed without that filter
+            }
+
+            $qb->orderBy('displayname', 'ASC');
+
+            $res = $qb->executeQuery();
+            $rows = $res->fetchAll();
+            $res->closeCursor();
+
+            $out = [];
+            foreach ($rows as $row) {
+                $out[] = [
+                    'id'    => (int)$row['id'],
+                    'uri'   => (string)$row['uri'],
+                    'name'  => (string)($row['displayname'] ?? $row['uri']),
+                    'color' => (string)($row['calendarcolor'] ?? '#0082c9'),
+                ];
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->error('[CalendarService] listOwnedCalendars failed', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Connect an existing calendar to a team by inserting a dav_shares row
+     * granting the team's circle read-write access.
+     *
+     * SECURITY: Caller MUST verify the user has permission to enable team
+     * integrations (team admin level). This method additionally verifies that
+     * $uid actually owns the calendar — preventing forged resourceId attacks.
+     *
+     * If the team already has a calendar connected, returns an error rather
+     * than connecting a second one (one calendar per team).
+     *
+     * @return array{success:bool, calendar_id?:int, name?:string, error?:string}
+     */
+    public function connectExistingCalendar(string $teamId, int $calendarId, string $uid): array {
+        if (!$this->appManager->isInstalled('calendar')) {
+            return ['success' => false, 'error' => 'Calendar app not installed'];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $principalUri = 'principals/users/' . $uid;
+
+            // SECURITY: verify the calendar exists and is owned by this user.
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('id', 'displayname', 'uri')
+                ->from('calendars')
+                ->where($qb->expr()->eq('id', $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['success' => false, 'error' => 'Calendar not found or not owned by user'];
+            }
+
+            $calendarName = (string)($row['displayname'] ?? $row['uri']);
+
+            // Refuse if a calendar is already connected to this team.
+            $circlePrincipal = 'principals/circles/' . $teamId;
+            $chk = $db->getQueryBuilder();
+            $cres = $chk->select('resourceid')
+                ->from('dav_shares')
+                ->where($chk->expr()->eq('type', $chk->createNamedParameter('calendar')))
+                ->andWhere($chk->expr()->eq('principaluri', $chk->createNamedParameter($circlePrincipal)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $existing = $cres->fetch();
+            $cres->closeCursor();
+
+            if ($existing) {
+                return ['success' => false, 'error' => 'Team already has a calendar — disable the current one first'];
+            }
+
+            // Insert dav_shares row granting the circle read-write access (access=2).
+            $circlePublicUri = 'teamhub-' . substr($teamId, 0, 8) . '-' . $calendarId;
+            $db->insertIfNotExist('*PREFIX*dav_shares', [
+                'principaluri' => $circlePrincipal,
+                'type'         => 'calendar',
+                'access'       => 2,
+                'resourceid'   => $calendarId,
+                'publicuri'    => $circlePublicUri,
+            ], ['principaluri', 'resourceid']);
+
+            // Also create a public read-only token for embed widgets, mirroring createCalendar behaviour.
+            $publicToken = bin2hex(random_bytes(16));
+            $db->insertIfNotExist('*PREFIX*dav_shares', [
+                'principaluri' => $principalUri,
+                'type'         => 'calendar',
+                'access'       => 4,
+                'resourceid'   => $calendarId,
+                'publicuri'    => $publicToken,
+            ], ['publicuri']);
+
+
+            return [
+                'success'      => true,
+                'calendar_id'  => $calendarId,
+                'name'         => $calendarName,
+                'public_token' => $publicToken,
+            ];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[CalendarService] connectExistingCalendar failed', [
+                'teamId' => $teamId, 'calendarId' => $calendarId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['success' => false, 'error' => 'Operation failed — see server log for details'];
+        }
+    }
+
     public function deleteCalendar(string $teamId, \OCP\IDBConnection $db): array {
         try {
             // Find the calendar via dav_shares: principaluri = principals/circles/{teamId}

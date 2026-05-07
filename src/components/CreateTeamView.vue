@@ -140,16 +140,50 @@
             <!-- ── STEP 4: App integrations ── -->
             <div v-if="step === 4" class="ctv__section">
                 <div class="ctv__field">
-                    <p class="ctv__hint">{{ t('teamhub', 'TeamHub will create a dedicated space in each selected app and add this team as a member.') }}</p>
+                    <p class="ctv__hint">{{ t('teamhub', 'For each app, choose whether to create a new resource for this team or connect one you already own.') }}</p>
                     <div class="ctv__apps">
-                        <label v-for="app in appOptions" :key="app.id" class="ctv__app">
-                            <input v-model="form.apps[app.id]" type="checkbox" class="ctv__app-check" />
-                            <component :is="app.icon" :size="24" class="ctv__app-icon" />
-                            <div class="ctv__app-text">
-                                <span class="ctv__app-name">{{ app.label }}</span>
-                                <span class="ctv__app-desc">{{ app.description }}</span>
+                        <div v-for="app in appOptions" :key="app.id" class="ctv__app ctv__app--tri">
+                            <label class="ctv__app-header">
+                                <input
+                                    type="checkbox"
+                                    :checked="form.apps[app.id].mode !== null"
+                                    class="ctv__app-check"
+                                    :aria-label="t('teamhub', 'Enable {app}', { app: app.label })"
+                                    @change="onAppToggle(app.id, $event)" />
+                                <component :is="app.icon" :size="24" class="ctv__app-icon" aria-hidden="true" />
+                                <div class="ctv__app-text">
+                                    <span class="ctv__app-name">{{ app.label }}</span>
+                                    <span class="ctv__app-desc">{{ app.description }}</span>
+                                </div>
+                            </label>
+
+                            <div v-if="form.apps[app.id].mode !== null" class="ctv__app-modes">
+                                <label class="ctv__app-mode">
+                                    <input
+                                        v-model="form.apps[app.id].mode"
+                                        type="radio"
+                                        value="create"
+                                        :name="'mode-' + app.id" />
+                                    <span>{{ t('teamhub', 'Create new for this team') }}</span>
+                                </label>
+                                <label class="ctv__app-mode">
+                                    <input
+                                        v-model="form.apps[app.id].mode"
+                                        type="radio"
+                                        value="connect"
+                                        :name="'mode-' + app.id" />
+                                    <!-- TRANSLATORS: radio option label — picker for an existing resource follows on the next line -->
+                                    <span>{{ t('teamhub', 'Connect one I already own') }}</span>
+                                </label>
+                                <div v-if="form.apps[app.id].mode === 'connect'" class="ctv__app-picker">
+                                    <ResourcePicker
+                                        :app="app.id"
+                                        :value="form.apps[app.id].resourceId"
+                                        @input="form.apps[app.id].resourceId = $event"
+                                        @selected-name="form.apps[app.id].name = $event" />
+                                </div>
                             </div>
-                        </label>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -212,6 +246,7 @@ import Briefcase from 'vue-material-design-icons/Briefcase.vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutline.vue'
+import ResourcePicker from './ResourcePicker.vue'
 
 export default {
     name: 'CreateTeamView',
@@ -219,6 +254,7 @@ export default {
         NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
         Check, Close, CheckCircle, AlertCircle,
         Chat, Folder, Calendar, CardText, Briefcase, AccountMultiple, AccountGroup, OfficeBuildingOutline,
+        ResourcePicker,
     },
     emits: ['created', 'cancel'],
     data() {
@@ -241,7 +277,12 @@ export default {
                 description: '',
                 teamType: 'collaboration',
                 members: [],
-                apps: { talk: false, files: false, calendar: false, deck: false },
+                apps: {
+                    talk:     { mode: null, resourceId: null, name: '' },
+                    files:    { mode: null, resourceId: null, name: '' },
+                    calendar: { mode: null, resourceId: null, name: '' },
+                    deck:     { mode: null, resourceId: null, name: '' },
+                },
                 config: {
                     open: false,         // anyone can join
                     invite: true,        // members can invite
@@ -344,26 +385,57 @@ export default {
             }
         },
 
+        // Step 4 — toggle an app on/off. When turning on we default to "create new";
+        // when turning off we clear any pending picker selection.
+        onAppToggle(appId, event) {
+            if (event.target.checked) {
+                this.form.apps[appId].mode = 'create'
+            } else {
+                this.form.apps[appId].mode = null
+                this.form.apps[appId].resourceId = null
+                this.form.apps[appId].name = ''
+            }
+        },
+
         async submit() {
+            // Validate: any app set to "connect" must have a resourceId selected.
+            const incompleteConnect = Object.entries(this.form.apps)
+                .find(([, v]) => v.mode === 'connect' && !v.resourceId)
+            if (incompleteConnect) {
+                const appLabel = (this.appOptions.find(a => a.id === incompleteConnect[0]) || {}).label
+                    || incompleteConnect[0]
+                showError(
+                    // TRANSLATORS: error shown when the user picked "Connect existing" for an app but didn't pick a resource. {app} is e.g. "Calendar".
+                    t('teamhub', 'Please select an item to connect for {app}, or switch it to "Create new for this team".', { app: appLabel })
+                )
+                return
+            }
+
+            // Apps split by mode.
+            const appsToCreate  = Object.entries(this.form.apps)
+                .filter(([, v]) => v.mode === 'create').map(([k]) => k)
+            const appsToConnect = Object.entries(this.form.apps)
+                .filter(([, v]) => v.mode === 'connect' && v.resourceId)
+                .map(([k, v]) => ({ app: k, resourceId: v.resourceId }))
+            const anyAppEnabled = Object.values(this.form.apps).some(v => v.mode !== null)
+
             // Build task list
-            const appsSelected = Object.entries(this.form.apps).filter(([, v]) => v).map(([k]) => k)
             const tasks = [{ label: t('teamhub', 'Creating team'), status: 'waiting' }]
             if (this.form.description.trim()) tasks.push({ label: t('teamhub', 'Saving description'), status: 'waiting' })
             if (this.form.members.length > 0) tasks.push({ label: t('teamhub', 'Inviting members'), status: 'waiting' })
-            if (appsSelected.length > 0) tasks.push({ label: t('teamhub', 'Setting up app integrations'), status: 'waiting' })
+            if (appsToCreate.length > 0) tasks.push({ label: t('teamhub', 'Creating new app resources'), status: 'waiting' })
+            if (appsToConnect.length > 0) tasks.push({ label: t('teamhub', 'Connecting existing app resources'), status: 'waiting' })
             if (this.intravoxAvailable) tasks.push({ label: t('teamhub', 'Creating documentation page'), status: 'waiting' })
 
             // Build the full app-state payload for ALL known apps so the backend can
             // persist enabled/disabled in teamhub_team_apps immediately after team creation.
-            // This fixes two bugs:
-            //   1. Pages widget hidden  — intravox has no row → resources.intravox = false
-            //   2. Manage team shows all apps enabled — no rows → defaultEnabled fallback fires
+            // An app counts as "enabled" if it has any non-null mode (create or connect).
             //
             // Note: the wizard uses 'talk' but teamhub_team_apps stores 'spreed' (NC app name).
             const wizardToAppId = { talk: 'spreed' }
             const appStates = Object.entries(this.form.apps).map(([k, v]) => ({
                 app_id: wizardToAppId[k] || k,
-                enabled: v,
+                enabled: v.mode !== null,
             }))
             // Intravox is always enabled if installed — page is created unconditionally in step 6.
             if (this.intravoxAvailable) {
@@ -422,27 +494,60 @@ export default {
                     } catch { this.setTask(i++, 'error') }
                 }
 
-                // 5. Create app resources + persist enabled/disabled state for all apps
-                if (appsSelected.length > 0) {
+                // 5a. Create new app resources for "create" mode apps (also persists appStates).
+                if (appsToCreate.length > 0) {
                     this.setTask(i, 'running')
                     try {
                         const { data: resourceResults } = await axios.post(
                             generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/create-resources`),
-                            { apps: appsSelected, teamName: team.name, appStates }
+                            { apps: appsToCreate, teamName: team.name, appStates }
                         )
-                        // Log full results so console shows which apps succeeded/failed
                         const anyError = Object.values(resourceResults).some(r => r?.error)
                         this.setTask(i++, anyError ? 'error' : 'done')
                     } catch (e) {
                         this.setTask(i++, 'error')
                     }
-                } else {
-                    // No resources to create, but still persist disabled states so that
-                    // manage team view and widget grid are correct from the start.
+                } else if (!anyAppEnabled || appsToConnect.length === 0) {
+                    // Persist appStates even when nothing is being created — keeps manage view honest.
                     axios.post(
                         generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/create-resources`),
                         { apps: [], teamName: team.name, appStates }
                     ).catch(() => {})
+                }
+
+                // 5b. Connect existing app resources for "connect" mode apps.
+                //     The connect endpoint persists each app's team_apps row itself, so we
+                //     only need to call it per-app. If we had no "create" call, we still
+                //     need to make sure appStates is persisted — do it via the empty
+                //     create-resources call above (the else-if path).
+                if (appsToConnect.length > 0) {
+                    if (appsToCreate.length === 0) {
+                        // No create call has fired — persist appStates for non-connecting apps now.
+                        axios.post(
+                            generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/create-resources`),
+                            { apps: [], teamName: team.name, appStates }
+                        ).catch(() => {})
+                    }
+
+                    this.setTask(i, 'running')
+                    let connectErrors = 0
+                    for (const { app, resourceId } of appsToConnect) {
+                        try {
+                            await axios.post(
+                                generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/resources/${app}/connect`),
+                                { resourceId }
+                            )
+                        } catch (e) {
+                            connectErrors++
+                            const detail = e?.response?.data?.error || e?.message || ''
+                            showError(detail
+                                // TRANSLATORS: error shown when connecting an existing resource fails. {app} is e.g. "Calendar", {error} is the detail.
+                                ? t('teamhub', 'Could not connect {app}: {error}', { app, error: detail })
+                                : t('teamhub', 'Could not connect {app}', { app })
+                            )
+                        }
+                    }
+                    this.setTask(i++, connectErrors > 0 ? 'error' : 'done')
                 }
 
                 // 6. IntraVox page (only if installed)
@@ -737,6 +842,51 @@ export default {
 .ctv__app-text { display: flex; flex-direction: column; gap: 2px; }
 .ctv__app-name { font-size: 14px; font-weight: 600; }
 .ctv__app-desc { font-size: 12px; color: var(--color-text-maxcontrast); }
+
+/* Tri-control variant: column layout so the create/connect modes can sit
+   below the header row. The header row keeps its original flex layout. */
+.ctv__app--tri {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    cursor: default;
+}
+
+.ctv__app-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    cursor: pointer;
+}
+
+.ctv__app-modes {
+    display: flex;
+    flex-direction: column;
+    margin-left: 32px; /* indent under the checkbox */
+    padding-top: 4px;
+    border-top: 1px solid var(--color-border);
+    padding-top: 10px;
+}
+
+.ctv__app-mode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.ctv__app-mode input[type="radio"] {
+    accent-color: var(--color-primary-element);
+    cursor: pointer;
+}
+
+.ctv__app-picker {
+    margin-left: 24px;
+    margin-top: 2px;
+    max-width: 360px;
+}
 
 /* Progress */
 .ctv__progress {

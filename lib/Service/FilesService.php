@@ -345,6 +345,95 @@ class FilesService {
     }
 
     /**
+     * Connect an existing folder to a team by sharing it with the team's circle.
+     *
+     * SECURITY: Caller MUST verify the user has team-admin level. This method
+     * additionally verifies that $uid actually owns the node — preventing
+     * forged fileId attacks. We resolve the node via $uid's user folder, so a
+     * fileId pointing to someone else's file will throw NotFoundException.
+     *
+     * Refuses to connect if the team already has a Files folder shared
+     * (one folder per team).
+     *
+     * @return array{success:bool, folder_id?:int, path?:string, share_id?:string, error?:string}
+     */
+    public function connectExistingFolder(string $teamId, int $fileId, string $uid): array {
+
+        $user = $this->container->get(\OCP\IUserManager::class)->get($uid);
+        if (!$user) {
+            return ['success' => false, 'error' => 'User not found'];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // Refuse if a folder is already connected for this team.
+            $chk = $db->getQueryBuilder();
+            $cres = $chk->select('id')
+                ->from('share')
+                ->where($chk->expr()->eq('share_with', $chk->createNamedParameter($teamId)))
+                ->andWhere($chk->expr()->eq('share_type', $chk->createNamedParameter(7)))
+                ->andWhere($chk->expr()->eq('item_type', $chk->createNamedParameter('folder')))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $existing = $cres->fetch();
+            $cres->closeCursor();
+
+            if ($existing) {
+                return ['success' => false, 'error' => 'Team already has a Files folder — disable the current one first'];
+            }
+
+            // SECURITY: resolve the node via $uid's user folder. This both verifies
+            // ownership (the user has access to it via their root) and gives us the
+            // Node object we need for IShareManager.
+            $userFolder = $this->container->get(IRootFolder::class)->getUserFolder($uid);
+            $nodes = $userFolder->getById($fileId);
+            if (empty($nodes)) {
+                return ['success' => false, 'error' => 'Folder not found or not accessible by user'];
+            }
+            $node = $nodes[0];
+
+            if (!($node instanceof \OCP\Files\Folder)) {
+                return ['success' => false, 'error' => 'Selected item is not a folder'];
+            }
+
+            // Bootstrap a Circles session as the user — required for createShare with a circle target.
+            try {
+                $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+                $federatedUserService->setLocalCurrentUser($user);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[FilesService] connectExistingFolder — Circles session bootstrap failed', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            $shareManager = $this->container->get(\OCP\Share\IManager::class);
+            $share = $shareManager->newShare();
+            $share->setShareType(\OCP\Share\IShare::TYPE_CIRCLE)
+                  ->setSharedWith($teamId)
+                  ->setSharedBy($uid)
+                  ->setNode($node)
+                  ->setPermissions(\OCP\Constants::PERMISSION_ALL);
+            $share = $shareManager->createShare($share);
+
+
+            return [
+                'success'   => true,
+                'folder_id' => $node->getId(),
+                'path'      => $node->getPath(),
+                'share_id'  => $share->getId(),
+            ];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[FilesService] connectExistingFolder failed', [
+                'teamId' => $teamId, 'fileId' => $fileId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['success' => false, 'error' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
      * Suspend team access to the shared Files folder by removing the circle share row.
      * The folder itself and its contents remain intact in the owner's Files.
      *

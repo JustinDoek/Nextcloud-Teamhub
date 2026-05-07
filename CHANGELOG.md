@@ -3,6 +3,30 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.28.0] — 2026-05-07
+
+### Added
+- **Connect existing app resources to a team.** Team owners can now choose, per app, to connect a Calendar / Files folder / Deck board / Talk room they already own instead of creating a new one. Available in the Create-team wizard step 4 and in Manage Team → Settings → Apps.
+- **Resource pickers** (`GET /api/v1/pickers/{calendar|deck|talk}`) listing the current user's owned resources, scoped to the caller's UID.
+- **Connect endpoint** `POST /api/v1/teams/{teamId}/resources/{app}/connect` (team-admin required) that inserts the share/ACL row granting the team's circle access to the selected resource.
+- **`ResourcePicker.vue`** — unified picker component used by both the wizard and the manage-team dialog. Files mode opens NC's standard `getFilePickerBuilder` dialog; the other three apps render a populated `<select>` populated from the picker endpoint.
+- **Connected-resource warning** under "Delete team" in Manage Team → Maintenance, explaining that connected resources are deleted with the team and how to preserve them.
+- **Archive-before-delete admin toggle.** New checkbox in Archive Policy controls whether team deletion produces an archive ZIP first or skips archiving entirely. Default OFF for new and existing installs. Same three deletion modes (`hard` / `soft30` / `soft60`) apply to both archive-on and archive-off paths.
+- **`POST /api/v1/teams/{teamId}/soft-delete`** endpoint for soft-delete without archive — creates a pending-deletion row and suspends connected app resources but skips archive production.
+- **Owner-side delete dialog** when archive-before-delete is OFF, with description and confirmation text adapted to the chosen deletion mode (immediate hard delete vs 30/60 day grace period without archive).
+
+### Changed
+- The Delete-team button in Manage Team → Maintenance now branches based on admin policy: archive ON opens the existing archive modal; archive OFF opens a plain `NcDialog` confirmation.
+- Description text for the Delete-team row dynamically reflects the active archive policy and deletion mode.
+
+### Fixed
+- **PostgreSQL `SQLSTATE[22P02]: invalid input syntax for type smallint: "f"` on team creation.** The `enabled` (in `teamhub_team_apps`) and `is_builtin` (in `teamhub_integ_registry`) columns are SMALLINT (per the v3.9.0 cross-database fix), but their bind parameters were still using `IQueryBuilder::PARAM_BOOL`. PostgreSQL refuses the boolean-to-smallint coercion at the wire-protocol level; MySQL accepted it silently. Fixed by casting to int and binding as `PARAM_INT` in `TeamAppMapper::upsert()` and `IntegrationRegistryMapper::register()`.
+
+### Security
+- Every connect endpoint re-verifies that the user owns the specified resource (`WHERE owner = currentUid` or `IRootFolder::getById()` for Files), preventing forged-`resourceId` attacks across the four supported apps.
+- Each app refuses to connect a second resource if one is already linked to the team (one-resource-per-team invariant).
+- Picker endpoints scope listing to the caller's UID — never accept a UID from request parameters.
+
 ## [3.27.0] — 2026-05-07
 
 ### Added

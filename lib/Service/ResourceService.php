@@ -425,6 +425,42 @@ class ResourceService {
         return $results;
     }
 
+    /**
+     * Connect an existing app resource to a team. Inserts the share/ACL row
+     * granting the team's circle access to a resource the user already owns.
+     *
+     * Mirrors createTeamResources but uses the connect-existing methods on each
+     * sub-service. Returns per-call result.
+     *
+     * SECURITY: Authorisation (team-admin level) is enforced at the controller
+     * layer. Each sub-service additionally re-verifies the user owns the
+     * specified resource ID, preventing forged resource ID attacks.
+     *
+     * @param string $teamId     Team / circle unique ID
+     * @param string $app        'talk' | 'files' | 'calendar' | 'deck'
+     * @param int    $resourceId The resource ID owned by the current user
+     */
+    public function connectExistingResource(string $teamId, string $app, int $resourceId): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+        $uid = $user->getUID();
+
+        switch ($app) {
+            case 'talk':
+                return $this->talkService->connectExistingRoom($teamId, $resourceId, $uid);
+            case 'files':
+                return $this->filesService->connectExistingFolder($teamId, $resourceId, $uid);
+            case 'calendar':
+                return $this->calendarService->connectExistingCalendar($teamId, $resourceId, $uid);
+            case 'deck':
+                return $this->deckService->connectExistingBoard($teamId, $resourceId, $uid);
+            default:
+                return ['success' => false, 'error' => 'Unknown app: ' . $app];
+        }
+    }
+
 
     public function checkInstalledApps(): array {
         $config = $this->container->get(\OCP\IConfig::class);

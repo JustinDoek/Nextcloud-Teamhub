@@ -264,6 +264,175 @@ class TalkService {
      *
      * @return bool True when the row was inserted successfully.
      */
+    /**
+     * List Talk rooms where $uid is owner or moderator and which are eligible
+     * to be connected to a team. Excludes one-on-one chats and changelog rooms.
+     *
+     * Caller should pass the current NC user's UID — this method does no auth itself.
+     *
+     * @return array<int, array{id:int, token:string, name:string, type:int}>
+     */
+    public function listOwnedRooms(string $uid): array {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+
+            // Talk participant_type: 1=OWNER, 2=MODERATOR, 6=GUEST_MODERATOR.
+            // We want rooms the user can administer.
+            // Talk room type: 1=ONE_TO_ONE, 2=GROUP, 3=PUBLIC, 4=CHANGELOG, 5=ONE_TO_ONE_FORMER, 6=NOTE_TO_SELF.
+            // We exclude 1 (one-to-one), 4 (changelog), 5, 6.
+            $qb->select('r.id', 'r.token', 'r.name', 'r.type')
+                ->from('talk_rooms', 'r')
+                ->innerJoin('r', 'talk_attendees', 'a',
+                    $qb->expr()->andX(
+                        $qb->expr()->eq('a.room_id', 'r.id'),
+                        $qb->expr()->eq('a.actor_type', $qb->createNamedParameter('users')),
+                        $qb->expr()->eq('a.actor_id', $qb->createNamedParameter($uid)),
+                        $qb->expr()->in('a.participant_type', $qb->createNamedParameter(
+                            [1, 2, 6],
+                            \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                        ))
+                    )
+                )
+                ->where($qb->expr()->in('r.type', $qb->createNamedParameter(
+                    [2, 3],
+                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                )))
+                ->orderBy('r.name', 'ASC');
+
+            $res = $qb->executeQuery();
+            $rows = $res->fetchAll();
+            $res->closeCursor();
+
+            $out = [];
+            foreach ($rows as $row) {
+                $out[] = [
+                    'id'    => (int)$row['id'],
+                    'token' => (string)($row['token'] ?? ''),
+                    'name'  => (string)($row['name'] ?? ''),
+                    'type'  => (int)($row['type'] ?? 0),
+                ];
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] listOwnedRooms failed', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Connect an existing Talk room to a team by adding the team's circle as
+     * a moderator-level attendee.
+     *
+     * SECURITY: Caller MUST verify the user has team-admin level. This method
+     * additionally verifies that $uid actually owns/moderates the room —
+     * preventing forged roomId attacks.
+     *
+     * Refuses to connect if the team's circle is already an attendee anywhere.
+     *
+     * @return array{success:bool, room_id?:int, token?:string, name?:string, error?:string}
+     */
+    public function connectExistingRoom(string $teamId, int $roomId, string $uid): array {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return ['success' => false, 'error' => 'Talk (spreed) app not installed'];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // SECURITY: verify the room exists and the user owns/moderates it.
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('r.id', 'r.token', 'r.name')
+                ->from('talk_rooms', 'r')
+                ->innerJoin('r', 'talk_attendees', 'a',
+                    $qb->expr()->andX(
+                        $qb->expr()->eq('a.room_id', 'r.id'),
+                        $qb->expr()->eq('a.actor_type', $qb->createNamedParameter('users')),
+                        $qb->expr()->eq('a.actor_id', $qb->createNamedParameter($uid)),
+                        $qb->expr()->in('a.participant_type', $qb->createNamedParameter(
+                            [1, 2, 6],
+                            \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                        ))
+                    )
+                )
+                ->where($qb->expr()->eq('r.id', $qb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['success' => false, 'error' => 'Room not found or user is not owner/moderator'];
+            }
+
+            $token    = (string)($row['token'] ?? '');
+            $roomName = (string)($row['name'] ?? '');
+
+            // Refuse if this circle is already an attendee in any room — TeamHub
+            // model is one Talk room per team.
+            $chk = $db->getQueryBuilder();
+            $cres = $chk->select('room_id')
+                ->from('talk_attendees')
+                ->where($chk->expr()->eq('actor_type', $chk->createNamedParameter('circles')))
+                ->andWhere($chk->expr()->eq('actor_id', $chk->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $existing = $cres->fetch();
+            $cres->closeCursor();
+
+            if ($existing) {
+                return ['success' => false, 'error' => 'Team already has a Talk room — disable the current one first'];
+            }
+
+            // Strategy 1: ParticipantService::addCircle (Talk 17+)
+            $circleAdded = false;
+            try {
+                $manager = $this->container->get(\OCA\Talk\Manager::class);
+                $room    = $manager->getRoomById($roomId);
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $participantService->addCircle($room, $teamId);
+                $circleAdded = true;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TalkService] connectExistingRoom: ParticipantService::addCircle failed — using direct DB insert', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            // Strategy 2: direct DB insert
+            if (!$circleAdded) {
+                $circleAdded = $this->insertTalkCircleAttendee($roomId, $teamId, $roomName, $db);
+            }
+
+            if (!$circleAdded) {
+                return ['success' => false, 'error' => 'Failed to add team circle as room attendee'];
+            }
+
+            // Promote circle attendee to MODERATOR.
+            $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
+
+
+            return [
+                'success' => true,
+                'room_id' => $roomId,
+                'token'   => $token,
+                'name'    => $roomName,
+            ];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] connectExistingRoom failed', [
+                'teamId' => $teamId, 'roomId' => $roomId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['success' => false, 'error' => 'Operation failed — see server log for details'];
+        }
+    }
+
     public function insertTalkCircleAttendee(int $roomId, string $teamId, string $teamName, \OCP\IDBConnection $db): bool {
         try {
             // Skip if a circle attendee already exists for this room (idempotent)

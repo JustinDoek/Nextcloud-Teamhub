@@ -87,6 +87,45 @@ class ArchiveController extends Controller {
     }
 
     /**
+     * POST /api/v1/teams/{teamId}/soft-delete
+     *
+     * Soft-delete a team WITHOUT producing an archive. Used when the admin has
+     * disabled archiving (archiveBeforeDelete=false) and chosen soft30/soft60.
+     *
+     * The caller must be the team owner (level 9). Creates a pending-deletion
+     * row and suspends connected app resources, but skips the archive ZIP step.
+     *
+     * For archive=off + mode=hard, the frontend should call DELETE /teams/{teamId}
+     * directly (no pending row needed).
+     *
+     * HTTP status codes:
+     *   200 — pending-deletion row created
+     *   403 — caller is not the team owner
+     *   409 — team already has a pending-deletion row
+     *   500 — operation failed
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function softDeleteTeam(string $teamId): JSONResponse {
+        try {
+            $result = $this->archiveService->softDeleteTeamWithoutArchive($teamId);
+            return new JSONResponse($result);
+        } catch (\RuntimeException $e) {
+            $status = match ((int)$e->getCode()) {
+                409 => Http::STATUS_CONFLICT,
+                default => Http::STATUS_INTERNAL_SERVER_ERROR,
+            };
+            $this->logger->warning('[TeamHub][ArchiveController] softDeleteTeam failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'owner') ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
      * GET /api/v1/teams/{teamId}/archive/status
      *
      * Returns the pending-deletion row for this team, or null if none exists.

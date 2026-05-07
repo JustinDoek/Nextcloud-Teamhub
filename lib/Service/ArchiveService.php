@@ -46,10 +46,11 @@ class ArchiveService {
     public const ARCHIVE_FORMAT_VERSION = '1.0';
 
     /** Admin config keys */
-    private const CFG_MODE         = 'archiveMode';
-    private const CFG_PATH         = 'archivePath';    // Team Folder /f/{id} link or empty (fallback)
-    private const CFG_MAX_BYTES    = 'archiveMaxBytes';
-    private const CFG_PSEUDONYMIZE = 'anonymizeData';
+    private const CFG_MODE                  = 'archiveMode';
+    private const CFG_PATH                  = 'archivePath';    // Team Folder /f/{id} link or empty (fallback)
+    private const CFG_MAX_BYTES             = 'archiveMaxBytes';
+    private const CFG_PSEUDONYMIZE          = 'anonymizeData';
+    private const CFG_ARCHIVE_BEFORE_DELETE = 'archiveBeforeDelete'; // '1' = archive then delete, '0' = delete only
 
     private const DEFAULT_MODE      = 'soft30';
     private const DEFAULT_MAX_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
@@ -314,6 +315,109 @@ class ArchiveService {
                 // Archive exists and row is marked pending — cron will retry.
             }
         }
+
+        return $this->pendingToArray($pending);
+    }
+
+    /**
+     * Soft-delete a team WITHOUT producing an archive.
+     *
+     * Used when admin has set archiveBeforeDelete=false. Mirrors the
+     * pending-deletion + circle-suspension behaviour of produceTeamArchive
+     * for soft modes, but skips all archive production. The pending_dels row
+     * is created with archive_path='' / archive_bytes=0, so callers/UIs that
+     * format the row must tolerate an empty archive.
+     *
+     * For 'hard' mode this method should not be called — the controller
+     * routes hard+no-archive deletes directly through TeamService::deleteTeam().
+     *
+     * @return array Pending-deletion row as array, with status='pending'
+     * @throws \Exception When not authenticated, not the owner, or already pending
+     */
+    public function softDeleteTeamWithoutArchive(string $teamId): array {
+
+        // 1. Auth — owner only, mirroring produceTeamArchive
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('Not authenticated.');
+        }
+        $uid = $user->getUID();
+
+        $level = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $uid);
+        if ($level < 9) {
+            throw new \Exception('Only the team owner can delete a team.');
+        }
+
+        // 2. Pre-check — refuse to overlap an existing pending row
+        $existing = $this->pendingMapper->findByTeamId($teamId);
+        if ($existing !== null) {
+            if ($existing->getStatus() === 'pending') {
+                throw new \RuntimeException(
+                    'This team is already pending deletion. Administrators can restore or force-delete it.',
+                    409
+                );
+            }
+            if ($existing->getStatus() === 'completed') {
+                throw new \RuntimeException(
+                    'This team has already been permanently deleted.',
+                    409
+                );
+            }
+            // status='failed' or 'restored' — clear and proceed
+            $this->pendingMapper->deleteByTeamId($teamId);
+        }
+
+        // 3. Read mode — only soft30/soft60 allowed here
+        $mode = $this->config->getAppValue(Application::APP_ID, self::CFG_MODE, self::DEFAULT_MODE);
+        if (!in_array($mode, ['soft30', 'soft60'], true)) {
+            throw new \RuntimeException(
+                'softDeleteTeamWithoutArchive requires archiveMode soft30 or soft60.',
+                500
+            );
+        }
+
+        // 4. Capture team name — needed for the pending row + suspension records
+        $teamMeta = $this->captureTeamMeta($teamId);
+        $teamName = $teamMeta['name'] ?? 'unknown-team';
+
+        // 5. Insert pending_dels row — team is now hidden
+        $now          = $this->timeFactory->getTime();
+        $graceSeconds = $this->graceSeconds($mode);
+
+        $pending = new PendingDeletion();
+        $pending->setTeamId($teamId);
+        $pending->setTeamName($teamName);
+        $pending->setArchivedAt($now);
+        $pending->setHardDeleteAt($now + $graceSeconds);
+        $pending->setArchivedBy($uid);
+        $pending->setArchivePath('');     // explicitly empty — no archive produced
+        $pending->setArchiveBytes(0);
+        $pending->setStatus('pending');
+        $this->pendingMapper->insert($pending);
+
+        // 6. Suspend connected app resources so members lose access immediately
+        $suspended = $this->suspendConnectedAppResources($teamId, $teamName);
+        if (!empty($suspended)) {
+            $pending->setSuspendedResources(json_encode($suspended));
+            $this->pendingMapper->update($pending);
+        }
+
+        // 7. Audit-log
+        $this->auditService->log(
+            $teamId,
+            'team.archived', // re-use existing event type — pseudonymized=false signals no archive
+            $uid,
+            'team',
+            $teamId,
+            [
+                'name'         => $teamName,
+                'archive_path' => '',
+                'archive_bytes'=> 0,
+                'mode'         => $mode,
+                'pseudonymized'=> false,
+                'archive_skipped' => true,
+            ]
+        );
 
         return $this->pendingToArray($pending);
     }
@@ -633,13 +737,14 @@ class ArchiveService {
      */
     public function getAdminSettings(): array {
         return [
-            'archiveMode'     => $this->config->getAppValue(Application::APP_ID, self::CFG_MODE, self::DEFAULT_MODE),
-            'archiveLocation' => $this->config->getAppValue(Application::APP_ID, self::CFG_PATH, ''),
-            'archiveMaxMb'    => (int)round(
+            'archiveBeforeDelete' => $this->config->getAppValue(Application::APP_ID, self::CFG_ARCHIVE_BEFORE_DELETE, '0') === '1',
+            'archiveMode'         => $this->config->getAppValue(Application::APP_ID, self::CFG_MODE, self::DEFAULT_MODE),
+            'archiveLocation'     => $this->config->getAppValue(Application::APP_ID, self::CFG_PATH, ''),
+            'archiveMaxMb'        => (int)round(
                 (int)$this->config->getAppValue(Application::APP_ID, self::CFG_MAX_BYTES, (string)self::DEFAULT_MAX_BYTES)
                 / 1048576
             ),
-            'anonymizeData'   => $this->config->getAppValue(Application::APP_ID, self::CFG_PSEUDONYMIZE, '0') === '1',
+            'anonymizeData'       => $this->config->getAppValue(Application::APP_ID, self::CFG_PSEUDONYMIZE, '0') === '1',
         ];
     }
 
@@ -651,6 +756,13 @@ class ArchiveService {
     public function saveAdminSettings(array $data): void {
         $allowedModes = ['hard', 'soft30', 'soft60'];
 
+        if (isset($data['archiveBeforeDelete'])) {
+            $this->config->setAppValue(
+                Application::APP_ID,
+                self::CFG_ARCHIVE_BEFORE_DELETE,
+                ((bool)$data['archiveBeforeDelete']) ? '1' : '0'
+            );
+        }
         if (isset($data['archiveMode']) && in_array($data['archiveMode'], $allowedModes, true)) {
             $this->config->setAppValue(Application::APP_ID, self::CFG_MODE, $data['archiveMode']);
         }

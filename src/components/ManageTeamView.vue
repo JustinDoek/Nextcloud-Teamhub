@@ -540,15 +540,19 @@
                 <div class="manage-danger-row">
                     <div class="manage-danger-info">
                         <span class="manage-danger-title">{{ t('teamhub', 'Delete team') }}</span>
-                        <span class="manage-danger-desc">{{ t('teamhub', 'Export all team data to an archive file, then delete the team. An administrator can restore the team during the grace period.') }}</span>
+                        <span class="manage-danger-desc">{{ deleteTeamDescription }}</span>
+                        <span class="manage-danger-warning" role="note">
+                            <AlertIcon :size="16" aria-hidden="true" />
+                            <span>{{ t('teamhub', 'Heads up: any app resource connected to this team (calendar, folder, board, conversation) will be permanently deleted along with the team — even if it was created outside TeamHub. To preserve a connected resource, remove this team from its sharing permissions before deleting the team.') }}</span>
+                        </span>
                     </div>
                     <NcButton
                         type="error"
                         :disabled="archiving || deleting || archiveStatusLoading || (archiveStatusRow && archiveStatusRow.status === 'pending')"
                         :aria-label="t('teamhub', 'Delete this team')"
-                        @click="openArchiveModal">
+                        @click="onDeleteTeamClicked">
                         <template #icon>
-                            <NcLoadingIcon v-if="archiving || archiveStatusLoading" :size="20" />
+                            <NcLoadingIcon v-if="archiving || archiveStatusLoading || deleting" :size="20" />
                             <Delete v-else :size="20" />
                         </template>
                         {{ archiveStatusRow && archiveStatusRow.status === 'failed'
@@ -558,13 +562,39 @@
                 </div>
             </div>
 
-            <!-- Archive modal -->
+            <!-- Archive modal (only used when admin enabled archive-before-delete) -->
             <ArchiveTeamModal
                 :show="showArchiveModal"
                 :team-id="team.id"
                 :archive-settings="archiveSettings"
                 @close="showArchiveModal = false"
                 @archived="onTeamArchived" />
+
+            <!-- No-archive delete confirmation dialog -->
+            <NcDialog
+                v-if="pendingNoArchiveDelete"
+                :name="t('teamhub', 'Delete team {name}?', { name: team.name })"
+                :open="true"
+                @update:open="cancelNoArchiveDelete">
+                <template #default>
+                    <p style="margin: 0 0 12px;">{{ noArchiveDeleteMessage }}</p>
+                    <p style="margin: 0; font-weight: 600; color: var(--color-error-text);">
+                        {{ t('teamhub', 'This action cannot be undone.') }}
+                    </p>
+                </template>
+                <template #actions>
+                    <NcButton type="tertiary" @click="cancelNoArchiveDelete">
+                        {{ t('teamhub', 'Cancel') }}
+                    </NcButton>
+                    <NcButton type="error" :disabled="deleting" @click="confirmNoArchiveDelete">
+                        <template #icon>
+                            <NcLoadingIcon v-if="deleting" :size="20" />
+                            <Delete v-else :size="20" />
+                        </template>
+                        {{ t('teamhub', 'Yes, delete team') }}
+                    </NcButton>
+                </template>
+            </NcDialog>
 
             <!-- Transfer ownership confirmation dialog -->
             <NcDialog
@@ -624,6 +654,57 @@
                 </NcButton>
             </template>
         </NcDialog>
+
+        <!-- Enable-mode dialog: choose between Create new and Connect existing -->
+        <NcDialog
+            v-if="pendingEnableApp"
+            :name="t('teamhub', 'Enable {name} for this team', { name: pendingEnableApp.label })"
+            :open="true"
+            @update:open="cancelEnableApp">
+            <template #default>
+                <p style="margin: 0 0 12px;">
+                    {{ t('teamhub', 'How would you like to enable {name}?', { name: pendingEnableApp.label }) }}
+                </p>
+                <div class="enable-app-modes">
+                    <label class="enable-app-mode">
+                        <input
+                            v-model="enableAppMode"
+                            type="radio"
+                            value="create"
+                            name="enable-app-mode" />
+                        <span>{{ t('teamhub', 'Create a new resource for this team') }}</span>
+                    </label>
+                    <label class="enable-app-mode">
+                        <input
+                            v-model="enableAppMode"
+                            type="radio"
+                            value="connect"
+                            name="enable-app-mode" />
+                        <span>{{ t('teamhub', 'Connect an existing resource I already own') }}</span>
+                    </label>
+                    <div v-if="enableAppMode === 'connect'" class="enable-app-picker">
+                        <ResourcePicker
+                            :app="pendingEnableApp.id === 'spreed' ? 'talk' : pendingEnableApp.id"
+                            :value="enableAppResourceId"
+                            @input="enableAppResourceId = $event" />
+                    </div>
+                </div>
+                <p style="margin: 12px 0 0; font-size: 12px; color: var(--color-text-maxcontrast);">
+                    {{ t('teamhub', 'Note: connected resources stay shared with the team. If the team is deleted, the resource is deleted too. To preserve the resource, remove the team from its sharing permissions before deleting the team.') }}
+                </p>
+            </template>
+            <template #actions>
+                <NcButton type="tertiary" @click="cancelEnableApp">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    type="primary"
+                    :disabled="enableAppMode === 'connect' && !enableAppResourceId"
+                    @click="confirmEnableApp">
+                    {{ enableAppMode === 'connect' ? t('teamhub', 'Connect') : t('teamhub', 'Create') }}
+                </NcButton>
+            </template>
+        </NcDialog>
     </div>
 </template>
 
@@ -658,6 +739,7 @@ import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
 import UploadIcon from 'vue-material-design-icons/Upload.vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
 import ArchiveTeamModal from './ArchiveTeamModal.vue'
+import ResourcePicker from './ResourcePicker.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -676,6 +758,7 @@ export default {
         ImageIcon, TrashCanOutline, UploadIcon, AccountArrowRight,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
         ArchiveTeamModal,
+        ResourcePicker,
     },
     props: {
         team: { type: Object, required: true },
@@ -715,6 +798,12 @@ export default {
             loadingApps: false,
             togglingApp: null,
             pendingDisableApp: null,
+            // No-archive delete confirmation dialog
+            pendingNoArchiveDelete: false,
+            // Enable-mode dialog (Create new vs Connect existing)
+            pendingEnableApp: null,
+            enableAppMode: 'create',
+            enableAppResourceId: null,
             // Team image
             imageUploading: false,
             imageRemoving: false,
@@ -738,6 +827,36 @@ export default {
     },
     computed: {
         ...mapState(['intravoxAvailable']),
+
+        // Description text under "Delete team" — depends on archive setting + mode
+        deleteTeamDescription() {
+            if (this.archiveSettings.archiveBeforeDelete) {
+                return t('teamhub', 'Export all team data to an archive file, then delete the team. An administrator can restore the team during the grace period.')
+            }
+            // No archive — text reflects the chosen deletion mode
+            switch (this.archiveSettings.archiveMode) {
+            case 'soft30':
+                return t('teamhub', 'Delete the team without producing an archive. The team is hidden immediately and permanently deleted after 30 days. An administrator can restore it before then.')
+            case 'soft60':
+                return t('teamhub', 'Delete the team without producing an archive. The team is hidden immediately and permanently deleted after 60 days. An administrator can restore it before then.')
+            case 'hard':
+            default:
+                return t('teamhub', 'Permanently delete the team and all its data immediately. No archive is produced. This action cannot be undone.')
+            }
+        },
+
+        // Confirmation message in the no-archive dialog — mirrors the description
+        noArchiveDeleteMessage() {
+            switch (this.archiveSettings.archiveMode) {
+            case 'soft30':
+                return t('teamhub', 'The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.')
+            case 'soft60':
+                return t('teamhub', 'The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.')
+            case 'hard':
+            default:
+                return t('teamhub', 'The team and all its data will be permanently deleted immediately. No archive will be produced.')
+            }
+        },
 
         tabs() {
             return [
@@ -865,6 +984,7 @@ export default {
         activeTab(tab) {
             if (tab === 'danger') {
                 this.loadArchiveStatus()
+                this.loadArchiveSettings()
             }
         },
     },
@@ -1124,14 +1244,66 @@ export default {
             }
         },
 
-        async openArchiveModal() {
-            // Fetch archive settings so the modal can display mode and path.
+        async loadArchiveSettings() {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/archive/settings'))
                 this.archiveSettings = data
             } catch (err) {
                 this.archiveSettings = {}
             }
+        },
+
+        // Decide the delete-team flow based on admin's archive setting:
+        //   archiveBeforeDelete=true  → open the existing archive modal
+        //   archiveBeforeDelete=false → open the no-archive confirmation dialog
+        async onDeleteTeamClicked() {
+            // Refresh archive settings before deciding so we honour the latest admin policy.
+            await this.loadArchiveSettings()
+
+            if (this.archiveSettings.archiveBeforeDelete) {
+                this.showArchiveModal = true
+            } else {
+                this.pendingNoArchiveDelete = true
+            }
+        },
+
+        cancelNoArchiveDelete() {
+            this.pendingNoArchiveDelete = false
+        },
+
+        async confirmNoArchiveDelete() {
+            const mode = this.archiveSettings.archiveMode
+            this.deleting = true
+            try {
+                if (mode === 'soft30' || mode === 'soft60') {
+                    // Soft delete without archive — pending row + grace period.
+                    const { data } = await axios.post(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/soft-delete`)
+                    )
+                    this.archiveStatusRow = data
+                    showSuccess(t('teamhub', 'Team scheduled for deletion'))
+                    this.$emit('team-deleted')
+                } else {
+                    // Hard delete without archive — straight DELETE.
+                    await axios.delete(generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}`))
+                    showSuccess(t('teamhub', 'Team deleted'))
+                    this.$emit('team-deleted')
+                }
+            } catch (error) {
+                const msg = error.response?.data?.error || ''
+                showError(msg
+                    ? t('teamhub', 'Failed to delete team: {error}', { error: msg })
+                    : t('teamhub', 'Failed to delete team')
+                )
+            } finally {
+                this.deleting = false
+                this.pendingNoArchiveDelete = false
+            }
+        },
+
+        async openArchiveModal() {
+            // Fetch archive settings so the modal can display mode and path.
+            await this.loadArchiveSettings()
             this.showArchiveModal = true
         },
 
@@ -1182,7 +1354,76 @@ export default {
                 this.pendingDisableApp = app
                 return
             }
+            // For the four connectable apps, ask whether to Create or Connect.
+            // For any other app (intravox, shared_files, ...) just enable directly.
+            const connectable = ['spreed', 'files', 'calendar', 'deck']
+            if (connectable.includes(app.id)) {
+                this.pendingEnableApp = app
+                this.enableAppMode = 'create'
+                this.enableAppResourceId = null
+                return
+            }
             await this._executeToggleApp(app, true)
+        },
+
+        cancelEnableApp() {
+            // Roll back optimistic state if the switch had already flipped on.
+            const existing = this.teamApps.find(a => a.app_id === this.pendingEnableApp?.id)
+            if (existing) existing.enabled = false
+            this.pendingEnableApp = null
+            this.enableAppMode = 'create'
+            this.enableAppResourceId = null
+        },
+
+        async confirmEnableApp() {
+            const app = this.pendingEnableApp
+            const mode = this.enableAppMode
+            const resourceId = this.enableAppResourceId
+            // Capture then clear so the dialog closes immediately.
+            this.pendingEnableApp = null
+            if (!app) return
+
+            if (mode === 'create') {
+                await this._executeToggleApp(app, true)
+                this.enableAppMode = 'create'
+                this.enableAppResourceId = null
+                return
+            }
+
+            // Connect path
+            if (!resourceId) {
+                showError(t('teamhub', 'No resource selected.'))
+                return
+            }
+            this.togglingApp = app.id
+            try {
+                // Map app_id to the resource key used by the connect endpoint.
+                const resourceKey = app.id === 'spreed' ? 'talk' : app.id
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resourceKey}/connect`),
+                    { resourceId }
+                )
+                // Reflect enabled state locally.
+                const existing = this.teamApps.find(a => a.app_id === app.id)
+                if (existing) {
+                    existing.enabled = true
+                } else {
+                    this.teamApps.push({ app_id: app.id, enabled: true })
+                }
+                showSuccess(t('teamhub', '{name} connected to this team', { name: app.label }))
+            } catch (error) {
+                const msg = error.response?.data?.error || ''
+                showError(msg
+                    // TRANSLATORS: error shown when connecting an existing resource fails. {name} is the app name (e.g. "Calendar"), {error} is the detail.
+                    ? t('teamhub', 'Failed to connect {name}: {error}', { name: app.label, error: msg })
+                    : t('teamhub', 'Failed to connect {name}', { name: app.label })
+                )
+                await this.loadTeamApps()
+            } finally {
+                this.togglingApp = null
+                this.enableAppMode = 'create'
+                this.enableAppResourceId = null
+            }
         },
 
         async confirmDisableApp() {
@@ -2122,5 +2363,47 @@ export default {
 .group-circle-count {
     font-size: 12px;
     color: var(--color-text-maxcontrast);
+}
+
+/* Enable-mode dialog (Create new vs Connect existing) */
+.enable-app-modes {
+    display: flex;
+    flex-direction: column;
+    margin-top: 4px;
+}
+.enable-app-mode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.enable-app-mode input[type="radio"] {
+    accent-color: var(--color-primary-element);
+    cursor: pointer;
+}
+.enable-app-picker {
+    margin-left: 24px;
+    margin-top: 4px;
+    max-width: 360px;
+}
+/* Connected-resource deletion warning under "Delete team" */
+.manage-danger-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--color-warning, #c89b00);
+    background: var(--color-warning-hover, rgba(200, 155, 0, 0.08));
+    border-radius: 0 var(--border-radius, 4px) var(--border-radius, 4px) 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--color-main-text);
+}
+.manage-danger-warning :first-child {
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: var(--color-warning, #c89b00);
 }
 </style>

@@ -1,6 +1,6 @@
-# TeamHub API Endpoints — v3.27.0
+# TeamHub API Endpoints — v3.28.0
 
-> No new endpoints added in v3.26.x–3.27.0. All archive endpoints were added in v3.25.0 and remain unchanged.
+> v3.28.0 adds 5 new endpoints: 3 picker endpoints (Calendar/Deck/Talk), 1 connect endpoint, and 1 soft-delete-without-archive endpoint.
 > v3.18.0 is a frontend-only release (iframe overhaul + Audit tab info banner).
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
@@ -22,6 +22,44 @@ All team-scoped membership checks use a direct indexed DB query against `circles
 
 ---
 
+## Resource pickers (added v3.28.0)
+
+### GET `/pickers/calendar`
+List calendars owned by the current user that can be connected to a team. Excludes the contact birthday calendar and soft-deleted calendars.
+
+**Auth:** Authenticated.
+**Response 200:** `{ resources: [{ id, uri, name, color }] }`
+
+### GET `/pickers/deck`
+List Deck boards owned by the current user. Excludes archived and soft-deleted boards.
+
+**Auth:** Authenticated.
+**Response 200:** `{ resources: [{ id, name, color }] }`
+
+### GET `/pickers/talk`
+List Talk rooms where the current user is owner or moderator. Excludes one-to-one, changelog, and note-to-self rooms.
+
+**Auth:** Authenticated.
+**Response 200:** `{ resources: [{ id, token, name, type }] }`
+
+> **Note:** No equivalent `/pickers/files` endpoint. The Files picker uses NC's standard client-side `getFilePickerBuilder` dialog (`@nextcloud/dialogs`) with WebDAV PROPFIND to resolve path → `fileId`.
+
+---
+
+## Connect existing resource (added v3.28.0)
+
+### POST `/teams/{teamId}/resources/{app}/connect`
+Connect an existing app resource to a team by inserting the appropriate share/ACL row. The user must own the resource — each sub-service re-verifies ownership before any insert. Refuses to connect a second resource if one is already linked to the team for the given app.
+
+**Path params:** `app` ∈ `{talk, files, calendar, deck}`.
+**Body:** `{ resourceId: <int> }` — the calendar ID / file ID / board ID / room ID.
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ success: true, ...app-specific fields }`. Calendar returns `{calendar_id, name, public_token}`; Files returns `{folder_id, path, share_id}`; Deck returns `{board_id, name}`; Talk returns `{room_id, token, name}`.
+**Response 400:** Unknown app, missing `resourceId`, or the resource is not owned by the user / team already has a resource of that type.
+**Response 403:** Caller is not team admin.
+
+---
+
 ## Archive (added v3.25.0)
 
 ### POST `/teams/{teamId}/archive`
@@ -35,6 +73,17 @@ hard-deletes immediately (mode=hard) or leaves deletion for the daily cron (mode
 **Response 409:** Team already has a pending-deletion row.
 **Response 413:** Estimated archive size exceeds configured cap.
 **Response 500:** Archive production failed. Team is NOT deleted. Row is set to status='failed'. Retry is possible.
+
+### POST `/teams/{teamId}/soft-delete` *(added v3.28.0)*
+Soft-delete a team WITHOUT producing an archive. Used when the admin has set `archiveBeforeDelete=false` and chosen `soft30` or `soft60`. Creates a pending-deletion row, suspends connected app resources, but skips archive production.
+
+For `archiveBeforeDelete=false` + `mode=hard`, the frontend calls `DELETE /teams/{teamId}` directly — no pending row is needed.
+
+**Auth:** Team owner (level 9).
+**Response 200:** Pending-deletion row metadata (same shape as `/teams/{teamId}/archive`); `archivePath=''` and `archiveBytes=0` since no archive is produced.
+**Response 403:** Caller is not team owner.
+**Response 409:** Team already has a pending-deletion row.
+**Response 500:** Operation failed (e.g. invalid mode for this endpoint, or DB error).
 
 ---
 

@@ -54,6 +54,14 @@ return [
         ['name' => 'team#getTeamApps',            'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'GET'],
         ['name' => 'team#updateTeamApps',         'url' => '/api/v1/teams/{teamId}/apps',                    'verb' => 'PUT'],
         ['name' => 'team#deleteTeamResource',     'url' => '/api/v1/teams/{teamId}/resources/{app}',         'verb' => 'DELETE'],
+
+        // Connect existing resources to a team (team admin required)
+        ['name' => 'resource_connect#connect',     'url' => '/api/v1/teams/{teamId}/resources/{app}/connect', 'verb' => 'POST'],
+
+        // Resource pickers — list resources owned by current user (any authenticated user)
+        ['name' => 'picker#listCalendars',         'url' => '/api/v1/pickers/calendar',                       'verb' => 'GET'],
+        ['name' => 'picker#listDeckBoards',        'url' => '/api/v1/pickers/deck',                           'verb' => 'GET'],
+        ['name' => 'picker#listTalkRooms',         'url' => '/api/v1/pickers/talk',                           'verb' => 'GET'],
         ['name' => 'team#createIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'POST'],
         ['name' => 'team#deleteIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'DELETE'],
         ['name' => 'team#getIntravoxSubPages',    'url' => '/api/v1/teams/{teamId}/intravox/subpages',       'verb' => 'GET'],
@@ -188,6 +196,7 @@ return [
         // ----------------------------------------------------------------
         // Owner: initiate archive-and-delete for the team.
         ['name' => 'archive#archiveTeam',             'url' => '/api/v1/teams/{teamId}/archive',                          'verb' => 'POST'],
+        ['name' => 'archive#softDeleteTeam',          'url' => '/api/v1/teams/{teamId}/soft-delete',                      'verb' => 'POST'],
         // Owner or admin: poll the pending-deletion status of a team.
         ['name' => 'archive#getArchiveStatus',        'url' => '/api/v1/teams/{teamId}/archive/status',                   'verb' => 'GET'],
         // Admin: list all pending-deletion rows (paginated).

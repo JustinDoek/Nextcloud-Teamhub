@@ -783,6 +783,18 @@
 
                 <h3 class="archive-admin__heading">{{ t('teamhub', 'Archive policy') }}</h3>
 
+                <!-- Archive-before-delete master toggle -->
+                <div class="archive-admin__field">
+                    <NcCheckboxRadioSwitch
+                        v-model="archiveSettings.archiveBeforeDelete"
+                        type="checkbox">
+                        {{ t('teamhub', 'Archive teams before deletion') }}
+                    </NcCheckboxRadioSwitch>
+                    <p class="archive-admin__help">
+                        {{ t('teamhub', 'When enabled, deleting a team produces an archive ZIP first, then applies the deletion mode below. When disabled, teams are deleted directly without producing an archive.') }}
+                    </p>
+                </div>
+
                 <!-- Deletion mode -->
                 <fieldset class="archive-admin__fieldset">
                     <legend class="archive-admin__legend">{{ t('teamhub', 'Deletion mode') }}</legend>
@@ -813,7 +825,7 @@
                 </fieldset>
 
                 <!-- Archive storage location — single field -->
-                <div class="archive-admin__field">
+                <div class="archive-admin__field" :class="{ 'archive-admin__field--disabled': !archiveSettings.archiveBeforeDelete }">
                     <label class="archive-admin__label" for="archive-location">
                         {{ t('teamhub', 'Archive location (Team Folder)') }}
                     </label>
@@ -822,6 +834,7 @@
                         v-model="archiveSettings.archiveLocation"
                         type="text"
                         class="archive-admin__input"
+                        :disabled="!archiveSettings.archiveBeforeDelete"
                         :placeholder="t('teamhub', 'Leave empty to use each team owner\'s Files')" />
                     <p class="archive-admin__help">
                         {{ t('teamhub', 'Paste the internal link of a Team Folder (e.g. /f/150770 from the URL bar). Leave empty to save archives in each team owner\'s Files under "TeamHub Archives".') }}
@@ -829,7 +842,7 @@
                 </div>
 
                 <!-- Max archive size -->
-                <div class="archive-admin__field">
+                <div class="archive-admin__field" :class="{ 'archive-admin__field--disabled': !archiveSettings.archiveBeforeDelete }">
                     <label class="archive-admin__label" for="archive-max-mb">
                         {{ t('teamhub', 'Maximum archive size (MB)') }}
                     </label>
@@ -839,6 +852,7 @@
                         type="number"
                         min="1"
                         max="51200"
+                        :disabled="!archiveSettings.archiveBeforeDelete"
                         class="archive-admin__input archive-admin__input--short" />
                     <p class="archive-admin__help">
                         {{ t('teamhub', 'If the estimated archive size exceeds this limit, the archiving is refused. Default: 5120 MB (5 GB).') }}
@@ -846,10 +860,11 @@
                 </div>
 
                 <!-- Pseudonymize -->
-                <div class="archive-admin__field">
+                <div class="archive-admin__field" :class="{ 'archive-admin__field--disabled': !archiveSettings.archiveBeforeDelete }">
                     <NcCheckboxRadioSwitch
                         v-model="archiveSettings.anonymizeData"
                         type="checkbox"
+                        :disabled="!archiveSettings.archiveBeforeDelete"
                         @update:checked="archiveSettings.anonymizeData = $event">
                         {{ t('teamhub', 'Pseudonymize personal identifiers') }}
                     </NcCheckboxRadioSwitch>
@@ -2789,6 +2804,10 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+.archive-admin__field--disabled {
+    opacity: 0.5;
 }
 
 .archive-admin__label {

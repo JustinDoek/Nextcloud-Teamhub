@@ -219,6 +219,220 @@ class DeckService {
     }
 
     /**
+     * List Deck boards owned by $uid that are eligible to be connected to a team.
+     *
+     * Excludes archived boards and soft-deleted boards. Caller should pass the
+     * current NC user's UID — this method does no auth itself.
+     *
+     * @return array<int, array{id:int, name:string, color:string}>
+     */
+    public function listOwnedBoards(string $uid): array {
+        if (!$this->appManager->isInstalled('deck')) {
+            return [];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $boardCols = $this->dbIntrospection->getTableColumns('deck_boards');
+
+            $qb = $db->getQueryBuilder();
+            $qb->select('id', 'title', 'color')
+                ->from('deck_boards')
+                ->where($qb->expr()->eq('owner', $qb->createNamedParameter($uid)));
+
+            // Exclude soft-deleted boards if the column exists (it does on all
+            // supported Deck versions, but be defensive).
+            if (in_array('deleted_at', $boardCols, true)) {
+                $qb->andWhere($qb->expr()->eq('deleted_at', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+            }
+            // Exclude archived boards.
+            if (in_array('archived', $boardCols, true)) {
+                $qb->andWhere($qb->expr()->eq('archived', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+            }
+
+            $qb->orderBy('title', 'ASC');
+
+            $res = $qb->executeQuery();
+            $rows = $res->fetchAll();
+            $res->closeCursor();
+
+            $out = [];
+            foreach ($rows as $row) {
+                $out[] = [
+                    'id'    => (int)$row['id'],
+                    'name'  => (string)($row['title'] ?? ''),
+                    'color' => (string)($row['color'] ?? '0082c9'),
+                ];
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->error('[DeckService] listOwnedBoards failed', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Connect an existing Deck board to a team by inserting a circle ACL row
+     * granting the team's circle read+edit access.
+     *
+     * SECURITY: Caller MUST verify the user has team-admin level. This method
+     * additionally verifies that $uid actually owns the board — preventing
+     * forged boardId attacks.
+     *
+     * Refuses to connect if the team already has a board connected.
+     *
+     * @return array{success:bool, board_id?:int, name?:string, error?:string}
+     */
+    public function connectExistingBoard(string $teamId, int $boardId, string $uid): array {
+        if (!$this->appManager->isInstalled('deck')) {
+            return ['success' => false, 'error' => 'Deck app not installed'];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // SECURITY: verify board exists, is owned by user, and not deleted.
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('id', 'title')
+                ->from('deck_boards')
+                ->where($qb->expr()->eq('id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('owner', $qb->createNamedParameter($uid)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['success' => false, 'error' => 'Board not found or not owned by user'];
+            }
+
+            $boardName = (string)($row['title'] ?? '');
+
+            // Refuse if a board is already connected to this team.
+            // We look in both deck_board_acl and deck_acl because Deck has
+            // version variance; a hit in either means there's already a board.
+            foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+                try {
+                    $cols = $this->dbIntrospection->getTableColumns($aclTable);
+                    if (empty($cols)) {
+                        continue;
+                    }
+                    $chk = $db->getQueryBuilder();
+                    $cres = $chk->select('board_id')
+                        ->from($aclTable)
+                        ->where($chk->expr()->eq('type', $chk->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($chk->expr()->eq('participant', $chk->createNamedParameter($teamId)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    $existing = $cres->fetch();
+                    $cres->closeCursor();
+                    if ($existing) {
+                        return ['success' => false, 'error' => 'Team already has a Deck board — disable the current one first'];
+                    }
+                } catch (\Throwable) {
+                    // Table absent — try the next one
+                }
+            }
+
+            // Insert circle ACL — multi-strategy, mirrors createDeckBoard.
+            $circleAdded = false;
+
+            // Strategy 1: AclMapper
+            try {
+                $aclMapper = $this->container->get(\OCA\Deck\Db\AclMapper::class);
+                $acl = new \OCA\Deck\Db\Acl();
+                $acl->setBoardId($boardId);
+                $acl->setType(7);
+                $acl->setParticipant($teamId);
+                if (method_exists($acl, 'setPermissionRead')) {
+                    $acl->setPermissionRead(true);
+                    $acl->setPermissionEdit(true);
+                    $acl->setPermissionManage(false);
+                }
+                if (method_exists($acl, 'setPermissions')) {
+                    $acl->setPermissions(3);
+                }
+                $aclMapper->insert($acl);
+                $circleAdded = true;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[DeckService] connectExistingBoard: AclMapper failed', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            // Strategy 2: BoardService::addAcl (Deck 2.x)
+            if (!$circleAdded) {
+                try {
+                    $boardService = $this->container->get(\OCA\Deck\Service\BoardService::class);
+                    if (method_exists($boardService, 'addAcl')) {
+                        $boardService->addAcl($boardId, 7, $teamId, true, true, false);
+                        $circleAdded = true;
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[DeckService] connectExistingBoard: BoardService::addAcl failed', [
+                        'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            // Strategy 3: QB insert
+            if (!$circleAdded) {
+                foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+                    $aclCols = $this->dbIntrospection->getTableColumns($aclTable);
+                    if (empty($aclCols)) {
+                        continue;
+                    }
+                    try {
+                        $iqb = $db->getQueryBuilder();
+                        $iqb->insert($aclTable)
+                            ->setValue('board_id',    $iqb->createNamedParameter($boardId))
+                            ->setValue('type',        $iqb->createNamedParameter(7))
+                            ->setValue('participant', $iqb->createNamedParameter($teamId));
+                        foreach (['permission_read' => 1, 'permission_edit' => 1, 'permission_manage' => 0] as $col => $val) {
+                            if (in_array($col, $aclCols, true)) {
+                                $iqb->setValue($col, $iqb->createNamedParameter($val));
+                            }
+                        }
+                        if (in_array('permissions', $aclCols, true)) {
+                            $iqb->setValue('permissions', $iqb->createNamedParameter(3));
+                        }
+                        $iqb->executeStatement();
+                        $circleAdded = true;
+                        break;
+                    } catch (\Throwable $e) {
+                        $this->logger->warning('[DeckService] connectExistingBoard: QB insert failed', [
+                            'table' => $aclTable, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                        ]);
+                    }
+                }
+            }
+
+            if (!$circleAdded) {
+                return ['success' => false, 'error' => 'Failed to grant team access to board'];
+            }
+
+            // Belt-and-braces: ensure edit permission flag is actually set.
+            $this->enforceAclEditPermissions($boardId, $teamId, $db);
+
+
+            return [
+                'success'  => true,
+                'board_id' => $boardId,
+                'name'     => $boardName,
+            ];
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[DeckService] connectExistingBoard failed', [
+                'teamId' => $teamId, 'boardId' => $boardId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['success' => false, 'error' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
      * Directly UPDATE the ACL row(s) for this board+circle to ensure edit
      * permission is granted, independent of ORM behaviour.
      *

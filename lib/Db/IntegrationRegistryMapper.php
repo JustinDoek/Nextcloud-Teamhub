@@ -189,7 +189,7 @@ class IntegrationRegistryMapper {
                 'icon'             => $qb->createNamedParameter($icon),
                 'php_class'        => $qb->createNamedParameter($phpClass),
                 'iframe_url'       => $qb->createNamedParameter($iframeUrl),
-                'is_builtin'       => $qb->createNamedParameter($isBuiltin, IQueryBuilder::PARAM_BOOL),
+                'is_builtin'       => $qb->createNamedParameter($isBuiltin ? 1 : 0, IQueryBuilder::PARAM_INT),
                 'created_at'       => $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT),
             ]);
 
