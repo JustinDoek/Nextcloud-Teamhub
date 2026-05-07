@@ -182,5 +182,27 @@ return [
         ['name' => 'audit#exportTeam',    'url' => '/api/v1/admin/audit/teams/{teamId}/export',         'verb' => 'GET'],
         ['name' => 'audit#getRetention',  'url' => '/api/v1/admin/audit/retention',                      'verb' => 'GET'],
         ['name' => 'audit#saveRetention', 'url' => '/api/v1/admin/audit/retention',                      'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
+        // Archive — owner initiation + admin governance
+        // ----------------------------------------------------------------
+        // Owner: initiate archive-and-delete for the team.
+        ['name' => 'archive#archiveTeam',             'url' => '/api/v1/teams/{teamId}/archive',                          'verb' => 'POST'],
+        // Owner or admin: poll the pending-deletion status of a team.
+        ['name' => 'archive#getArchiveStatus',        'url' => '/api/v1/teams/{teamId}/archive/status',                   'verb' => 'GET'],
+        // Admin: list all pending-deletion rows (paginated).
+        ['name' => 'archive#listPendingDeletions',    'url' => '/api/v1/admin/archive/pending',                           'verb' => 'GET'],
+        // Admin: restore a team within its grace period.
+        ['name' => 'archive#restorePendingDeletion',  'url' => '/api/v1/admin/archive/pending/{id}/restore',              'verb' => 'POST'],
+        // Admin: force immediate hard-delete regardless of remaining grace period.
+        ['name' => 'archive#purgePendingDeletion',    'url' => '/api/v1/admin/archive/pending/{id}/purge',                'verb' => 'POST'],
+        // Admin: discard a failed archive row without deleting the team.
+        ['name' => 'archive#discardFailedArchive',    'url' => '/api/v1/admin/archive/pending/{id}',                     'verb' => 'DELETE'],
+        // Admin: retry a failed archive (admin-level, bypasses owner check).
+        ['name' => 'archive#retryArchive',            'url' => '/api/v1/admin/archive/pending/{id}/retry',               'verb' => 'POST'],
+        // Admin: read archive settings.
+        ['name' => 'archive#getAdminArchiveSettings', 'url' => '/api/v1/admin/archive/settings',                          'verb' => 'GET'],
+        // Admin: save archive settings.
+        ['name' => 'archive#saveAdminArchiveSettings','url' => '/api/v1/admin/archive/settings',                          'verb' => 'PUT'],
     ],
 ];

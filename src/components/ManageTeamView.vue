@@ -506,26 +506,65 @@
                 </div>
             </div>
 
-            <!-- Danger Zone: Delete -->
+            <!-- Danger Zone: Delete (always archives first per admin policy) -->
             <div class="manage-section manage-section--danger">
                 <h3>{{ t('teamhub', 'Danger Zone') }}</h3>
+
+                <!-- Pending deletion — team is hidden, grace period is running -->
+                <div
+                    v-if="archiveStatusRow && archiveStatusRow.status === 'pending'"
+                    class="manage-archive-notice manage-archive-notice--pending"
+                    role="status">
+                    <strong>{{ t('teamhub', 'This team is pending deletion') }}</strong>
+                    <span>
+                        {{ n('teamhub',
+                            'The team will be permanently deleted in {n} day. Administrators can restore it.',
+                            'The team will be permanently deleted in {n} days. Administrators can restore it.',
+                            archiveStatusRow.daysRemaining,
+                            { n: archiveStatusRow.daysRemaining }) }}
+                    </span>
+                </div>
+
+                <!-- Failed archive — previous attempt failed, retry is available -->
+                <div
+                    v-if="archiveStatusRow && archiveStatusRow.status === 'failed'"
+                    class="manage-archive-notice manage-archive-notice--failed"
+                    role="alert">
+                    <strong>{{ t('teamhub', 'Previous archive attempt failed') }}</strong>
+                    <span v-if="archiveStatusRow.failureReason" class="manage-archive-notice__reason">
+                        {{ archiveStatusRow.failureReason }}
+                    </span>
+                    <span>{{ t('teamhub', 'You can retry below. The previous failed attempt will be cleared automatically.') }}</span>
+                </div>
+
                 <div class="manage-danger-row">
                     <div class="manage-danger-info">
-                        <span class="manage-danger-title">{{ t('teamhub', 'Delete this team') }}</span>
-                        <span class="manage-danger-desc">{{ t('teamhub', 'Permanently delete the team and all its settings. Resources (files, calendar, chat) are not deleted.') }}</span>
+                        <span class="manage-danger-title">{{ t('teamhub', 'Delete team') }}</span>
+                        <span class="manage-danger-desc">{{ t('teamhub', 'Export all team data to an archive file, then delete the team. An administrator can restore the team during the grace period.') }}</span>
                     </div>
                     <NcButton
                         type="error"
-                        :disabled="deleting"
-                        @click="confirmDeleteTeam">
+                        :disabled="archiving || deleting || archiveStatusLoading || (archiveStatusRow && archiveStatusRow.status === 'pending')"
+                        :aria-label="t('teamhub', 'Delete this team')"
+                        @click="openArchiveModal">
                         <template #icon>
-                            <NcLoadingIcon v-if="deleting" :size="20" />
+                            <NcLoadingIcon v-if="archiving || archiveStatusLoading" :size="20" />
                             <Delete v-else :size="20" />
                         </template>
-                        {{ t('teamhub', 'Delete team') }}
+                        {{ archiveStatusRow && archiveStatusRow.status === 'failed'
+                            ? t('teamhub', 'Retry delete')
+                            : t('teamhub', 'Delete team') }}
                     </NcButton>
                 </div>
             </div>
+
+            <!-- Archive modal -->
+            <ArchiveTeamModal
+                :show="showArchiveModal"
+                :team-id="team.id"
+                :archive-settings="archiveSettings"
+                @close="showArchiveModal = false"
+                @archived="onTeamArchived" />
 
             <!-- Transfer ownership confirmation dialog -->
             <NcDialog
@@ -618,6 +657,7 @@ import ImageIcon from 'vue-material-design-icons/Image.vue'
 import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
 import UploadIcon from 'vue-material-design-icons/Upload.vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
+import ArchiveTeamModal from './ArchiveTeamModal.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -635,6 +675,7 @@ export default {
         MessageIcon, FolderIcon, FolderAccountIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
         ImageIcon, TrashCanOutline, UploadIcon, AccountArrowRight,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
+        ArchiveTeamModal,
     },
     props: {
         team: { type: Object, required: true },
@@ -653,6 +694,9 @@ export default {
             saving: false,
             configSaved: false,
             deleting: false,
+            archiving: false,
+            showArchiveModal: false,
+            archiveSettings: {},
             changingLevel: null,
             circleConfig: {
                 open: false,
@@ -687,6 +731,9 @@ export default {
             selectedOwner: null,
             transferringOwner: false,
             pendingOwnerTransfer: null,
+            // Archive status (fetched when danger tab opens)
+            archiveStatusRow: null,
+            archiveStatusLoading: false,
         }
     },
     computed: {
@@ -812,7 +859,13 @@ export default {
         'team.id'() {
             this.editedDescription = this.team.description || ''
             this.activeTab = 'description'
+            this.archiveStatusRow = null
             this.loadAll()
+        },
+        activeTab(tab) {
+            if (tab === 'danger') {
+                this.loadArchiveStatus()
+            }
         },
     },
     mounted() {
@@ -1056,6 +1109,36 @@ export default {
             } finally {
                 this.transferringOwner = false
             }
+        },
+
+        async loadArchiveStatus() {
+            this.archiveStatusLoading = true
+            try {
+                const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/archive/status`))
+                this.archiveStatusRow = data.pending || null
+            } catch (err) {
+                // Non-fatal — just don't show a stale failed banner
+                this.archiveStatusRow = null
+            } finally {
+                this.archiveStatusLoading = false
+            }
+        },
+
+        async openArchiveModal() {
+            // Fetch archive settings so the modal can display mode and path.
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/archive/settings'))
+                this.archiveSettings = data
+            } catch (err) {
+                this.archiveSettings = {}
+            }
+            this.showArchiveModal = true
+        },
+
+        onTeamArchived(pendingRow) {
+            this.archiveStatusRow = pendingRow
+            showSuccess(t('teamhub', 'Team maintenance: Action executed.'))
+            this.$emit('team-deleted')
         },
 
         async confirmDeleteTeam() {
@@ -1778,6 +1861,49 @@ export default {
 .manage-danger-desc {
     font-size: 13px;
     color: var(--color-text-maxcontrast);
+}
+
+/* Archive status notices in the danger zone */
+.manage-archive-notice {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-radius: var(--border-radius);
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+
+.manage-archive-notice--pending {
+    background: #fff8e1;
+    border: 2px solid #f9a825;
+    color: #3e2a00;
+}
+
+.manage-archive-notice--pending strong {
+    color: #3e2a00;
+    font-size: 14px;
+}
+
+.manage-archive-notice--failed {
+    background: #ffebee;
+    border: 2px solid #c62828;
+    color: #7f0000;
+}
+
+.manage-archive-notice--failed strong {
+    color: #7f0000;
+    font-size: 14px;
+}
+
+.manage-archive-notice__reason {
+    font-family: monospace;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.07);
+    border-radius: 3px;
+    padding: 4px 6px;
+    word-break: break-word;
+    color: inherit;
 }
 
 /* ── Team image ────────────────────────────────────────────────── */

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Service\AuditService;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
@@ -36,14 +37,28 @@ use Psr\Log\LoggerInterface;
 class MemberService {
 
     public function __construct(
-        private ResourceService $resourceService,
-        private IUserSession $userSession,
-        private IAppManager $appManager,
-        private IUserManager $userManager,
-        private ContainerInterface $container,
-        private LoggerInterface $logger,
-        private AuditService $auditService,
+        private ResourceService      $resourceService,
+        private IUserSession         $userSession,
+        private IAppManager          $appManager,
+        private IUserManager         $userManager,
+        private ContainerInterface   $container,
+        private LoggerInterface      $logger,
+        private AuditService         $auditService,
+        private PendingDeletionMapper $pendingMapper,
     ) {
+    }
+
+    /**
+     * Throw if the team is in a pending-deletion state.
+     * Call this at the start of every write operation that targets a team.
+     */
+    private function assertTeamNotPendingDeletion(string $teamId): void {
+        if ($this->pendingMapper->isTeamPendingDeletion($teamId)) {
+            throw new \Exception(
+                'This team is pending deletion and does not accept changes. Contact your administrator to restore it.',
+                409
+            );
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -547,6 +562,8 @@ class MemberService {
      */
     public function updateMemberLevel(string $teamId, string $userId, int $newLevel): array {
 
+        $this->assertTeamNotPendingDeletion($teamId);
+
         $caller = $this->userSession->getUser();
         if (!$caller) {
             throw new \Exception('User not authenticated');
@@ -769,6 +786,8 @@ class MemberService {
      */
     public function leaveTeam(string $teamId): void {
 
+        $this->assertTeamNotPendingDeletion($teamId);
+
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
@@ -846,6 +865,7 @@ class MemberService {
      */
     public function removeMember(string $teamId, string $targetId, int $userType = 1): void {
 
+        $this->assertTeamNotPendingDeletion($teamId);
         $this->requireAdminLevel($teamId);
 
         $db = $this->container->get(\OCP\IDBConnection::class);
@@ -933,8 +953,9 @@ class MemberService {
      */
     public function inviteMembers(string $teamId, array $members): array {
 
+        $this->assertTeamNotPendingDeletion($teamId);
+
         // Moderator (level >= 4) or above may invite — matches the controller gate.
-        // Previously this called requireAdminLevel() which silently rejected moderators.
         $this->requireModeratorLevel($teamId);
 
         $user = $this->userSession->getUser();
@@ -1542,6 +1563,7 @@ class MemberService {
      */
     public function approveRequest(string $teamId, string $userId): void {
 
+        $this->assertTeamNotPendingDeletion($teamId);
         $this->requireAdminLevel($teamId);
 
         $user = $this->userSession->getUser();

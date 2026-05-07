@@ -85,6 +85,126 @@ class CalendarService {
      *
      * ACL type 7 = circle, per official Deck API docs.
      */
+
+    /**
+     * Suspend team access to the calendar by removing the dav_shares row for the circle.
+     * The calendar and all its events remain under the owner's account.
+     *
+     * Returns {calendar_id, principal_uri} for resume, or null if not found.
+     *
+     * @return array{calendar_id: int, principal_uri: string}|null
+     */
+    public function suspendCalendarAccess(string $teamId, \OCP\IDBConnection $db): ?array {
+        if (!$this->appManager->isInstalled('calendar')) {
+            return null;
+        }
+        try {
+            $principalUri = 'principals/circles/' . $teamId;
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('resourceid', 'principaluri')
+                ->from('dav_shares')
+                ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return null;
+            }
+
+            $calendarId  = (int)$row['resourceid'];
+            $ownerUri    = $this->resolveCalendarOwnerUri($calendarId, $db);
+
+            // Delete the dav_shares row for the circle principal.
+            $dqb = $db->getQueryBuilder();
+            $dqb->delete('dav_shares')
+                ->where($dqb->expr()->eq('type', $dqb->createNamedParameter('calendar')))
+                ->andWhere($dqb->expr()->eq('principaluri', $dqb->createNamedParameter($principalUri)))
+                ->executeStatement();
+
+            $this->logger->debug('[CalendarService] suspendCalendarAccess: dav_shares row removed', [
+                'teamId' => $teamId, 'calendarId' => $calendarId, 'app' => Application::APP_ID,
+            ]);
+
+            return [
+                'calendar_id'   => $calendarId,
+                'principal_uri' => $ownerUri,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('[CalendarService] suspendCalendarAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Resume team access to the calendar by re-inserting the dav_shares row.
+     */
+    public function resumeCalendarAccess(int $calendarId, string $teamId, \OCP\IDBConnection $db): bool {
+        if (!$this->appManager->isInstalled('calendar')) {
+            return false;
+        }
+        try {
+            $principalUri = 'principals/circles/' . $teamId;
+
+            // Idempotency check — skip if the row already exists.
+            $chk  = $db->getQueryBuilder();
+            $cres = $chk->select($chk->func()->count('*', 'cnt'))
+                ->from('dav_shares')
+                ->where($chk->expr()->eq('type', $chk->createNamedParameter('calendar')))
+                ->andWhere($chk->expr()->eq('principaluri', $chk->createNamedParameter($principalUri)))
+                ->andWhere($chk->expr()->eq('resourceid', $chk->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeQuery();
+            $exists = (int)$cres->fetchOne() > 0;
+            $cres->closeCursor();
+
+            if ($exists) {
+                return true;
+            }
+
+            $iqb = $db->getQueryBuilder();
+            $iqb->insert('dav_shares')
+                ->setValue('principaluri', $iqb->createNamedParameter($principalUri))
+                ->setValue('type',        $iqb->createNamedParameter('calendar'))
+                ->setValue('access',      $iqb->createNamedParameter(1))  // read-write
+                ->setValue('resourceid',  $iqb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->executeStatement();
+
+            $this->logger->debug('[CalendarService] resumeCalendarAccess: dav_shares row re-inserted', [
+                'teamId' => $teamId, 'calendarId' => $calendarId, 'app' => Application::APP_ID,
+            ]);
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error('[CalendarService] resumeCalendarAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Resolve the calendar owner's principaluri from oc_calendars.
+     */
+    private function resolveCalendarOwnerUri(int $calendarId, \OCP\IDBConnection $db): string {
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('principaluri')
+                ->from('calendars')
+                ->where($qb->expr()->eq('id', $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+            return $row ? (string)$row['principaluri'] : '';
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
     public function deleteCalendar(string $teamId, \OCP\IDBConnection $db): array {
         try {
             // Find the calendar via dav_shares: principaluri = principals/circles/{teamId}

@@ -3,6 +3,49 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.27.0] — 2026-05-07
+
+### Added
+- **Calendar extractor (`apps/calendar/`).** Archive includes `calendar.json` (metadata: name, colour, timezone, event count), `events.json` (structured VEVENT/VTODO/VJOURNAL array with organizer, attendees, recurrence rules), and `events.ics` (merged ICS file openable in any calendar client). Looked up via `dav_shares` → `CalDavBackend::getCalendarObjects()`. Pseudonymizes organizer/attendee mailto: addresses when policy is on.
+- **Files extractor (`apps/files/`).** Archive includes a full recursive copy of the team's shared folder. Uses `getLocalFile()` + `copy()` for local storage (no memory overhead); falls back to `getContent()` for external storage with a 100 MB per-file skip guard. Files folder and share left completely intact during grace period — only destroyed at hard-delete. `apps/files/index.json` lists all files with sizes and any skip reasons.
+- **Talk extractor (`apps/talk/`).** Archive includes `messages.json` (all chat messages from `oc_comments` where `object_type='chat'` and `object_id={room_id}`) and `transcript.html` (self-contained offline viewer with date separators, system message rendering, and rich-object placeholder highlighting). Fixed: `object_id` stores the integer room ID, not the room token.
+- **Deck extractor (`apps/deck/`).** Archive includes `board.json` (full board in Deck's import-compatible format: stacks, cards with labels/assignees/comments nested inline) and `board.html` (self-contained offline kanban view with label colour chips, due date highlighting, assignee badges). Card comments sourced from `oc_comments` where `object_type='deckCard'`.
+- **Resource suspension on soft-delete.** When a team is archived in soft-delete mode, the team circle is removed from each connected NC app resource (Talk room attendee, Files circle share, Calendar dav_shares row, Deck ACL row) so members lose access immediately. Content stays intact for restore.
+- **Resource resume on admin restore.** `restorePendingDeletion` re-adds the circle to each suspended resource using IDs stored in `suspended_resources` on the pending_dels row. Idempotent — skips re-insert if row already exists.
+- **`suspended_resources` column** added to `teamhub_pending_dels` (migration `Version000326000`). JSON blob storing the IDs needed to resume each app resource.
+- **Pre-flight size check includes destination free space.** Archive is refused if the estimated size exceeds either the admin cap or 90% of the free space at the archive destination, whichever is more restrictive. Error message specifies which constraint was hit.
+- **`oc_filecache` folder size in pre-flight.** Real folder size read from NC's file cache (accurate recursive total) rather than estimated from row counts.
+- **Audit team list filters deleted teams.** `GET /admin/audit/teams` no longer returns hard-deleted teams (circle gone) or soft-deleted teams (pending grace period). Both are excluded from the dropdown.
+- **`PendingDeletionJob` destroys app resources at grace period expiry.** Calls `ResourceService::deleteTeamResource()` for each enabled app before `deleteTeam()`, ensuring the Files folder and other content is fully removed at the scheduled time.
+
+### Fixed
+- **Deck `resumeDeckAccess` permissions.** Re-inserted circle ACL row now uses `dbIntrospection->getTableColumns()` for column detection, matching the creation pattern. Handles `permission_edit`, `permission_share`, `permission_manage` (Deck 1.x) and `permissions` bitmask (Deck 2.x). `enforceAclEditPermissions()` called after insert as a belt-and-braces check.
+- **Talk message extraction.** `oc_comments.object_id` stores the integer room ID as a string, not the room token. Query now uses `(string)$roomId` which correctly returns messages.
+- **`fclose()` warning on ZIP write.** NC's `putContent()` closes stream handles internally; switched to passing file content as string to avoid double-close.
+- **`OC_Util::getVersion()` and `OC::$server` removed.** Replaced with `IConfig::getSystemValue('version')` and injected `IAppManager::getAppVersion()`.
+
+### Security
+- Resource suspension removes circle access immediately on archive initiation — members cannot use Talk, Files, Calendar, or Deck during the grace period.
+- `suspended_resources` JSON stored on the DB row; access is admin-only via `AuthorizedAdminSetting`.
+
+## [3.25.0] — 2026-05-06
+
+### Added
+- **Team archiving — Session A (foundation).** Two-action danger zone: "Archive team" (amber) produces a ZIP archive of all team data before deleting; "Delete team" (red, unchanged) deletes immediately without an archive.
+- **`teamhub_pending_dels` table.** Shadow table tracking teams in each phase of archiving. Status='pending' hides the team from all member-facing list endpoints. Grace period is immutable once set.
+- **Archive bundle format v1.0.** ZIP containing `manifest.json`, `index.html` (self-contained client-side viewer), `teamhub/` (messages, comments, poll votes, web links, widget layouts, integrations, audit log), and `circles/` (team metadata, members, effective users). `apps/` folder is reserved for Sessions B–E.
+- **`ArchivePseudonymizer`.** Admin-policy-driven per-archive UID → alias replacement. Alias map is never written to the archive. Message and comment body text is not processed.
+- **Admin "Archive" settings tab.** Deletion mode (soft30 / soft60 / hard), archive storage location (owner + folder path with fallback to team owner's Files), max archive size cap (default 5 GB), pseudonymize toggle.
+- **Admin archived-teams table.** Lists all pending-deletion rows with Restore (within grace period) and Force-delete actions.
+- **`PendingDeletionJob`.** Daily background job finalizing teams whose soft-delete grace period has expired.
+- **7 new API endpoints.** `POST /teams/{teamId}/archive`, `GET /teams/{teamId}/archive/status`, `GET|PUT /admin/archive/settings`, `GET /admin/archive/pending`, `POST /admin/archive/pending/{id}/restore`, `POST /admin/archive/pending/{id}/purge`.
+- **Write guard on all MemberService mutation methods.** Attempting to invite, remove, level-change, or approve members on a pending-deletion team returns 409 Conflict.
+
+### Security
+- All admin archive endpoints carry `#[AuthorizedAdminSetting]` — NC framework enforces admin-only.
+- Archive ZIP written atomically (`.zip.tmp` → rename); on failure the partial directory is deleted and the team is not deleted.
+- Archive storage writes through `IRootFolder` exclusively — no raw filesystem access outside NC's abstraction layer.
+
 ## [3.24.0] — 2026-05-05
 
 ### Added

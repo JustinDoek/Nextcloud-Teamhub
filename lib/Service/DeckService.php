@@ -305,6 +305,167 @@ class DeckService {
      * @param string $table Un-prefixed table name, e.g. 'circles_member'
      * @return string[]
      */
+    /**
+     * Suspend team access to the Deck board by removing the circle ACL row.
+     * The board, stacks, and cards all remain intact.
+     *
+     * Returns {board_id, acl_table, type} for resume, or null if not found.
+     *
+     * @return array{board_id: int, acl_table: string, type: int}|null
+     */
+    public function suspendDeckAccess(string $teamId, \OCP\IDBConnection $db): ?array {
+        if (!$this->appManager->isInstalled('deck')) {
+            return null;
+        }
+        try {
+            $boardId  = null;
+            $aclTable = null;
+
+            foreach (['deck_board_acl', 'deck_acl'] as $tbl) {
+                try {
+                    $qb  = $db->getQueryBuilder();
+                    $res = $qb->select('board_id')
+                        ->from($tbl)
+                        ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
+                        ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    $row = $res->fetch();
+                    $res->closeCursor();
+                    if ($row) {
+                        $boardId  = (int)$row['board_id'];
+                        $aclTable = $tbl;
+                        break;
+                    }
+                } catch (\Throwable) {}
+            }
+
+            if ($boardId === null || $aclTable === null) {
+                return null;
+            }
+
+            // Remove only the circle ACL row — owner and user ACL rows stay.
+            $dqb = $db->getQueryBuilder();
+            $dqb->delete($aclTable)
+                ->where($dqb->expr()->eq('board_id',    $dqb->createNamedParameter($boardId)))
+                ->andWhere($dqb->expr()->eq('participant', $dqb->createNamedParameter($teamId)))
+                ->andWhere($dqb->expr()->eq('type',        $dqb->createNamedParameter(7)))
+                ->executeStatement();
+
+            $this->logger->debug('[DeckService] suspendDeckAccess: circle ACL row removed', [
+                'teamId' => $teamId, 'boardId' => $boardId, 'table' => $aclTable,
+                'app' => Application::APP_ID,
+            ]);
+
+            return [
+                'board_id'  => $boardId,
+                'acl_table' => $aclTable,
+                'type'      => 7,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('[DeckService] suspendDeckAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Resume team access to the Deck board by re-inserting the circle ACL row.
+     * Idempotent — skips insert if the row already exists.
+     *
+     * Uses dbIntrospection to detect which permission columns exist, matching
+     * the creation pattern in createDeckBoard(). Handles both:
+     *   Deck 1.x: permission_edit, permission_share, permission_manage (boolean cols)
+     *   Deck 2.x: permissions bitmask (read=1 | edit=2 = 3)
+     */
+    public function resumeDeckAccess(
+        int $boardId,
+        string $teamId,
+        string $aclTable,
+        \OCP\IDBConnection $db
+    ): bool {
+        if (!$this->appManager->isInstalled('deck')) {
+            return false;
+        }
+        try {
+            // Idempotency check.
+            $chk  = $db->getQueryBuilder();
+            $cres = $chk->select($chk->func()->count('*', 'cnt'))
+                ->from($aclTable)
+                ->where($chk->expr()->eq('board_id',    $chk->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($chk->expr()->eq('participant', $chk->createNamedParameter($teamId)))
+                ->andWhere($chk->expr()->eq('type',        $chk->createNamedParameter(7)))
+                ->executeQuery();
+            $exists = (int)$cres->fetchOne() > 0;
+            $cres->closeCursor();
+
+            if ($exists) {
+                return true;
+            }
+
+            // Detect actual columns so we match the Deck version on this instance.
+            $columns = $this->dbIntrospection->getTableColumns($aclTable);
+            if (empty($columns)) {
+                // Table doesn't exist — try the other ACL table name.
+                $fallback = ($aclTable === 'deck_board_acl') ? 'deck_acl' : 'deck_board_acl';
+                $columns  = $this->dbIntrospection->getTableColumns($fallback);
+                if (!empty($columns)) {
+                    $aclTable = $fallback;
+                }
+            }
+
+            $iqb = $db->getQueryBuilder();
+            $iqb->insert($aclTable)
+                ->setValue('board_id',    $iqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->setValue('type',        $iqb->createNamedParameter(7))
+                ->setValue('participant', $iqb->createNamedParameter($teamId));
+
+            // Deck 1.x individual boolean permission columns.
+            // permission_edit=1, permission_share=0, permission_manage=0
+            // matches the original circle ACL row created by createDeckBoard().
+            foreach ([
+                'permission_read'   => 1,
+                'permission_edit'   => 1,
+                'permission_share'  => 0,
+                'permission_manage' => 0,
+            ] as $col => $val) {
+                if (in_array($col, $columns, true)) {
+                    $iqb->setValue($col, $iqb->createNamedParameter($val, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+                }
+            }
+
+            // Deck 2.x single bitmask column: PERMISSION_READ(1) | PERMISSION_EDIT(2) = 3.
+            if (in_array('permissions', $columns, true)) {
+                $iqb->setValue('permissions', $iqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+            }
+
+            // owner column present in some Deck versions — always 0 for circle ACL rows.
+            if (in_array('owner', $columns, true)) {
+                $iqb->setValue('owner', $iqb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+            }
+
+            $iqb->executeStatement();
+
+            // Run the same post-insert permission enforcement used on creation,
+            // which fires individual UPDATEs per column to handle any column
+            // that wasn't set cleanly by the INSERT.
+            $this->enforceAclEditPermissions($boardId, $teamId, $db);
+
+            $this->logger->debug('[DeckService] resumeDeckAccess: circle ACL row re-inserted', [
+                'teamId' => $teamId, 'boardId' => $boardId, 'table' => $aclTable,
+                'app' => Application::APP_ID,
+            ]);
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error('[DeckService] resumeDeckAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
     public function deleteDeckBoard(string $teamId, \OCP\IDBConnection $db): array {
         try {
             // Find board_id via the circle ACL row (type=7 = circle)

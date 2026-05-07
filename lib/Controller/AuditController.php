@@ -70,6 +70,8 @@ class AuditController extends Controller {
             $teamIds  = array_map(static fn(array $r) => $r['team_id'], $summary);
 
             // Look up display names in one query.
+            // Only teams that still have a circles_circle row are included —
+            // this naturally excludes hard-deleted teams.
             $names = [];
             if (!empty($teamIds)) {
                 $qb = $this->db->getQueryBuilder();
@@ -86,15 +88,44 @@ class AuditController extends Controller {
                 $r->closeCursor();
             }
 
+            // Collect team IDs that are in a soft-delete grace period
+            // (status='pending' in teamhub_pending_dels). These teams still
+            // have a circles_circle row but must not appear in the dropdown.
+            $pendingIds = [];
+            if (!empty($teamIds)) {
+                $pdQb = $this->db->getQueryBuilder();
+                $pdQb->select('team_id')
+                    ->from('teamhub_pending_dels')
+                    ->where($pdQb->expr()->in(
+                        'team_id',
+                        $pdQb->createNamedParameter($teamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)
+                    ))
+                    ->andWhere($pdQb->expr()->eq('status', $pdQb->createNamedParameter('pending')));
+                $pdRes = $pdQb->executeQuery();
+                while ($pdRow = $pdRes->fetch()) {
+                    $pendingIds[(string)$pdRow['team_id']] = true;
+                }
+                $pdRes->closeCursor();
+            }
+
             $teams = [];
             foreach ($summary as $row) {
                 $tid = $row['team_id'];
+
+                // Exclude hard-deleted teams (no circles_circle row — name not resolved).
+                if (!isset($names[$tid])) {
+                    continue;
+                }
+
+                // Exclude soft-deleted teams (pending grace period).
+                // Their audit log is archived in the ZIP; no need to surface here.
+                if (isset($pendingIds[$tid])) {
+                    continue;
+                }
+
                 $teams[] = [
                     'team_id'       => $tid,
-                    // The team may have been deleted — fall back to the team_id
-                    // as display so admins can still see the audit history of
-                    // a now-deleted team.
-                    'display_name'  => $names[$tid] ?? $tid,
+                    'display_name'  => $names[$tid],
                     'event_count'   => $row['event_count'],
                     'last_event_at' => $row['last_event_at'],
                 ];

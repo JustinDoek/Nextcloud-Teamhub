@@ -346,6 +346,75 @@ class TalkService {
     }
 
     /**
+     * Suspend team access to the Talk room by removing the circle attendee row.
+     * The room and all messages remain intact. Only the circle entry is removed,
+     * so individual user attendee rows are untouched.
+     *
+     * Returns the room_id for storage in suspended_resources, or null if no
+     * Talk room exists for this team.
+     */
+    public function suspendTalkAccess(string $teamId, \OCP\IDBConnection $db): ?int {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return null;
+        }
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('room_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return null;
+            }
+
+            $roomId = (int)$row['room_id'];
+
+            // Remove only the circle attendee row — individual users keep their rows.
+            $dqb = $db->getQueryBuilder();
+            $dqb->delete('talk_attendees')
+                ->where($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('circles')))
+                ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
+                ->andWhere($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId)))
+                ->executeStatement();
+
+            $this->logger->debug('[TalkService] suspendTalkAccess: circle attendee removed', [
+                'teamId' => $teamId, 'roomId' => $roomId, 'app' => Application::APP_ID,
+            ]);
+
+            return $roomId;
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] suspendTalkAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Resume team access to the Talk room by re-inserting the circle attendee row.
+     * Uses the existing insertTalkCircleAttendee() which is idempotent.
+     */
+    public function resumeTalkAccess(int $roomId, string $teamId, string $teamName, \OCP\IDBConnection $db): bool {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return false;
+        }
+        try {
+            return $this->insertTalkCircleAttendee($roomId, $teamId, $teamName, $db);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] resumeTalkAccess failed', [
+                'teamId' => $teamId, 'roomId' => $roomId, 'error' => $e->getMessage(),
+                'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
      * Create a folder in the user's files and share it with the circle.
      */
     public function deleteTalkRoom(string $teamId, \OCP\IDBConnection $db): array {

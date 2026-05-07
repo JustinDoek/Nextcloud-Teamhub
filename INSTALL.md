@@ -25,6 +25,17 @@
 
 Database tables are created automatically on first enable.
 
+## From source
+
+```bash
+cd /path/to/nextcloud/apps
+git clone https://github.com/jdoek/teamhub.git teamhub
+cd teamhub
+npm install
+npm run build
+sudo -u www-data php occ app:enable teamhub
+```
+
 ## After upgrading
 
 ```bash
@@ -40,5 +51,4 @@ TeamHub auto-detects the following apps. Enable them in Nextcloud for the corres
 | Talk (`spreed`) | Chat tab, Talk token in activity feed |
 | Calendar | Calendar tab, upcoming events widget |
 | Deck | Deck tab, open tasks widget |
-| Files | Files tab, favorite files and recently modified files widgets |
 | IntraVox | Pages widget |

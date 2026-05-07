@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
+use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Db\TeamAppMapper;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
@@ -43,17 +44,18 @@ class TeamService {
     private $circlesManager = null;
 
     public function __construct(
-        private MemberService $memberService,
-        private ResourceService $resourceService,
-        private ActivityService $activityService,
-        private TeamAppMapper $teamAppMapper,
-        private IUserSession $userSession,
-        private IAppManager $appManager,
-        private ContainerInterface $container,
-        private LoggerInterface $logger,
-        private IUserManager $userManager,
-        private TeamImageService $teamImageService,
-        private AuditService $auditService,
+        private MemberService        $memberService,
+        private ResourceService      $resourceService,
+        private ActivityService      $activityService,
+        private TeamAppMapper        $teamAppMapper,
+        private IUserSession         $userSession,
+        private IAppManager          $appManager,
+        private ContainerInterface   $container,
+        private LoggerInterface      $logger,
+        private IUserManager         $userManager,
+        private TeamImageService     $teamImageService,
+        private AuditService         $auditService,
+        private PendingDeletionMapper $pendingMapper,
     ) {
     }
 
@@ -181,6 +183,30 @@ class TeamService {
             $result->closeCursor();
 
             $ids = array_keys($ids);
+
+            // ── Filter: exclude teams pending deletion ────────────────────────
+            // A pending-deletion team is hidden from all member list queries.
+            // Only the admin pending-deletions endpoint surfaces these teams.
+            if (!empty($ids)) {
+                $pdQb  = $db->getQueryBuilder();
+                $pdRes = $pdQb->select('team_id')
+                    ->from('teamhub_pending_dels')
+                    ->where($pdQb->expr()->in(
+                        'team_id',
+                        $pdQb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)
+                    ))
+                    ->andWhere($pdQb->expr()->eq('status', $pdQb->createNamedParameter('pending')))
+                    ->executeQuery();
+                $pendingIds = [];
+                while ($pdRow = $pdRes->fetch()) {
+                    $pendingIds[$pdRow['team_id']] = true;
+                }
+                $pdRes->closeCursor();
+                if (!empty($pendingIds)) {
+                    $ids  = array_values(array_filter($ids, fn($id) => !isset($pendingIds[$id])));
+                    $rows = array_values(array_filter($rows,  fn($r) => !isset($pendingIds[$r['unique_id']])));
+                }
+            }
 
             $this->logger->debug('[TeamService] getUserTeams: found teams', [
                 'uid' => $uid, 'count' => count($ids), 'singleId' => $userSingleId, 'app' => Application::APP_ID,

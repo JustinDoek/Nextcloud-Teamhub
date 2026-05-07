@@ -1,6 +1,6 @@
-# TeamHub API Endpoints — v3.23.0
+# TeamHub API Endpoints — v3.27.0
 
-> No endpoint surface changes between 3.17.0 and 3.18.0.
+> No new endpoints added in v3.26.x–3.27.0. All archive endpoints were added in v3.25.0 and remain unchanged.
 > v3.18.0 is a frontend-only release (iframe overhaul + Audit tab info banner).
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
@@ -21,6 +21,77 @@ CSRF protection is disabled (`#[NoCSRFRequired]`) on all listed endpoints.
 All team-scoped membership checks use a direct indexed DB query against `circles_member` — no Circles API session overhead.
 
 ---
+
+## Archive (added v3.25.0)
+
+### POST `/teams/{teamId}/archive`
+Initiate an archive-and-delete for the team. Produces a ZIP archive of all TeamHub and Circles
+data synchronously within the request, registers a `teamhub_pending_dels` row, then either
+hard-deletes immediately (mode=hard) or leaves deletion for the daily cron (mode=soft30/soft60).
+
+**Auth:** Team owner (level 9).
+**Response 200:** `{ id, teamId, teamName, archivedAt, hardDeleteAt, daysRemaining, archivePath, archiveBytes, archivedBy, status, failureReason }`
+**Response 403:** Caller is not team owner.
+**Response 409:** Team already has a pending-deletion row.
+**Response 413:** Estimated archive size exceeds configured cap.
+**Response 500:** Archive production failed. Team is NOT deleted. Row is set to status='failed'. Retry is possible.
+
+---
+
+### GET `/teams/{teamId}/archive/status`
+Returns the pending-deletion row for this team, or `{ "pending": null }` if none exists.
+
+**Auth:** Authenticated.
+**Response 200:** `{ pending: { ...row } | null }`
+
+---
+
+### GET `/admin/archive/pending`
+Returns a paginated list of all pending-deletion rows for the admin archived-teams table.
+
+**Auth:** NC admin.
+**Query params:** `limit` (default 50, max 200), `offset` (default 0).
+**Response 200:** `{ rows: [ ...pendingRow ], total: int }`
+
+---
+
+### POST `/admin/archive/pending/{id}/restore`
+Restore a pending-deletion team within its grace period. Sets `status='restored'`, making
+the team visible again. The archive ZIP is retained.
+
+**Auth:** NC admin.
+**Response 200:** `{ restored: true, teamId, teamName }`
+**Response 404:** Row not found.
+**Response 409:** Status is not 'pending' (already completed/failed/restored).
+
+---
+
+### POST `/admin/archive/pending/{id}/purge`
+Force immediate hard-delete of a pending-deletion team, ignoring remaining grace period.
+
+**Auth:** NC admin.
+**Response 200:** `{ purged: true, teamId, teamName }`
+**Response 404:** Row not found.
+
+---
+
+### GET `/admin/archive/settings`
+Returns the current archive configuration.
+
+**Auth:** NC admin.
+**Response 200:** `{ archiveMode: 'soft30'|'soft60'|'hard', archiveOwner: string, archivePath: string, archiveMaxMb: int, anonymizeData: bool }`
+
+---
+
+### PUT `/admin/archive/settings`
+Save archive configuration. All fields are optional — only provided fields are updated.
+
+**Auth:** NC admin.
+**Body (JSON):** `{ archiveMode?, archiveOwner?, archivePath?, archiveMaxMb?, anonymizeData? }`
+**Response 200:** `{ saved: true }`
+
+---
+
 
 ## Teams
 

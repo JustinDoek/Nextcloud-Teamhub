@@ -344,6 +344,114 @@ class FilesService {
         return ['folder_id' => $folder->getId(), 'path' => $folder->getPath(), 'share_id' => $share->getId()];
     }
 
+    /**
+     * Suspend team access to the shared Files folder by removing the circle share row.
+     * The folder itself and its contents remain intact in the owner's Files.
+     *
+     * Returns an array of IDs needed for resume, or null if no share found.
+     *
+     * @return array{share_id: int, uid_initiator: string, file_source: int, permissions: int}|null
+     */
+    public function suspendFilesAccess(string $teamId, \OCP\IDBConnection $db): ?array {
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('id', 'uid_initiator', 'file_source', 'permissions')
+                ->from('share')
+                ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return null;
+            }
+
+            $shareId     = (int)$row['id'];
+            $permissions = (int)$row['permissions'];
+
+            // Remove only the share row — the folder node is untouched.
+            try {
+                $shareManager = $this->container->get(\OCP\Share\IManager::class);
+                $share        = $shareManager->getShareById('ocinternal:' . $shareId);
+                $shareManager->deleteShare($share);
+            } catch (\Throwable $e) {
+                // Fallback to direct QB delete if IManager fails.
+                $this->logger->warning('[FilesService] suspendFilesAccess: IManager delete failed, using QB', [
+                    'shareId' => $shareId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                $dqb = $db->getQueryBuilder();
+                $dqb->delete('share')
+                    ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId)))
+                    ->executeStatement();
+            }
+
+            $this->logger->debug('[FilesService] suspendFilesAccess: share removed', [
+                'teamId' => $teamId, 'shareId' => $shareId, 'app' => Application::APP_ID,
+            ]);
+
+            return [
+                'share_id'      => $shareId,
+                'uid_initiator' => (string)$row['uid_initiator'],
+                'file_source'   => (int)$row['file_source'],
+                'permissions'   => $permissions,
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('[FilesService] suspendFilesAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Resume team access to the shared Files folder by re-creating the circle share.
+     * Uses the NC IManager to ensure all share metadata is populated correctly.
+     */
+    public function resumeFilesAccess(
+        string $teamId,
+        string $ownerUid,
+        int $fileId,
+        int $permissions,
+        \OCP\IDBConnection $db
+    ): bool {
+        try {
+            $rootFolder  = $this->container->get(\OCP\Files\IRootFolder::class);
+            $userFolder  = $rootFolder->getUserFolder($ownerUid);
+            $nodes       = $userFolder->getById($fileId);
+
+            if (empty($nodes)) {
+                $this->logger->warning('[FilesService] resumeFilesAccess: folder node not found', [
+                    'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
+
+            $shareManager = $this->container->get(\OCP\Share\IManager::class);
+            $share        = $shareManager->newShare();
+            $share->setNode($nodes[0]);
+            $share->setShareType(7);          // IShare::TYPE_CIRCLE
+            $share->setSharedWith($teamId);
+            $share->setShareOwner($ownerUid);
+            $share->setSharedBy($ownerUid);
+            $share->setPermissions($permissions);
+            $shareManager->createShare($share);
+
+            $this->logger->debug('[FilesService] resumeFilesAccess: share re-created', [
+                'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
+            ]);
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error('[FilesService] resumeFilesAccess failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
     public function deleteSharedFolder(string $teamId, \OCP\IDBConnection $db): array {
         try {
             $qb  = $db->getQueryBuilder();

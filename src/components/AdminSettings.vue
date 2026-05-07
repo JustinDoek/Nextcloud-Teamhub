@@ -768,8 +768,236 @@
             </div>
         </NcSettingsSection>
 
-        <!-- ── Save row — only for settings tabs, not statistics/maintenance/audit ─ -->
-        <div v-show="!(['statistics','maintenance','audit'].includes(activeTab))" class="admin-save-row">
+        <!-- ──────────────────────────────────────────────────────────────────
+             Archive tab
+             ───────────────────────────────────────────────────────────────── -->
+        <NcSettingsSection
+            v-show="activeTab === 'archive'"
+            id="tab-panel-archive"
+            role="tabpanel"
+            :name="t('teamhub', 'Archive')"
+            :description="t('teamhub', 'Configure how teams are archived when deleted and view teams pending deletion.')">
+
+            <!-- Archive settings card -->
+            <div class="archive-admin">
+
+                <h3 class="archive-admin__heading">{{ t('teamhub', 'Archive policy') }}</h3>
+
+                <!-- Deletion mode -->
+                <fieldset class="archive-admin__fieldset">
+                    <legend class="archive-admin__legend">{{ t('teamhub', 'Deletion mode') }}</legend>
+                    <NcCheckboxRadioSwitch
+                        v-model="archiveSettings.archiveMode"
+                        value="soft30"
+                        name="archive_mode"
+                        type="radio">
+                        {{ t('teamhub', 'Soft delete — 30 day grace period') }}
+                    </NcCheckboxRadioSwitch>
+                    <NcCheckboxRadioSwitch
+                        v-model="archiveSettings.archiveMode"
+                        value="soft60"
+                        name="archive_mode"
+                        type="radio">
+                        {{ t('teamhub', 'Soft delete — 60 day grace period') }}
+                    </NcCheckboxRadioSwitch>
+                    <NcCheckboxRadioSwitch
+                        v-model="archiveSettings.archiveMode"
+                        value="hard"
+                        name="archive_mode"
+                        type="radio">
+                        {{ t('teamhub', 'Hard delete (no grace period)') }}
+                    </NcCheckboxRadioSwitch>
+                    <p class="archive-admin__help">
+                        {{ t('teamhub', 'Soft delete hides the team immediately and permanently deletes it after the grace period. Administrators can restore the team before the deadline.') }}
+                    </p>
+                </fieldset>
+
+                <!-- Archive storage location — single field -->
+                <div class="archive-admin__field">
+                    <label class="archive-admin__label" for="archive-location">
+                        {{ t('teamhub', 'Archive location (Team Folder)') }}
+                    </label>
+                    <input
+                        id="archive-location"
+                        v-model="archiveSettings.archiveLocation"
+                        type="text"
+                        class="archive-admin__input"
+                        :placeholder="t('teamhub', 'Leave empty to use each team owner\'s Files')" />
+                    <p class="archive-admin__help">
+                        {{ t('teamhub', 'Paste the internal link of a Team Folder (e.g. /f/150770 from the URL bar). Leave empty to save archives in each team owner\'s Files under "TeamHub Archives".') }}
+                    </p>
+                </div>
+
+                <!-- Max archive size -->
+                <div class="archive-admin__field">
+                    <label class="archive-admin__label" for="archive-max-mb">
+                        {{ t('teamhub', 'Maximum archive size (MB)') }}
+                    </label>
+                    <input
+                        id="archive-max-mb"
+                        v-model.number="archiveSettings.archiveMaxMb"
+                        type="number"
+                        min="1"
+                        max="51200"
+                        class="archive-admin__input archive-admin__input--short" />
+                    <p class="archive-admin__help">
+                        {{ t('teamhub', 'If the estimated archive size exceeds this limit, the archiving is refused. Default: 5120 MB (5 GB).') }}
+                    </p>
+                </div>
+
+                <!-- Pseudonymize -->
+                <div class="archive-admin__field">
+                    <NcCheckboxRadioSwitch
+                        v-model="archiveSettings.anonymizeData"
+                        type="checkbox"
+                        @update:checked="archiveSettings.anonymizeData = $event">
+                        {{ t('teamhub', 'Pseudonymize personal identifiers') }}
+                    </NcCheckboxRadioSwitch>
+                    <p class="archive-admin__help">
+                        {{ t('teamhub', 'Replaces user identifiers (UIDs) in the archive with stable aliases. Message and comment text is preserved as-is — names mentioned within content are not removed. The archive remains personal data under GDPR but with reduced linkability.') }}
+                    </p>
+                </div>
+
+                <!-- Save button for archive settings -->
+                <div class="archive-admin__actions">
+                    <NcButton
+                        type="primary"
+                        :disabled="archiveSettingsSaving"
+                        @click="saveArchiveSettings">
+                        <template #icon>
+                            <NcLoadingIcon v-if="archiveSettingsSaving" :size="18" />
+                            <ContentSave v-else :size="18" />
+                        </template>
+                        {{ archiveSettingsSaving ? t('teamhub', 'Saving…') : t('teamhub', 'Save archive settings') }}
+                    </NcButton>
+                    <span v-if="archiveSettingsSaved" class="archive-admin__ok">
+                        ✓ {{ t('teamhub', 'Archive settings saved') }}
+                    </span>
+                    <span v-if="archiveSettingsError" class="archive-admin__err">
+                        {{ archiveSettingsError }}
+                    </span>
+                </div>
+
+                <!-- Pending deletions table -->
+                <h3 class="archive-admin__heading archive-admin__heading--mt">
+                    {{ t('teamhub', 'Archived teams') }}
+                </h3>
+
+                <div class="archive-admin__toolbar">
+                    <NcButton
+                        type="secondary"
+                        :disabled="pendingDelsLoading"
+                        :aria-label="t('teamhub', 'Refresh archived teams list')"
+                        @click="loadPendingDeletions">
+                        <template #icon>
+                            <NcLoadingIcon v-if="pendingDelsLoading" :size="18" />
+                            <RefreshIcon v-else :size="18" />
+                        </template>
+                        {{ t('teamhub', 'Refresh') }}
+                    </NcButton>
+                </div>
+
+                <p v-if="visiblePendingDels.length === 0 && !pendingDelsLoading" class="archive-admin__empty">
+                    {{ t('teamhub', 'No archived teams.') }}
+                </p>
+
+                <table v-else class="archive-admin__table" :aria-label="t('teamhub', 'Archived teams')">
+                    <caption class="archive-admin__table-caption">
+                        {{ t('teamhub', 'Teams pending deletion or with a failed archive attempt') }}
+                    </caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ t('teamhub', 'Team') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Archived by') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Archived') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Deletes in') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Size') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Status') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Actions') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody v-for="row in visiblePendingDels" :key="row.id">
+                        <tr>
+                            <td>{{ row.teamName }}</td>
+                            <td>{{ row.archivedBy }}</td>
+                            <td>{{ formatDate(row.archivedAt) }}</td>
+                            <td>
+                                <span v-if="row.status === 'pending'">
+                                    <!-- TRANSLATORS: {n} is the number of days remaining before deletion -->
+                                    {{ n('teamhub', '{n} day', '{n} days', row.daysRemaining, { n: row.daysRemaining }) }}
+                                </span>
+                                <span v-else>—</span>
+                            </td>
+                            <td>{{ formatBytes(row.archiveBytes) }}</td>
+                            <td>
+                                <span :class="'archive-admin__status archive-admin__status--' + row.status">
+                                    {{ row.status }}
+                                </span>
+                            </td>
+                            <td class="archive-admin__row-actions">
+                                <!-- pending: Restore + Force delete -->
+                                <template v-if="row.status === 'pending'">
+                                    <NcButton
+                                        type="tertiary"
+                                        size="small"
+                                        :aria-label="t('teamhub', 'Restore team {name}', { name: row.teamName })"
+                                        @click="restorePendingDeletion(row.id)">
+                                        {{ t('teamhub', 'Restore') }}
+                                    </NcButton>
+                                    <NcButton
+                                        type="error"
+                                        size="small"
+                                        :aria-label="t('teamhub', 'Force delete team {name} immediately', { name: row.teamName })"
+                                        @click="purgePendingDeletion(row.id)">
+                                        {{ t('teamhub', 'Force delete') }}
+                                    </NcButton>
+                                </template>
+                                <!-- failed: View error button toggles inline error panel -->
+                                <template v-else-if="row.status === 'failed'">
+                                    <NcButton
+                                        type="tertiary"
+                                        size="small"
+                                        :aria-label="t('teamhub', 'View error for team {name}', { name: row.teamName })"
+                                        @click="toggleFailedDetail(row.id)">
+                                        {{ failedDetailId === row.id ? t('teamhub', 'Hide error') : t('teamhub', 'View error') }}
+                                    </NcButton>
+                                </template>
+                            </td>
+                        </tr>
+                        <!-- Failed detail row — inline error panel with Retry + Cancel -->
+                        <tr v-if="row.status === 'failed' && failedDetailId === row.id" class="archive-admin__error-row">
+                            <td colspan="7">
+                                <div class="archive-admin__error-panel" role="alert">
+                                    <strong>{{ t('teamhub', 'Archive failed') }}</strong>
+                                    <code v-if="row.failureReason" class="archive-admin__error-reason">{{ row.failureReason }}</code>
+                                    <div class="archive-admin__error-actions">
+                                        <NcButton
+                                            type="primary"
+                                            size="small"
+                                            :aria-label="t('teamhub', 'Retry archive for team {name}', { name: row.teamName })"
+                                            @click="retryArchive(row.id)">
+                                            {{ t('teamhub', 'Retry') }}
+                                        </NcButton>
+                                        <NcButton
+                                            type="secondary"
+                                            size="small"
+                                            :aria-label="t('teamhub', 'Cancel failed archive for team {name} and make team usable again', { name: row.teamName })"
+                                            @click="discardFailedArchive(row.id)">
+                                            {{ t('teamhub', 'Cancel — make team usable again') }}
+                                        </NcButton>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+            </div>
+
+        </NcSettingsSection>
+
+        <!-- ── Save row — only for settings tabs, not statistics/maintenance/audit/archive ─ -->
+        <div v-show="!(['statistics','maintenance','audit','archive'].includes(activeTab))" class="admin-save-row">
             <NcButton
                 type="primary"
                 :disabled="saving"
@@ -836,6 +1064,7 @@ import ShieldCheckIcon from 'vue-material-design-icons/ShieldCheck.vue'
 import DownloadIcon from 'vue-material-design-icons/Download.vue'
 import RefreshIcon from 'vue-material-design-icons/Refresh.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
+import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
 
 export default {
     name: 'AdminSettings',
@@ -844,7 +1073,7 @@ export default {
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
         ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon,
-        InformationOutline,
+        InformationOutline, ArchiveIcon,
     },
     data() {
         return {
@@ -932,6 +1161,22 @@ export default {
                 'file.created', 'file.edited', 'file.deleted',
                 'share.created', 'share.permissions_changed', 'share.deleted',
             ],
+            // ── Archive tab ────────────────────────────────────────────────
+            archiveSettings: {
+                archiveMode:     'soft30',
+                archiveLocation: '',
+                archiveMaxMb:    5120,
+                anonymizeData:   false,
+            },
+            archiveSettingsSaving: false,
+            archiveSettingsSaved: false,
+            archiveSettingsError: null,
+            archiveSettingsLoaded: false,
+            pendingDels: [],
+            pendingDelsTotal: 0,
+            pendingDelsLoading: false,
+            pendingDelsError: null,
+            failedDetailId: null,   // row.id of the failed row whose error panel is open
         }
     },
     computed: {
@@ -944,7 +1189,18 @@ export default {
                 { id: 'statistics',    label: this.t('teamhub', 'Statistics'),    icon: 'ChartBarIcon'    },
                 { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },
                 { id: 'audit',         label: this.t('teamhub', 'Audit'),          icon: 'ShieldCheckIcon' },
+                { id: 'archive',       label: this.t('teamhub', 'Archive'),        icon: 'ArchiveIcon'     },
             ]
+        },
+
+        /**
+         * Only show rows that still need admin attention: pending and failed.
+         * Restored and completed rows are removed from the admin view immediately
+         * after the action completes (spliced from pendingDels in the method).
+         * This computed acts as a final guard in case any slip through.
+         */
+        visiblePendingDels() {
+            return this.pendingDels.filter(r => r.status === 'pending' || r.status === 'failed')
         },
 
         /**
@@ -989,6 +1245,14 @@ export default {
                 }
                 if (!this.auditTeamsLoading && this.auditTeams.length === 0 && !this.auditTeamsError) {
                     this.loadAuditTeams()
+                }
+            }
+            if (tab === 'archive') {
+                if (!this.archiveSettingsLoaded) {
+                    this.loadArchiveSettings()
+                }
+                if (!this.pendingDelsLoading && this.pendingDels.length === 0 && !this.pendingDelsError) {
+                    this.loadPendingDeletions()
                 }
             }
         },
@@ -1531,6 +1795,122 @@ export default {
                 return `${k}=${s}`
             })
             return parts.join(' · ')
+        },
+
+        // ── Archive tab methods ──────────────────────────────────────────────
+
+        async loadArchiveSettings() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/archive/settings'))
+                this.archiveSettings = {
+                    archiveMode:     data.archiveMode     ?? 'soft30',
+                    archiveLocation: data.archiveLocation ?? '',
+                    archiveMaxMb:    data.archiveMaxMb    ?? 5120,
+                    anonymizeData:   !!data.anonymizeData,
+                }
+                this.archiveSettingsLoaded = true
+            } catch (err) {
+                this.archiveSettingsError = this.t('teamhub', 'Failed to load archive settings: {error}', { error: err.message })
+            }
+        },
+
+        async saveArchiveSettings() {
+            this.archiveSettingsSaving = true
+            this.archiveSettingsSaved  = false
+            this.archiveSettingsError  = null
+            try {
+                await axios.put(
+                    generateUrl('/apps/teamhub/api/v1/admin/archive/settings'),
+                    this.archiveSettings,
+                )
+                this.archiveSettingsSaved = true
+                setTimeout(() => { this.archiveSettingsSaved = false }, 3000)
+            } catch (err) {
+                this.archiveSettingsError = this.t('teamhub', 'Failed to save archive settings: {error}', { error: err.response?.data?.error || err.message })
+            } finally {
+                this.archiveSettingsSaving = false
+            }
+        },
+
+        async loadPendingDeletions() {
+            this.pendingDelsLoading = true
+            this.pendingDelsError   = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/archive/pending'))
+                this.pendingDels      = data.rows  ?? []
+                this.pendingDelsTotal = data.total ?? 0
+            } catch (err) {
+                this.pendingDelsError = this.t('teamhub', 'Failed to load archived teams: {error}', { error: err.message })
+            } finally {
+                this.pendingDelsLoading = false
+            }
+        },
+
+        async restorePendingDeletion(id) {
+            try {
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/admin/archive/pending/${id}/restore`))
+                // Remove from view immediately — restored teams need no further admin action.
+                this.pendingDels = this.pendingDels.filter(r => r.id !== id)
+                this.failedDetailId = null
+            } catch (err) {
+                this.pendingDelsError = this.t('teamhub', 'Failed to restore team: {error}', { error: err.response?.data?.error || err.message })
+            }
+        },
+
+        async purgePendingDeletion(id) {
+            try {
+                await axios.post(generateUrl(`/apps/teamhub/api/v1/admin/archive/pending/${id}/purge`))
+                this.pendingDels = this.pendingDels.filter(r => r.id !== id)
+                this.failedDetailId = null
+            } catch (err) {
+                this.pendingDelsError = this.t('teamhub', 'Failed to purge team: {error}', { error: err.response?.data?.error || err.message })
+            }
+        },
+
+        toggleFailedDetail(id) {
+            this.failedDetailId = this.failedDetailId === id ? null : id
+        },
+
+        async retryArchive(id) {
+            try {
+                const { data } = await axios.post(generateUrl(`/apps/teamhub/api/v1/admin/archive/pending/${id}/retry`))
+                // Replace the failed row with the new pending row returned by the retry.
+                const idx = this.pendingDels.findIndex(r => r.id === id)
+                if (idx !== -1) {
+                    this.pendingDels.splice(idx, 1, data)
+                } else {
+                    this.pendingDels.unshift(data)
+                }
+                this.failedDetailId = null
+            } catch (err) {
+                this.pendingDelsError = this.t('teamhub', 'Retry failed: {error}', { error: err.response?.data?.error || err.message })
+            }
+        },
+
+        async discardFailedArchive(id) {
+            try {
+                await axios.delete(generateUrl(`/apps/teamhub/api/v1/admin/archive/pending/${id}`))
+                // Remove from view — team is usable again, no further action needed.
+                this.pendingDels = this.pendingDels.filter(r => r.id !== id)
+                this.failedDetailId = null
+            } catch (err) {
+                this.pendingDelsError = this.t('teamhub', 'Failed to discard archive: {error}', { error: err.response?.data?.error || err.message })
+            }
+        },
+
+        formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '—'
+            if (bytes < 1024) return bytes + ' B'
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
+            return (bytes / 1073741824).toFixed(2) + ' GB'
+        },
+
+        formatDate(unixTs) {
+            if (!unixTs) return '—'
+            return new Date(unixTs * 1000).toLocaleDateString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric',
+            })
         },
     },
 }
@@ -2367,5 +2747,207 @@ export default {
     color: var(--color-text-maxcontrast);
     word-break: break-word;
 }
+
+/* ── Archive tab ─────────────────────────────────────────────────────────── */
+.archive-admin {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 720px;
+}
+
+.archive-admin__heading {
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0;
+    color: var(--color-main-text);
+}
+
+.archive-admin__heading--mt {
+    margin-top: 8px;
+    padding-top: 20px;
+    border-top: 1px solid var(--color-border);
+}
+
+.archive-admin__fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.archive-admin__legend {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    margin-bottom: 8px;
+}
+
+.archive-admin__field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.archive-admin__label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-main-text);
+}
+
+.archive-admin__input {
+    width: 100%;
+    max-width: 480px;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border-maxcontrast);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 14px;
+}
+
+.archive-admin__input--short {
+    max-width: 140px;
+}
+
+.archive-admin__help {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    margin-top: 2px;
+    line-height: 1.4;
+}
+
+.archive-admin__actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.archive-admin__ok {
+    font-size: 13px;
+    color: var(--color-success-text, #2d7d46);
+}
+
+.archive-admin__err {
+    font-size: 13px;
+    color: var(--color-error-text);
+}
+
+.archive-admin__toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.archive-admin__empty {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    padding: 8px 0;
+}
+
+.archive-admin__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.archive-admin__table-caption {
+    text-align: left;
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    margin-bottom: 6px;
+    caption-side: top;
+}
+
+.archive-admin__table th {
+    text-align: left;
+    padding: 8px 10px;
+    font-weight: 600;
+    border-bottom: 2px solid var(--color-border);
+    white-space: nowrap;
+}
+
+.archive-admin__table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+}
+
+.archive-admin__row-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.archive-admin__status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.archive-admin__status--pending {
+    background: var(--color-warning-bg, #fff3cd);
+    color: var(--color-warning-text, #7d5a00);
+}
+
+.archive-admin__status--completed {
+    background: var(--color-success-bg, #d4edda);
+    color: var(--color-success-text, #1a5e2e);
+}
+
+.archive-admin__status--restored {
+    background: var(--color-info-bg, #d1ecf1);
+    color: var(--color-info-text, #0c5460);
+}
+
+.archive-admin__status--failed {
+    background: var(--color-error-bg, #fff3f3);
+    color: var(--color-error-text, #c62828);
+}
+
+/* Inline error detail row */
+.archive-admin__error-row td {
+    padding: 0;
+    border-bottom: 2px solid #c62828;
+}
+
+.archive-admin__error-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #ffebee;
+    border-left: 4px solid #c62828;
+    padding: 14px 16px;
+    font-size: 13px;
+    color: #7f0000;
+}
+
+.archive-admin__error-panel strong {
+    font-size: 14px;
+    color: #7f0000;
+}
+
+.archive-admin__error-reason {
+    display: block;
+    font-family: monospace;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 3px;
+    padding: 6px 8px;
+    word-break: break-word;
+    color: #4a0000;
+}
+
+.archive-admin__error-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
 </style>
 
