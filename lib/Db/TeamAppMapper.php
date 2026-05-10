@@ -60,7 +60,7 @@ class TeamAppMapper {
             // Update
             $qb = $this->db->getQueryBuilder();
             $qb->update('teamhub_team_apps')
-                ->set('enabled', $qb->createNamedParameter($enabled ? 1 : 0, IQueryBuilder::PARAM_INT))
+                ->set('enabled', $qb->createNamedParameter((int)($enabled ? 1 : 0), IQueryBuilder::PARAM_INT))
                 ->set('config', $qb->createNamedParameter($config))
                 ->where($qb->expr()->eq('id', $qb->createNamedParameter((int)$row['id'], IQueryBuilder::PARAM_INT)));
             $qb->executeStatement();
@@ -70,9 +70,9 @@ class TeamAppMapper {
             $qb->insert('teamhub_team_apps')
                 ->values([
                     'team_id' => $qb->createNamedParameter($teamId),
-                    'app_id' => $qb->createNamedParameter($appId),
-                    'enabled' => $qb->createNamedParameter($enabled ? 1 : 0, IQueryBuilder::PARAM_INT),
-                    'config' => $qb->createNamedParameter($config),
+                    'app_id'  => $qb->createNamedParameter($appId),
+                    'enabled' => $qb->createNamedParameter((int)($enabled ? 1 : 0), IQueryBuilder::PARAM_INT),
+                    'config'  => $qb->createNamedParameter($config),
                 ]);
             $qb->executeStatement();
         }

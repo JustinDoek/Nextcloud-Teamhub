@@ -23,6 +23,8 @@ export default new Vuex.Store({
         isCurrentUserDirectMember: true, // false when user is only in team via a group/team
         currentUserLevel: 0,       // current user's direct Circles level on the active team (0 = no direct row)
         resources: {},         // { talk, files, calendar, deck, tasks }
+        resourceWarnings: { pending: 0, atRisk: 0 }, // from _warnings in resources response
+        resourceWarningFocus: false,                  // true when warning block button clicked — ManageTeamView scrolls to at-risk section
         webLinks: [],
         deckTasks: [],
         teamTasks: [],         // VTODO tasks from the team calendar (NC Tasks app)
@@ -142,6 +144,8 @@ export default new Vuex.Store({
             if (idx !== -1) list.splice(idx, 1)
         },
         SET_RESOURCES(state, resources) { state.resources = resources },
+        SET_RESOURCE_WARNINGS(state, warnings) { state.resourceWarnings = warnings },
+        SET_RESOURCE_WARNING_FOCUS(state, value) { state.resourceWarningFocus = value },
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
         SET_TEAM_TASKS(state, tasks) { state.teamTasks = tasks },
@@ -327,18 +331,23 @@ export default new Vuex.Store({
             commit('SET_LOADING', { key: 'resources', value: true })
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/resources`))
-                commit('SET_RESOURCES', data || {})
-                if (data?.deck?.board_id) {
-                    dispatch('fetchDeckTasks', data.deck.board_id)
+                // Strip _warnings before storing as resources — it's a meta key, not a resource.
+                const { _warnings, ...resourceData } = data || {}
+                commit('SET_RESOURCES', resourceData)
+                commit('SET_RESOURCE_WARNINGS', _warnings || { pending: 0, atRisk: 0 })
+                // Fetch tasks for ALL connected Deck boards.
+                if (data?.deck?.length > 0) {
+                    dispatch('fetchDeckTasks', data.deck)
                 }
                 // Fetch team calendar tasks when Tasks app is installed AND the team has a calendar.
-                if (data?.tasks && data?.calendar) {
+                if (data?.tasks && data?.calendar?.length > 0) {
                     dispatch('fetchTeamTasks', teamId)
                 } else {
                     commit('SET_TEAM_TASKS', [])
                 }
             } catch (e) {
                 commit('SET_RESOURCES', {})
+                commit('SET_RESOURCE_WARNINGS', { pending: 0, atRisk: 0 })
                 commit('SET_TEAM_TASKS', [])
             } finally {
                 commit('SET_LOADING', { key: 'resources', value: false })
@@ -373,36 +382,56 @@ export default new Vuex.Store({
             }
         },
 
-        async fetchDeckTasks({ commit }, boardId) {
+        async fetchDeckTasks({ commit }, boards) {
+            // boards can be a single boardId (legacy) or array of board objects.
+            const boardList = Array.isArray(boards)
+                ? boards
+                : (typeof boards === 'number' ? [{ board_id: boards }] : [])
+
+            if (boardList.length === 0) {
+                commit('SET_DECK_TASKS', [])
+                return
+            }
+
             try {
-                const { data } = await axios.get(
-                    generateUrl(`/apps/deck/api/v1.0/boards/${boardId}/stacks`),
-                    { headers: { 'OCS-APIRequest': 'true' } }
-                )
                 const now = new Date()
                 const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
                 const cutoff = new Date(todayStart)
                 cutoff.setDate(cutoff.getDate() + 14)
-                const cards = []
-                ;(Array.isArray(data) ? data : []).forEach(stack => {
-                    ;(stack.cards || []).forEach(card => {
-                        if (!card.archived && !card.done && card.duedate) {
-                            const due = new Date(card.duedate)
-                            if (due >= todayStart && due <= cutoff) {
-                                cards.push({
-                                    id: card.id,
-                                    title: card.title,
-                                    duedate: card.duedate,
-                                    assignedUsers: card.assignedUsers || [],
-                                    boardId,
-                                    overdue: due < now,
-                                })
-                            }
-                        }
-                    })
-                })
-                cards.sort((a, b) => new Date(a.duedate) - new Date(b.duedate))
-                commit('SET_DECK_TASKS', cards.slice(0, 5))
+                const allCards = []
+
+                for (const board of boardList) {
+                    const boardId = board.board_id ?? board
+                    try {
+                        const { data } = await axios.get(
+                            generateUrl(`/apps/deck/api/v1.0/boards/${boardId}/stacks`),
+                            { headers: { 'OCS-APIRequest': 'true' } }
+                        )
+                        ;(Array.isArray(data) ? data : []).forEach(stack => {
+                            ;(stack.cards || []).forEach(card => {
+                                if (!card.archived && !card.done && card.duedate) {
+                                    const due = new Date(card.duedate)
+                                    if (due >= todayStart && due <= cutoff) {
+                                        allCards.push({
+                                            id: card.id,
+                                            title: card.title,
+                                            duedate: card.duedate,
+                                            assignedUsers: card.assignedUsers || [],
+                                            boardId,
+                                            boardName: board.name || '',
+                                            overdue: due < now,
+                                        })
+                                    }
+                                }
+                            })
+                        })
+                    } catch (e) {
+                        // skip failed board, continue with others
+                    }
+                }
+
+                allCards.sort((a, b) => new Date(a.duedate) - new Date(b.duedate))
+                commit('SET_DECK_TASKS', allCards.slice(0, 20))
             } catch (e) {
                 commit('SET_DECK_TASKS', [])
             }

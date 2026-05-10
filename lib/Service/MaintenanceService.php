@@ -748,10 +748,10 @@ class MaintenanceService {
 
         foreach ($tables as $table => $column) {
             try {
-                $this->db->executeStatement(
-                    'DELETE FROM `*PREFIX*' . $table . '` WHERE `' . $column . '` = ?',
-                    [$teamId]
-                );
+                $dqb = $this->db->getQueryBuilder();
+                $dqb->delete($table)
+                    ->where($dqb->expr()->eq($column, $dqb->createNamedParameter($teamId)))
+                    ->executeStatement();
             } catch (\Throwable $e) {
             }
         }
@@ -759,14 +759,10 @@ class MaintenanceService {
 
     private function getTableColumns(string $table): array {
         try {
-            $result = $this->db->executeQuery('SELECT * FROM `*PREFIX*' . $table . '` WHERE 1=0');
-            $cols   = array_keys($result->fetch(\PDO::FETCH_ASSOC) ?: []);
-            $result->closeCursor();
-            if (empty($cols)) {
-                // No rows returned — use column metadata
-                $sm   = $this->db->createSchemaManager();
-                $cols = array_keys($sm->listTableColumns('*PREFIX*' . $table));
-            }
+            // Use DBAL SchemaManager — works on both MySQL and Postgres.
+            // NC prefixes the table name automatically via the connection.
+            $sm   = $this->db->createSchemaManager();
+            $cols = array_keys($sm->listTableColumns($this->db->getPrefix() . $table));
             return $cols;
         } catch (\Throwable $e) {
             return [];

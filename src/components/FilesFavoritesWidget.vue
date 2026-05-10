@@ -260,7 +260,7 @@ export default {
 /* Inline star badge next to the title */
 .th-widget__star-badge {
     flex-shrink: 0;
-    color: var(--color-warning, #f6c342);
+    color: var(--color-warning-text, #7a5900);
 }
 
 /* Meta line */

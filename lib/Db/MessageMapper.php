@@ -109,7 +109,7 @@ class MessageMapper {
 
         $qb->insert('teamhub_messages')->values($values);
         $qb->executeStatement();
-        $id = $qb->getLastInsertId();
+        $id = $this->db->lastInsertId('*PREFIX*teamhub_messages');
 
         return $this->find($id);
     }

@@ -584,8 +584,92 @@ class TalkService {
     }
 
     /**
+     * Remove the team's circle access from a specific Talk room (by token).
+     * Deletes only the circle attendee row — individual user rows are untouched.
+     * The room itself is preserved; the team loses visibility in TeamHub.
+     */
+    public function removeRoomAccess(string $teamId, string $token, \OCP\IDBConnection $db): bool {
+        try {
+            // Find the room_id for this token.
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('id')
+                ->from('talk_rooms')
+                ->where($qb->expr()->eq('token', $qb->createNamedParameter($token)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                $this->logger->warning('[TalkService] removeRoomAccess: room not found', [
+                    'token' => $token, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
+            $roomId = (int)$row['id'];
+
+            $dqb = $db->getQueryBuilder();
+            $affected = $dqb->delete('talk_attendees')
+                ->where($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('circles')))
+                ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
+                ->executeStatement();
+
+            $this->logger->debug('[TalkService] removeRoomAccess: circle attendee removed', [
+                'teamId' => $teamId, 'token' => $token, 'roomId' => $roomId,
+                'affected' => $affected, 'app' => Application::APP_ID,
+            ]);
+            return $affected > 0;
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] removeRoomAccess failed', [
+                'teamId' => $teamId, 'token' => $token,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
      * Create a folder in the user's files and share it with the circle.
      */
+    /**
+     * Delete a specific Talk room by token (multi-resource-aware).
+     * Looks up the room_id from the token then deletes attendees + room.
+     */
+    public function deleteRoomById(string $token, \OCP\IDBConnection $db): array {
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('id')->from('talk_rooms')
+                ->where($qb->expr()->eq('token', $qb->createNamedParameter($token)))
+                ->setMaxResults(1)->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['deleted' => false, 'detail' => "Room with token {$token} not found"];
+            }
+            $roomId = (int)$row['id'];
+
+            $db->getQueryBuilder()->delete('talk_attendees')
+                ->where($db->getQueryBuilder()->expr()->eq('room_id', $db->getQueryBuilder()->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $db->getQueryBuilder()->delete('talk_rooms')
+                ->where($db->getQueryBuilder()->expr()->eq('id', $db->getQueryBuilder()->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $this->logger->info('[TalkService] deleteRoomById: room deleted', [
+                'token' => $token, 'roomId' => $roomId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'token' => $token];
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] deleteRoomById failed', [
+                'token' => $token, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => $e->getMessage()];
+        }
+    }
+
     public function deleteTalkRoom(string $teamId, \OCP\IDBConnection $db): array {
         try {
             // Find the room_id via the circle attendee row

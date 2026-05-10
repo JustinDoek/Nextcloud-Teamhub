@@ -159,6 +159,26 @@
                                 <span class="teamhub-owner-name">{{ teamOwner.displayName }}</span>
                             </div>
                         </div>
+
+                        <!-- Resource warning block — visible to team admins only -->
+                        <div
+                            v-if="isTeamAdmin && resourceWarningTotal > 0"
+                            class="teamhub-resource-warning"
+                            role="alert"
+                            aria-live="polite">
+                            <span class="teamhub-resource-warning__icon" aria-hidden="true">⚠</span>
+                            <span class="teamhub-resource-warning__text">
+                                <!-- TRANSLATORS: N is the number of connected resources that need review (pending acceptance or at risk due to owner issues) -->
+                                {{ n('teamhub', '%n resource needs review.', '%n resources need review.', resourceWarningTotal, { n: resourceWarningTotal }) }}
+                            </span>
+                            <NcButton
+                                type="tertiary"
+                                class="teamhub-resource-warning__link"
+                                :aria-label="t('teamhub', 'Open team settings to review resources')"
+                                @click="openSettingsAtRisk">
+                                {{ t('teamhub', 'Open settings →') }}
+                            </NcButton>
+                        </div>
                     </div>
                 </div>
             </grid-item>
@@ -260,7 +280,7 @@
 
             <!-- Calendar widget -->
             <grid-item
-                v-if="resources.calendar && getGridItem('widget-calendar')"
+                v-if="resources.calendar && resources.calendar.length > 0 && getGridItem('widget-calendar')"
                 v-bind="getGridItem('widget-calendar')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
@@ -331,11 +351,11 @@
                         <CardText :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</h2>
                         <NcActions class="teamhub-widget-actions">
-                            <NcActionButton v-if="resources.deck" @click="$emit('add-deck-task')">
+                            <NcActionButton v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
                                 <template #icon><CheckboxMarkedOutline :size="20" /></template>
                                 {{ t('teamhub', 'Create Deck task') }}
                             </NcActionButton>
-                            <NcActionButton v-if="resources.tasks && resources.calendar" @click="$emit('add-personal-task')">
+                            <NcActionButton v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
                                 <template #icon><ClipboardPlusOutline :size="20" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
@@ -712,7 +732,7 @@
                 </div>
 
                 <!-- Calendar -->
-                <div v-if="getGridItem('widget-calendar') && resources.calendar" class="teamhub-tablet-widget">
+                <div v-if="getGridItem('widget-calendar') && resources.calendar && resources.calendar.length > 0" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
                         <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-calendar')">
                             <Calendar :size="18" />
@@ -748,11 +768,11 @@
                             <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-deck') }" />
                         </button>
                         <NcActions class="teamhub-tablet-widget__actions">
-                            <NcActionButton v-if="resources.deck" @click="$emit('add-deck-task')">
+                            <NcActionButton v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
                                 <template #icon><CheckboxMarkedOutline :size="20" /></template>
                                 {{ t('teamhub', 'Create Deck task') }}
                             </NcActionButton>
-                            <NcActionButton v-if="resources.tasks && resources.calendar" @click="$emit('add-personal-task')">
+                            <NcActionButton v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
                                 <template #icon><ClipboardPlusOutline :size="20" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
@@ -953,7 +973,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
-import { mapState, mapGetters } from 'vuex'
+import { mapState, mapGetters, mapMutations } from 'vuex'
 import { NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'vue-grid-layout'
 
@@ -1072,6 +1092,7 @@ export default {
             'currentTeamId', 'resources', 'members', 'memberships',
             'effectiveMemberCount',
             'intravoxAvailable', 'teamWidgets', 'isCurrentUserDirectMember',
+            'resourceWarnings',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -1083,7 +1104,7 @@ export default {
          * The widget renders whichever subset of tasks is available.
          */
         showTasksWidget() {
-            return !!(this.resources.deck || (this.resources.tasks && this.resources.calendar))
+            return !!((this.resources.deck && this.resources.deck.length > 0) || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0))
         },
 
         /**
@@ -1206,6 +1227,15 @@ export default {
             return m && m.level >= 8
         },
 
+        /**
+         * Combined count of pending + at-risk resources.
+         * Used by the Teaminfo warning block (admin-only).
+         */
+        resourceWarningTotal() {
+            const w = this.resourceWarnings || {}
+            return (w.pending || 0) + (w.atRisk || 0)
+        },
+
         isTeamModerator() {
             if (!this.members?.length) return false
             const uid = getCurrentUser()?.uid
@@ -1230,6 +1260,17 @@ export default {
 
     methods: {
         t, n,
+
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS']),
+
+        /**
+         * Called from the warning block "Open settings →" button.
+         * Sets the focus flag so ManageTeamView scrolls to the at-risk section.
+         */
+        openSettingsAtRisk() {
+            this.SET_RESOURCE_WARNING_FOCUS(true)
+            this.$emit('manage-team')
+        },
 
         onLayoutUpdated(newLayout) {
             this.$emit('layout-updated', newLayout)
@@ -1676,6 +1717,36 @@ export default {
 }
 
 .teamhub-owner-name { font-size: 13px; color: var(--color-main-text); }
+
+/* Resource warning block — Teaminfo widget */
+.teamhub-resource-warning {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--border-radius);
+    font-size: 13px;
+}
+.teamhub-resource-warning__icon {
+    font-size: 15px;
+    flex-shrink: 0;
+}
+.teamhub-resource-warning__text {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-main-text);
+}
+.teamhub-resource-warning__link {
+    /* NcButton tertiary — keep it compact inside the warning strip */
+    min-height: unset !important;
+    height: auto !important;
+    padding: 2px 6px !important;
+    font-size: 12px !important;
+}
 
 .teamhub-avatar-stack {
     display: flex;

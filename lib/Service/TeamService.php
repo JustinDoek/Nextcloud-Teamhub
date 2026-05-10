@@ -505,7 +505,10 @@ class TeamService {
 
         // ── Step 4: Remove TeamHub metadata rows ──────────────────────────────
         try {
-            $db->executeStatement('DELETE FROM `*PREFIX*teamhub_team_apps` WHERE `team_id` = ?', [$teamId]);
+            $delQb = $db->getQueryBuilder();
+            $delQb->delete('teamhub_team_apps')
+                ->where($delQb->expr()->eq('team_id', $delQb->createNamedParameter($teamId)))
+                ->executeStatement();
         } catch (\Throwable $e) { /* Not fatal */ }
 
         // ── Step 5: Audit log ─────────────────────────────────────────────────
@@ -642,10 +645,11 @@ class TeamService {
         $currentConfig = (int)$row['config'];
         $newConfig     = ($currentConfig & ~$MANAGED_BITS) | ($config & $MANAGED_BITS);
 
-        $db->executeStatement(
-            'UPDATE `*PREFIX*circles_circle` SET `config` = ? WHERE `unique_id` = ?',
-            [$newConfig, $teamId]
-        );
+        $updQb = $db->getQueryBuilder();
+        $updQb->update('circles_circle')
+            ->set('config', $updQb->createNamedParameter($newConfig, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
+            ->executeStatement();
 
         // Flush Circles' in-process object cache
         try {

@@ -855,8 +855,8 @@ export default {
     color: var(--color-main-text);
 }
 .teamhub-mobile-team-label--info    { background: color-mix(in srgb, var(--color-primary-element) 14%, transparent); color: var(--color-primary-element); }
-.teamhub-mobile-team-label--warn    { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
-.teamhub-mobile-team-label--success { background: color-mix(in srgb, var(--color-success) 14%, transparent); color: var(--color-success); }
+.teamhub-mobile-team-label--warn    { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning-text); }
+.teamhub-mobile-team-label--success { background: color-mix(in srgb, var(--color-success) 14%, transparent); color: var(--color-success-text); }
 
 .teamhub-mobile-teaminfo__owner {
     display: flex;
@@ -917,7 +917,7 @@ export default {
 }
 .teamhub-mobile-membership-icon--team {
     background: color-mix(in srgb, var(--color-success) 14%, transparent);
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .teamhub-mobile-membership-name {
@@ -941,7 +941,7 @@ export default {
 }
 .teamhub-mobile-membership-pill--team {
     background: color-mix(in srgb, var(--color-success) 18%, transparent);
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .teamhub-mobile-membership-count {

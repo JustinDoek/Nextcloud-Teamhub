@@ -186,7 +186,7 @@ export default {
 }
 
 .archive-modal__lead--danger {
-    color: var(--color-error);
+    color: var(--color-error-text);
     font-weight: 500;
 }
 

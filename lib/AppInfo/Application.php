@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\AppInfo;
 
 use OCA\TeamHub\Listener\AppDisabledListener;
+use OCA\TeamHub\Listener\UserStatusListener;
+use OCA\TeamHub\Listener\UserDeletedListener;
 use OCA\TeamHub\Notification\Notifier;
 use OCA\TeamHub\Service\IntegrationService;
 use OCP\App\Events\AppDisabledEvent;
@@ -12,6 +14,8 @@ use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
 use OCA\TeamHub\Search\MessageSearchProvider;
 use OCP\AppFramework\Bootstrap\IRegistrationContext;
+use OCP\User\Events\UserChangedEvent;
+use OCP\User\Events\BeforeUserDeletedEvent;
 
 class Application extends App implements IBootstrap {
     public const APP_ID = 'teamhub';
@@ -25,8 +29,13 @@ class Application extends App implements IBootstrap {
         $context->registerNotifierService(Notifier::class);
 
         // Auto-deregister any integration whose app is disabled or removed.
-        // AppDisabledEvent fires for both occ app:disable and App Store removal.
         $context->registerEventListener(AppDisabledEvent::class, AppDisabledListener::class);
+
+        // Flag / clear risk_status when a resource owner is disabled or re-enabled.
+        $context->registerEventListener(UserChangedEvent::class, UserStatusListener::class);
+
+        // Attempt ownership transfer before a resource owner's account is deleted.
+        $context->registerEventListener(BeforeUserDeletedEvent::class, UserDeletedListener::class);
 
         // Register TeamHub messages with NC unified search.
         $context->registerSearchProvider(MessageSearchProvider::class);

@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\TeamAppResourceMapper;
+use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCP\App\IAppManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
@@ -67,6 +69,8 @@ class ResourceService {
         private CalendarService $calendarService,
         private DeckService $deckService,
         private IntravoxService $intravoxService,
+        private TeamAppResourceMapper $resourceMapper,
+        private ResourceDiscoveryService $discoveryService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -106,11 +110,23 @@ class ResourceService {
             'app' => Application::APP_ID,
         ]);
 
-        $resources = ['talk' => null, 'files' => null, 'calendar' => null, 'deck' => null, 'intravox' => false, 'tasks' => false, 'shared_files' => false];
+        // ── Render-time discovery reconciliation ──────────────────────────────
+        // Sync teamhub_team_app_resources against live NC ACL tables for this team.
+        // Non-fatal: if it throws, page load continues with the existing DB state.
+        try {
+            $this->discoveryService->reconcileTeam($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ResourceService] render-time reconciliation failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        $resources = ['talk' => null, 'files' => null, 'calendar' => [], 'deck' => [], 'intravox' => false, 'tasks' => false, 'shared_files' => false];
 
         try {
             // ── IntraVox enabled flag ─────────────────────────────────────────
-            // Check if the intravox app is enabled for this team in teamhub_team_apps
+            // intravox and shared_files remain toggle-driven via teamhub_team_apps.
+            // They are not resource-backed and are not tracked in teamhub_team_app_resources.
             if ($this->appManager->isInstalled('intravox')) {
                 $ivQb  = $db->getQueryBuilder();
                 $ivRes = $ivQb->select('enabled')
@@ -124,82 +140,7 @@ class ResourceService {
                 $resources['intravox'] = $ivRow ? (bool)$ivRow['enabled'] : false;
             }
 
-            // ── Talk ─────────────────────────────────────────────────────────
-            // Find rooms where the circle is an attendee (actor_type=circles, actor_id=teamId)
-            if ($this->appManager->isInstalled('spreed')) {
-                try {
-                    $qb = $db->getQueryBuilder();
-                    $result = $qb->select('a.room_id')
-                        ->from('talk_attendees', 'a')
-                        ->where($qb->expr()->eq('a.actor_type', $qb->createNamedParameter('circles')))
-                        ->andWhere($qb->expr()->eq('a.actor_id', $qb->createNamedParameter($teamId)))
-                        ->setMaxResults(1)
-                        ->executeQuery();
-
-                    if ($row = $result->fetch()) {
-                        $roomId = (int)$row['room_id'];
-                        $result->closeCursor();
-
-                        $roomQb     = $db->getQueryBuilder();
-                        $roomResult = $roomQb->select('token', 'name')
-                            ->from('talk_rooms')
-                            ->where($roomQb->expr()->eq('id', $roomQb->createNamedParameter($roomId)))
-                            ->executeQuery();
-                        if ($roomRow = $roomResult->fetch()) {
-                            $resources['talk'] = [
-                                'room_id' => $roomId,
-                                'token'   => $roomRow['token'],
-                                'name'    => $roomRow['name'],
-                            ];
-                        }
-                        $roomResult->closeCursor();
-                    } else {
-                        $result->closeCursor();
-                    }
-                } catch (\Throwable $e) {
-                    $this->logger->warning('[ResourceService] Talk resource query failed', [
-                        'teamId' => $teamId,
-                        'error'  => $e->getMessage(),
-                        'app'    => Application::APP_ID,
-                    ]);
-                }
-            }
-
-            // ── Files ────────────────────────────────────────────────────────
-            // Filter on item_type='folder' so that individual file shares
-            // (e.g. from Nextcloud Notes) are never mistaken for the team folder.
-            try {
-                $qb = $db->getQueryBuilder();
-                $result = $qb->select('file_source', 'file_target')
-                    ->from('share')
-                    ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-                    ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
-                    ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
-                    ->setMaxResults(1)
-                    ->executeQuery();
-
-                if ($row = $result->fetch()) {
-                    $resources['files'] = [
-                        'folder_id' => $row['file_source'],
-                        'path'      => $row['file_target'],
-                    ];
-                }
-                $result->closeCursor();
-                $this->logger->debug('[TeamHub][ResourceService] Files resource resolved', [
-                    'teamId'   => $teamId,
-                    'resolved' => $resources['files'] !== null,
-                    'app'      => Application::APP_ID,
-                ]);
-            } catch (\Throwable $e) {
-                $this->logger->warning('[ResourceService] Files resource query failed', [
-                    'teamId' => $teamId,
-                    'error'  => $e->getMessage(),
-                    'app'    => Application::APP_ID,
-                ]);
-            }
-
             // ── Shared Files toggle ───────────────────────────────────────────
-            // Independent toggle — does not require a team folder to be configured.
             try {
                 $sfQb  = $db->getQueryBuilder();
                 $sfRes = $sfQb->select('enabled')
@@ -224,39 +165,107 @@ class ResourceService {
                 ]);
             }
 
+            // ── Resource-backed apps: Talk, Files, Calendar, Deck ─────────────
+            // Source of truth is now teamhub_team_app_resources.
+            // For backward compatibility the single-resource shape is preserved:
+            // each key returns the first active resource's detail, or null if none.
+            // Multi-resource UX (tab picker, per-app list) lands in Session C.
+
+            // ── Talk ─────────────────────────────────────────────────────────
+            if ($this->appManager->isInstalled('spreed')) {
+                try {
+                    $talkRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'talk');
+                    $this->logger->debug('[TeamHub][ResourceService] Talk resource rows from registry', [
+                        'teamId' => $teamId, 'count' => count($talkRows), 'app' => Application::APP_ID,
+                    ]);
+                    if (!empty($talkRows)) {
+                        // resource_id for Talk is the room token.
+                        $token = $talkRows[0]->getResourceId();
+                        $roomQb  = $db->getQueryBuilder();
+                        $roomRes = $roomQb->select('id', 'token', 'name')
+                            ->from('talk_rooms')
+                            ->where($roomQb->expr()->eq('token', $roomQb->createNamedParameter($token)))
+                            ->setMaxResults(1)
+                            ->executeQuery();
+                        if ($roomRow = $roomRes->fetch()) {
+                            $resources['talk'] = [
+                                'room_id' => (int) $roomRow['id'],
+                                'token'   => $roomRow['token'],
+                                'name'    => $roomRow['name'],
+                            ];
+                        }
+                        $roomRes->closeCursor();
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][ResourceService] Talk resource lookup failed', [
+                        'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            // ── Files ────────────────────────────────────────────────────────
+            try {
+                $filesRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'files');
+                $this->logger->debug('[TeamHub][ResourceService] Files resource rows from registry', [
+                    'teamId' => $teamId, 'count' => count($filesRows), 'app' => Application::APP_ID,
+                ]);
+                if (!empty($filesRows)) {
+                    // resource_id for Files is the file_source integer stored as string.
+                    $fileSource = (int) $filesRows[0]->getResourceId();
+                    // Resolve the file_target path from the share row.
+                    $shareQb  = $db->getQueryBuilder();
+                    $shareRes = $shareQb->select('file_source', 'file_target')
+                        ->from('share')
+                        ->where($shareQb->expr()->eq('file_source', $shareQb->createNamedParameter($fileSource, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($shareQb->expr()->eq('share_with', $shareQb->createNamedParameter($teamId)))
+                        ->andWhere($shareQb->expr()->eq('share_type', $shareQb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    if ($shareRow = $shareRes->fetch()) {
+                        $resources['files'] = [
+                            'folder_id' => (int) $shareRow['file_source'],
+                            'path'      => $shareRow['file_target'],
+                        ];
+                    }
+                    $shareRes->closeCursor();
+                }
+                $this->logger->debug('[TeamHub][ResourceService] Files resource resolved', [
+                    'teamId'   => $teamId,
+                    'resolved' => $resources['files'] !== null,
+                    'app'      => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][ResourceService] Files resource lookup failed', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
             // ── Calendar ─────────────────────────────────────────────────────
             if ($this->appManager->isInstalled('calendar')) {
                 try {
-                    $principalUri = 'principals/circles/' . $teamId;
-                    $qb = $db->getQueryBuilder();
-                    $result = $qb->select('resourceid', 'publicuri')
-                        ->from('dav_shares')
-                        ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
-                        ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
-                        ->setMaxResults(1)
-                        ->executeQuery();
-
-                    if ($row = $result->fetch()) {
-                        $calendarId = $row['resourceid'];
-                        $result->closeCursor();
-
-                        $calQb     = $db->getQueryBuilder();
-                        $calResult = $calQb->select('id', 'uri', 'displayname', 'principaluri')
+                    $calRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'calendar');
+                    $this->logger->debug('[TeamHub][ResourceService] Calendar resource rows from registry', [
+                        'teamId' => $teamId, 'count' => count($calRows), 'app' => Application::APP_ID,
+                    ]);
+                    $calendars = [];
+                    foreach ($calRows as $calRow) {
+                        $calendarId = (int) $calRow->getResourceId();
+                        $calQb  = $db->getQueryBuilder();
+                        $calRes = $calQb->select('id', 'uri', 'displayname', 'principaluri')
                             ->from('calendars')
-                            ->where($calQb->expr()->eq('id', $calQb->createNamedParameter((int)$calendarId)))
+                            ->where($calQb->expr()->eq('id', $calQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->setMaxResults(1)
                             ->executeQuery();
+                        if ($calDetail = $calRes->fetch()) {
+                            $calName = $calDetail['displayname'] ?? $calDetail['uri'] ?? 'Team Calendar';
 
-                        if ($calRow = $calResult->fetch()) {
-                            $calName = $calRow['displayname'] ?? $calRow['uri'] ?? 'Team Calendar';
-
-                            // The public embed token is on a separate dav_shares row with access=4
-                            // (the circle share row has access=2 and a non-token publicuri)
+                            // Resolve the public embed token (dav_shares access=4 row).
                             $publicUri = null;
                             try {
                                 $psQb  = $db->getQueryBuilder();
                                 $psRes = $psQb->select('publicuri')
                                     ->from('dav_shares')
-                                    ->where($psQb->expr()->eq('resourceid', $psQb->createNamedParameter((int)$calendarId)))
+                                    ->where($psQb->expr()->eq('resourceid', $psQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                                     ->andWhere($psQb->expr()->eq('type', $psQb->createNamedParameter('calendar')))
                                     ->andWhere($psQb->expr()->eq('access', $psQb->createNamedParameter(4, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                                     ->setMaxResults(1)
@@ -266,26 +275,24 @@ class ResourceService {
                                 }
                                 $psRes->closeCursor();
                             } catch (\Throwable $e) {
-                                // Non-fatal — public token may not exist yet
+                                // Non-fatal — public token may not exist yet.
                             }
 
-                            $resources['calendar'] = [
-                                'id'             => (int)$calendarId,
-                                'uri'            => $calRow['uri'],
+                            $calendars[] = [
+                                'id'             => $calendarId,
+                                'uri'            => $calDetail['uri'],
                                 'name'           => $calName,
-                                'ownerPrincipal' => $calRow['principaluri'],
+                                'ownerPrincipal' => $calDetail['principaluri'],
                                 'public_token'   => $publicUri,
                             ];
                         }
-                        $calResult->closeCursor();
-                    } else {
-                        $result->closeCursor();
+                        $calRes->closeCursor();
                     }
+                    // calendar is now an array. Empty array = no calendar = tab hidden.
+                    $resources['calendar'] = $calendars;
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[ResourceService] Calendar resource query failed', [
-                        'teamId' => $teamId,
-                        'error'  => $e->getMessage(),
-                        'app'    => Application::APP_ID,
+                    $this->logger->warning('[TeamHub][ResourceService] Calendar resource lookup failed', [
+                        'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
             }
@@ -293,58 +300,39 @@ class ResourceService {
             // ── Deck ─────────────────────────────────────────────────────────
             if ($this->appManager->isInstalled('deck')) {
                 try {
-                    // Try deck_board_acl first (Deck 1.x), fall back to checking deck_acl
-                    $aclTable      = 'deck_board_acl';
-                    $boardIdCol    = 'board_id';
-                    $participantCol = 'participant';
-                    $typeCol       = 'type';
-
-                    try {
-                        $test = $db->getQueryBuilder()->select($participantCol)->from($aclTable)->setMaxResults(0)->executeQuery();
-                        $test->closeCursor();
-                    } catch (\Throwable $e) {
-                        $aclTable = 'deck_acl';
-                    }
-
-                    $qb = $db->getQueryBuilder();
-                    $result = $qb->select($boardIdCol)
-                        ->from($aclTable)
-                        ->where($qb->expr()->eq($participantCol, $qb->createNamedParameter($teamId)))
-                        ->andWhere($qb->expr()->eq($typeCol, $qb->createNamedParameter(7)))
-                        ->setMaxResults(1)
-                        ->executeQuery();
-
-                    if ($row = $result->fetch()) {
-                        $boardId = (int)$row[$boardIdCol];
-                        $result->closeCursor();
-
-                        $boardQb     = $db->getQueryBuilder();
-                        $boardResult = $boardQb->select('id', 'title', 'color')
+                    $deckRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'deck');
+                    $this->logger->debug('[TeamHub][ResourceService] Deck resource rows from registry', [
+                        'teamId' => $teamId, 'count' => count($deckRows), 'app' => Application::APP_ID,
+                    ]);
+                    $boards = [];
+                    foreach ($deckRows as $deckRow) {
+                        $boardId = (int) $deckRow->getResourceId();
+                        $boardQb  = $db->getQueryBuilder();
+                        $boardRes = $boardQb->select('id', 'title', 'color')
                             ->from('deck_boards')
-                            ->where($boardQb->expr()->eq('id', $boardQb->createNamedParameter($boardId)))
+                            ->where($boardQb->expr()->eq('id', $boardQb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->setMaxResults(1)
                             ->executeQuery();
-                        if ($boardRow = $boardResult->fetch()) {
-                            $resources['deck'] = [
+                        if ($boardRow = $boardRes->fetch()) {
+                            $boards[] = [
                                 'board_id' => $boardId,
                                 'name'     => $boardRow['title'],
                                 'color'    => $boardRow['color'],
                             ];
                         }
-                        $boardResult->closeCursor();
-                    } else {
-                        $result->closeCursor();
+                        $boardRes->closeCursor();
                     }
+                    // deck is now an array. Empty array = no board = tab hidden.
+                    $resources['deck'] = $boards;
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[ResourceService] Deck resource query failed', [
-                        'teamId' => $teamId,
-                        'error'  => $e->getMessage(),
-                        'app'    => Application::APP_ID,
+                    $this->logger->warning('[TeamHub][ResourceService] Deck resource lookup failed', [
+                        'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
             }
 
         } catch (\Throwable $e) {
-            $this->logger->error('[ResourceService] getTeamResources failed', [
+            $this->logger->error('[TeamHub][ResourceService] getTeamResources failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -354,6 +342,18 @@ class ResourceService {
         // ── Tasks app availability ────────────────────────────────────────────
         $resources['tasks'] = $this->appManager->isInstalled('tasks');
 
+        // ── Warning counts for the Teaminfo widget (admin-only surface) ───────
+        // Includes pending (externally discovered, awaiting accept/ignore) and
+        // at-risk (owner disabled/transfer failed) counts. The frontend only
+        // renders the warning block for team admins (level ≥ 8).
+        try {
+            $resources['_warnings'] = $this->discoveryService->getWarningCounts($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ResourceService] getWarningCounts failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            $resources['_warnings'] = ['pending' => 0, 'atRisk' => 0];
+        }
 
         return $resources;
     }
@@ -374,47 +374,70 @@ class ResourceService {
      * Create app resources and share them with the circle. Returns per-app results.
      * Delegates to TalkService, FilesService, CalendarService, DeckService.
      */
-    public function createTeamResources(string $teamId, array $apps, string $teamName): array {
+    public function createTeamResources(string $teamId, array $apps, string $teamName, array $names = []): array {
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
         }
         $uid = $user->getUID();
 
-        // Pick one colour for the whole team — all colour-bearing resources
-        // (Deck board, Calendar) receive the same value so the team has a
-        // consistent visual identity across apps.
         $teamColour = self::randomTeamColour();
 
         $results = [];
         foreach ($apps as $app) {
+            // Use per-app name if provided, fall back to teamName.
+            $resourceName = isset($names[$app]) && $names[$app] !== '' ? (string)$names[$app] : $teamName;
             try {
                 switch ($app) {
                     case 'talk':
-                        $results['talk'] = $this->talkService->createTalkRoom($teamId, $teamName, $uid);
+                        $result = $this->talkService->createTalkRoom($teamId, $resourceName, $uid);
+                        $results['talk'] = $result;
+                        if (!empty($result['token'])) {
+                            $this->upsertResourceRow(
+                                $teamId, 'talk', (string) $result['token'], 'teamhub_create', $uid
+                            );
+                        }
                         break;
                     case 'files':
-                        $results['files'] = $this->filesService->createSharedFolder($teamId, $teamName, $uid);
+                        $result = $this->filesService->createSharedFolder($teamId, $resourceName, $uid);
+                        $results['files'] = $result;
+                        if (!empty($result['folder_id'])) {
+                            $this->upsertResourceRow(
+                                $teamId, 'files', (string) $result['folder_id'], 'teamhub_create', $uid
+                            );
+                        }
                         break;
                     case 'calendar':
-                        $results['calendar'] = $this->calendarService->createCalendar(
-                            $teamId, $teamName, $uid, $teamColour
+                        $result = $this->calendarService->createCalendar(
+                            $teamId, $resourceName, $uid, $teamColour
                         );
+                        $results['calendar'] = $result;
+                        if (!empty($result['calendar_id'])) {
+                            $this->upsertResourceRow(
+                                $teamId, 'calendar', (string) $result['calendar_id'], 'teamhub_create', $uid
+                            );
+                        }
                         break;
                     case 'deck':
-                        $results['deck'] = $this->deckService->createDeckBoard(
-                            $teamId, $teamName, $uid, $teamColour
+                        $result = $this->deckService->createDeckBoard(
+                            $teamId, $resourceName, $uid, $teamColour
                         );
+                        $results['deck'] = $result;
+                        if (!empty($result['board_id'])) {
+                            $this->upsertResourceRow(
+                                $teamId, 'deck', (string) $result['board_id'], 'teamhub_create', $uid
+                            );
+                        }
                         break;
                     case 'intravox':
-                        $results['intravox'] = $this->intravoxService->createPage($teamId, $teamName);
+                        $results['intravox'] = $this->intravoxService->createPage($teamId, $resourceName);
                         break;
                     default:
                         $results[$app] = ['error' => 'Unknown app'];
                 }
             } catch (\Throwable $e) {
                 $results[$app] = ['error' => $e->getMessage(), 'trace' => substr($e->getTraceAsString(), 0, 800)];
-                $this->logger->error('[ResourceService] Failed to create resource', [
+                $this->logger->error('[TeamHub][ResourceService] Failed to create resource', [
                     'teamId'  => $teamId,
                     'app'     => $app,
                     'message' => $e->getMessage(),
@@ -449,13 +472,34 @@ class ResourceService {
 
         switch ($app) {
             case 'talk':
-                return $this->talkService->connectExistingRoom($teamId, $resourceId, $uid);
+                $result = $this->talkService->connectExistingRoom($teamId, $resourceId, $uid);
+                // resource_id for Talk is the room token returned by the sub-service.
+                if (!empty($result['success']) && !empty($result['token'])) {
+                    $this->upsertResourceRow($teamId, 'talk', (string) $result['token'], 'teamhub_connect', $uid);
+                }
+                return $result;
+
             case 'files':
-                return $this->filesService->connectExistingFolder($teamId, $resourceId, $uid);
+                $result = $this->filesService->connectExistingFolder($teamId, $resourceId, $uid);
+                if (!empty($result['success'])) {
+                    $this->upsertResourceRow($teamId, 'files', (string) $resourceId, 'teamhub_connect', $uid);
+                }
+                return $result;
+
             case 'calendar':
-                return $this->calendarService->connectExistingCalendar($teamId, $resourceId, $uid);
+                $result = $this->calendarService->connectExistingCalendar($teamId, $resourceId, $uid);
+                if (!empty($result['success'])) {
+                    $this->upsertResourceRow($teamId, 'calendar', (string) $resourceId, 'teamhub_connect', $uid);
+                }
+                return $result;
+
             case 'deck':
-                return $this->deckService->connectExistingBoard($teamId, $resourceId, $uid);
+                $result = $this->deckService->connectExistingBoard($teamId, $resourceId, $uid);
+                if (!empty($result['success'])) {
+                    $this->upsertResourceRow($teamId, 'deck', (string) $resourceId, 'teamhub_connect', $uid);
+                }
+                return $result;
+
             default:
                 return ['success' => false, 'error' => 'Unknown app: ' . $app];
         }
@@ -490,23 +534,196 @@ class ResourceService {
      * @return array { deleted: bool, detail: string }
      */
     /**
+     * Remove team access to a specific resource (§6.2 — strip ACL, delete row).
+     * The underlying resource (room, calendar, folder, board) is preserved.
+     *
+     * @param string $teamId      Circle unique_id
+     * @param string $app         talk | files | calendar | deck
+     * @param string $resourceId  Resource identifier (token for Talk, integer ID for others)
+     * @return array { success: bool, error?: string }
+     */
+    public function removeTeamAccess(string $teamId, string $app, string $resourceId): array {
+        $db  = $this->container->get(\OCP\IDBConnection::class);
+        $row = $this->resourceMapper->findByTeamAppResource($teamId, $app, $resourceId);
+
+        if ($row === null) {
+            return ['success' => false, 'error' => 'Resource row not found'];
+        }
+
+        // Count how many OTHER teams also have this resource connected.
+        // This is purely informational for the audit log — it does not change behaviour.
+        // The remove methods already only strip this team's ACL row.
+        $otherTeamCount = $this->countOtherTeamsWithResource($db, $app, $resourceId, $teamId);
+
+        $stripped = false;
+        try {
+            $stripped = match ($app) {
+                'talk'     => $this->talkService->removeRoomAccess($teamId, $resourceId, $db),
+                'files'    => $this->filesService->removeFilesAccess($teamId, (int)$resourceId, $db),
+                'calendar' => $this->calendarService->removeCalendarAccess($teamId, (int)$resourceId, $db),
+                'deck'     => $this->deckService->removeBoardAccess($teamId, (int)$resourceId, $db),
+                default    => false,
+            };
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ResourceService] removeTeamAccess ACL strip failed', [
+                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
+            ]);
+        }
+
+        // Delete this team's registry row.
+        $this->resourceMapper->deleteById($row->getId());
+
+        $this->logger->info('[TeamHub][ResourceService] removeTeamAccess completed', [
+            'teamId'          => $teamId,
+            'app'             => $app,
+            'resourceId'      => $resourceId,
+            'aclStripped'     => $stripped,
+            'sharedWithOther' => $otherTeamCount > 0,
+            'otherTeamCount'  => $otherTeamCount,
+            'app_id'          => Application::APP_ID,
+        ]);
+
+        return [
+            'success'         => true,
+            'aclStripped'     => $stripped,
+            'sharedWithOther' => $otherTeamCount > 0,
+            'otherTeamCount'  => $otherTeamCount,
+        ];
+    }
+
+    /**
+     * Count how many teams (other than $excludeTeamId) currently have the given
+     * resource connected via teamhub_team_app_resources.
+     *
+     * Used purely for audit logging in removeTeamAccess — does not affect behaviour.
+     */
+    private function countOtherTeamsWithResource(
+        \OCP\IDBConnection $db,
+        string             $app,
+        string             $resourceId,
+        string             $excludeTeamId
+    ): int {
+        try {
+            $qb = $db->getQueryBuilder();
+            $qb->select($qb->func()->count('*', 'cnt'))
+                ->from('teamhub_team_app_resources')
+                ->where($qb->expr()->eq('app_id',      $qb->createNamedParameter($app)))
+                ->andWhere($qb->expr()->eq('resource_id', $qb->createNamedParameter($resourceId)))
+                ->andWhere($qb->expr()->neq('team_id',  $qb->createNamedParameter($excludeTeamId)))
+                ->andWhere($qb->expr()->eq('status',    $qb->createNamedParameter('active')));
+            $result = $qb->executeQuery();
+            $count  = (int) $result->fetchOne();
+            $result->closeCursor();
+            return $count;
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    /**
      * Fully delete a team resource. Delegates to the appropriate sub-service.
+     * Legacy method — operates on the first resource for the given app.
+     * Prefer deleteSpecificResource for multi-resource teams.
      */
     public function deleteTeamResource(string $teamId, string $app): array {
         $db = $this->container->get(\OCP\IDBConnection::class);
         switch ($app) {
             case 'talk':
-                return $this->talkService->deleteTalkRoom($teamId, $db);
+                $result = $this->talkService->deleteTalkRoom($teamId, $db);
+                if (!empty($result['deleted'])) {
+                    $this->removeResourceRowsByTeamAndApp($teamId, 'talk');
+                }
+                return $result;
             case 'files':
-                return $this->filesService->deleteSharedFolder($teamId, $db);
+                $result = $this->filesService->deleteSharedFolder($teamId, $db);
+                if (!empty($result['deleted'])) {
+                    $this->removeResourceRowsByTeamAndApp($teamId, 'files');
+                }
+                return $result;
             case 'calendar':
-                return $this->calendarService->deleteCalendar($teamId, $db);
+                $result = $this->calendarService->deleteCalendar($teamId, $db);
+                if (!empty($result['deleted'])) {
+                    $this->removeResourceRowsByTeamAndApp($teamId, 'calendar');
+                }
+                return $result;
             case 'deck':
-                return $this->deckService->deleteDeckBoard($teamId, $db);
+                $result = $this->deckService->deleteDeckBoard($teamId, $db);
+                if (!empty($result['deleted'])) {
+                    $this->removeResourceRowsByTeamAndApp($teamId, 'deck');
+                }
+                return $result;
             case 'intravox':
                 return $this->intravoxService->deletePage($teamId, $this->getTeamName($teamId, $db));
             default:
                 return ['deleted' => false, 'detail' => "Unknown app: {$app}"];
+        }
+    }
+
+    /**
+     * Delete a specific resource by resourceId (multi-resource-aware).
+     * Destroys the underlying NC resource (room, calendar, folder, board)
+     * and deletes the registry row.
+     *
+     * @param string $teamId
+     * @param string $app         talk | files | calendar | deck
+     * @param string $resourceId  Resource identifier
+     * @return array { success: bool, error?: string }
+     */
+    public function deleteSpecificResource(string $teamId, string $app, string $resourceId): array {
+        $db  = $this->container->get(\OCP\IDBConnection::class);
+        $row = $this->resourceMapper->findByTeamAppResource($teamId, $app, $resourceId);
+
+        if ($row === null) {
+            return ['success' => false, 'error' => 'Resource row not found'];
+        }
+
+        try {
+            $result = match ($app) {
+                'talk'     => $this->talkService->deleteRoomById($resourceId, $db),
+                'files'    => $this->filesService->deleteFolderById((int)$resourceId, $teamId, $db),
+                'calendar' => $this->calendarService->deleteCalendarById((int)$resourceId, $db),
+                'deck'     => $this->deckService->deleteBoardById((int)$resourceId, $db),
+                default    => ['deleted' => false, 'detail' => "Unknown app: {$app}"],
+            };
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][ResourceService] deleteSpecificResource failed', [
+                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+
+        // Delete the registry row whether or not the underlying delete succeeded
+        // (if the resource was already gone, we still want to clean up our row).
+        $this->resourceMapper->deleteById($row->getId());
+
+        $this->logger->info('[TeamHub][ResourceService] deleteSpecificResource completed', [
+            'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+            'result' => $result, 'app_id' => Application::APP_ID,
+        ]);
+
+        return ['success' => true, 'detail' => $result];
+    }
+    /**
+     * Remove all registry rows for a team + app after a hard delete.
+     * Errors are logged and swallowed — the NC-side resource is already gone.
+     */
+    private function removeResourceRowsByTeamAndApp(string $teamId, string $appId): void {
+        try {
+            $rows = $this->resourceMapper->findAllByTeamAndApp($teamId, $appId);
+            foreach ($rows as $row) {
+                $this->resourceMapper->deleteById($row->getId());
+            }
+            $this->logger->debug('[TeamHub][ResourceService] removeResourceRowsByTeamAndApp — removed', [
+                'teamId' => $teamId, 'appId' => $appId, 'count' => count($rows),
+                'app' => Application::APP_ID,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ResourceService] removeResourceRowsByTeamAndApp failed', [
+                'teamId' => $teamId, 'appId' => $appId, 'error' => $e->getMessage(),
+                'app' => Application::APP_ID,
+            ]);
         }
     }
 
@@ -527,6 +744,64 @@ class ResourceService {
      * Look up a team's display name from circles_circle by its unique_id.
      * Used internally to resolve the name for IntraVox page matching on delete.
      */
+    // -------------------------------------------------------------------------
+    // Resource registry write helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Insert or ignore a resource row in teamhub_team_app_resources.
+     *
+     * Used after successful create or connect operations. If a row for this
+     * (team, app, resource_id) already exists (e.g. grandfathered by migration)
+     * we leave it untouched — the existing origin/status is authoritative.
+     *
+     * @param string $teamId     Circle unique_id
+     * @param string $appId      'talk' | 'files' | 'calendar' | 'deck'
+     * @param string $resourceId Token, folder_id, calendar_id, or board_id as string
+     * @param string $origin     'teamhub_create' | 'teamhub_connect'
+     * @param string $decidedBy  UID of the acting user
+     */
+    private function upsertResourceRow(
+        string $teamId,
+        string $appId,
+        string $resourceId,
+        string $origin,
+        string $decidedBy
+    ): void {
+        try {
+            $existing = $this->resourceMapper->findByTeamAppResource($teamId, $appId, $resourceId);
+            if ($existing !== null) {
+                $this->logger->debug('[TeamHub][ResourceService] upsertResourceRow — row already exists, skipping', [
+                    'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+                    'app' => Application::APP_ID,
+                ]);
+                return;
+            }
+            $this->resourceMapper->insertResource(
+                teamId:       $teamId,
+                appId:        $appId,
+                resourceId:   $resourceId,
+                origin:       $origin,
+                status:       'active',
+                riskStatus:   'none',
+                displayOrder: 0,
+                decidedBy:    $decidedBy,
+                decidedAt:    time(),
+            );
+            $this->logger->debug('[TeamHub][ResourceService] upsertResourceRow — inserted', [
+                'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+                'origin' => $origin, 'app' => Application::APP_ID,
+            ]);
+        } catch (\Throwable $e) {
+            // Non-fatal: the NC-side share/ACL was already written. Log so we
+            // can diagnose drift between the registry and NC reality at next reconcile.
+            $this->logger->warning('[TeamHub][ResourceService] upsertResourceRow failed', [
+                'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+    }
+
     private function getTeamName(string $teamId, \OCP\IDBConnection $db): string {
         try {
             $qb  = $db->getQueryBuilder();

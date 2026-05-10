@@ -302,20 +302,22 @@ class CalendarService {
 
             $calendarName = (string)($row['displayname'] ?? $row['uri']);
 
-            // Refuse if a calendar is already connected to this team.
+            // Refuse only if this specific calendar is already connected to this team.
+            // Multiple different calendars are allowed (multi-resource model).
             $circlePrincipal = 'principals/circles/' . $teamId;
             $chk = $db->getQueryBuilder();
             $cres = $chk->select('resourceid')
                 ->from('dav_shares')
                 ->where($chk->expr()->eq('type', $chk->createNamedParameter('calendar')))
                 ->andWhere($chk->expr()->eq('principaluri', $chk->createNamedParameter($circlePrincipal)))
+                ->andWhere($chk->expr()->eq('resourceid', $chk->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->setMaxResults(1)
                 ->executeQuery();
             $existing = $cres->fetch();
             $cres->closeCursor();
 
             if ($existing) {
-                return ['success' => false, 'error' => 'Team already has a calendar — disable the current one first'];
+                return ['success' => false, 'error' => 'This calendar is already connected to this team'];
             }
 
             // Insert dav_shares row granting the circle read-write access (access=2).
@@ -352,6 +354,71 @@ class CalendarService {
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['success' => false, 'error' => 'Operation failed — see server log for details'];
+        }
+    }
+
+    /**
+     * Remove the team's circle access from a specific calendar (by ID).
+     * Deletes only the dav_shares row for the circle principal.
+     * The calendar itself and its events are preserved.
+     */
+    public function removeCalendarAccess(string $teamId, int $calendarId, \OCP\IDBConnection $db): bool {
+        try {
+            $principalUri = 'principals/circles/' . $teamId;
+            $qb = $db->getQueryBuilder();
+            $affected = $qb->delete('dav_shares')
+                ->where($qb->expr()->eq('type',         $qb->createNamedParameter('calendar')))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                ->andWhere($qb->expr()->eq('resourceid',   $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $this->logger->debug('[CalendarService] removeCalendarAccess: dav_shares row removed', [
+                'teamId' => $teamId, 'calendarId' => $calendarId,
+                'affected' => $affected, 'app' => Application::APP_ID,
+            ]);
+            return $affected > 0;
+        } catch (\Throwable $e) {
+            $this->logger->error('[CalendarService] removeCalendarAccess failed', [
+                'teamId' => $teamId, 'calendarId' => $calendarId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Delete a specific calendar by ID (multi-resource-aware).
+     */
+    public function deleteCalendarById(int $calendarId, \OCP\IDBConnection $db): array {
+        try {
+            // Delete via CalDavBackend (cascades events, attendees, alarms).
+            try {
+                $caldav = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
+                $caldav->deleteCalendar($calendarId, true);
+            } catch (\Throwable $e) {
+                // Fallback: manual QB delete
+                $this->logger->warning('[CalendarService] deleteCalendarById: CalDavBackend failed, using QB', [
+                    'calendarId' => $calendarId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                foreach (['dav_shares', 'calendarobjects', 'calendars'] as $tbl) {
+                    $col = ($tbl === 'dav_shares') ? 'resourceid' : (($tbl === 'calendars') ? 'id' : 'calendarid');
+                    try {
+                        $dqb = $db->getQueryBuilder();
+                        $dqb->delete($tbl)
+                            ->where($dqb->expr()->eq($col, $dqb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->executeStatement();
+                    } catch (\Throwable) {}
+                }
+            }
+            $this->logger->info('[CalendarService] deleteCalendarById: calendar deleted', [
+                'calendarId' => $calendarId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'calendar_id' => $calendarId];
+        } catch (\Throwable $e) {
+            $this->logger->error('[CalendarService] deleteCalendarById failed', [
+                'calendarId' => $calendarId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => $e->getMessage()];
         }
     }
 

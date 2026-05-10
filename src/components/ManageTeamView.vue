@@ -185,18 +185,162 @@
                 </div>
             </div>
 
-            <!-- Team Apps -->
+            <!-- Team Apps — per-app resource lists for resource-backed apps -->
             <div class="manage-section">
                 <h3>{{ t('teamhub', 'Team Apps') }}</h3>
                 <p class="manage-section-desc">
-                    {{ t('teamhub', 'Enable or disable Nextcloud apps for this team. Disabled apps are hidden from the tab bar.') }}
+                    {{ t('teamhub', 'Manage connected resources for each app. Resources appear as tabs on the team home view.') }}
                 </p>
                 <div v-if="loadingApps" class="section-loading">
                     <NcLoadingIcon :size="24" />
                 </div>
                 <div v-else class="team-apps-list">
+
+                    <!-- At-risk resources — shown at top so admins see problems first -->
+                    <div v-if="atRiskResources.length > 0" class="manage-section--atrisk manage-section--atrisk-inline">
+                        <div class="team-app-section__header team-app-section__header--warning">
+                            <span aria-hidden="true">⚠</span>
+                            <span class="team-app-section__name">{{ t('teamhub', 'Resources at risk') }}</span>
+                        </div>
+                        <div v-for="resource in atRiskResources" :key="resource.id" class="atrisk-resource-item atrisk-resource-item--inline">
+                            <span class="atrisk-resource-icon" aria-hidden="true">⚠</span>
+                            <div class="atrisk-resource-info">
+                                <span class="atrisk-resource-name">
+                                    {{ appLabel(resource.appId) }} — {{ resource.displayName || resource.resourceId }}
+                                </span>
+                                <span class="atrisk-resource-reason">
+                                    {{ riskLabel(resource.riskStatus) }}
+                                    <template v-if="resource.ownerUid">
+                                        · {{ t('teamhub', 'Owner: {uid}', { uid: resource.ownerUid }) }}
+                                    </template>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Talk — 1:1, no multi-resource -->
+                    <div v-if="installedApps.talk" class="team-app-section">
+                        <div class="team-app-section__header">
+                            <MessageIcon :size="18" aria-hidden="true" />
+                            <span class="team-app-section__name">{{ t('teamhub', 'Talk') }}</span>
+                        </div>
+                        <div v-for="row in activeResourcesByApp('talk')" :key="row.id" class="resource-row">
+                            <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
+                            <div class="resource-row__actions">
+                                <NcButton
+                                    type="tertiary"
+                                    :aria-label="t('teamhub', 'Disconnect Talk room')"
+                                    @click="removeResource(row)">
+                                    {{ t('teamhub', 'Disconnect') }}
+                                </NcButton>
+                            </div>
+                        </div>
+                        <div v-if="activeResourcesByApp('talk').length === 0" class="resource-row resource-row--empty">
+                            <span class="resource-row__empty-label">{{ t('teamhub', 'No Talk room connected') }}</span>
+                            <NcButton type="tertiary" @click="openConnectPicker('talk')">
+                                {{ t('teamhub', '+ Connect existing') }}
+                            </NcButton>
+                        </div>
+                    </div>
+
+                    <!-- Files — 1:1 -->
+                    <div class="team-app-section">
+                        <div class="team-app-section__header">
+                            <FolderIcon :size="18" aria-hidden="true" />
+                            <span class="team-app-section__name">{{ t('teamhub', 'Files') }}</span>
+                        </div>
+                        <div v-for="row in activeResourcesByApp('files')" :key="row.id" class="resource-row">
+                            <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
+                            <div class="resource-row__actions">
+                                <NcButton
+                                    type="tertiary"
+                                    :aria-label="t('teamhub', 'Disconnect Files folder')"
+                                    @click="removeResource(row)">
+                                    {{ t('teamhub', 'Disconnect') }}
+                                </NcButton>
+                            </div>
+                        </div>
+                        <div v-if="activeResourcesByApp('files').length === 0" class="resource-row resource-row--empty">
+                            <span class="resource-row__empty-label">{{ t('teamhub', 'No shared folder connected') }}</span>
+                            <NcButton type="tertiary" @click="openConnectPicker('files')">
+                                {{ t('teamhub', '+ Connect existing') }}
+                            </NcButton>
+                        </div>
+                    </div>
+
+                    <!-- Calendar — multi-resource -->
+                    <div v-if="installedApps.calendar" class="team-app-section">
+                        <div class="team-app-section__header">
+                            <CalendarIcon :size="18" aria-hidden="true" />
+                            <span class="team-app-section__name">{{ t('teamhub', 'Calendar') }}</span>
+                        </div>
+                        <div v-for="row in activeResourcesByApp('calendar')" :key="row.id" class="resource-row">
+                            <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
+                            <div class="resource-row__actions">
+                                <NcButton
+                                    type="tertiary"
+                                    :disabled="row._loading"
+                                    :aria-label="t('teamhub', 'Disconnect calendar — removes team access, calendar is preserved')"
+                                    @click="removeResource(row)">
+                                    {{ t('teamhub', 'Disconnect') }}
+                                </NcButton>
+                                <NcButton
+                                    type="error"
+                                    :disabled="row._loading"
+                                    :aria-label="t('teamhub', 'Delete calendar permanently')"
+                                    @click="confirmDeleteResource(row)">
+                                    {{ t('teamhub', 'Delete') }}
+                                </NcButton>
+                            </div>
+                        </div>
+                        <div class="resource-row resource-row--actions">
+                            <NcButton type="tertiary" @click="openConnectPicker('calendar')">
+                                {{ t('teamhub', '+ Connect existing') }}
+                            </NcButton>
+                            <NcButton type="tertiary" @click="createResource('calendar')">
+                                {{ t('teamhub', '+ Create new') }}
+                            </NcButton>
+                        </div>
+                    </div>
+
+                    <!-- Deck — multi-resource -->
+                    <div v-if="installedApps.deck" class="team-app-section">
+                        <div class="team-app-section__header">
+                            <CardTextIcon :size="18" aria-hidden="true" />
+                            <span class="team-app-section__name">{{ t('teamhub', 'Deck') }}</span>
+                        </div>
+                        <div v-for="row in activeResourcesByApp('deck')" :key="row.id" class="resource-row">
+                            <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
+                            <div class="resource-row__actions">
+                                <NcButton
+                                    type="tertiary"
+                                    :disabled="row._loading"
+                                    :aria-label="t('teamhub', 'Disconnect board — removes team access, board is preserved')"
+                                    @click="removeResource(row)">
+                                    {{ t('teamhub', 'Disconnect') }}
+                                </NcButton>
+                                <NcButton
+                                    type="error"
+                                    :disabled="row._loading"
+                                    :aria-label="t('teamhub', 'Delete board permanently')"
+                                    @click="confirmDeleteResource(row)">
+                                    {{ t('teamhub', 'Delete') }}
+                                </NcButton>
+                            </div>
+                        </div>
+                        <div class="resource-row resource-row--actions">
+                            <NcButton type="tertiary" @click="openConnectPicker('deck')">
+                                {{ t('teamhub', '+ Connect existing') }}
+                            </NcButton>
+                            <NcButton type="tertiary" @click="createResource('deck')">
+                                {{ t('teamhub', '+ Create new') }}
+                            </NcButton>
+                        </div>
+                    </div>
+
+                    <!-- Shared Files + Intravox — toggle-driven, unchanged -->
                     <div
-                        v-for="app in teamAppsList"
+                        v-for="app in toggleApps"
                         :key="app.id"
                         class="team-app-item">
                         <div class="team-app-icon">
@@ -214,6 +358,169 @@
                             @update:checked="toggleApp(app, $event)">
                             {{ app.installed ? (app.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled')) : t('teamhub', 'Not installed') }}
                         </NcCheckboxRadioSwitch>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Connect existing resource picker (inline) -->
+            <NcDialog
+                v-if="connectPickerApp"
+                :name="connectPickerTitle"
+                :open="!!connectPickerApp"
+                @update:open="connectPickerApp = null">
+                <div class="teamhub-resource-picker">
+                    <div v-if="loadingConnectPicker" class="section-loading">
+                        <NcLoadingIcon :size="24" />
+                    </div>
+                    <div v-else-if="connectPickerItems.length === 0" class="resource-picker-empty">
+                        {{ t('teamhub', 'No resources available to connect') }}
+                    </div>
+                    <button
+                        v-else
+                        v-for="item in connectPickerItems"
+                        :key="item.id"
+                        class="teamhub-resource-picker__item"
+                        @click="connectExisting(item)">
+                        <span class="teamhub-resource-picker__name">{{ item.name }}</span>
+                    </button>
+                </div>
+            </NcDialog>
+
+            <!-- Create new resource — name input dialog -->
+            <NcDialog
+                v-if="createResourceApp"
+                :name="createResourceDialogTitle"
+                :open="!!createResourceApp"
+                @update:open="createResourceApp = null">
+                <div class="create-resource-form">
+                    <NcTextArea
+                        :value="createResourceName"
+                        :label="t('teamhub', 'Name')"
+                        :placeholder="createResourceNamePlaceholder"
+                        :rows="1"
+                        :disabled="creatingResource"
+                        @input="createResourceName = $event.target.value"
+                        @keydown.enter.prevent="confirmCreateResource" />
+                    <div class="create-resource-form__actions">
+                        <NcButton
+                            type="tertiary"
+                            :disabled="creatingResource"
+                            @click="createResourceApp = null">
+                            {{ t('teamhub', 'Cancel') }}
+                        </NcButton>
+                        <NcButton
+                            type="primary"
+                            :disabled="!createResourceName.trim() || creatingResource"
+                            :aria-label="t('teamhub', 'Create {name}', { name: createResourceName })"
+                            @click="confirmCreateResource">
+                            <NcLoadingIcon v-if="creatingResource" :size="16" />
+                            {{ t('teamhub', 'Create') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </NcDialog>
+
+            <!-- Delete resource confirmation dialog -->
+            <NcDialog
+                v-if="pendingDeleteResource"
+                :name="t('teamhub', 'Delete resource permanently?')"
+                :open="!!pendingDeleteResource"
+                @update:open="pendingDeleteResource = null">
+                <div class="delete-resource-confirm">
+                    <p>
+                        {{ t('teamhub', 'This will permanently delete "{name}". This cannot be undone. All data in this {app} will be lost.', {
+                            name: pendingDeleteResource.displayName || pendingDeleteResource.resourceId,
+                            app: appLabel(pendingDeleteResource.appId),
+                        }) }}
+                    </p>
+                    <div class="delete-resource-confirm__actions">
+                        <NcButton type="tertiary" @click="pendingDeleteResource = null">
+                            {{ t('teamhub', 'Cancel') }}
+                        </NcButton>
+                        <NcButton
+                            type="error"
+                            :disabled="deletingResource"
+                            @click="executeDeleteResource">
+                            <NcLoadingIcon v-if="deletingResource" :size="16" />
+                            {{ t('teamhub', 'Delete permanently') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </NcDialog>
+
+            <!-- At-risk resources (active but owner disabled or transfer failed) -->
+            <!-- Pending resources (externally connected, awaiting team admin review) -->
+            <div v-if="pendingResources.length > 0" class="manage-section manage-section--pending">
+                <h3>{{ t('teamhub', 'Resources pending review') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'These resources are connected to this team in Nextcloud but were not added through TeamHub. Review each one and choose to accept or ignore it.') }}
+                </p>
+                <div v-if="loadingPendingResources" class="section-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <div v-else class="pending-resources-list">
+                    <div
+                        v-for="resource in pendingResources"
+                        :key="resource.id"
+                        class="pending-resource-item">
+                        <div class="pending-resource-info">
+                            <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
+                            <span class="pending-resource-name" :title="resource.resourceId">
+                                {{ resource.displayName || resource.resourceId }}
+                            </span>
+                        </div>
+                        <div class="pending-resource-actions">
+                            <NcButton
+                                type="primary"
+                                :disabled="resource._loading"
+                                :aria-label="t('teamhub', 'Accept resource {id}', { id: resource.resourceId })"
+                                @click="acceptResource(resource)">
+                                {{ t('teamhub', 'Accept') }}
+                            </NcButton>
+                            <NcButton
+                                type="tertiary"
+                                :disabled="resource._loading"
+                                :aria-label="t('teamhub', 'Ignore resource {id}', { id: resource.resourceId })"
+                                @click="ignoreResource(resource)">
+                                {{ t('teamhub', 'Ignore') }}
+                            </NcButton>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ignored resources (collapsed, reversible) -->
+            <div v-if="ignoredResources.length > 0" class="manage-section">
+                <button
+                    type="button"
+                    class="manage-section-toggle"
+                    :aria-expanded="showIgnored"
+                    @click="showIgnored = !showIgnored">
+                    <ChevronRight v-if="!showIgnored" :size="16" aria-hidden="true" />
+                    <ChevronDown v-else :size="16" aria-hidden="true" />
+                    <!-- TRANSLATORS: label for a collapsible section listing resources hidden from the team view -->
+                    {{ n('teamhub', 'Show %n ignored resource', 'Show %n ignored resources', ignoredResources.length, { n: ignoredResources.length }) }}
+                </button>
+                <div v-if="showIgnored" class="pending-resources-list pending-resources-list--ignored">
+                    <div
+                        v-for="resource in ignoredResources"
+                        :key="resource.id"
+                        class="pending-resource-item">
+                        <div class="pending-resource-info">
+                            <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
+                            <span class="pending-resource-name" :title="resource.resourceId">
+                                {{ resource.displayName || resource.resourceId }}
+                            </span>
+                        </div>
+                        <NcButton
+                            type="tertiary"
+                            :disabled="resource._loading"
+                            :aria-label="t('teamhub', 'Un-ignore resource {id}', { id: resource.resourceId })"
+                            @click="unignoreResource(resource)">
+                            <!-- TRANSLATORS: button label to restore a previously ignored resource back to active status -->
+                            {{ t('teamhub', 'Un-ignore') }}
+                        </NcButton>
                     </div>
                 </div>
             </div>
@@ -714,7 +1021,7 @@ import { getCurrentUser } from '@nextcloud/auth'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import { mapState } from 'vuex'
+import { mapState, mapMutations } from 'vuex'
 import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountRemove from 'vue-material-design-icons/AccountRemove.vue'
@@ -729,6 +1036,8 @@ import FolderAccountIcon from 'vue-material-design-icons/FolderAccount.vue'
 import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
 import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 import FileDocumentOutlineIcon from 'vue-material-design-icons/FileDocumentOutline.vue'
+import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
+import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import TextIcon from 'vue-material-design-icons/Text.vue'
 import TuneIcon from 'vue-material-design-icons/Tune.vue'
 import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
@@ -755,6 +1064,7 @@ export default {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, FolderAccountIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
+        ChevronRight, ChevronDown,
         ImageIcon, TrashCanOutline, UploadIcon, AccountArrowRight,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
         ArchiveTeamModal,
@@ -797,6 +1107,21 @@ export default {
             installedApps: {},
             loadingApps: false,
             togglingApp: null,
+            // Pending / ignored resources (discovered externally)
+            pendingResourceRows: [],   // raw rows from /resources/panel grouped by app, flattened
+            loadingPendingResources: false,
+            showIgnored: false,
+            // Connect existing picker
+            connectPickerApp: null,
+            connectPickerItems: [],
+            loadingConnectPicker: false,
+            // Create new resource name dialog
+            createResourceApp: null,
+            createResourceName: '',
+            creatingResource: false,
+            // Delete resource confirmation
+            pendingDeleteResource: null,
+            deletingResource: false,
             pendingDisableApp: null,
             // No-archive delete confirmation dialog
             pendingNoArchiveDelete: false,
@@ -826,7 +1151,63 @@ export default {
         }
     },
     computed: {
-        ...mapState(['intravoxAvailable']),
+        ...mapState(['intravoxAvailable', 'resourceWarningFocus']),
+
+        /** Active rows for a specific app — used by the per-app resource list. */
+        activeResourcesByApp() {
+            return (appId) => this.pendingResourceRows.filter(r => r.appId === appId && r.status === 'active')
+        },
+
+        /** Toggle-driven apps (not resource-backed) — Shared Files + Intravox. */
+        toggleApps() {
+            return (this.teamAppsList || []).filter(a => ['shared_files', 'intravox'].includes(a.id))
+        },
+
+        /** Title for the connect picker dialog. */
+        connectPickerTitle() {
+            const labels = {
+                talk:     t('teamhub', 'Connect a Talk room'),
+                files:    t('teamhub', 'Connect a shared folder'),
+                calendar: t('teamhub', 'Connect a calendar'),
+                deck:     t('teamhub', 'Connect a Deck board'),
+            }
+            return labels[this.connectPickerApp] || t('teamhub', 'Connect resource')
+        },
+
+        /** Title for the create new dialog. */
+        createResourceDialogTitle() {
+            const labels = {
+                talk:     t('teamhub', 'Create a Talk room'),
+                calendar: t('teamhub', 'Create a calendar'),
+                deck:     t('teamhub', 'Create a Deck board'),
+            }
+            return labels[this.createResourceApp] || t('teamhub', 'Create resource')
+        },
+
+        /** Placeholder for the name input in the create dialog. */
+        createResourceNamePlaceholder() {
+            const labels = {
+                talk:     t('teamhub', 'e.g. Team Chat'),
+                calendar: t('teamhub', 'e.g. Team Schedule'),
+                deck:     t('teamhub', 'e.g. Sprint Board'),
+            }
+            return labels[this.createResourceApp] || ''
+        },
+
+        /** Flat list of pending resource rows (status=pending). */
+        pendingResources() {
+            return this.pendingResourceRows.filter(r => r.status === 'pending')
+        },
+
+        /** Flat list of ignored resource rows (status=ignored). */
+        ignoredResources() {
+            return this.pendingResourceRows.filter(r => r.status === 'ignored')
+        },
+
+        /** Active resources with a risk flag set. */
+        atRiskResources() {
+            return this.pendingResourceRows.filter(r => r.riskStatus && r.riskStatus !== 'none')
+        },
 
         // Description text under "Delete team" — depends on archive setting + mode
         deleteTeamDescription() {
@@ -981,10 +1362,30 @@ export default {
             this.archiveStatusRow = null
             this.loadAll()
         },
+        // When the warning block button is clicked, auto-switch to settings tab.
+        resourceWarningFocus(focused) {
+            if (focused && this.activeTab !== 'settings') {
+                this.activeTab = 'settings'
+                // The activeTab watcher handles the scroll + flag clear.
+            }
+        },
         activeTab(tab) {
             if (tab === 'danger') {
                 this.loadArchiveStatus()
                 this.loadArchiveSettings()
+            }
+            // If the warning block sent us here with focus flag set, scroll to at-risk section.
+            if (tab === 'settings' && this.resourceWarningFocus) {
+                this.$nextTick(() => {
+                    const el = this.$el.querySelector('.manage-section--atrisk-inline') ||
+                               this.$el.querySelector('.manage-section--atrisk')
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        el.classList.add('manage-section--highlight')
+                        setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
+                    }
+                    this.SET_RESOURCE_WARNING_FOCUS(false)
+                })
             }
         },
     },
@@ -993,6 +1394,8 @@ export default {
     },
     methods: {
         t, n,
+
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS']),
 
         loadAll() {
             this.loadMembers()
@@ -1346,6 +1749,234 @@ export default {
             } finally {
                 this.loadingApps = false
             }
+            // Also load pending/ignored resources when the settings tab is opened.
+            this.loadPendingResources()
+        },
+
+        // ------------------------------------------------------------------
+        // Pending / ignored resource management
+        // ------------------------------------------------------------------
+
+        async loadPendingResources() {
+            this.loadingPendingResources = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/panel`)
+                )
+                // data is grouped by app_id — flatten to a single list with _loading flag.
+                const flat = []
+                for (const [, rows] of Object.entries(data || {})) {
+                    for (const row of rows) {
+                        flat.push({ ...row, _loading: false })
+                    }
+                }
+                this.pendingResourceRows = flat
+            } catch (e) {
+                this.pendingResourceRows = []
+            } finally {
+                this.loadingPendingResources = false
+            }
+        },
+
+        async acceptResource(resource) {
+            resource._loading = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/accept`)
+                )
+                // Update status in-place to keep UI reactive without a full reload.
+                resource.status = 'active'
+            } catch (e) {
+            } finally {
+                resource._loading = false
+            }
+        },
+
+        async ignoreResource(resource) {
+            resource._loading = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/ignore`)
+                )
+                resource.status = 'ignored'
+            } catch (e) {
+            } finally {
+                resource._loading = false
+            }
+        },
+
+        async unignoreResource(resource) {
+            resource._loading = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/unignore`)
+                )
+                resource.status = 'active'
+            } catch (e) {
+            } finally {
+                resource._loading = false
+            }
+        },
+
+        /**
+         * Human-readable label for a risk_status value.
+         */
+        riskLabel(riskStatus) {
+            const labels = {
+                // TRANSLATORS: risk status shown when the resource owner's NC account has been disabled
+                owner_disabled:   t('teamhub', 'Owner disabled'),
+                // TRANSLATORS: risk status shown when automatic ownership transfer failed after account deletion
+                transfer_failed:  t('teamhub', 'Transfer failed'),
+            }
+            return labels[riskStatus] || riskStatus
+        },
+
+        // ------------------------------------------------------------------
+        // Per-app resource list actions
+        // ------------------------------------------------------------------
+
+        async removeResource(resource) {
+            resource._loading = true
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/remove`)
+                )
+                const idx = this.pendingResourceRows.findIndex(r => r.id === resource.id)
+                if (idx !== -1) this.pendingResourceRows.splice(idx, 1)
+                this.$store.dispatch('fetchResources', this.team.id)
+            } catch (e) {
+                resource._loading = false
+            }
+        },
+
+        confirmDeleteResource(resource) {
+            this.pendingDeleteResource = resource
+        },
+
+        async executeDeleteResource() {
+            if (!this.pendingDeleteResource) return
+            const resource = this.pendingDeleteResource
+            this.deletingResource = true
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/delete`)
+                )
+                const idx = this.pendingResourceRows.findIndex(r => r.id === resource.id)
+                if (idx !== -1) this.pendingResourceRows.splice(idx, 1)
+                this.$store.dispatch('fetchResources', this.team.id)
+                this.pendingDeleteResource = null
+            } catch (e) {
+                // keep dialog open on error
+            } finally {
+                this.deletingResource = false
+            }
+        },
+
+        async openConnectPicker(appId) {
+            // Files uses NC's own file picker — no server endpoint needed.
+            if (appId === 'files') {
+                this.openFilePicker()
+                return
+            }
+            this.connectPickerApp = appId
+            this.connectPickerItems = []
+            this.loadingConnectPicker = true
+            try {
+                const urlMap = {
+                    talk:     '/apps/teamhub/api/v1/pickers/talk',
+                    calendar: '/apps/teamhub/api/v1/pickers/calendar',
+                    deck:     '/apps/teamhub/api/v1/pickers/deck',
+                }
+                const { data } = await axios.get(generateUrl(urlMap[appId]))
+                // Picker endpoints return { resources: [...] }
+                this.connectPickerItems = Array.isArray(data.resources) ? data.resources : []
+            } catch (e) {
+                this.connectPickerItems = []
+            } finally {
+                this.loadingConnectPicker = false
+            }
+        },
+
+        async openFilePicker() {
+            try {
+                const { getFilePickerBuilder } = await import('@nextcloud/dialogs')
+                const picker = getFilePickerBuilder(t('teamhub', 'Choose a folder to connect'))
+                    .setMultiSelect(false)
+                    .setMimeTypeFilter(['httpd/unix-directory'])
+                    .setType(1)
+                    .allowDirectories()
+                    .build()
+                const nodes = await picker.pick()
+                if (nodes && nodes.length > 0) {
+                    const node = nodes[0]
+                    // NC file picker returns a node with fileid as the resource ID
+                    const fileId = node.fileid || node.id
+                    if (fileId) {
+                        await axios.post(
+                            generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/files/connect`),
+                            { resourceId: fileId }
+                        )
+                        await this.loadPendingResources()
+                        this.$store.dispatch('fetchResources', this.team.id)
+                    }
+                }
+            } catch (e) {
+                // User cancelled or picker not available
+            }
+        },
+
+        async connectExisting(item) {
+            const appId = this.connectPickerApp
+            this.connectPickerApp = null
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${appId}/connect`),
+                    { resourceId: item.id }
+                )
+                await this.loadPendingResources()
+                this.$store.dispatch('fetchResources', this.team.id)
+            } catch (e) {
+                // silent — picker closed, user can retry
+            }
+        },
+
+        createResource(appId) {
+            // Open the name dialog — actual creation happens in confirmCreateResource.
+            this.createResourceApp = appId
+            this.createResourceName = ''
+        },
+
+        async confirmCreateResource() {
+            const name = this.createResourceName.trim()
+            if (!name || !this.createResourceApp) return
+            this.creatingResource = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/create-resources`),
+                    { apps: [this.createResourceApp], names: { [this.createResourceApp]: name } }
+                )
+                this.createResourceApp = null
+                this.createResourceName = ''
+                await this.loadPendingResources()
+                this.$store.dispatch('fetchResources', this.team.id)
+            } catch (e) {
+                // keep dialog open on error
+            } finally {
+                this.creatingResource = false
+            }
+        },
+
+        /**
+         * Human-readable app label for a resource panel row.
+         */
+        appLabel(appId) {
+            const labels = {
+                talk:     t('teamhub', 'Talk'),
+                files:    t('teamhub', 'Files'),
+                calendar: t('teamhub', 'Calendar'),
+                deck:     t('teamhub', 'Deck'),
+            }
+            return labels[appId] || appId
         },
 
         async toggleApp(app, enabled) {
@@ -1743,7 +2374,7 @@ export default {
 }
 .manage-tab--danger.manage-tab--active {
     color: var(--color-error-text);
-    border-bottom-color: var(--color-error);
+    border-bottom-color: var(--color-error-text);
 }
 
 /* ── Sections ─────────────────────────────────────────────────── */
@@ -1896,7 +2527,267 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-/* Members */
+/* At-risk resource panel */
+.manage-section--atrisk {
+    border: 1px solid var(--color-error);
+    border-radius: var(--border-radius-large);
+    padding: 12px 16px;
+    background: color-mix(in srgb, var(--color-error) 8%, transparent);
+    transition: box-shadow 0.3s ease;
+}
+/* Inline variant — inside team-apps-list, styled as a section item */
+.manage-section--atrisk-inline {
+    border: 1px solid var(--color-error);
+    border-radius: var(--border-radius-large);
+    margin-bottom: 10px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--color-error) 8%, transparent);
+}
+.team-app-section__header--warning {
+    background: color-mix(in srgb, var(--color-error) 12%, var(--color-background-dark));
+    color: var(--color-main-text);
+}
+.team-app-section__header--warning span[aria-hidden] {
+    color: var(--color-error-text);
+}
+.atrisk-resource-item--inline {
+    border-top: 1px solid color-mix(in srgb, var(--color-error) 25%, transparent);
+    padding: 8px 14px;
+    background: transparent;
+}
+.atrisk-resource-item--inline .atrisk-resource-name {
+    color: var(--color-main-text);
+}
+.atrisk-resource-item--inline .atrisk-resource-reason {
+    color: var(--color-error-text);
+}
+.manage-section--atrisk.manage-section--highlight,
+.manage-section--atrisk-inline.manage-section--highlight {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-error) 40%, transparent);
+}
+.atrisk-resources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+.atrisk-resource-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--color-background-hover);
+    border-radius: var(--border-radius);
+}
+.atrisk-resource-icon {
+    font-size: 15px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+.atrisk-resource-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.atrisk-resource-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-main-text);
+}
+.atrisk-resource-reason {
+    font-size: 11px;
+    color: var(--color-error-text);
+}
+
+/* Pending / ignored resource panels */
+.manage-section--pending {
+    border: 1px solid var(--color-warning);
+    border-radius: var(--border-radius-large);
+    padding: 12px 16px;
+    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+.pending-resources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+.pending-resources-list--ignored {
+    opacity: 0.75;
+}
+.pending-resource-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    background: var(--color-background-hover);
+    border-radius: var(--border-radius);
+}
+.pending-resource-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.pending-resource-app {
+    font-size: 13px;
+    font-weight: 500;
+}
+.pending-resource-name {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pending-resource-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.manage-section-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-main-text);
+    padding: 4px 0;
+}
+.manage-section-toggle:hover {
+    color: var(--color-primary);
+}
+.manage-section-toggle:focus-visible {
+    outline: 2px solid var(--color-primary);
+    border-radius: var(--border-radius);
+}
+
+/* Per-app resource list */
+.team-app-section {
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+.team-app-section__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--color-background-dark);
+    font-weight: 500;
+    font-size: 13px;
+}
+.team-app-section__name {
+    flex: 1;
+}
+.resource-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--color-border);
+    min-height: 44px;
+}
+.resource-row--empty {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+}
+.resource-row--actions {
+    gap: 6px;
+    justify-content: flex-start;
+}
+.resource-row__name {
+    font-size: 13px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.resource-row__empty-label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+}
+.resource-row__actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.resource-picker-empty {
+    padding: 16px;
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+    text-align: center;
+}
+.create-resource-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 0;
+    min-width: 280px;
+}
+.create-resource-form__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.delete-resource-confirm {
+    padding: 4px 0;
+    min-width: 300px;
+}
+.delete-resource-confirm p {
+    margin-bottom: 16px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--color-main-text);
+}
+.delete-resource-confirm__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+.teamhub-resource-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0;
+    min-width: 240px;
+}
+.teamhub-resource-picker__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-background-hover);
+    cursor: pointer;
+    text-align: left;
+    font-size: 14px;
+    color: var(--color-main-text);
+}
+.teamhub-resource-picker__item:hover {
+    background: var(--color-primary-light);
+}
+.teamhub-resource-picker__item:focus-visible {
+    outline: 2px solid var(--color-primary);
+}
+.teamhub-resource-picker__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Team Apps toggle items (shared_files, intravox) */
 .members-list {
     display: flex;
     flex-direction: column;
@@ -2404,6 +3295,6 @@ export default {
 .manage-danger-warning :first-child {
     flex-shrink: 0;
     margin-top: 1px;
-    color: var(--color-warning, #c89b00);
+    color: var(--color-warning-text, #7a5900);
 }
 </style>

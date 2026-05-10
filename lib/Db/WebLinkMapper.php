@@ -62,7 +62,7 @@ class WebLinkMapper {
             ]);
         
         $qb->executeStatement();
-        $id = $qb->getLastInsertId();
+        $id = (int)$this->db->lastInsertId('*PREFIX*teamhub_web_links');
         
         return [
             'id' => (int)$id,

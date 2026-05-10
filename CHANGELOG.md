@@ -3,6 +3,87 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.32.0] — 2026-05-10
+
+### Added
+- **Multi-resource support for Calendar and Deck.** Teams can now connect multiple calendars and multiple Deck boards. `getTeamResources()` returns arrays for both apps.
+- **Tab bar picker.** When a team has 2+ active calendars or boards, clicking the tab opens a picker. Count badge shown on the tab.
+- **Per-app resource list in Manage Team → Settings.** Replaces app toggles for Talk/Files/Calendar/Deck with a live resource list showing connected resources with Disconnect and Delete actions, plus Connect existing and Create new buttons.
+- **Create new resource name dialog.** Admin enters a name before creating a new calendar or Deck board.
+- **Connect existing uses NC file picker for Files.** Other apps use TeamHub's own picker endpoint.
+- **At-risk block at top of Team Apps section.** Resources with `risk_status != none` shown prominently before the per-app lists.
+- **Disconnect action** — strips team's circle ACL, resource survives. Replaces "Remove".
+- **Delete action with confirmation dialog** — destroys the NC resource permanently (hard delete).
+- **Two-pill source labels on widget items.** DeckWidget shows board name (truncated 20 chars, full name on hover) + "Deck". CalendarWidget shows calendar name + "Calendar". Only shown when team has 2+ resources of that type.
+- **Multi-resource widget aggregation.** DeckWidget and CalendarWidget aggregate across all connected resources. `fetchDeckTasks` loops all boards. `getTeamCalendarEvents` loops all calendars. `getTeamTasks` loops all connected calendars.
+- **`calendarId` and `boardId` in create-event/create-task requests.** When team has 2+ resources, inline picker in modal lets admin choose target. `calendarId`/`boardId` sent in POST body and used by backend.
+- **`calendarName` in calendar events response** and **`boardName` in deck task data** for pill display.
+- Per-app remove methods: `removeRoomAccess`, `removeCalendarAccess`, `removeFilesAccess`, `removeBoardAccess`.
+- Per-resource delete methods: `deleteRoomById`, `deleteCalendarById`, `deleteBoardById`, `deleteFolderById`.
+- `deleteResource` endpoint: `DELETE /api/v1/teams/{teamId}/resources/{app}/{resourceId}/delete`.
+
+### Changed
+- Calendar and Deck connect guard now blocks only duplicate of the **same** resource, not any resource of that app type (multi-resource fix).
+- `TaskService::resolveCalendarId()` updated for array shape. New `resolveAllCalendarIds()` helper.
+- `TeamView` passes `calendars` and `boards` arrays as props to `AddEventModal` and `AddTaskModal`.
+- `AddTaskModal` — `boardId` prop replaced with `boards` array; stack re-fetch on board switch.
+- `AddEventModal` — `calendars` prop added.
+
+### Fixed
+- `ArchiveService::readIntegrations()` — `ir.integration_id` corrected to `ir.id AS ir_id` (column does not exist).
+- `FilesService::suspendFilesAccess` and `removeFilesAccess` — removed `IManager::getShareById` for circle shares (wrong prefix). Now uses QB delete directly, eliminating spurious "Share not found" warnings on team deletion.
+- Multiple PHP brace-balance issues in `ActivityService` and `ResourceService` caused by partial str_replace replacements.
+- At-risk resource block text readability — header text now uses `var(--color-main-text)` instead of `var(--color-error)` on dark background.
+- Standalone duplicate at-risk section removed from bottom of settings tab.
+- Scroll target for warning block link updated to `.manage-section--atrisk-inline`.
+- `DeckWidget` calendar check updated for array shape (`resources.calendar.length > 0`).
+- `DeckService::deleteBoardByIdInternal` — each QB operation now uses its own instance (fixes MySQL syntax error on board delete).
+
+## [3.31.0] — 2026-05-09
+
+### Added
+- **`owner_uid` column** on `teamhub_team_app_resources` (migration `Version000330000Date20260509000000`). Tracks the NC uid of the resource owner for risk monitoring.
+- **`UserStatusListener`** — flags all resources owned by a disabled user as `risk_status=owner_disabled`; clears on re-enable. Writes `resource.risk_flagged` / `resource.risk_cleared` audit events.
+- **`UserDeletedListener`** — attempts ownership transfer to the most recently active team admin before a user account is deleted. Sets `risk_status=transfer_failed` when no eligible admin exists. Writes `resource.owner_transferred` / `resource.transfer_failed` audit events.
+- **"Resources at risk" section** in Manage Team → Settings. Red-bordered, read-only list of active resources with `risk_status != none`. Shows app, resource name, risk reason, and owner uid.
+- **Deep-link scroll** — "Open settings →" in the Teaminfo warning block now auto-switches to the Settings tab and smooth-scrolls to the at-risk section with a highlight pulse.
+- **`resourceWarningFocus`** state in Vuex store — coordinates the warning block button with ManageTeamView scroll behaviour.
+
+### Changed
+- `ResourceDiscoveryService::refreshRiskStatus()` — completed from stub. Always re-resolves live resource owner from NC tables on every reconcile, catching external ownership changes (e.g. Deck board transferred directly in Deck). Backfills or corrects `owner_uid` when it differs from the stored value.
+- `ResourceDiscoveryService::insertDiscoveredRow()` — now populates `owner_uid` on insert.
+- `TeamAppResourceMapper::insertResource()` — gains `ownerUid` parameter.
+
+## [3.30.0] — 2026-05-08
+
+### Added
+- **Resource name resolution in settings panel.** The panel endpoint now returns a `displayName` field for each resource row, resolved from NC native tables: Files (`filecache.name`), Talk (`talk_rooms.name`, falls back to token), Calendar (`calendars.displayname` then `uri`), Deck (`deck_boards.title`). Falls back to raw resource ID on any lookup failure.
+- `ManageTeamView` pending and ignored resource rows now show the resolved name with the raw ID as a tooltip.
+
+### Changed
+- CSS class `.pending-resource-id` renamed to `.pending-resource-name` in `ManageTeamView.vue`.
+
+## [3.29.0] — 2026-05-08
+
+### Added
+- **Resource discovery reconciliation.** `ResourceDiscoveryService` compares live NC ACL/share tables against `teamhub_team_app_resources` on every team page load (render-time) and hourly via cron (`ResourceDiscoveryJob`). Externally added resources are auto-accepted if the owner is a team admin, otherwise inserted as pending.
+- **Pending/ignored resource management.** New endpoints `GET /panel`, `POST /accept`, `POST /ignore`, `POST /unignore` under `/api/v1/teams/{teamId}/resources/`. All require team admin level ≥ 8.
+- **Teaminfo widget warning block.** Admin-only banner shows combined count of pending + at-risk resources with a link to Manage Team → Settings.
+- **Settings panel — pending resources section.** Lists externally discovered resources awaiting review with Accept/Ignore actions. Ignored resources shown in a collapsible section with Un-ignore action.
+- **`ResourceDiscoveryJob`** registered as hourly background job in `appinfo/info.xml`.
+- **Audit log events** for all resource lifecycle transitions: `resource.discovered`, `resource.auto_accepted`, `resource.external_withdrawn`, `resource.accepted`, `resource.ignored`, `resource.unignored`.
+- **`_warnings`** key added to `GET /api/v1/teams/{teamId}/resources` response: `{ pending: int, atRisk: int }`.
+
+### Fixed
+- `OCP\IAppManager` corrected to `OCP\App\IAppManager` in `ResourceDiscoveryService` — wrong namespace caused DI resolution failure and broke team listing on page load.
+
+## [3.28.1] — 2026-05-08
+
+### Added
+- **Design doc: `docs/design/connected-resources.md`.** Locked design for the upcoming "Connected Resources" overhaul, which moves TeamHub from a one-resource-per-app-per-team model to a hybrid discovery model with explicit team-admin acceptance, multi-resource support for Deck and Calendar, three-action off-semantics (ignore / remove access / delete), and automatic ownership transfer on `BeforeUserDeletedEvent` to preserve team continuity. Implementation split across Sessions A → D. No code changes this session.
+- **Project-level design reference: `DESIGN.md`.** First creation. Captures durable architectural choices and principles for future-session reference, seeded with both pre-existing decisions inferred from the codebase and the choices made this session. Per SKILLS.md step 10, this document is appended to whenever a non-trivial design choice is made.
+- **Group Folders integration principles** (DESIGN.md §2.18 and §2.19). Locked the principle that TeamHub aligns permissions with other NC apps at configuration time rather than bypassing their security models, and the dual-folder migration semantics for the future Session E that will integrate Group Folders as a preferred team-folder backend. Implementation deferred; pre-Session-E spike documented in HANDOFF.
+
 ## [3.28.0] — 2026-05-07
 
 ### Added

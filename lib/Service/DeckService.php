@@ -167,7 +167,7 @@ class DeckService {
                     $qb = $db->getQueryBuilder();
                     $qb->insert($aclTable)
                        ->setValue('board_id',    $qb->createNamedParameter($boardId))
-                       ->setValue('type',        $qb->createNamedParameter(7))
+                       ->setValue('type',        $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                        ->setValue('participant', $qb->createNamedParameter($teamId));
 
                     // Deck 1.x: separate boolean columns
@@ -179,7 +179,7 @@ class DeckService {
 
                     // Deck 2.x: single bitmask column (read=1, edit=2 → 3)
                     if (in_array('permissions', $aclCols, true)) {
-                        $qb->setValue('permissions', $qb->createNamedParameter(3));
+                        $qb->setValue('permissions', $qb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
                     }
 
                     $qb->executeStatement();
@@ -308,11 +308,10 @@ class DeckService {
                 return ['success' => false, 'error' => 'Board not found or not owned by user'];
             }
 
-            $boardName = (string)($row['title'] ?? '');
+            $boardName = (string)($row['title'] ?? '');;
 
-            // Refuse if a board is already connected to this team.
-            // We look in both deck_board_acl and deck_acl because Deck has
-            // version variance; a hit in either means there's already a board.
+            // Refuse only if this specific board is already connected to this team.
+            // Multiple different boards are allowed (multi-resource model).
             foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
                 try {
                     $cols = $this->dbIntrospection->getTableColumns($aclTable);
@@ -324,12 +323,13 @@ class DeckService {
                         ->from($aclTable)
                         ->where($chk->expr()->eq('type', $chk->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                         ->andWhere($chk->expr()->eq('participant', $chk->createNamedParameter($teamId)))
+                        ->andWhere($chk->expr()->eq('board_id', $chk->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                         ->setMaxResults(1)
                         ->executeQuery();
                     $existing = $cres->fetch();
                     $cres->closeCursor();
                     if ($existing) {
-                        return ['success' => false, 'error' => 'Team already has a Deck board — disable the current one first'];
+                        return ['success' => false, 'error' => 'This board is already connected to this team'];
                     }
                 } catch (\Throwable) {
                     // Table absent — try the next one
@@ -388,7 +388,7 @@ class DeckService {
                         $iqb = $db->getQueryBuilder();
                         $iqb->insert($aclTable)
                             ->setValue('board_id',    $iqb->createNamedParameter($boardId))
-                            ->setValue('type',        $iqb->createNamedParameter(7))
+                            ->setValue('type',        $iqb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                             ->setValue('participant', $iqb->createNamedParameter($teamId));
                         foreach (['permission_read' => 1, 'permission_edit' => 1, 'permission_manage' => 0] as $col => $val) {
                             if (in_array($col, $aclCols, true)) {
@@ -396,7 +396,7 @@ class DeckService {
                             }
                         }
                         if (in_array('permissions', $aclCols, true)) {
-                            $iqb->setValue('permissions', $iqb->createNamedParameter(3));
+                            $iqb->setValue('permissions', $iqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
                         }
                         $iqb->executeStatement();
                         $circleAdded = true;
@@ -541,7 +541,7 @@ class DeckService {
                     $res = $qb->select('board_id')
                         ->from($tbl)
                         ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
-                        ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7)))
+                        ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                         ->setMaxResults(1)
                         ->executeQuery();
                     $row = $res->fetch();
@@ -563,7 +563,7 @@ class DeckService {
             $dqb->delete($aclTable)
                 ->where($dqb->expr()->eq('board_id',    $dqb->createNamedParameter($boardId)))
                 ->andWhere($dqb->expr()->eq('participant', $dqb->createNamedParameter($teamId)))
-                ->andWhere($dqb->expr()->eq('type',        $dqb->createNamedParameter(7)))
+                ->andWhere($dqb->expr()->eq('type',        $dqb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
             $this->logger->debug('[DeckService] suspendDeckAccess: circle ACL row removed', [
@@ -609,7 +609,7 @@ class DeckService {
                 ->from($aclTable)
                 ->where($chk->expr()->eq('board_id',    $chk->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($chk->expr()->eq('participant', $chk->createNamedParameter($teamId)))
-                ->andWhere($chk->expr()->eq('type',        $chk->createNamedParameter(7)))
+                ->andWhere($chk->expr()->eq('type',        $chk->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeQuery();
             $exists = (int)$cres->fetchOne() > 0;
             $cres->closeCursor();
@@ -632,7 +632,7 @@ class DeckService {
             $iqb = $db->getQueryBuilder();
             $iqb->insert($aclTable)
                 ->setValue('board_id',    $iqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                ->setValue('type',        $iqb->createNamedParameter(7))
+                ->setValue('type',        $iqb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                 ->setValue('participant', $iqb->createNamedParameter($teamId));
 
             // Deck 1.x individual boolean permission columns.
@@ -680,6 +680,112 @@ class DeckService {
         }
     }
 
+    /**
+     * Remove the team's circle access from a specific Deck board (by board ID).
+     * Deletes only the circle ACL row — owner and user ACL rows are untouched.
+     * The board itself and its cards are preserved.
+     */
+    public function removeBoardAccess(string $teamId, int $boardId, \OCP\IDBConnection $db): bool {
+        foreach (['deck_board_acl', 'deck_acl'] as $table) {
+            try {
+                $qb       = $db->getQueryBuilder();
+                $affected = $qb->delete($table)
+                    ->where($qb->expr()->eq('board_id',    $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
+                    ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->executeStatement();
+
+                if ($affected > 0) {
+                    $this->logger->debug('[DeckService] removeBoardAccess: circle ACL row removed', [
+                        'teamId' => $teamId, 'boardId' => $boardId,
+                        'table' => $table, 'app' => Application::APP_ID,
+                    ]);
+                    return true;
+                }
+            } catch (\Throwable) {
+                // Table may not exist on this Deck version — try the next one.
+            }
+        }
+        $this->logger->warning('[DeckService] removeBoardAccess: no ACL row found', [
+            'teamId' => $teamId, 'boardId' => $boardId, 'app' => Application::APP_ID,
+        ]);
+        return false;
+    }
+
+    /**
+     * Delete a specific board by ID (multi-resource-aware).
+     * Delegates to the existing deleteDeckBoard logic after confirming the board exists.
+     */
+    public function deleteBoardById(int $boardId, \OCP\IDBConnection $db): array {
+        // Verify the board exists first.
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('id')->from('deck_boards')
+            ->where($qb->expr()->eq('id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        if (!$row) {
+            return ['deleted' => false, 'detail' => "Board {$boardId} not found"];
+        }
+
+        // Reuse the full delete logic via a synthetic teamId lookup —
+        // instead, inline the delete sequence directly using the known boardId.
+        return $this->deleteBoardByIdInternal($boardId, $db);
+    }
+
+    private function deleteBoardByIdInternal(int $boardId, \OCP\IDBConnection $db): array {
+        try {
+            // Delete cards for each stack on this board.
+            $sqb  = $db->getQueryBuilder();
+            $sres = $sqb->select('id')->from('deck_stacks')
+                ->where($sqb->expr()->eq('board_id', $sqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeQuery();
+            while ($srow = $sres->fetch()) {
+                $stackId = (int)$srow['id'];
+                try {
+                    $cqb = $db->getQueryBuilder();
+                    $cqb->delete('deck_cards')
+                        ->where($cqb->expr()->eq('stack_id', $cqb->createNamedParameter($stackId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->executeStatement();
+                } catch (\Throwable) {}
+            }
+            $sres->closeCursor();
+
+            // Delete stacks.
+            $stqb = $db->getQueryBuilder();
+            $stqb->delete('deck_stacks')
+                ->where($stqb->expr()->eq('board_id', $stqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            // Delete ACL rows (both possible tables).
+            foreach (['deck_board_acl', 'deck_acl'] as $tbl) {
+                try {
+                    $aqb = $db->getQueryBuilder();
+                    $aqb->delete($tbl)
+                        ->where($aqb->expr()->eq('board_id', $aqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->executeStatement();
+                } catch (\Throwable) {}
+            }
+
+            // Delete the board itself.
+            $bqb = $db->getQueryBuilder();
+            $bqb->delete('deck_boards')
+                ->where($bqb->expr()->eq('id', $bqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $this->logger->info('[DeckService] deleteBoardById: board deleted', [
+                'boardId' => $boardId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'board_id' => $boardId];
+        } catch (\Throwable $e) {
+            $this->logger->error('[DeckService] deleteBoardById failed', [
+                'boardId' => $boardId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => $e->getMessage()];
+        }
+    }
+
     public function deleteDeckBoard(string $teamId, \OCP\IDBConnection $db): array {
         try {
             // Find board_id via the circle ACL row (type=7 = circle)
@@ -690,7 +796,7 @@ class DeckService {
                     $res = $qb->select('board_id')
                         ->from($aclTable)
                         ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
-                        ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7)))
+                        ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                         ->setMaxResults(1)
                         ->executeQuery();
                     $row = $res->fetch();

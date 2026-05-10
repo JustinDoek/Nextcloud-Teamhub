@@ -1249,7 +1249,7 @@ class ArchiveService {
     /** @return array<int, array<string, mixed>> */
     private function readIntegrations(string $teamId): array {
         $qb  = $this->db->getQueryBuilder();
-        $res = $qb->select('ti.*', 'ir.integration_id', 'ir.name', 'ir.description')
+        $res = $qb->select('ti.*', 'ir.id AS ir_id', 'ir.name', 'ir.description')
             ->from('teamhub_team_integrations', 'ti')
             ->leftJoin('ti', 'teamhub_integ_registry', 'ir', $qb->expr()->eq('ti.integration_id', 'ir.id'))
             ->where($qb->expr()->eq('ti.team_id', $qb->createNamedParameter($teamId)))
@@ -1538,7 +1538,7 @@ class ArchiveService {
         $res = $qb->select('uid_initiator', 'file_source')
             ->from('share')
             ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-            ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+            ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
             ->setMaxResults(1)
             ->executeQuery();
@@ -1783,7 +1783,7 @@ class ArchiveService {
                 $res = $qb->select('board_id')
                     ->from($tbl)
                     ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
-                    ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7)))
+                    ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                     ->setMaxResults(1)
                     ->executeQuery();
                 $row = $res->fetch();
@@ -2431,7 +2431,7 @@ HTML;
             $res = $qb->select('file_source')
                 ->from('share')
                 ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
                 ->setMaxResults(1)
                 ->executeQuery();

@@ -41,13 +41,20 @@
                             {{ formatDate(task.duedate) }}
                         </span>
 
-                        <!-- Source pill -->
-                        <span
-                            class="th-widget__source-pill"
-                            :class="task.source === 'deck'
-                                ? 'th-widget__source-pill--deck'
-                                : 'th-widget__source-pill--tasks'">
-                            {{ task.source === 'deck' ? t('teamhub', 'Deck') : t('teamhub', 'Personal task') }}
+                        <!-- Source pills: board name + app label -->
+                        <template v-if="task.source === 'deck'">
+                            <span
+                                v-if="task.boardName && resources.deck && resources.deck.length > 1"
+                                class="th-widget__source-pill th-widget__source-pill--board"
+                                :title="task.boardName">
+                                {{ truncate(task.boardName, 20) }}
+                            </span>
+                            <span class="th-widget__source-pill th-widget__source-pill--deck">
+                                {{ t('teamhub', 'Deck') }}
+                            </span>
+                        </template>
+                        <span v-else class="th-widget__source-pill th-widget__source-pill--tasks">
+                            {{ t('teamhub', 'Personal task') }}
                         </span>
 
                         <!-- Assignee avatars (Deck only) -->
@@ -109,10 +116,11 @@ export default {
                 overdue:       card.duedate ? new Date(card.duedate) < now : false,
                 url:           generateUrl(`/apps/deck/board/${card.boardId}/card/${card.id}`),
                 assignedUsers: card.assignedUsers || [],
+                boardName:     card.boardName || '',
             }))
 
             // NC Tasks VTODOs — only shown when tasks app AND calendar are active.
-            const showTasks = this.resources && this.resources.tasks && this.resources.calendar
+            const showTasks = this.resources && this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0
             const taskItems = showTasks
                 ? (this.teamTasks || []).map(task => ({
                     _key:    'task-' + task.id,
@@ -142,6 +150,11 @@ export default {
 
     methods: {
         t,
+
+        truncate(str, max) {
+            if (!str) return ''
+            return str.length > max ? str.slice(0, max) + '…' : str
+        },
 
         formatDate(duedate) {
             if (!duedate) return ''
@@ -291,6 +304,17 @@ export default {
     background: var(--color-primary-element-light, rgba(0, 130, 201, 0.12));
     color: var(--color-primary-element);
     border: 1px solid var(--color-primary-element-light, rgba(0, 130, 201, 0.25));
+}
+
+/* Board name pill — neutral, to distinguish from the app label pill */
+.th-widget__source-pill--board {
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+    border: 1px solid var(--color-border);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Personal task pill — muted teal, distinct from Deck's primary blue */

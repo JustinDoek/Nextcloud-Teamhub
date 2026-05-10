@@ -292,8 +292,11 @@ class ActivityService {
         }
 
         try {
-            $db = $this->container->get(\OCP\IDBConnection::class);
+            $db  = $this->container->get(\OCP\IDBConnection::class);
+            $now         = time();
+            $futureLimit = $now + (30 * 24 * 60 * 60);
 
+            // Fetch ALL calendar IDs connected to this team's circle.
             $qb = $db->getQueryBuilder();
             $result = $qb->select('resourceid')
                 ->from('dav_shares')
@@ -301,107 +304,107 @@ class ActivityService {
                 ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter('principals/circles/' . $teamId)))
                 ->executeQuery();
 
-            $row = $result->fetch();
+            $calendarIds = [];
+            while ($row = $result->fetch()) {
+                $calendarIds[] = (int)$row['resourceid'];
+            }
             $result->closeCursor();
 
-            if (!$row) {
+            if (empty($calendarIds)) {
                 return [];
             }
 
-            $calendarId  = (int)$row['resourceid'];
-            $now         = time();
-            $futureLimit = $now + (30 * 24 * 60 * 60);
-
-            // Fetch calendar owner (principaluri) and slug (uri) for building the NC Calendar edit URL.
-            // principaluri = "principals/users/{uid}", uri = the calendar's DAV slug.
-            $calQb  = $db->getQueryBuilder();
-            $calRes = $calQb->select('principaluri', 'uri')
-                ->from('calendars')
-                ->where($calQb->expr()->eq('id', $calQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $calRow = $calRes->fetch();
-            $calRes->closeCursor();
-
-            // Extract owner UID from "principals/users/{uid}"
-            $calOwner = '';
-            $calSlug  = '';
-            if ($calRow) {
-                $parts    = explode('/', $calRow['principaluri']);
-                $calOwner = end($parts);
-                $calSlug  = $calRow['uri'];
-            }
-
-            $qb = $db->getQueryBuilder();
-            $result = $qb->select('co.id', 'co.uri', 'co.calendardata', 'co.lastmodified')
-                ->from('calendarobjects', 'co')
-                ->where($qb->expr()->eq('co.calendarid', $qb->createNamedParameter($calendarId)))
-                ->andWhere($qb->expr()->eq('co.componenttype', $qb->createNamedParameter('VEVENT')))
-                ->andWhere($qb->expr()->notLike('co.uri', $qb->createNamedParameter('%-deleted.ics')))
-                ->orderBy('co.lastmodified', 'DESC')
-                ->setMaxResults($limit * 3)
-                ->executeQuery();
-
             $events = [];
-            while ($row = $result->fetch()) {
-                try {
-                    $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
-                    if (!isset($vcalendar->VEVENT)) {
-                        continue;
-                    }
-                    $vevent = $vcalendar->VEVENT;
-                    if (!isset($vevent->DTSTART)) {
-                        continue;
-                    }
 
-                    $dtstart        = $vevent->DTSTART;
-                    $startTime      = $dtstart->getDateTime();
-                    $startTimestamp = $startTime->getTimestamp();
+            foreach ($calendarIds as $calendarId) {
+                // Fetch calendar owner + slug for building edit URLs.
+                $calQb  = $db->getQueryBuilder();
+                $calRes = $calQb->select('principaluri', 'uri', 'displayname')
+                    ->from('calendars')
+                    ->where($calQb->expr()->eq('id', $calQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $calRow = $calRes->fetch();
+                $calRes->closeCursor();
 
-                    if ($startTimestamp < $now || $startTimestamp > $futureLimit) {
-                        continue;
-                    }
-
-                    $endTime = null;
-                    if (isset($vevent->DTEND)) {
-                        $endTime = $vevent->DTEND->getDateTime();
-                    } elseif (isset($vevent->DURATION)) {
-                        $endTime = clone $startTime;
-                        $endTime->add($vevent->DURATION->getDateInterval());
-                    }
-
-                    // Build NC Calendar direct edit URL:
-                    // /apps/calendar/timeGridWeek/now/edit/sidebar/{base64(davPath)}/{startTimestamp}
-                    $editUrl = null;
-                    if ($calOwner !== '' && $calSlug !== '') {
-                        $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
-                        $objectId = rtrim(strtr(base64_encode($davPath), '+/', '-_'), '=');
-                        $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTimestamp;
-                    }
-
-                    $events[] = [
-                        'id'          => (string)($vevent->UID ?? $row['uri']),
-                        'title'       => (string)($vevent->SUMMARY ?? 'Untitled'),
-                        'start'       => $startTime->format('c'),
-                        'end'         => $endTime?->format('c'),
-                        'location'    => isset($vevent->LOCATION)    ? (string)$vevent->LOCATION    : null,
-                        'description' => isset($vevent->DESCRIPTION) ? (string)$vevent->DESCRIPTION : null,
-                        'allDay'      => !$dtstart->hasTime(),
-                        'editUrl'     => $editUrl,
-                    ];
-                } catch (\Exception $e) {
-                    $this->logger->warning('[ActivityService] Error parsing calendar event', [
-                        'exception' => $e,
-                        'app'       => Application::APP_ID,
-                    ]);
+                $calOwner = '';
+                $calSlug  = '';
+                $calName  = '';
+                if ($calRow) {
+                    $parts    = explode('/', $calRow['principaluri']);
+                    $calOwner = end($parts);
+                    $calSlug  = $calRow['uri'];
+                    $calName  = $calRow['displayname'] ?: $calRow['uri'];
                 }
+
+                $evQb = $db->getQueryBuilder();
+                $evResult = $evQb->select('co.id', 'co.uri', 'co.calendardata', 'co.lastmodified')
+                    ->from('calendarobjects', 'co')
+                    ->where($evQb->expr()->eq('co.calendarid', $evQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($evQb->expr()->eq('co.componenttype', $evQb->createNamedParameter('VEVENT')))
+                    ->andWhere($evQb->expr()->notLike('co.uri', $evQb->createNamedParameter('%-deleted.ics')))
+                    ->orderBy('co.lastmodified', 'DESC')
+                    ->setMaxResults($limit * 3)
+                    ->executeQuery();
+
+                while ($row = $evResult->fetch()) {
+                    try {
+                        $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
+                        if (!isset($vcalendar->VEVENT)) {
+                            continue;
+                        }
+                        $vevent = $vcalendar->VEVENT;
+                        if (!isset($vevent->DTSTART)) {
+                            continue;
+                        }
+
+                        $dtstart        = $vevent->DTSTART;
+                        $startTime      = $dtstart->getDateTime();
+                        $startTimestamp = $startTime->getTimestamp();
+
+                        if ($startTimestamp < $now || $startTimestamp > $futureLimit) {
+                            continue;
+                        }
+
+                        $endTime = null;
+                        if (isset($vevent->DTEND)) {
+                            $endTime = $vevent->DTEND->getDateTime();
+                        } elseif (isset($vevent->DURATION)) {
+                            $endTime = clone $startTime;
+                            $endTime->add($vevent->DURATION->getDateInterval());
+                        }
+
+                        $editUrl = null;
+                        if ($calOwner !== '' && $calSlug !== '') {
+                            $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
+                            $objectId = rtrim(strtr(base64_encode($davPath), '+/', '-_'), '=');
+                            $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTimestamp;
+                        }
+
+                        $events[] = [
+                            'id'           => (string)($vevent->UID ?? $row['uri']),
+                            'title'        => (string)($vevent->SUMMARY ?? 'Untitled'),
+                            'start'        => $startTime->format('c'),
+                            'end'          => $endTime?->format('c'),
+                            'location'     => isset($vevent->LOCATION)    ? (string)$vevent->LOCATION    : null,
+                            'description'  => isset($vevent->DESCRIPTION) ? (string)$vevent->DESCRIPTION : null,
+                            'allDay'       => !$dtstart->hasTime(),
+                            'editUrl'      => $editUrl,
+                            'calendarId'   => $calendarId,
+                            'calendarName' => $calName,
+                        ];
+                    } catch (\Exception $e) {
+                        $this->logger->warning('[ActivityService] Error parsing calendar event', [
+                            'exception' => $e,
+                            'app'       => Application::APP_ID,
+                        ]);
+                    }
+                }
+                $evResult->closeCursor();
             }
-            $result->closeCursor();
 
             usort($events, fn($a, $b) => strcmp($a['start'], $b['start']));
-            $events = array_slice($events, 0, $limit);
-
-            return $events;
+            return array_slice($events, 0, $limit);
 
         } catch (\Exception $e) {
             $this->logger->error('[ActivityService] Error getting calendar events', [
@@ -415,8 +418,6 @@ class ActivityService {
 
     /**
      * Create a calendar event on the team calendar via CalDAV.
-     * Looks up the calendar by dav_shares principal, then writes a VEVENT
-     * via CalDavBackend::createCalendarObject().
      *
      * @throws \Exception if user not authenticated, calendar app not installed,
      *                    or no calendar is connected to the team
@@ -427,7 +428,8 @@ class ActivityService {
         string $start,
         string $end,
         string $location = '',
-        string $description = ''
+        string $description = '',
+        ?int   $calendarId = null
     ): void {
 
         $user = $this->userSession->getUser();
@@ -441,21 +443,23 @@ class ActivityService {
 
         $db = $this->container->get(\OCP\IDBConnection::class);
 
-        // Find the calendar ID for this team
-        $qb = $db->getQueryBuilder();
-        $result = $qb->select('resourceid')
-            ->from('dav_shares')
-            ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
-            ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter('principals/circles/' . $teamId)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $row = $result->fetch();
-        $result->closeCursor();
+        // Use provided calendarId, or fall back to the first connected calendar.
+        if ($calendarId === null) {
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('resourceid')
+                ->from('dav_shares')
+                ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter('principals/circles/' . $teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
 
-        if (!$row) {
-            throw new \Exception('No calendar connected to this team');
+            if (!$row) {
+                throw new \Exception('No calendar connected to this team');
+            }
+            $calendarId = (int)$row['resourceid'];
         }
-        $calendarId = (int)$row['resourceid'];
 
         // Find the calendar owner's principaluri (needed for CalDavBackend)
         $ownerQb  = $db->getQueryBuilder();

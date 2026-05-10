@@ -66,7 +66,7 @@
 
                 <!-- Built-in: Calendar -->
                 <button
-                    v-else-if="tab.key === 'calendar' && resources.calendar"
+                    v-else-if="tab.key === 'calendar' && resources.calendar && resources.calendar.length > 0"
                     id="tab-calendar"
                     :key="'tab-calendar'"
                     role="tab"
@@ -74,17 +74,18 @@
                     :class="{ active: currentView === 'calendar' }"
                     :aria-selected="currentView === 'calendar' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
-                    @click="setView('calendar')"
+                    @click="onCalendarTabClick"
                     @keydown.left.prevent="moveTabLeft(tabIndex)"
                     @keydown.right.prevent="moveTabRight(tabIndex)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Calendar :size="16" />
                     {{ t('teamhub', 'Calendar') }}
+                    <span v-if="resources.calendar.length > 1" class="teamhub-tab-count" aria-label="t('teamhub', '{n} calendars', { n: resources.calendar.length })">{{ resources.calendar.length }}</span>
                 </button>
 
                 <!-- Built-in: Deck -->
                 <button
-                    v-else-if="tab.key === 'deck' && resources.deck && resources.deck.board_id"
+                    v-else-if="tab.key === 'deck' && resources.deck && resources.deck.length > 0"
                     id="tab-deck"
                     :key="'tab-deck'"
                     role="tab"
@@ -92,12 +93,13 @@
                     :class="{ active: currentView === 'deck' }"
                     :aria-selected="currentView === 'deck' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
-                    @click="setView('deck')"
+                    @click="onDeckTabClick"
                     @keydown.left.prevent="moveTabLeft(tabIndex)"
                     @keydown.right.prevent="moveTabRight(tabIndex)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <CardText :size="16" />
                     {{ t('teamhub', 'Deck') }}
+                    <span v-if="resources.deck.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} boards', { n: resources.deck.length })">{{ resources.deck.length }}</span>
                 </button>
 
                 <!-- External app tabs -->
@@ -203,7 +205,7 @@ export default {
         isTablet: { type: Boolean, default: false },
     },
 
-    emits: ['input', 'tab-reorder', 'manage-links', 'toggle-edit-mode'],
+    emits: ['input', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker'],
 
     computed: {
         ...mapState(['currentView', 'resources']),
@@ -219,6 +221,22 @@ export default {
 
         setView(view) {
             this.$store.commit('SET_VIEW', view)
+        },
+
+        onCalendarTabClick() {
+            if (this.resources.calendar && this.resources.calendar.length > 1) {
+                this.$emit('show-picker', 'calendar')
+            } else {
+                this.setView('calendar')
+            }
+        },
+
+        onDeckTabClick() {
+            if (this.resources.deck && this.resources.deck.length > 1) {
+                this.$emit('show-picker', 'deck')
+            } else {
+                this.setView('deck')
+            }
         },
 
         /**
@@ -360,6 +378,22 @@ export default {
 }
 
 .teamhub-tab-add {
+    flex-shrink: 0;
+}
+
+.teamhub-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--color-primary);
+    color: var(--color-primary-text);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
     flex-shrink: 0;
 }
 

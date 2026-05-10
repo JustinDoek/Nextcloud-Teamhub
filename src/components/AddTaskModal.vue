@@ -44,6 +44,28 @@
                 </div>
             </div>
 
+            <!-- Board picker — only shown when team has 2+ boards -->
+            <div v-if="showBoardPicker" class="addtask-modal__field">
+                <label class="addtask-modal__label">{{ t('teamhub', 'Board') }}</label>
+                <div class="resource-inline-picker">
+                    <button
+                        v-for="board in boards"
+                        :key="board.board_id"
+                        type="button"
+                        class="resource-inline-picker__item"
+                        :class="{ 'resource-inline-picker__item--selected': activeBoardId === board.board_id }"
+                        :aria-pressed="activeBoardId === board.board_id ? 'true' : 'false'"
+                        @click="selectedBoardId = board.board_id">
+                        <span
+                            v-if="board.color"
+                            class="resource-inline-picker__color"
+                            :style="{ background: board.color }"
+                            aria-hidden="true" />
+                        {{ board.name }}
+                    </button>
+                </div>
+            </div>
+
             <p v-if="errors.general" class="addtask-modal__error">{{ errors.general }}</p>
 
             <div class="addtask-modal__actions">
@@ -74,7 +96,7 @@ export default {
     name: 'AddTaskModal',
     components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, CheckboxMarkedOutline },
     props: {
-        boardId: { type: [String, Number], required: true },
+        boards: { type: Array, default: () => [] }, // [{ board_id, name, color }]
     },
     emits: ['close', 'created'],
     data() {
@@ -82,6 +104,7 @@ export default {
             saving: false,
             errors: {},
             stacks: [],
+            selectedBoardId: null,
             form: {
                 title:       '',
                 description: '',
@@ -96,19 +119,31 @@ export default {
             const pad = v => String(v).padStart(2, '0')
             return `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}`
         },
+        showBoardPicker() {
+            return this.boards && this.boards.length > 1
+        },
+        activeBoardId() {
+            return this.selectedBoardId ?? (this.boards[0]?.board_id ?? null)
+        },
     },
-    async mounted() {
-        // Pre-fetch stacks so we can pick the first one on submit
-        try {
-            const { data } = await axios.get(
-                generateUrl(`/apps/deck/api/v1.0/boards/${this.boardId}/stacks`),
-                { headers: { 'OCS-APIRequest': 'true' } }
-            )
-            this.stacks = Array.isArray(data) ? data : []
-        } catch (e) {
-            // Will show error on submit if no stack found
-        }
+    watch: {
+        activeBoardId: {
+            immediate: true,
+            async handler(boardId) {
+                if (!boardId) return
+                try {
+                    const { data } = await axios.get(
+                        generateUrl(`/apps/deck/api/v1.0/boards/${boardId}/stacks`),
+                        { headers: { 'OCS-APIRequest': 'true' } }
+                    )
+                    this.stacks = Array.isArray(data) ? data : []
+                } catch (e) {
+                    this.stacks = []
+                }
+            },
+        },
     },
+    async mounted() {},
     methods: {
         t,
         validate() {
@@ -143,7 +178,7 @@ export default {
 
             try {
                 await axios.post(
-                    generateUrl(`/apps/deck/api/v1.0/boards/${this.boardId}/stacks/${stackId}/cards`),
+                    generateUrl(`/apps/deck/api/v1.0/boards/${this.activeBoardId}/stacks/${stackId}/cards`),
                     payload,
                     { headers: { 'OCS-APIRequest': 'true' } }
                 )
@@ -246,5 +281,40 @@ export default {
     display: flex;
     gap: 12px;
     margin-top: 8px;
+}
+.resource-inline-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.resource-inline-picker__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-pill);
+    background: var(--color-background-hover);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-main-text);
+    transition: background 0.15s, border-color 0.15s;
+}
+.resource-inline-picker__item:hover {
+    background: var(--color-primary-light);
+}
+.resource-inline-picker__item--selected {
+    background: var(--color-primary);
+    color: var(--color-primary-text);
+    border-color: var(--color-primary);
+}
+.resource-inline-picker__item:focus-visible {
+    outline: 2px solid var(--color-primary);
+}
+.resource-inline-picker__color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
 }
 </style>

@@ -58,6 +58,14 @@ return [
         // Connect existing resources to a team (team admin required)
         ['name' => 'resource_connect#connect',     'url' => '/api/v1/teams/{teamId}/resources/{app}/connect', 'verb' => 'POST'],
 
+        // Resource state — pending/ignored management (team admin required)
+        ['name' => 'resource_state#getPanelData',    'url' => '/api/v1/teams/{teamId}/resources/panel',                          'verb' => 'GET'],
+        ['name' => 'resource_state#acceptResource',  'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/accept',       'verb' => 'POST'],
+        ['name' => 'resource_state#ignoreResource',  'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/ignore',       'verb' => 'POST'],
+        ['name' => 'resource_state#unignoreResource','url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/unignore',     'verb' => 'POST'],
+        ['name' => 'resource_state#removeAccess',    'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/remove',       'verb' => 'DELETE'],
+        ['name' => 'resource_state#deleteResource',  'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/delete',       'verb' => 'DELETE'],
+
         // Resource pickers — list resources owned by current user (any authenticated user)
         ['name' => 'picker#listCalendars',         'url' => '/api/v1/pickers/calendar',                       'verb' => 'GET'],
         ['name' => 'picker#listDeckBoards',        'url' => '/api/v1/pickers/deck',                           'verb' => 'GET'],

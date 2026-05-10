@@ -194,7 +194,7 @@ class IntegrationRegistryMapper {
             ]);
 
         $qb->executeStatement();
-        $id = (int)$qb->getLastInsertId();
+        $id = (int)$this->db->lastInsertId('*PREFIX*teamhub_integ_registry');
 
         return $this->findById($id);
     }

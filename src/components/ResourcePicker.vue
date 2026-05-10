@@ -239,7 +239,7 @@ export default {
 .resource-picker__error {
     display: block;
     margin-top: 4px;
-    color: var(--color-error, #b00020);
+    color: var(--color-error-text, #8c0016);
     font-size: 12px;
 }
 </style>

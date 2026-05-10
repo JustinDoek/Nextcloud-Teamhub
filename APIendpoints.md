@@ -60,6 +60,66 @@ Connect an existing app resource to a team by inserting the appropriate share/AC
 
 ---
 
+### GET `/teams/{teamId}/resources/panel`
+Return all resource rows for the team grouped by `app_id`. Used by Manage Team → Settings to populate the pending/ignored resource review UI.
+
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ [appId]: [ { id, teamId, appId, resourceId, displayName, ownerUid, origin, status, riskStatus, displayOrder, decidedBy, decidedAt, riskSetAt, createdAt, updatedAt } ] }`. `displayName` is resolved from the native app table (filecache/talk_rooms/calendars/deck_boards); falls back to `resourceId` if the lookup fails.
+**Response 403:** Caller is not team admin.
+
+---
+
+### POST `/teams/{teamId}/resources/{app}/{resourceId}/accept`
+Accept a pending resource row — sets `status=active`, records `decided_by` and `decided_at`. Writes `resource.accepted` audit event.
+
+**Path params:** `app` ∈ `{talk, files, calendar, deck}`. `resourceId` = the NC resource identifier (file_source / room token / calendar id / board id).
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ status: 'ok' }`.
+**Response 400:** Row not found, or row is not in pending state.
+**Response 403:** Caller is not team admin.
+
+---
+
+### POST `/teams/{teamId}/resources/{app}/{resourceId}/ignore`
+Ignore a pending or active resource row — sets `status=ignored`. Reversible. Does not remove the underlying NC ACL. Writes `resource.ignored` audit event.
+
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ status: 'ok' }`.
+**Response 400:** Row not found, or row is already ignored.
+**Response 403:** Caller is not team admin.
+
+---
+
+### POST `/teams/{teamId}/resources/{app}/{resourceId}/unignore`
+Restore an ignored resource to active status. Writes `resource.unignored` audit event.
+
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ status: 'ok' }`.
+**Response 400:** Row not found, or row is not in ignored state.
+**Response 403:** Caller is not team admin.
+
+---
+
+### DELETE `/teams/{teamId}/resources/{app}/{resourceId}/remove`
+Strip the team's circle ACL from a resource and delete the registry row. The underlying resource (board, calendar, room, folder) is preserved and remains accessible to its owner. Writes `resource.access_removed` audit event with `shared_with_other_teams` and `other_team_count` metadata.
+
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ status: 'ok', aclStripped: bool }`.
+**Response 400:** Row not found.
+**Response 403:** Caller is not team admin.
+
+---
+
+### DELETE `/teams/{teamId}/resources/{app}/{resourceId}/delete`
+Permanently destroy the underlying NC resource (Deck board, calendar, Talk room, or shared folder) and delete the registry row. This is irreversible. Writes `resource.deleted` audit event.
+
+**Auth:** Team admin (level 8+).
+**Response 200:** `{ status: 'ok' }`.
+**Response 400:** Row not found or delete failed.
+**Response 403:** Caller is not team admin.
+
+---
+
 ## Archive (added v3.25.0)
 
 ### POST `/teams/{teamId}/archive`

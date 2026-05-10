@@ -68,6 +68,23 @@
                     :rows="3" />
             </div>
 
+            <!-- Calendar picker — only shown when team has 2+ calendars -->
+            <div v-if="showCalendarPicker" class="addevent-modal__field">
+                <label class="addevent-modal__label">{{ t('teamhub', 'Calendar') }}</label>
+                <div class="resource-inline-picker">
+                    <button
+                        v-for="cal in calendars"
+                        :key="cal.id"
+                        type="button"
+                        class="resource-inline-picker__item"
+                        :class="{ 'resource-inline-picker__item--selected': selectedCalendarId === cal.id }"
+                        :aria-pressed="selectedCalendarId === cal.id ? 'true' : 'false'"
+                        @click="selectedCalendarId = cal.id">
+                        {{ cal.name }}
+                    </button>
+                </div>
+            </div>
+
             <p v-if="errors.general" class="addevent-modal__error">{{ errors.general }}</p>
 
             <div class="addevent-modal__actions">
@@ -98,7 +115,8 @@ export default {
     name: 'AddEventModal',
     components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, CalendarPlus },
     props: {
-        teamId: { type: String, required: true },
+        teamId:    { type: String,  required: true },
+        calendars: { type: Array,   default: () => [] }, // [{ id, name }]
     },
     emits: ['close'],
     data() {
@@ -109,6 +127,7 @@ export default {
         return {
             saving: false,
             errors: {},
+            selectedCalendarId: null, // set from picker when multiple calendars
             form: {
                 title:       '',
                 startDate:   dateStr,
@@ -125,6 +144,9 @@ export default {
             const n = new Date()
             const pad = v => String(v).padStart(2, '0')
             return `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}`
+        },
+        showCalendarPicker() {
+            return this.calendars && this.calendars.length > 1
         },
     },
     methods: {
@@ -155,6 +177,7 @@ export default {
                         end:         endDt.toISOString(),
                         location:    this.form.location.trim(),
                         description: this.form.description.trim(),
+                        calendarId:  this.selectedCalendarId || (this.calendars[0]?.id ?? null),
                     }
                 )
                 showSuccess(t('teamhub', 'Event added to calendar'))
@@ -250,5 +273,38 @@ export default {
     display: flex;
     gap: 12px;
     margin-top: 8px;
+}
+.addevent-modal__label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: var(--color-main-text);
+}
+.resource-inline-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.resource-inline-picker__item {
+    padding: 4px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-pill);
+    background: var(--color-background-hover);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-main-text);
+    transition: background 0.15s, border-color 0.15s;
+}
+.resource-inline-picker__item:hover {
+    background: var(--color-primary-light);
+}
+.resource-inline-picker__item--selected {
+    background: var(--color-primary);
+    color: var(--color-primary-text);
+    border-color: var(--color-primary);
+}
+.resource-inline-picker__item:focus-visible {
+    outline: 2px solid var(--color-primary);
 }
 </style>

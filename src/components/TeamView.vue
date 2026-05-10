@@ -9,7 +9,8 @@
             :is-tablet="isTablet"
             @tab-reorder="onTabReorder"
             @manage-links="showManageLinks = true"
-            @toggle-edit-mode="toggleEditMode" />
+            @toggle-edit-mode="toggleEditMode"
+            @show-picker="onShowPicker" />
 
         <!-- ── Content area ─────────────────────────────────────────── -->
         <div class="teamhub-content">
@@ -68,7 +69,7 @@
                 :url="calendarUrl"
                 :label="t('teamhub', 'Calendar')" />
             <AppEmbed
-                v-if="(preloadedViews.has('deck') || currentView === 'deck') && resources.deck"
+                v-if="(preloadedViews.has('deck') || currentView === 'deck') && resources.deck && resources.deck.length > 0"
                 v-show="currentView === 'deck'"
                 :url="deckUrl"
                 :label="t('teamhub', 'Deck')" />
@@ -86,6 +87,44 @@
 
         <!-- ── Modals ─────────────────────────────────────────────── -->
         <ManageLinksModal v-if="showManageLinks" @close="showManageLinks = false" />
+
+        <!-- ── Multi-resource picker: Deck ──────────────────────────── -->
+        <NcDialog
+            v-if="showDeckPicker"
+            :name="t('teamhub', 'Choose a board')"
+            :open="showDeckPicker"
+            @update:open="showDeckPicker = false">
+            <div class="teamhub-resource-picker">
+                <button
+                    v-for="board in resources.deck"
+                    :key="board.board_id"
+                    class="teamhub-resource-picker__item"
+                    @click="pickDeckBoard(board)">
+                    <span
+                        class="teamhub-resource-picker__color"
+                        :style="{ background: board.color || 'var(--color-primary)' }"
+                        aria-hidden="true" />
+                    <span class="teamhub-resource-picker__name">{{ board.name }}</span>
+                </button>
+            </div>
+        </NcDialog>
+
+        <!-- ── Multi-resource picker: Calendar ──────────────────────── -->
+        <NcDialog
+            v-if="showCalendarPicker"
+            :name="t('teamhub', 'Choose a calendar')"
+            :open="showCalendarPicker"
+            @update:open="showCalendarPicker = false">
+            <div class="teamhub-resource-picker">
+                <button
+                    v-for="cal in resources.calendar"
+                    :key="cal.id"
+                    class="teamhub-resource-picker__item"
+                    @click="pickCalendar(cal)">
+                    <span class="teamhub-resource-picker__name">{{ cal.name }}</span>
+                </button>
+            </div>
+        </NcDialog>
 
         <NcDialog
             v-if="showCreatePage"
@@ -154,16 +193,18 @@
         <ScheduleMeetingModal v-if="showScheduleMeeting" :team-id="currentTeamId"
             @close="showScheduleMeeting = false; $store.dispatch('fetchMessages', currentTeamId); $refs.widgetGrid?.refreshCalendar()" />
 
-        <AddEventModal v-if="showAddEvent" :team-id="currentTeamId"
+        <AddEventModal v-if="showAddEvent"
+            :team-id="currentTeamId"
+            :calendars="resources.calendar || []"
             @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar()" />
 
         <TeamMeetingModal v-if="showTeamMeeting" :team-id="currentTeamId" :resources="resources"
             @close="showTeamMeeting = false; $refs.widgetGrid?.refreshCalendar()" />
 
         <AddTaskModal v-if="showAddTask"
-            :board-id="resources.deck && resources.deck.board_id"
+            :boards="resources.deck || []"
             @close="showAddTask = false"
-            @created="$store.dispatch('fetchDeckTasks', resources.deck && resources.deck.board_id)" />
+            @created="$store.dispatch('fetchDeckTasks', resources.deck || [])" />
 
         <AddPersonalTaskModal v-if="showAddPersonalTask"
             :team-id="currentTeamId"
@@ -248,6 +289,11 @@ export default {
             showAddEvent:        false,
             showTeamMeeting:     false,
             showAddTask:         false,
+            // Multi-resource picker state (§10.1)
+            showDeckPicker:      false,
+            showCalendarPicker:  false,
+            selectedDeckBoard:   null,   // { board_id, name, color } — set when picker chooses
+            selectedCalendar:    null,   // { id, name } — set when picker chooses
             showAddPersonalTask: false,
             widgetDynamicActions: {},
             // Set of view keys whose iframe has been rendered at least once.
@@ -279,8 +325,8 @@ export default {
             return generateUrl('/apps/calendar')
         },
         deckUrl() {
-            const id = this.resources.deck?.board_id
-            return generateUrl('/apps/deck') + (id ? '/#/board/' + id : '/')
+            const board = this.selectedDeckBoard || (this.resources.deck && this.resources.deck[0])
+            return generateUrl('/apps/deck') + (board ? '/#/board/' + board.board_id : '/')
         },
         externalMenuItems() {
             return (this.teamMenuItems || []).filter(item => !item.is_builtin)
@@ -479,9 +525,9 @@ export default {
             active.add('widget-members')
             active.add('widget-activity')
             // Resource-gated widgets.
-            if (this.resources && this.resources.calendar) active.add('widget-calendar')
+            if (this.resources && this.resources.calendar && this.resources.calendar.length > 0) active.add('widget-calendar')
             // Tasks widget shows for Deck OR when Tasks app + calendar are both active.
-            if (this.resources && (this.resources.deck || (this.resources.tasks && this.resources.calendar))) {
+            if (this.resources && ((this.resources.deck && this.resources.deck.length > 0) || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0))) {
                 active.add('widget-deck')
             }
             if (this.resources && this.resources.intravox) active.add('widget-pages')
@@ -668,6 +714,26 @@ export default {
 
         openManageTeam() { this.$emit('show-manage-team') },
 
+        onShowPicker(app) {
+            if (app === 'deck') {
+                this.showDeckPicker = true
+            } else if (app === 'calendar') {
+                this.showCalendarPicker = true
+            }
+        },
+
+        pickDeckBoard(board) {
+            this.selectedDeckBoard = board
+            this.showDeckPicker = false
+            this.$store.commit('SET_VIEW', 'deck')
+        },
+
+        pickCalendar(cal) {
+            this.selectedCalendar = cal
+            this.showCalendarPicker = false
+            this.$store.commit('SET_VIEW', 'calendar')
+        },
+
         async onLeaveTeam() {
             try {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/leave`), {})
@@ -774,6 +840,48 @@ export default {
 </script>
 
 <style scoped>
+/* Resource picker modal */
+.teamhub-resource-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0;
+    min-width: 260px;
+}
+.teamhub-resource-picker__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-background-hover);
+    cursor: pointer;
+    text-align: left;
+    font-size: 14px;
+    color: var(--color-main-text);
+    transition: background 0.15s;
+}
+.teamhub-resource-picker__item:hover {
+    background: var(--color-primary-light);
+}
+.teamhub-resource-picker__item:focus-visible {
+    outline: 2px solid var(--color-primary);
+}
+.teamhub-resource-picker__color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.teamhub-resource-picker__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .teamhub-team-view {
     display: flex;
     flex-direction: column;

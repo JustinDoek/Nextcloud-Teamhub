@@ -180,7 +180,7 @@ class FilesService {
                 $qb = $db->getQueryBuilder();
                 $qb->from('share', 's')
                     ->where($qb->expr()->eq('s.share_with', $qb->createNamedParameter($teamId)))
-                    ->andWhere($qb->expr()->eq('s.share_type', $qb->createNamedParameter(7)))
+                    ->andWhere($qb->expr()->eq('s.share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                     ->andWhere($qb->expr()->in(
                         's.item_type',
                         $qb->createNamedParameter(['file', 'folder'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)
@@ -372,7 +372,7 @@ class FilesService {
             $cres = $chk->select('id')
                 ->from('share')
                 ->where($chk->expr()->eq('share_with', $chk->createNamedParameter($teamId)))
-                ->andWhere($chk->expr()->eq('share_type', $chk->createNamedParameter(7)))
+                ->andWhere($chk->expr()->eq('share_type', $chk->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($chk->expr()->eq('item_type', $chk->createNamedParameter('folder')))
                 ->setMaxResults(1)
                 ->executeQuery();
@@ -447,7 +447,7 @@ class FilesService {
             $res = $qb->select('id', 'uid_initiator', 'file_source', 'permissions')
                 ->from('share')
                 ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
                 ->setMaxResults(1)
                 ->executeQuery();
@@ -461,21 +461,12 @@ class FilesService {
             $shareId     = (int)$row['id'];
             $permissions = (int)$row['permissions'];
 
-            // Remove only the share row — the folder node is untouched.
-            try {
-                $shareManager = $this->container->get(\OCP\Share\IManager::class);
-                $share        = $shareManager->getShareById('ocinternal:' . $shareId);
-                $shareManager->deleteShare($share);
-            } catch (\Throwable $e) {
-                // Fallback to direct QB delete if IManager fails.
-                $this->logger->warning('[FilesService] suspendFilesAccess: IManager delete failed, using QB', [
-                    'shareId' => $shareId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-                $dqb = $db->getQueryBuilder();
-                $dqb->delete('share')
-                    ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId)))
-                    ->executeStatement();
-            }
+            // Circle shares (type=7) are not retrievable via IManager::getShareById
+            // with the 'ocinternal:' prefix — use QB delete directly.
+            $dqb = $db->getQueryBuilder();
+            $dqb->delete('share')
+                ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
 
             $this->logger->debug('[FilesService] suspendFilesAccess: share removed', [
                 'teamId' => $teamId, 'shareId' => $shareId, 'app' => Application::APP_ID,
@@ -541,13 +532,92 @@ class FilesService {
         }
     }
 
+    /**
+     * Remove the team's circle access from a specific shared folder (by file_source ID).
+     * Deletes only the share row. The folder node is untouched.
+     */
+    public function removeFilesAccess(string $teamId, int $fileId, \OCP\IDBConnection $db): bool {
+        try {
+            // Find the share ID for this specific file_source + teamId circle share.
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('id')
+                ->from('share')
+                ->where($qb->expr()->eq('share_with',  $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('share_type',  $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('file_source', $qb->createNamedParameter($fileId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                $this->logger->warning('[FilesService] removeFilesAccess: share not found', [
+                    'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
+            $shareId = (int)$row['id'];
+
+            // Circle shares (type=7) are not retrievable via IManager — use QB directly.
+            $dqb = $db->getQueryBuilder();
+            $dqb->delete('share')
+                ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $this->logger->debug('[FilesService] removeFilesAccess: share removed', [
+                'teamId' => $teamId, 'fileId' => $fileId, 'shareId' => $shareId,
+                'app' => Application::APP_ID,
+            ]);
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error('[FilesService] removeFilesAccess failed', [
+                'teamId' => $teamId, 'fileId' => $fileId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Delete a specific shared folder by file_source ID (multi-resource-aware).
+     * Removes the circle share and the folder node.
+     */
+    public function deleteFolderById(int $fileId, string $teamId, \OCP\IDBConnection $db): array {
+        try {
+            // Remove the circle share first.
+            $this->removeFilesAccess($teamId, $fileId, $db);
+
+            // Delete the actual node via NC filesystem.
+            try {
+                $folder = \OC::$server->get(\OCP\Files\IRootFolder::class)->getById($fileId);
+                if (!empty($folder)) {
+                    $folder[0]->delete();
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[FilesService] deleteFolderById: node delete failed', [
+                    'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            $this->logger->info('[FilesService] deleteFolderById: folder deleted', [
+                'fileId' => $fileId, 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => true, 'file_id' => $fileId];
+        } catch (\Throwable $e) {
+            $this->logger->error('[FilesService] deleteFolderById failed', [
+                'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['deleted' => false, 'detail' => $e->getMessage()];
+        }
+    }
+
     public function deleteSharedFolder(string $teamId, \OCP\IDBConnection $db): array {
         try {
             $qb  = $db->getQueryBuilder();
             $res = $qb->select('id', 'uid_initiator', 'file_source')
                 ->from('share')
                 ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7)))
+                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
                 ->setMaxResults(1)
                 ->executeQuery();

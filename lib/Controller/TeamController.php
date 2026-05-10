@@ -488,12 +488,13 @@ class TeamController extends Controller {
             $title       = trim((string)$this->request->getParam('title', ''));
             $duedate     = $this->request->getParam('duedate') ?: null;
             $description = $this->request->getParam('description') ?: null;
+            $calendarId  = $this->request->getParam('calendarId') ? (int)$this->request->getParam('calendarId') : null;
 
             if ($title === '') {
                 return new JSONResponse(['error' => 'Title is required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $result = $this->taskService->createTeamTask($teamId, $title, $duedate, $description);
+            $result = $this->taskService->createTeamTask($teamId, $title, $duedate, $description, $calendarId);
             return new JSONResponse($result, Http::STATUS_CREATED);
         } catch (\Exception $e) {
             $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
@@ -680,12 +681,13 @@ class TeamController extends Controller {
             $end         = trim($body['end']          ?? '');
             $location    = trim($body['location']    ?? '');
             $description = trim($body['description'] ?? '');
+            $calendarId  = isset($body['calendarId']) ? (int)$body['calendarId'] : null;
 
             if ($title === '' || $start === '' || $end === '') {
                 return new JSONResponse(['error' => 'title, start and end are required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $this->activityService->createCalendarEvent($teamId, $title, $start, $end, $location, $description);
+            $this->activityService->createCalendarEvent($teamId, $title, $start, $end, $location, $description, $calendarId ?: null);
             return new JSONResponse(['success' => true], Http::STATUS_CREATED);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -827,7 +829,8 @@ class TeamController extends Controller {
             $body     = $this->request->getParams();
             $apps     = isset($body['apps']) && is_array($body['apps']) ? $body['apps'] : [];
             $teamName = isset($body['teamName']) ? (string)$body['teamName'] : '';
-            $results  = $this->resourceService->createTeamResources($teamId, $apps, $teamName);
+            $names    = isset($body['names']) && is_array($body['names']) ? $body['names'] : [];
+            $results  = $this->resourceService->createTeamResources($teamId, $apps, $teamName, $names);
 
             // Persist the wizard's full app enabled/disabled state when provided.
             // The wizard sends appStates for ALL apps (both selected and deselected)
@@ -838,10 +841,13 @@ class TeamController extends Controller {
             $appStates = isset($body['appStates']) && is_array($body['appStates']) ? $body['appStates'] : [];
             if (!empty($appStates)) {
                 $stateRows = [];
-                $allowedAppIds = ['spreed', 'files', 'shared_files', 'calendar', 'deck', 'intravox'];
+                // Only toggle-driven apps go to teamhub_team_apps.
+                // Resource-backed apps (spreed/files/calendar/deck) are now
+                // registry-driven — createTeamResources() writes their rows directly.
+                $toggleOnlyAppIds = ['shared_files', 'intravox'];
                 foreach ($appStates as $as) {
                     $appId = isset($as['app_id']) ? (string)$as['app_id'] : '';
-                    if ($appId !== '' && in_array($appId, $allowedAppIds, true)) {
+                    if ($appId !== '' && in_array($appId, $toggleOnlyAppIds, true)) {
                         $stateRows[] = [
                             'app_id'  => $appId,
                             'enabled' => !empty($as['enabled']),

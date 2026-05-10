@@ -52,29 +52,29 @@ class TaskService {
     public function getTeamTasks(string $teamId): array {
         $this->assertTasksApp();
 
-        $calendarId = $this->resolveCalendarId($teamId);
-        if ($calendarId === null) {
+        // Aggregate tasks from ALL connected calendars.
+        $calendarIds = $this->resolveAllCalendarIds($teamId);
+        if (empty($calendarIds)) {
             return [];
         }
 
+        $now    = new \DateTimeImmutable();
+        $cutoff = $now->modify('+14 days');
+        $tasks  = [];
 
-        $rows = $this->fetchVtodoRows($calendarId);
-
-        $now       = new \DateTimeImmutable();
-        $cutoff    = $now->modify('+14 days');
-        $tasks     = [];
-
-        foreach ($rows as $row) {
-            try {
-                $task = $this->parseVtodo($row, $now, $cutoff);
-                if ($task !== null) {
-                    $tasks[] = $task;
+        foreach ($calendarIds as $calendarId) {
+            $rows = $this->fetchVtodoRows($calendarId);
+            foreach ($rows as $row) {
+                try {
+                    $task = $this->parseVtodo($row, $now, $cutoff);
+                    if ($task !== null) {
+                        $tasks[] = $task;
+                    }
+                } catch (\Throwable $e) {
                 }
-            } catch (\Throwable $e) {
             }
         }
 
-        // Sort by due date ascending; tasks without a due date go last.
         usort($tasks, static function (array $a, array $b): int {
             if ($a['duedate'] === null && $b['duedate'] === null) return 0;
             if ($a['duedate'] === null) return 1;
@@ -82,24 +82,26 @@ class TaskService {
             return strcmp($a['duedate'], $b['duedate']);
         });
 
-        $result = array_slice($tasks, 0, 10);
-        return $result;
+        return array_slice($tasks, 0, 10);
     }
 
     /**
      * Create a VTODO in the team calendar.
      *
-     * @param string      $teamId   Circle/team ID
-     * @param string      $title    Task title (required)
-     * @param string|null $duedate  ISO 8601 datetime string or null
+     * @param string      $teamId      Circle/team ID
+     * @param string      $title       Task title (required)
+     * @param string|null $duedate     ISO 8601 datetime string or null
      * @param string|null $description Optional description
+     * @param int|null    $calendarId  Target calendar ID; uses first connected calendar if null
      * @return array{uri:string,title:string}
      * @throws \Exception when Tasks app missing, calendar not found, or insert fails
      */
-    public function createTeamTask(string $teamId, string $title, ?string $duedate, ?string $description): array {
+    public function createTeamTask(string $teamId, string $title, ?string $duedate, ?string $description, ?int $calendarId = null): array {
         $this->assertTasksApp();
 
-        $calendarId = $this->resolveCalendarId($teamId);
+        if ($calendarId === null) {
+            $calendarId = $this->resolveCalendarId($teamId);
+        }
         if ($calendarId === null) {
             throw new \Exception('No calendar found for this team.');
         }
@@ -107,7 +109,6 @@ class TaskService {
         $uid     = $this->generateUid();
         $icsData = $this->buildVtodoIcs($uid, $title, $duedate, $description);
         $uri     = $uid . '.ics';
-
 
         // Persist via CalDavBackend (preferred — updates indices and caches).
         $stored = false;
@@ -127,7 +128,6 @@ class TaskService {
             ]);
         }
 
-        // Fallback: direct QB insert (still triggers NC's DB indices).
         if (!$stored) {
             $this->insertCalendarObject($calendarId, $uri, $icsData);
         }
@@ -146,21 +146,38 @@ class TaskService {
     }
 
     /**
-     * Resolve the team's shared calendar ID from the calendarobjects table.
-     * Delegates to ResourceService to keep resource resolution centralised.
+     * Resolve the first connected calendar ID for a team.
+     * Used as the default target for createTeamTask.
      */
     private function resolveCalendarId(string $teamId): ?int {
+        $ids = $this->resolveAllCalendarIds($teamId);
+        return $ids[0] ?? null;
+    }
+
+    /**
+     * Resolve ALL connected calendar IDs for a team.
+     * calendar is now an array in getTeamResources().
+     *
+     * @return int[]
+     */
+    private function resolveAllCalendarIds(string $teamId): array {
         try {
             $resources = $this->resourceService->getTeamResources($teamId);
-            $id = $resources['calendar']['id'] ?? null;
-            return $id !== null ? (int)$id : null;
+            $calendars = $resources['calendar'] ?? [];
+            $ids = [];
+            foreach ($calendars as $cal) {
+                if (isset($cal['id'])) {
+                    $ids[] = (int)$cal['id'];
+                }
+            }
+            return $ids;
         } catch (\Throwable $e) {
-            $this->logger->warning('[TaskService] resolveCalendarId failed', [
+            $this->logger->warning('[TaskService] resolveAllCalendarIds failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
             ]);
-            return null;
+            return [];
         }
     }
 
@@ -306,11 +323,11 @@ class TaskService {
             ->setValue('etag',          $qb->createNamedParameter($etag))
             ->setValue('size',          $qb->createNamedParameter($size))
             ->setValue('componenttype', $qb->createNamedParameter('VTODO'))
-            ->setValue('firstoccurence',$qb->createNamedParameter(0))
-            ->setValue('lastoccurence', $qb->createNamedParameter(0))
+            ->setValue('firstoccurence',$qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->setValue('lastoccurence', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
             ->setValue('uid',           $qb->createNamedParameter($uri))
-            ->setValue('classification',$qb->createNamedParameter(0))
-            ->setValue('calendartype',  $qb->createNamedParameter(0))
+            ->setValue('classification',$qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->setValue('calendartype',  $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
             ->executeStatement();
 
     }

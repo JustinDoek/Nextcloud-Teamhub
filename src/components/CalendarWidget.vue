@@ -48,6 +48,16 @@
                         <span v-if="locationText(event)" class="th-widget__meta th-widget__meta--sep">
                             <MapMarkerIcon :size="12" />{{ locationText(event) }}
                         </span>
+                        <!-- Source pills: calendar name + app label -->
+                        <span
+                            v-if="event.calendarName && resources.calendar && resources.calendar.length > 1"
+                            class="th-widget__source-pill th-widget__source-pill--calname"
+                            :title="event.calendarName">
+                            {{ truncate(event.calendarName, 20) }}
+                        </span>
+                        <span class="th-widget__source-pill th-widget__source-pill--calendar">
+                            {{ t('teamhub', 'Calendar') }}
+                        </span>
                     </div>
                 </div>
             </li>
@@ -72,13 +82,19 @@ export default {
         return { loading: false, events: [] }
     },
     computed: {
-        ...mapState(['currentTeamId']),
+        ...mapState(['currentTeamId', 'resources']),
     },
     watch: {
         currentTeamId: { immediate: true, handler() { this.loadEvents() } },
     },
     methods: {
         t,
+
+        truncate(str, max) {
+            if (!str) return ''
+            return str.length > max ? str.slice(0, max) + '…' : str
+        },
+
         async loadEvents() {
             if (!this.currentTeamId) return
             this.loading = true
@@ -306,4 +322,32 @@ export default {
     transition: opacity 0.15s;
 }
 .th-widget__join-btn:hover { opacity: 0.85; }
+
+/* Source pills */
+.th-widget__source-pill--calname {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: var(--border-radius-pill);
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+    border: 1px solid var(--color-border);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.th-widget__source-pill--calendar {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: var(--border-radius-pill);
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--color-primary-element-light, rgba(0,130,201,0.12));
+    color: var(--color-primary-element);
+    border: 1px solid var(--color-primary-element-light, rgba(0,130,201,0.25));
+    vertical-align: middle;
+}
 </style>

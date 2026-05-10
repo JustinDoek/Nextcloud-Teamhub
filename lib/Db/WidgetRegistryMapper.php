@@ -110,7 +110,7 @@ class WidgetRegistryMapper {
             ]);
 
         $qb->executeStatement();
-        $id = (int)$qb->getLastInsertId();
+        $id = (int)$this->db->lastInsertId('*PREFIX*teamhub_widget_registry');
 
         return [
             'id'          => $id,
