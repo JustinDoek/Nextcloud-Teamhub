@@ -113,7 +113,10 @@ class Version000328200Date20260508000000 extends SimpleMigrationStep {
             'notnull' => true,
         ]);
 
-        $table->setPrimaryKey(['id']);
+        // Explicit PK name required: auto-generated "teamhub_team_app_resources_pkey"
+        // is 31 chars, exceeding NC DBAL's 30-char constraint-name limit. This caused
+        // migration failures on MariaDB (NC 32.0.9+).
+        $table->setPrimaryKey(['id'], 'th_tar_pk');
 
         // Uniqueness constraint: one row per (team, app, resource).
         $table->addUniqueIndex(['team_id', 'app_id', 'resource_id'], 'th_tar_team_app_res_uniq');

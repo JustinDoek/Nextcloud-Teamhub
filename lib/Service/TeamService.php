@@ -56,6 +56,7 @@ class TeamService {
         private TeamImageService     $teamImageService,
         private AuditService         $auditService,
         private PendingDeletionMapper $pendingMapper,
+        private GroupFolderService   $groupFolderService,
     ) {
     }
 
@@ -906,13 +907,33 @@ class TeamService {
         }
 
         return [
-            'wizardDescription'  => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
-            'inviteTypes'        => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
-            'pinMinLevel'        => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
-            'intravoxParentPath' => $config->getAppValue(Application::APP_ID, 'intravoxParentPath', 'en/teamhub'),
-            'createTeamGroup'   => $rawGroups,           // legacy flat string — keep for canCreateTeam()
-            'createTeamGroups'  => $createTeamGroups,   // structured array for the picker
+            'wizardDescription'      => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
+            'inviteTypes'            => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
+            'pinMinLevel'            => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
+            'intravoxParentPath'     => $config->getAppValue(Application::APP_ID, 'intravoxParentPath', 'en/teamhub'),
+            'createTeamGroup'        => $rawGroups,         // legacy flat string — keep for canCreateTeam()
+            'createTeamGroups'       => $createTeamGroups, // structured array for the picker
+            'groupFoldersDelegation' => $this->safeGetDelegationStatus(),
         ];
+    }
+
+    /**
+     * Isolates getDelegationStatus() from getAdminSettings() so that any failure
+     * (e.g. group_folders_applicable table absent on a fresh GF install) cannot
+     * break the settings load response and wipe the team-creator group from the UI.
+     */
+    private function safeGetDelegationStatus(): array {
+        try {
+            return $this->groupFolderService->getDelegationStatus();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamService] getDelegationStatus failed — returning safe defaults', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [
+                'groupFoldersInstalled'        => false,
+                'teamCreatorGroupsConfigured'  => false,
+            ];
+        }
     }
 
     /**

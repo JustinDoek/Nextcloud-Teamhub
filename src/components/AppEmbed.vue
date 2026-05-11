@@ -3,6 +3,19 @@
         <div class="app-embed__bar">
             <span class="app-embed__label">{{ label }}</span>
             <div class="app-embed__bar-actions">
+                <!-- Custom action buttons injected by the parent (e.g. calendar add/delete) -->
+                <NcButton
+                    v-for="action in embedActions"
+                    :key="action.id"
+                    type="tertiary"
+                    :aria-label="action.label"
+                    :title="action.label"
+                    @click="$emit('action', action.id)">
+                    <template #icon>
+                        <component :is="action.icon" :size="16" />
+                    </template>
+                    {{ action.label }}
+                </NcButton>
                 <NcButton
                     type="tertiary"
                     :aria-label="t('teamhub', 'Reload')"
@@ -284,7 +297,15 @@ export default {
     props: {
         url:   { type: String, required: true },
         label: { type: String, required: true },
+        /**
+         * Optional array of extra action buttons rendered in the embed bar.
+         * Each item: { id: string, label: string, icon: Component }
+         * When the user clicks a button, the component emits 'action' with the id.
+         */
+        embedActions: { type: Array, default: () => [] },
     },
+
+    emits: ['action'],
 
     data() {
         return {

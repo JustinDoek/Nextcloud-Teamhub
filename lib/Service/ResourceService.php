@@ -71,6 +71,7 @@ class ResourceService {
         private IntravoxService $intravoxService,
         private TeamAppResourceMapper $resourceMapper,
         private ResourceDiscoveryService $discoveryService,
+        private GroupFolderService $groupFolderService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -210,30 +211,69 @@ class ResourceService {
                     'teamId' => $teamId, 'count' => count($filesRows), 'app' => Application::APP_ID,
                 ]);
                 if (!empty($filesRows)) {
-                    // resource_id for Files is the file_source integer stored as string.
-                    $fileSource = (int) $filesRows[0]->getResourceId();
-                    // Resolve the file_target path from the share row.
-                    $shareQb  = $db->getQueryBuilder();
-                    $shareRes = $shareQb->select('file_source', 'file_target')
-                        ->from('share')
-                        ->where($shareQb->expr()->eq('file_source', $shareQb->createNamedParameter($fileSource, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->andWhere($shareQb->expr()->eq('share_with', $shareQb->createNamedParameter($teamId)))
-                        ->andWhere($shareQb->expr()->eq('share_type', $shareQb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->setMaxResults(1)
-                        ->executeQuery();
-                    if ($shareRow = $shareRes->fetch()) {
-                        $resources['files'] = [
-                            'folder_id' => (int) $shareRow['file_source'],
-                            'path'      => $shareRow['file_target'],
-                        ];
+                    // Group folder takes precedence over shared folder per DESIGN.md §2.19.
+                    // When both are active (dual-folder state during manual migration),
+                    // widgets and the team home must read from the GF, not the shared folder.
+                    $chosen = null;
+                    foreach ($filesRows as $row) {
+                        if (str_starts_with($row->getResourceId(), 'gf:')) {
+                            $chosen = $row;
+                            break;
+                        }
                     }
-                    $shareRes->closeCursor();
+                    if ($chosen === null) {
+                        $chosen = $filesRows[0]; // No GF — use the (only) shared row
+                    }
+                    $resourceId = $chosen->getResourceId();
+
+                    if (str_starts_with($resourceId, 'gf:')) {
+                        // ── Group Folder-backed resource ──────────────────────
+                        $gfData = $this->groupFolderService->resolveGroupFolderResourceId($resourceId);
+                        if ($gfData !== null) {
+                            // Also resolve the filecache ID so getFavoriteFiles/getRecentFiles
+                            // can use IRootFolder::getById() — GF folder ID ≠ filecache ID.
+                            $filecacheId = $this->filesService->getGroupFolderFilecacheId(
+                                $gfData['mount_point'], $uid
+                            );
+                            $resources['files'] = [
+                                'folder_id'   => $filecacheId ?? $gfData['folder_id'],
+                                'path'        => '/' . $gfData['mount_point'],
+                                'folder_type' => 'group',
+                                'mount_point' => $gfData['mount_point'],
+                            ];
+                        }
+                        $this->logger->debug('[TeamHub][ResourceService] Files resource (group folder) resolved', [
+                            'teamId'     => $teamId,
+                            'resourceId' => $resourceId,
+                            'resolved'   => $resources['files'] !== null,
+                            'app'        => Application::APP_ID,
+                        ]);
+                    } else {
+                        // ── Legacy shared-folder-backed resource ──────────────
+                        $fileSource = (int) $resourceId;
+                        $shareQb  = $db->getQueryBuilder();
+                        $shareRes = $shareQb->select('file_source', 'file_target')
+                            ->from('share')
+                            ->where($shareQb->expr()->eq('file_source', $shareQb->createNamedParameter($fileSource, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->andWhere($shareQb->expr()->eq('share_with', $shareQb->createNamedParameter($teamId)))
+                            ->andWhere($shareQb->expr()->eq('share_type', $shareQb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->setMaxResults(1)
+                            ->executeQuery();
+                        if ($shareRow = $shareRes->fetch()) {
+                            $resources['files'] = [
+                                'folder_id'   => (int) $shareRow['file_source'],
+                                'path'        => $shareRow['file_target'],
+                                'folder_type' => 'shared',
+                            ];
+                        }
+                        $shareRes->closeCursor();
+                        $this->logger->debug('[TeamHub][ResourceService] Files resource (shared folder) resolved', [
+                            'teamId'   => $teamId,
+                            'resolved' => $resources['files'] !== null,
+                            'app'      => Application::APP_ID,
+                        ]);
+                    }
                 }
-                $this->logger->debug('[TeamHub][ResourceService] Files resource resolved', [
-                    'teamId'   => $teamId,
-                    'resolved' => $resources['files'] !== null,
-                    'app'      => Application::APP_ID,
-                ]);
             } catch (\Throwable $e) {
                 $this->logger->warning('[TeamHub][ResourceService] Files resource lookup failed', [
                     'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
@@ -399,12 +439,82 @@ class ResourceService {
                         }
                         break;
                     case 'files':
-                        $result = $this->filesService->createSharedFolder($teamId, $resourceName, $uid);
-                        $results['files'] = $result;
-                        if (!empty($result['folder_id'])) {
-                            $this->upsertResourceRow(
-                                $teamId, 'files', (string) $result['folder_id'], 'teamhub_create', $uid
-                            );
+                        // Prefer Group Folders if the app is available (DESIGN.md §2.18).
+                        // Fall back to the legacy shared-folder path if GroupFolders is
+                        // unavailable. The resource_id for a group-folder-backed file is
+                        // prefixed 'gf:{folderId}' to distinguish it from a share file_source.
+                        $gfAvailable = $this->groupFolderService->isGroupFoldersAvailable();
+                        $this->logger->debug('[TeamHub][ResourceService] createTeamResources files — path decision', [
+                            'teamId'        => $teamId,
+                            'gfAvailable'   => $gfAvailable,
+                            'resourceName'  => $resourceName,
+                            'uid'           => $uid,
+                            'app_id'        => Application::APP_ID,
+                        ]);
+                        if ($gfAvailable) {
+                            try {
+                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — calling createGroupFolder', [
+                                    'teamId' => $teamId, 'mountPoint' => $resourceName, 'app_id' => Application::APP_ID,
+                                ]);
+                                $folderId = $this->groupFolderService->createGroupFolder($resourceName);
+                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — group folder created', [
+                                    'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
+                                ]);
+                                $this->groupFolderService->assignCircleToFolder($folderId, $teamId);
+                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — circle assigned to group folder', [
+                                    'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
+                                ]);
+                                $result = ['folder_id' => $folderId, 'folder_type' => 'group'];
+                                $results['files'] = $result;
+                                $this->upsertResourceRow(
+                                    $teamId, 'files', 'gf:' . $folderId, 'teamhub_create', $uid
+                                );
+                            } catch (\Throwable $gfEx) {
+                                $this->logger->error('[TeamHub][ResourceService] createTeamResources — GroupFolder creation failed, falling back to shared folder', [
+                                    'teamId'    => $teamId,
+                                    'error'     => $gfEx->getMessage(),
+                                    'file'      => $gfEx->getFile(),
+                                    'line'      => $gfEx->getLine(),
+                                    'trace'     => substr($gfEx->getTraceAsString(), 0, 1200),
+                                    'app_id'    => Application::APP_ID,
+                                ]);
+                                // Fall back to shared folder so team creation doesn't fail entirely.
+                                $result = $this->filesService->createSharedFolder($teamId, $resourceName, $uid);
+                                $results['files'] = $result;
+                                if (!empty($result['folder_id'])) {
+                                    $this->upsertResourceRow(
+                                        $teamId, 'files', (string) $result['folder_id'], 'teamhub_create', $uid
+                                    );
+                                }
+                            }
+                        } else {
+                            $this->logger->debug('[TeamHub][ResourceService] createTeamResources — files via shared folder (GroupFolders unavailable)', [
+                                'teamId' => $teamId, 'app_id' => Application::APP_ID,
+                            ]);
+                            try {
+                                $result = $this->filesService->createSharedFolder($teamId, $resourceName, $uid);
+                                $results['files'] = $result;
+                                if (!empty($result['folder_id'])) {
+                                    $this->upsertResourceRow(
+                                        $teamId, 'files', (string) $result['folder_id'], 'teamhub_create', $uid
+                                    );
+                                }
+                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — shared folder created', [
+                                    'teamId'   => $teamId,
+                                    'folderId' => $result['folder_id'] ?? 'null',
+                                    'app_id'   => Application::APP_ID,
+                                ]);
+                            } catch (\Throwable $sfEx) {
+                                $this->logger->error('[TeamHub][ResourceService] createTeamResources — shared folder creation failed', [
+                                    'teamId' => $teamId,
+                                    'error'  => $sfEx->getMessage(),
+                                    'file'   => $sfEx->getFile(),
+                                    'line'   => $sfEx->getLine(),
+                                    'trace'  => substr($sfEx->getTraceAsString(), 0, 1200),
+                                    'app_id' => Application::APP_ID,
+                                ]);
+                                throw $sfEx;
+                            }
                         }
                         break;
                     case 'calendar':
@@ -463,7 +573,7 @@ class ResourceService {
      * @param string $app        'talk' | 'files' | 'calendar' | 'deck'
      * @param int    $resourceId The resource ID owned by the current user
      */
-    public function connectExistingResource(string $teamId, string $app, int $resourceId): array {
+    public function connectExistingResource(string $teamId, string $app, string|int $resourceId): array {
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
@@ -480,9 +590,27 @@ class ResourceService {
                 return $result;
 
             case 'files':
-                $result = $this->filesService->connectExistingFolder($teamId, $resourceId, $uid);
-                if (!empty($result['success'])) {
-                    $this->upsertResourceRow($teamId, 'files', (string) $resourceId, 'teamhub_connect', $uid);
+                // resourceId from the picker is either 'gf:{folderId}' (group folder)
+                // or an integer string (legacy shared folder file_source).
+                if (is_string($resourceId) && str_starts_with((string)$resourceId, 'gf:')) {
+                    $folderId = (int) substr((string)$resourceId, 3);
+                    try {
+                        // assignCircleToFolder may throw if already assigned — treat as success.
+                        $this->groupFolderService->assignCircleToFolder($folderId, $teamId);
+                    } catch (\Throwable $e) {
+                        $this->logger->debug('[TeamHub][ResourceService] assignCircleToFolder — may already be assigned', [
+                            'teamId' => $teamId, 'folderId' => $folderId,
+                            'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
+                        ]);
+                    }
+                    // Always upsert the resource row so the team has an active files resource.
+                    $this->upsertResourceRow($teamId, 'files', 'gf:' . $folderId, 'teamhub_connect', $uid);
+                    $result = ['success' => true, 'folder_id' => $folderId, 'folder_type' => 'group'];
+                } else {
+                    $result = $this->filesService->connectExistingFolder($teamId, (int)$resourceId, $uid);
+                    if (!empty($result['success'])) {
+                        $this->upsertResourceRow($teamId, 'files', (string)(int)$resourceId, 'teamhub_connect', $uid);
+                    }
                 }
                 return $result;
 
@@ -513,6 +641,7 @@ class ResourceService {
             'calendar'           => $this->appManager->isInstalled('calendar'),
             'deck'               => $this->appManager->isInstalled('deck'),
             'intravox'           => $this->appManager->isInstalled('intravox'),
+            'groupfolders'       => $this->groupFolderService->isGroupFoldersAvailable(),
             'intravoxParentPath' => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
         ];
     }
@@ -559,7 +688,7 @@ class ResourceService {
         try {
             $stripped = match ($app) {
                 'talk'     => $this->talkService->removeRoomAccess($teamId, $resourceId, $db),
-                'files'    => $this->filesService->removeFilesAccess($teamId, (int)$resourceId, $db),
+                'files'    => $this->removeFilesAccess($teamId, $resourceId, $db),
                 'calendar' => $this->calendarService->removeCalendarAccess($teamId, (int)$resourceId, $db),
                 'deck'     => $this->deckService->removeBoardAccess($teamId, (int)$resourceId, $db),
                 default    => false,
@@ -636,7 +765,24 @@ class ResourceService {
                 }
                 return $result;
             case 'files':
-                $result = $this->filesService->deleteSharedFolder($teamId, $db);
+                // Handle both group-folder-backed (gf:) and legacy share-backed resources.
+                $fileRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'files');
+                if (!empty($fileRows)) {
+                    $firstId = $fileRows[0]->getResourceId();
+                    if (str_starts_with($firstId, 'gf:')) {
+                        $folderId = (int) substr($firstId, 3);
+                        try {
+                            $this->groupFolderService->deleteGroupFolder($folderId);
+                            $result = ['deleted' => true, 'detail' => "Group folder {$folderId} deleted"];
+                        } catch (\Throwable $e) {
+                            $result = ['deleted' => false, 'detail' => $e->getMessage()];
+                        }
+                    } else {
+                        $result = $this->filesService->deleteSharedFolder($teamId, $db);
+                    }
+                } else {
+                    $result = $this->filesService->deleteSharedFolder($teamId, $db);
+                }
                 if (!empty($result['deleted'])) {
                     $this->removeResourceRowsByTeamAndApp($teamId, 'files');
                 }
@@ -681,7 +827,7 @@ class ResourceService {
         try {
             $result = match ($app) {
                 'talk'     => $this->talkService->deleteRoomById($resourceId, $db),
-                'files'    => $this->filesService->deleteFolderById((int)$resourceId, $teamId, $db),
+                'files'    => $this->deleteFilesResource($resourceId, $teamId, $db),
                 'calendar' => $this->calendarService->deleteCalendarById((int)$resourceId, $db),
                 'deck'     => $this->deckService->deleteBoardById((int)$resourceId, $db),
                 default    => ['deleted' => false, 'detail' => "Unknown app: {$app}"],
@@ -705,6 +851,54 @@ class ResourceService {
 
         return ['success' => true, 'detail' => $result];
     }
+    /**
+     * Strip files access from a team for a given resource ID.
+     * Routes to GroupFolderService for gf: prefixed IDs, FilesService otherwise.
+     */
+    private function removeFilesAccess(string $teamId, string $resourceId, \OCP\IDBConnection $db): bool {
+        if (str_starts_with($resourceId, 'gf:')) {
+            $folderId = (int) substr($resourceId, 3);
+            $this->logger->debug('[TeamHub][ResourceService] removeFilesAccess — removing circle from group folder', [
+                'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
+            ]);
+            try {
+                $this->groupFolderService->removeCircleFromFolder($folderId, $teamId);
+                return true;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][ResourceService] removeFilesAccess group folder failed', [
+                    'teamId' => $teamId, 'folderId' => $folderId,
+                    'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
+                ]);
+                return false;
+            }
+        }
+        return $this->filesService->removeFilesAccess($teamId, (int)$resourceId, $db);
+    }
+
+    /**
+     * Permanently delete a files resource.
+     * Routes to GroupFolderService for gf: prefixed IDs, FilesService otherwise.
+     */
+    private function deleteFilesResource(string $resourceId, string $teamId, \OCP\IDBConnection $db): array {
+        if (str_starts_with($resourceId, 'gf:')) {
+            $folderId = (int) substr($resourceId, 3);
+            $this->logger->debug('[TeamHub][ResourceService] deleteFilesResource — deleting group folder', [
+                'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
+            ]);
+            try {
+                $this->groupFolderService->deleteGroupFolder($folderId);
+                return ['deleted' => true, 'detail' => "Group folder {$folderId} deleted"];
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][ResourceService] deleteFilesResource group folder failed', [
+                    'teamId' => $teamId, 'folderId' => $folderId,
+                    'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
+                ]);
+                return ['deleted' => false, 'detail' => $e->getMessage()];
+            }
+        }
+        return $this->filesService->deleteFolderById((int)$resourceId, $teamId, $db);
+    }
+
     /**
      * Remove all registry rows for a team + app after a hard delete.
      * Errors are logged and swallowed — the NC-side resource is already gone.
@@ -771,10 +965,26 @@ class ResourceService {
         try {
             $existing = $this->resourceMapper->findByTeamAppResource($teamId, $appId, $resourceId);
             if ($existing !== null) {
-                $this->logger->debug('[TeamHub][ResourceService] upsertResourceRow — row already exists, skipping', [
-                    'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
-                    'app' => Application::APP_ID,
-                ]);
+                // If the row already exists but is pending or ignored, promote it to active.
+                // This happens when discovery already found the resource before the admin
+                // clicked "Connect existing" — the explicit connect is the acceptance decision.
+                if (in_array($existing->getStatus(), ['pending', 'ignored'], true)) {
+                    $this->resourceMapper->updateStatus(
+                        $existing->getId(),
+                        'active',
+                        $decidedBy,
+                        time()
+                    );
+                    $this->logger->debug('[TeamHub][ResourceService] upsertResourceRow — promoted to active', [
+                        'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+                        'previousStatus' => $existing->getStatus(), 'app' => Application::APP_ID,
+                    ]);
+                } else {
+                    $this->logger->debug('[TeamHub][ResourceService] upsertResourceRow — already active, skipping', [
+                        'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+                        'app' => Application::APP_ID,
+                    ]);
+                }
                 return;
             }
             $this->resourceMapper->insertResource(

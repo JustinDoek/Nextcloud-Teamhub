@@ -536,6 +536,183 @@ class FilesService {
      * Remove the team's circle access from a specific shared folder (by file_source ID).
      * Deletes only the share row. The folder node is untouched.
      */
+    /**
+     * List file folders available to connect to a team.
+     *
+     * Returns two groups in order:
+     *   1. Group Folders where the team's circle is a member (type=group_folder) — top
+     *   2. Shared folders the current user owns, shared with any circle, not yet connected
+     *      to any TeamHub team (type=shared_folder)
+     *
+     * Items shape: { id: string, name: string, type: 'group_folder'|'shared_folder' }
+     * The id for group_folder items is 'gf:{folder_id}'; for shared_folder items it is
+     * the file_source integer as a string.
+     *
+     * @return array<int, array{id:string, name:string, type:string}>
+     */
+    public function listConnectableFileFolders(
+        string $uid,
+        string $teamId,
+        \OCA\TeamHub\Service\GroupFolderService $groupFolderService,
+        string $activeFilesType = 'none'
+    ): array {
+        $out = [];
+
+        // ── 1. Group Folders where this team's circle is a member ─────────────
+        // Always shown UNLESS a GF is already the active resource (nothing to switch to).
+        if ($groupFolderService->isGroupFoldersAvailable() && $teamId !== '' && $activeFilesType !== 'gf') {
+            try {
+                $db = $this->container->get(\OCP\IDBConnection::class);
+                $qb = $db->getQueryBuilder();
+                $qb->select('gf.folder_id', 'gf.mount_point')
+                    ->from('group_folders', 'gf')
+                    ->innerJoin('gf', 'group_folders_groups', 'gfg',
+                        $qb->expr()->eq('gf.folder_id', 'gfg.folder_id')
+                    )
+                    ->where($qb->expr()->eq(
+                        'gfg.circle_id',
+                        $qb->createNamedParameter($teamId)
+                    ))
+                    ->orderBy('gf.mount_point', 'ASC');
+
+                $r = $qb->executeQuery();
+                while ($row = $r->fetch()) {
+                    $out[] = [
+                        'id'   => 'gf:' . (int)$row['folder_id'],
+                        'name' => (string)$row['mount_point'],
+                        'type' => 'group_folder',
+                    ];
+                }
+                $r->closeCursor();
+
+                $this->logger->debug('[TeamHub][FilesService] listConnectableFileFolders — group folders', [
+                    'teamId' => $teamId, 'count' => count($out), 'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][FilesService] listConnectableFileFolders — GF query failed', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // ── 2. Shared folders owned by $uid, shared with a circle (type=7),
+        //       not already connected to any TeamHub team.
+        // Suppressed when activeFilesType='shared' (shared folder already active —
+        // only GF options are relevant) or 'gf' (GF already active — nothing to add).
+        if ($activeFilesType === 'none') {
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // Find file_source IDs already connected in teamhub_team_app_resources
+            // so we can exclude them. Only exclude non-gf: entries (legacy shares).
+            $usedQb = $db->getQueryBuilder();
+            $usedRes = $usedQb->select('resource_id')
+                ->from('teamhub_team_app_resources')
+                ->where($usedQb->expr()->eq('app_id', $usedQb->createNamedParameter('files')))
+                ->andWhere($usedQb->expr()->eq('status', $usedQb->createNamedParameter('active')))
+                ->executeQuery();
+            $usedIds = [];
+            while ($row = $usedRes->fetch()) {
+                $rid = (string)$row['resource_id'];
+                if (!str_starts_with($rid, 'gf:')) {
+                    $usedIds[] = $rid;
+                }
+            }
+            $usedRes->closeCursor();
+
+            // Find circle shares (type=7) owned by $uid for folders.
+            $qb = $db->getQueryBuilder();
+            $qb->select('s.file_source', 'f.name', 'f.path')
+                ->from('share', 's')
+                ->leftJoin('s', 'filecache', 'f',
+                    $qb->expr()->eq('s.file_source', 'f.fileid')
+                )
+                ->where($qb->expr()->eq('s.uid_owner', $qb->createNamedParameter($uid)))
+                ->andWhere($qb->expr()->eq('s.share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('s.item_type', $qb->createNamedParameter('folder')))
+                ->orderBy('f.name', 'ASC');
+
+            if (!empty($usedIds)) {
+                $qb->andWhere($qb->expr()->notIn(
+                    's.file_source',
+                    $qb->createNamedParameter(
+                        array_map('intval', $usedIds),
+                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                    )
+                ));
+            }
+
+            $r = $qb->executeQuery();
+            $seen = [];
+            while ($row = $r->fetch()) {
+                $fid = (string)(int)$row['file_source'];
+                if (isset($seen[$fid])) continue; // deduplicate multi-share
+                $seen[$fid] = true;
+                // name is the filecache entry's own name component.
+                // If empty (can happen on some storage backends), fall back to
+                // the last segment of the path, then to the raw file ID.
+                $name = (string)($row['name'] ?? '');
+                if ($name === '' && isset($row['path']) && $row['path'] !== '') {
+                    $name = basename((string)$row['path']);
+                }
+                if ($name === '') {
+                    $name = $fid;
+                }
+                $out[] = [
+                    'id'   => $fid,
+                    'name' => $name,
+                    'type' => 'shared_folder',
+                ];
+            }
+            $r->closeCursor();
+
+            $this->logger->debug('[TeamHub][FilesService] listConnectableFileFolders — shared folders', [
+                'uid' => $uid, 'total' => count($out), 'app' => Application::APP_ID,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][FilesService] listConnectableFileFolders — share query failed', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+        } // end if activeFilesType === 'none'
+
+        return $out;
+    }
+
+    /**
+     * Resolve the filecache ID (oc_filecache.fileid) for a Group Folder by its
+     * mount point name. Group folders are mounted at the root of every member's
+     * file tree under their mount point name. We look them up via IRootFolder
+     * with the current user's context.
+     *
+     * Returns null if the group folder cannot be found in the current user's file tree.
+     */
+    public function getGroupFolderFilecacheId(string $mountPoint, string $uid): ?int {
+        try {
+            $rootFolder = $this->container->get(IRootFolder::class);
+            $userFolder = $rootFolder->getUserFolder($uid);
+            // Group folders appear directly in the user's root under their mount point name.
+            if (!$userFolder->nodeExists($mountPoint)) {
+                $this->logger->warning('[TeamHub][FilesService] getGroupFolderFilecacheId — node not found', [
+                    'mountPoint' => $mountPoint, 'uid' => $uid, 'app' => Application::APP_ID,
+                ]);
+                return null;
+            }
+            $node = $userFolder->get($mountPoint);
+            $id   = $node->getId();
+            $this->logger->debug('[TeamHub][FilesService] getGroupFolderFilecacheId — resolved', [
+                'mountPoint' => $mountPoint, 'uid' => $uid, 'filecacheId' => $id, 'app' => Application::APP_ID,
+            ]);
+            return (int) $id;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][FilesService] getGroupFolderFilecacheId failed', [
+                'mountPoint' => $mountPoint, 'uid' => $uid,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
     public function removeFilesAccess(string $teamId, int $fileId, \OCP\IDBConnection $db): bool {
         try {
             // Find the share ID for this specific file_source + teamId circle share.

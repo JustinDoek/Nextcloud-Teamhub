@@ -3,7 +3,76 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.32.0] — 2026-05-10
+## [3.36.0] — 2026-05-11 — Session F
+
+### Added
+- **Strict 1:1 enforcement for files resources.** `ResourceDiscoveryService::reconcileApp` now snapshots the team's active files state and routes newly discovered rows accordingly: active shared + incoming GF → pending (with `isDualFolderPending` flag); active GF + anything → ignored (GF precedence); active shared + another shared → ignored. `acceptResource` and `unignoreResource` apply the same guard. All refusals write `resource.suppressed_duplicate` audit entries with reason codes.
+- **Group folder takes precedence in `getTeamResources`.** When both shared and GF rows are active (dual state during manual migration), the loop explicitly picks the `gf:` row so widgets and the team home always read from the group folder.
+- **Dual-folder informational notice** in Manage Team → Settings → Team Apps. When a GF is discovered alongside an active shared folder, a blue panel explains the situation and directs the admin to connect the group folder via the existing buttons and migrate files manually.
+- **Resource-type badge** ("Group folder" / "Shared folder") on each active files row in the settings panel.
+- **Picker filtering by active files type.** `GET /api/v1/pickers/files` now accepts `activeFilesType=shared|gf|none`. Shared folders are suppressed when one is already active; both types hidden when a GF is active.
+- **`isDualFolderPending` flag** on panel data rows.
+- **`normalPendingResources`, `dualFolderPendingRow`, `dualFolderSharedRow`, `activeFilesRow`, `activeFilesIsShared`, `activeFilesIsGf`** computed properties in `ManageTeamView.vue`.
+- **Create New button for Talk** — shown in empty state alongside Connect existing.
+- **Create New group folder button for Files** — shown only when Group Folders is installed; switches label to "+ Create new group folder" when a shared folder is active (signals the workflow).
+- **Both 1:1 buttons hidden** once a resource is connected, except when a shared folder is active and Group Folders is available — then the GF buttons remain so admin can attach a GF for manual migration.
+
+### Changed
+- `ResourceService::upsertResourceRow()` — now promotes `pending`/`ignored` rows to `active` on explicit connect instead of skipping. Fixes silent failure when the discovery reconciler had already inserted the resource as pending.
+- `ResourceService::getTeamResources()` — files block prefers `gf:` row when multiple active rows exist.
+- `ResourceDiscoveryService::getSettingsPanelData()` — adds dual-folder detection and tagging.
+- `ResourceDiscoveryService::resolveFileName()` — falls back to `basename(path)` when `filecache.name` is empty (some storage backends).
+- `FilesService::listConnectableFileFolders()` — accepts `activeFilesType` parameter, filters output accordingly. Also falls back to `basename(path)` for shared folder names.
+- `ResourceStateController::getPanelData()` — now triggers `reconcileTeam` before returning panel data, so externally added GF resources appear immediately.
+- `ManageTeamView::connectExisting()` — empty catch block replaced with `showError()`.
+
+### Fixed
+- **Critical pre-existing bug** in `ArchiveService.php`: stray extra `}` (line ~2770) caused `ParseError: unexpected token "try"` on every admin archive request. Removed. Archive settings save works again.
+- **`AdminSettings.vue` archive form**: `archiveBeforeDelete` was missing from the `data()` default and from `loadArchiveSettings` — the toggle had no reactive backing. Both fixed.
+
+### Removed
+- The auto-migration system (`FolderMigrationService`, `FolderMigrationController`, `FolderMigrationModal.vue`, two endpoints) was scoped, built, and removed per user direction. NcDialog wiring proved unreliable; manual file migration is the supported path. The dual-folder notice remains as an informational signal only.
+
+### Security
+- All new endpoints check team admin level (≥8) before any action.
+- No raw SQL anywhere; no `\OC::$server`; constructor DI throughout.
+
+## [3.33.8] — 2026-05-10
+
+### Added
+- **Group Folders integration (Session E, v21.0.7).** New `GroupFolderService` wraps `FolderManager` via lazy DI container resolution. When Group Folders is installed, new teams automatically get a server-owned Group Folder instead of a personal shared folder.
+- **`GET /api/v1/pickers/files?teamId={id}`** — new endpoint listing connectable file folders: group folders where the team's circle is a member (type `group_folder`, shown first) and shared folders owned by the current user not yet connected to any team (type `shared_folder`). Requires team membership.
+- **`gf:` resource ID convention.** Group Folder-backed files resources stored in `teamhub_team_app_resources` with `resource_id = 'gf:{folderId}'` — distinct from legacy share-based integer IDs.
+- **`folder_type` field** in `getTeamResources` files response: `'group'` or `'shared'`.
+- **`groupfolders` key** in `GET /api/v1/teams/apps/check` response.
+- **`groupFoldersDelegation` key** in `GET /api/v1/admin/settings` response.
+- **Admin Settings — Group Folders status section.** Read-only ✓/⚠ indicators for app installed and team-creator group configured.
+- **`docs/design/team-folder-via-groupfolders.md`** — full design document.
+- **Soft-delete suspend/resume for group folders.** `suspendConnectedAppResources` detects `gf:` resources and calls `removeCircleFromFolder`; `restoreConnectedAppResources` calls `assignCircleToFolder`. Folder ID stored in `suspended_resources` JSON.
+- **Archive extraction for group folders.** `extractFilesData` routes `gf:` resources to new `extractGroupFolderData` helper that resolves the folder via a team member's file tree.
+- **Type badges in Connect picker.** Group folder items show a blue `[Group Folder]` badge; shared folder items show a grey `[Shared]` badge.
+- **Pending resources section moved to top of Team-apps panel**, above app rows.
+
+### Changed
+- `ResourceService::createTeamResources` — files branch prefers Group Folders when available; falls back to shared folder silently.
+- `ResourceService::connectExistingResource` — files case handles `gf:` prefix; already-assigned circle treated as success (not 400).
+- `ResourceDiscoveryService::getRealFileIds` — includes `gf:` IDs from `group_folders_groups`.
+- `ResourceDiscoveryService::getFilesOwner` — returns null for `gf:` resources (always pending review on discovery).
+- `ResourceDiscoveryService::resolveFileName` — handles `gf:` prefix via `group_folders.mount_point`.
+- `FilesService::getTeamResources` — resolves filecache ID for group folders so favourites/recent widgets work.
+- `FilesService` — added `getGroupFolderFilecacheId`, `listConnectableFileFolders`.
+- `ResourcePicker.vue` — all apps now use server-driven list; NC file picker removed.
+- `ManageTeamView.vue` — files connect picker uses `/pickers/files` endpoint; type badges on picker items; pending section repositioned.
+- `AdminSettings.vue` — team-creator group auto-saves on add/remove (no separate Save click required).
+- `TeamService::getAdminSettings` — includes `groupFoldersDelegation`; wrapped in `safeGetDelegationStatus` so failures cannot break the settings load.
+
+### Fixed
+- `group_folders` table primary key is `folder_id`, not `id` — fixed all QB queries in `GroupFolderService`.
+- `FolderManager::addFolder()` → `createFolder()` — correct method name for GroupFolders v21.
+- `getDelegationStatus` — removed bogus `group_folders_applicable` query (table does not exist in v21); simplified to two-field response.
+- Security: `GET /api/v1/pickers/files` now validates team membership before exposing group folder names.
+
+
 
 ### Added
 - **Multi-resource support for Calendar and Deck.** Teams can now connect multiple calendars and multiple Deck boards. `getTeamResources()` returns arrays for both apps.

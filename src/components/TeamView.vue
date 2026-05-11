@@ -66,8 +66,11 @@
             <AppEmbed
                 v-if="preloadedViews.has('calendar') || currentView === 'calendar'"
                 v-show="currentView === 'calendar'"
+                ref="calendarEmbed"
                 :url="calendarUrl"
-                :label="t('teamhub', 'Calendar')" />
+                :label="t('teamhub', 'Calendar')"
+                :embed-actions="calendarEmbedActions"
+                @action="onCalendarEmbedAction" />
             <AppEmbed
                 v-if="(preloadedViews.has('deck') || currentView === 'deck') && resources.deck && resources.deck.length > 0"
                 v-show="currentView === 'deck'"
@@ -196,7 +199,13 @@
         <AddEventModal v-if="showAddEvent"
             :team-id="currentTeamId"
             :calendars="resources.calendar || []"
-            @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar()" />
+            @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()" />
+
+        <DeleteEventsModal v-if="showDeleteEvents"
+            :team-id="currentTeamId"
+            :calendars="resources.calendar || []"
+            @close="showDeleteEvents = false"
+            @deleted="$refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()" />
 
         <TeamMeetingModal v-if="showTeamMeeting" :team-id="currentTeamId" :resources="resources"
             @close="showTeamMeeting = false; $refs.widgetGrid?.refreshCalendar()" />
@@ -223,6 +232,8 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { NcButton, NcDialog, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
 
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
+import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
+import CalendarRemove from 'vue-material-design-icons/CalendarRemove.vue'
 
 import TeamTabBar from './TeamTabBar.vue'
 import TeamWidgetGrid from './TeamWidgetGrid.vue'
@@ -231,6 +242,7 @@ import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import ScheduleMeetingModal from './ScheduleMeetingModal.vue'
 import AddEventModal from './AddEventModal.vue'
+import DeleteEventsModal from './DeleteEventsModal.vue'
 import TeamMeetingModal from './TeamMeetingModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
@@ -249,10 +261,10 @@ export default {
 
     components: {
         NcButton, NcDialog, NcTextField, NcLoadingIcon,
-        FileDocumentOutline,
+        FileDocumentOutline, CalendarPlus, CalendarRemove,
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
-        ScheduleMeetingModal, AddEventModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
+        ScheduleMeetingModal, AddEventModal, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
         TeamMeetingModal,
     },
 
@@ -287,6 +299,7 @@ export default {
             showInviteModal:     false,
             showScheduleMeeting: false,
             showAddEvent:        false,
+            showDeleteEvents:    false,
             showTeamMeeting:     false,
             showAddTask:         false,
             // Multi-resource picker state (§10.1)
@@ -319,10 +332,39 @@ export default {
             return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
         },
         calendarUrl() {
-            // Always use the full authenticated Calendar app so events are
-            // editable. The public token URL (/apps/calendar/p/{token}) was
-            // read-only by design — dropped in v3.18.3.
+            // Use the public share token URL (/apps/calendar/p/{token}) so only
+            // the team calendar is shown — the full /apps/calendar view shows all
+            // the user's personal calendars which is confusing.
+            // Falls back to the full app when no public token is available
+            // (older calendars connected before token creation was added).
+            const cal = this.selectedCalendar || (this.resources.calendar && this.resources.calendar[0])
+            if (cal?.public_token) {
+                console.log('[TeamHub][TeamView] calendarUrl using public token for calendarId:', cal.id)
+                return generateUrl('/apps/calendar/p/' + cal.public_token)
+            }
+            console.log('[TeamHub][TeamView] calendarUrl: no public token, falling back to full app')
             return generateUrl('/apps/calendar')
+        },
+
+        /**
+         * Action buttons injected into the calendar AppEmbed bar.
+         * Always shown: Add event, Delete events.
+         */
+        calendarEmbedActions() {
+            return [
+                {
+                    id:    'add-event',
+                    // TRANSLATORS: button label in the calendar embed toolbar — opens the add-event modal
+                    label: t('teamhub', 'Add event'),
+                    icon:  CalendarPlus,
+                },
+                {
+                    id:    'delete-events',
+                    // TRANSLATORS: button label in the calendar embed toolbar — opens a modal to select and delete events
+                    label: t('teamhub', 'Delete events'),
+                    icon:  CalendarRemove,
+                },
+            ]
         },
         deckUrl() {
             const board = this.selectedDeckBoard || (this.resources.deck && this.resources.deck[0])
@@ -713,6 +755,15 @@ export default {
         },
 
         openManageTeam() { this.$emit('show-manage-team') },
+
+        onCalendarEmbedAction(actionId) {
+            console.log('[TeamHub][TeamView] Calendar embed action:', actionId)
+            if (actionId === 'add-event') {
+                this.showAddEvent = true
+            } else if (actionId === 'delete-events') {
+                this.showDeleteEvents = true
+            }
+        },
 
         onShowPicker(app) {
             if (app === 'deck') {

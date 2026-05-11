@@ -34,6 +34,7 @@ class ResourceDiscoveryService {
         private readonly IDBConnection         $db,
         private readonly IAppManager           $appManager,
         private readonly LoggerInterface       $logger,
+        private readonly GroupFolderService    $groupFolderService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -119,6 +120,35 @@ class ResourceDiscoveryService {
         foreach ($rows as $row) {
             $grouped[$row->getAppId()][] = $this->serializeRow($row);
         }
+
+        // ── Dual-folder detection ──────────────────────────────────────────
+        // When the team has an active legacy shared-folder resource (non-gf:)
+        // AND a pending gf: resource, we are in the dual-folder state (§2.19).
+        // Tag the pending gf: row so the UI can render the migration modal
+        // instead of the normal Accept/Ignore buttons.
+        $fileRows = $grouped['files'] ?? [];
+        $hasActiveLegacy = false;
+        $hasPendingGf    = false;
+        foreach ($fileRows as &$fr) {
+            if ($fr['status'] === 'active' && !str_starts_with($fr['resourceId'], 'gf:')) {
+                $hasActiveLegacy = true;
+            }
+            if ($fr['status'] === 'pending' && str_starts_with($fr['resourceId'], 'gf:')) {
+                $hasPendingGf = true;
+            }
+        }
+        unset($fr);
+
+        if ($hasActiveLegacy && $hasPendingGf) {
+            foreach ($fileRows as &$fr) {
+                if ($fr['status'] === 'pending' && str_starts_with($fr['resourceId'], 'gf:')) {
+                    $fr['isDualFolderPending'] = true;
+                }
+            }
+            unset($fr);
+            $grouped['files'] = $fileRows;
+        }
+
         return $grouped;
     }
 
@@ -138,6 +168,55 @@ class ResourceDiscoveryService {
         }
         if ($row->getStatus() !== 'pending') {
             throw new \RuntimeException("Resource is not pending (status={$row->getStatus()})");
+        }
+
+        // ── Files: enforce 1:1 at the accept layer ────────────────────────
+        // A pending gf: row alongside an active shared folder is the dual-folder
+        // migration case — acceptResource must not be called directly for that row;
+        // the migration endpoint handles it. All other duplicates are refused here.
+        if ($appId === 'files') {
+            $activeRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'files');
+            if (!empty($activeRows)) {
+                $activeId   = $activeRows[0]->getResourceId();
+                $activeIsGf = str_starts_with($activeId, 'gf:');
+                $incomingIsGf = str_starts_with($resourceId, 'gf:');
+
+                if (!$activeIsGf && $incomingIsGf) {
+                    // Dual-folder migration case — should go through the migrate endpoint
+                    throw new \RuntimeException(
+                        'This group folder must be accepted through the folder migration flow, not directly. ' .
+                        'Use the "Review migration" button in the team settings.'
+                    );
+                }
+
+                // Any other duplicate — suppress and audit
+                $this->resourceMapper->updateStatus($row->getId(), 'ignored', $actorUid, time());
+                $reason = $activeIsGf
+                    ? 'active_group_folder_takes_precedence'
+                    : 'duplicate_shared_folder_rejected';
+                $this->auditService->log(
+                    $teamId,
+                    'resource.suppressed_duplicate',
+                    $actorUid,
+                    'resource',
+                    "files:{$resourceId}",
+                    [
+                        'app_id'             => 'files',
+                        'resource_id'        => $resourceId,
+                        'active_resource_id' => $activeId,
+                        'reason'             => $reason,
+                        'actor'              => $actorUid,
+                    ],
+                );
+                $this->logger->warning('[TeamHub][ResourceDiscoveryService] acceptResource refused — files 1:1 constraint', [
+                    'teamId' => $teamId, 'resourceId' => $resourceId,
+                    'activeId' => $activeId, 'reason' => $reason, 'app' => Application::APP_ID,
+                ]);
+                throw new \RuntimeException(
+                    'A files resource is already connected to this team. ' .
+                    'Disconnect the existing folder before connecting another one.'
+                );
+            }
         }
 
         $this->resourceMapper->updateStatus($row->getId(), 'active', $actorUid, time());
@@ -199,6 +278,32 @@ class ResourceDiscoveryService {
             throw new \RuntimeException("Resource is not ignored (status={$row->getStatus()})");
         }
 
+        // ── Files: refuse un-ignore if one is already active ─────────────
+        if ($appId === 'files') {
+            $activeRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'files');
+            if (!empty($activeRows)) {
+                $activeId = $activeRows[0]->getResourceId();
+                $this->auditService->log(
+                    $teamId,
+                    'resource.suppressed_duplicate',
+                    $actorUid,
+                    'resource',
+                    "files:{$resourceId}",
+                    [
+                        'app_id'             => 'files',
+                        'resource_id'        => $resourceId,
+                        'active_resource_id' => $activeId,
+                        'reason'             => 'unignore_refused_one_active_files_resource',
+                        'actor'              => $actorUid,
+                    ],
+                );
+                throw new \RuntimeException(
+                    'A files resource is already connected to this team. ' .
+                    'Disconnect the existing folder before activating another one.'
+                );
+            }
+        }
+
         $this->resourceMapper->updateStatus($row->getId(), 'active', $actorUid, time());
 
         $this->auditService->log(
@@ -228,11 +333,31 @@ class ResourceDiscoveryService {
 
             $realIdSet = array_flip($realIds);
 
+            // ── Files: snapshot the current active resource before inserting new ones ──
+            // This drives the 1:1 enforcement and the migration-trigger logic.
+            $activeFilesRow = null;
+            if ($appId === 'files') {
+                foreach ($localRows as $row) {
+                    if ($row->getStatus() === 'active') {
+                        $activeFilesRow = $row;
+                        break;
+                    }
+                }
+            }
+
             // — Resources in NC reality but not in our table → insert —
             foreach ($realIds as $resourceId) {
                 if (isset($localByResourceId[$resourceId])) {
                     // Already tracked — refresh risk_status.
                     $this->refreshRiskStatus($teamId, $appId, $resourceId, $localByResourceId[$resourceId]);
+                    continue;
+                }
+
+                // ── Files: enforce 1:1 and group-folder-wins rules ──────────
+                if ($appId === 'files' && $activeFilesRow !== null) {
+                    $this->insertDiscoveredFilesRowWithGuard(
+                        $teamId, $resourceId, $activeFilesRow
+                    );
                     continue;
                 }
 
@@ -319,6 +444,99 @@ class ResourceDiscoveryService {
         $this->logger->info('[TeamHub][ResourceDiscoveryService] resource discovered', [
             'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
             'origin' => $origin, 'status' => $status, 'app' => Application::APP_ID,
+        ]);
+    }
+
+    /**
+     * Handle a newly discovered files resource when the team already has an active
+     * files resource. Enforces the 1:1 rule and the group-folder-wins precedence.
+     *
+     * Rules:
+     *   Active = shared folder (non-gf:), incoming = gf:
+     *     → Insert as pending with isDualFolderPending context (migration flow).
+     *   Active = GF (gf:), incoming = anything
+     *     → Suppress (insert as ignored). Audit: resource.suppressed_duplicate.
+     *   Active = shared folder (non-gf:), incoming = another shared folder
+     *     → Suppress (insert as ignored). Audit: resource.suppressed_duplicate.
+     */
+    private function insertDiscoveredFilesRowWithGuard(
+        string           $teamId,
+        string           $resourceId,
+        TeamAppResource  $activeRow
+    ): void {
+        $activeId    = $activeRow->getResourceId();
+        $activeIsGf  = str_starts_with($activeId, 'gf:');
+        $incomingIsGf = str_starts_with($resourceId, 'gf:');
+
+        // Case 1: active = shared folder, incoming = GF → migration pending
+        if (!$activeIsGf && $incomingIsGf) {
+            $ownerUid = $this->getResourceOwner($teamId, 'files', $resourceId);
+            $this->resourceMapper->insertResource(
+                teamId:      $teamId,
+                appId:       'files',
+                resourceId:  $resourceId,
+                origin:      'discovered_pending',
+                status:      'pending',
+                riskStatus:  'none',
+                displayOrder: 0,
+                decidedBy:   null,
+                decidedAt:   null,
+                ownerUid:    $ownerUid,
+            );
+            $this->auditService->log(
+                $teamId,
+                'resource.discovered',
+                null,
+                'resource',
+                "files:{$resourceId}",
+                ['app_id' => 'files', 'resource_id' => $resourceId,
+                 'origin' => 'discovered_pending', 'note' => 'dual_folder_pending_review'],
+            );
+            $this->logger->info('[TeamHub][ResourceDiscoveryService] files GF discovered alongside active shared folder — dual-folder pending', [
+                'teamId' => $teamId, 'resourceId' => $resourceId,
+                'activeResourceId' => $activeId, 'app' => Application::APP_ID,
+            ]);
+            return;
+        }
+
+        // Case 2: active = GF or active = shared, incoming would be a duplicate type
+        // → suppress immediately (insert as ignored)
+        $reason = $activeIsGf
+            ? 'active_group_folder_takes_precedence'
+            : 'duplicate_shared_folder_rejected';
+
+        $ownerUid = $this->getResourceOwner($teamId, 'files', $resourceId);
+        $this->resourceMapper->insertResource(
+            teamId:      $teamId,
+            appId:       'files',
+            resourceId:  $resourceId,
+            origin:      'discovered_pending',
+            status:      'ignored',
+            riskStatus:  'none',
+            displayOrder: 0,
+            decidedBy:   null,
+            decidedAt:   null,
+            ownerUid:    $ownerUid,
+        );
+        $this->auditService->log(
+            $teamId,
+            'resource.suppressed_duplicate',
+            null, // system actor
+            'resource',
+            "files:{$resourceId}",
+            [
+                'app_id'            => 'files',
+                'resource_id'       => $resourceId,
+                'active_resource_id' => $activeId,
+                'reason'            => $reason,
+            ],
+        );
+        $this->logger->info('[TeamHub][ResourceDiscoveryService] files resource suppressed — 1:1 constraint', [
+            'teamId'           => $teamId,
+            'resourceId'       => $resourceId,
+            'activeResourceId' => $activeId,
+            'reason'           => $reason,
+            'app'              => Application::APP_ID,
         ]);
     }
 
@@ -439,8 +657,10 @@ class ResourceDiscoveryService {
     /**
      * Files: oc_share rows where share_type=7 (circle) and share_with=teamId.
      * resource_id = file_source (integer, stored as string).
+     * Also includes Group Folder IDs prefixed 'gf:{id}' when GroupFolders is installed.
      */
     private function getRealFileIds(string $teamId): array {
+        // ── Legacy shared-folder shares ───────────────────────────────────────
         $qb = $this->db->getQueryBuilder();
         $qb->select('file_source')
             ->from('share')
@@ -453,6 +673,17 @@ class ResourceDiscoveryService {
             $ids[] = (string)(int)$row['file_source'];
         }
         $result->closeCursor();
+
+        // ── Group Folder-backed resources ─────────────────────────────────────
+        // resource_id format: 'gf:{folderId}' — distinct from share-based IDs.
+        $gfIds = $this->groupFolderService->getRealGroupFolderResourceIds($teamId);
+        $ids   = array_merge($ids, $gfIds);
+
+        $this->logger->debug('[TeamHub][ResourceDiscoveryService] getRealFileIds', [
+            'teamId' => $teamId, 'shareIds' => count($ids) - count($gfIds),
+            'gfIds' => count($gfIds), 'app' => Application::APP_ID,
+        ]);
+
         return $ids;
     }
 
@@ -564,9 +795,16 @@ class ResourceDiscoveryService {
     }
 
     /**
-     * Files: uid_owner from the share row for this file_source + teamId circle share.
+     * Files: uid_owner from the share row for share-based resources,
+     * or null for group-folder-backed resources (gf: prefix) — GF resources
+     * have no personal owner, so they always go to pending review on discovery.
      */
     private function getFilesOwner(string $teamId, string $resourceId): ?string {
+        // Group folder resources have no share owner — always treat as pending.
+        if (str_starts_with($resourceId, 'gf:')) {
+            return null;
+        }
+
         try {
             $qb = $this->db->getQueryBuilder();
             $qb->select('uid_owner')
@@ -759,12 +997,25 @@ class ResourceDiscoveryService {
     }
 
     /**
-     * Files: look up the file/folder name from oc_filecache using fileid.
-     * resourceId is file_source cast to string (integer).
+     * Files: look up the file/folder name from oc_filecache using fileid,
+     * or from group_folders for gf:-prefixed resource IDs.
+     * resourceId is either a plain integer string (share-based) or 'gf:{id}'.
      */
     private function resolveFileName(string $resourceId): string {
+        // Group Folder-backed resource: use mount_point as display name.
+        if (str_starts_with($resourceId, 'gf:')) {
+            $gfData = $this->groupFolderService->resolveGroupFolderResourceId($resourceId);
+            if ($gfData !== null) {
+                return $gfData['mount_point'] ?: $resourceId;
+            }
+            return $resourceId;
+        }
+
+        // Legacy share-based resource: look up file name from filecache.
+        // Select both name and path so we can fall back to basename(path)
+        // when name is empty (occurs on some storage backends).
         $qb = $this->db->getQueryBuilder();
-        $qb->select('name')
+        $qb->select('name', 'path')
             ->from('filecache')
             ->where($qb->expr()->eq(
                 'fileid',
@@ -776,7 +1027,14 @@ class ResourceDiscoveryService {
         $row    = $result->fetch();
         $result->closeCursor();
 
-        $name = $row ? (string)($row['name'] ?? '') : '';
+        if (!$row) {
+            return $resourceId;
+        }
+
+        $name = (string)($row['name'] ?? '');
+        if ($name === '' && ($row['path'] ?? '') !== '') {
+            $name = basename((string)$row['path']);
+        }
         return $name !== '' ? $name : $resourceId;
     }
 

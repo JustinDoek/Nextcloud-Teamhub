@@ -196,6 +196,65 @@
                 </div>
                 <div v-else class="team-apps-list">
 
+                    <!-- Pending resources — shown at top before app rows so admins see them first -->
+                    <div v-if="normalPendingResources.length > 0 || dualFolderPendingRow" class="manage-section manage-section--pending manage-section--pending-inline">
+                        <div class="team-app-section__header team-app-section__header--info">
+                            <span aria-hidden="true">ℹ</span>
+                            <span class="team-app-section__name">{{ t('teamhub', 'Resources pending review') }}</span>
+                        </div>
+
+                        <!-- Dual-folder informational notice — no action button -->
+                        <div v-if="dualFolderPendingRow" class="dual-folder-notice">
+                            <div class="dual-folder-notice__header">
+                                <FolderIcon :size="18" aria-hidden="true" />
+                                <strong>{{ t('teamhub', 'Group folder connect') }}</strong>
+                            </div>
+                            <p class="dual-folder-notice__body">
+                                <!-- TRANSLATORS: {groupFolder} and {sharedFolder} are folder names -->
+                                {{ t('teamhub', 'The group folder "{groupFolder}" is available for this team alongside the existing shared folder "{sharedFolder}". Use the + connect group folder to attach the group folder. Migrate files from your shared folder before you disconnect or delete the shared folder.', {
+                                    groupFolder: dualFolderPendingRow.displayName || dualFolderPendingRow.resourceId,
+                                    sharedFolder: dualFolderSharedRow ? (dualFolderSharedRow.displayName || dualFolderSharedRow.resourceId) : t('teamhub', 'shared folder'),
+                                }) }}
+                            </p>
+                        </div>
+
+                        <p v-if="normalPendingResources.length > 0" class="manage-section-desc manage-section-desc--inline">
+                            {{ t('teamhub', 'These resources are connected to this team in Nextcloud but were not added through TeamHub. Review each one and choose to accept or ignore it.') }}
+                        </p>
+                        <div v-if="loadingPendingResources" class="section-loading">
+                            <NcLoadingIcon :size="24" />
+                        </div>
+                        <div v-else class="pending-resources-list">
+                            <div
+                                v-for="resource in normalPendingResources"
+                                :key="resource.id"
+                                class="pending-resource-item">
+                                <div class="pending-resource-info">
+                                    <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
+                                    <span class="pending-resource-name" :title="resource.resourceId">
+                                        {{ resource.displayName || resource.resourceId }}
+                                    </span>
+                                </div>
+                                <div class="pending-resource-actions">
+                                    <NcButton
+                                        type="primary"
+                                        :disabled="resource._loading"
+                                        :aria-label="t('teamhub', 'Accept resource {id}', { id: resource.resourceId })"
+                                        @click="acceptResource(resource)">
+                                        {{ t('teamhub', 'Accept') }}
+                                    </NcButton>
+                                    <NcButton
+                                        type="tertiary"
+                                        :disabled="resource._loading"
+                                        :aria-label="t('teamhub', 'Ignore resource {id}', { id: resource.resourceId })"
+                                        @click="ignoreResource(resource)">
+                                        {{ t('teamhub', 'Ignore') }}
+                                    </NcButton>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- At-risk resources — shown at top so admins see problems first -->
                     <div v-if="atRiskResources.length > 0" class="manage-section--atrisk manage-section--atrisk-inline">
                         <div class="team-app-section__header team-app-section__header--warning">
@@ -237,8 +296,13 @@
                         </div>
                         <div v-if="activeResourcesByApp('talk').length === 0" class="resource-row resource-row--empty">
                             <span class="resource-row__empty-label">{{ t('teamhub', 'No Talk room connected') }}</span>
+                        </div>
+                        <div v-if="activeResourcesByApp('talk').length === 0" class="resource-row resource-row--actions">
                             <NcButton type="tertiary" @click="openConnectPicker('talk')">
                                 {{ t('teamhub', '+ Connect existing') }}
+                            </NcButton>
+                            <NcButton type="tertiary" @click="createResource('talk')">
+                                {{ t('teamhub', '+ Create new') }}
                             </NcButton>
                         </div>
                     </div>
@@ -251,6 +315,12 @@
                         </div>
                         <div v-for="row in activeResourcesByApp('files')" :key="row.id" class="resource-row">
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
+                            <span
+                                class="resource-type-badge"
+                                :class="row.resourceId.startsWith('gf:') ? 'resource-type-badge--gf' : 'resource-type-badge--shared'"
+                                :aria-label="row.resourceId.startsWith('gf:') ? t('teamhub', 'Group folder') : t('teamhub', 'Shared folder')">
+                                {{ row.resourceId.startsWith('gf:') ? t('teamhub', 'Group folder') : t('teamhub', 'Shared folder') }}
+                            </span>
                             <div class="resource-row__actions">
                                 <NcButton
                                     type="tertiary"
@@ -262,8 +332,21 @@
                         </div>
                         <div v-if="activeResourcesByApp('files').length === 0" class="resource-row resource-row--empty">
                             <span class="resource-row__empty-label">{{ t('teamhub', 'No shared folder connected') }}</span>
+                        </div>
+                        <!-- Show add buttons when no GF is active.
+                             When a shared folder is active, these trigger the migration flow.
+                             When a GF is active, no buttons shown (already on the best option). -->
+                        <div v-if="!activeFilesIsGf" class="resource-row resource-row--actions">
                             <NcButton type="tertiary" @click="openConnectPicker('files')">
-                                {{ t('teamhub', '+ Connect existing') }}
+                                {{ activeFilesIsShared
+                                    ? t('teamhub', '+ Connect group folder')
+                                    : t('teamhub', '+ Connect existing') }}
+                            </NcButton>
+                            <NcButton
+                                v-if="installedApps.groupfolders"
+                                type="tertiary"
+                                @click="createResource('files')">
+                                {{ t('teamhub', '+ Create new group folder') }}
                             </NcButton>
                         </div>
                     </div>
@@ -382,6 +465,18 @@
                         :key="item.id"
                         class="teamhub-resource-picker__item"
                         @click="connectExisting(item)">
+                        <span
+                            v-if="item.type === 'group_folder'"
+                            class="teamhub-resource-picker__badge teamhub-resource-picker__badge--gf"
+                            aria-label="Group Folder">
+                            {{ t('teamhub', 'Group Folder') }}
+                        </span>
+                        <span
+                            v-else-if="item.type === 'shared_folder'"
+                            class="teamhub-resource-picker__badge teamhub-resource-picker__badge--shared"
+                            aria-label="Shared folder">
+                            {{ t('teamhub', 'Shared') }}
+                        </span>
                         <span class="teamhub-resource-picker__name">{{ item.name }}</span>
                     </button>
                 </div>
@@ -449,46 +544,7 @@
                 </div>
             </NcDialog>
 
-            <!-- At-risk resources (active but owner disabled or transfer failed) -->
-            <!-- Pending resources (externally connected, awaiting team admin review) -->
-            <div v-if="pendingResources.length > 0" class="manage-section manage-section--pending">
-                <h3>{{ t('teamhub', 'Resources pending review') }}</h3>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'These resources are connected to this team in Nextcloud but were not added through TeamHub. Review each one and choose to accept or ignore it.') }}
-                </p>
-                <div v-if="loadingPendingResources" class="section-loading">
-                    <NcLoadingIcon :size="24" />
-                </div>
-                <div v-else class="pending-resources-list">
-                    <div
-                        v-for="resource in pendingResources"
-                        :key="resource.id"
-                        class="pending-resource-item">
-                        <div class="pending-resource-info">
-                            <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
-                            <span class="pending-resource-name" :title="resource.resourceId">
-                                {{ resource.displayName || resource.resourceId }}
-                            </span>
-                        </div>
-                        <div class="pending-resource-actions">
-                            <NcButton
-                                type="primary"
-                                :disabled="resource._loading"
-                                :aria-label="t('teamhub', 'Accept resource {id}', { id: resource.resourceId })"
-                                @click="acceptResource(resource)">
-                                {{ t('teamhub', 'Accept') }}
-                            </NcButton>
-                            <NcButton
-                                type="tertiary"
-                                :disabled="resource._loading"
-                                :aria-label="t('teamhub', 'Ignore resource {id}', { id: resource.resourceId })"
-                                @click="ignoreResource(resource)">
-                                {{ t('teamhub', 'Ignore') }}
-                            </NcButton>
-                        </div>
-                    </div>
-                </div>
-            </div>
+
 
             <!-- Ignored resources (collapsed, reversible) -->
             <div v-if="ignoredResources.length > 0" class="manage-section">
@@ -1158,6 +1214,33 @@ export default {
             return (appId) => this.pendingResourceRows.filter(r => r.appId === appId && r.status === 'active')
         },
 
+        /** All active files resource rows. */
+        activeFilesRows() {
+            return this.pendingResourceRows.filter(r => r.appId === 'files' && r.status === 'active')
+        },
+
+        /**
+         * The "primary" active files row.
+         * Prefers the GF row so that dual-folder state (shared + GF both active during manual
+         * migration) correctly reports the GF as the leading resource.
+         */
+        activeFilesRow() {
+            const rows = this.activeFilesRows
+            if (!rows.length) return null
+            return rows.find(r => r.resourceId.startsWith('gf:')) || rows[0]
+        },
+
+        /** True when any active files resource is a legacy shared folder. */
+        activeFilesIsShared() {
+            return this.activeFilesRows.some(r => !r.resourceId.startsWith('gf:'))
+        },
+
+        /** True when any active files resource is a group folder. */
+        activeFilesIsGf() {
+            console.log('[TeamHub][ManageTeamView] activeFilesIsGf check — activeFilesRows:', JSON.stringify(this.activeFilesRows.map(r => ({ id: r.id, resourceId: r.resourceId, status: r.status }))))
+            return this.activeFilesRows.some(r => r.resourceId.startsWith('gf:'))
+        },
+
         /** Toggle-driven apps (not resource-backed) — Shared Files + Intravox. */
         toggleApps() {
             return (this.teamAppsList || []).filter(a => ['shared_files', 'intravox'].includes(a.id))
@@ -1207,6 +1290,24 @@ export default {
         /** Active resources with a risk flag set. */
         atRiskResources() {
             return this.pendingResourceRows.filter(r => r.riskStatus && r.riskStatus !== 'none')
+        },
+
+        /** The pending gf: row tagged isDualFolderPending by the backend. */
+        dualFolderPendingRow() {
+            return this.pendingResourceRows.find(r => r.isDualFolderPending) || null
+        },
+
+        /** The active legacy shared-folder row during dual-folder state. */
+        dualFolderSharedRow() {
+            if (!this.dualFolderPendingRow) return null
+            return this.pendingResourceRows.find(
+                r => r.appId === 'files' && r.status === 'active' && !r.resourceId.startsWith('gf:')
+            ) || null
+        },
+
+        /** Pending rows that are NOT the dual-folder gf: row. */
+        normalPendingResources() {
+            return this.pendingResourceRows.filter(r => r.status === 'pending' && !r.isDualFolderPending)
         },
 
         // Description text under "Delete team" — depends on archive setting + mode
@@ -1873,11 +1974,6 @@ export default {
         },
 
         async openConnectPicker(appId) {
-            // Files uses NC's own file picker — no server endpoint needed.
-            if (appId === 'files') {
-                this.openFilePicker()
-                return
-            }
             this.connectPickerApp = appId
             this.connectPickerItems = []
             this.loadingConnectPicker = true
@@ -1886,9 +1982,9 @@ export default {
                     talk:     '/apps/teamhub/api/v1/pickers/talk',
                     calendar: '/apps/teamhub/api/v1/pickers/calendar',
                     deck:     '/apps/teamhub/api/v1/pickers/deck',
+                    files:    `/apps/teamhub/api/v1/pickers/files?teamId=${encodeURIComponent(this.team.id)}&activeFilesType=${this.activeFilesIsShared ? 'shared' : this.activeFilesIsGf ? 'gf' : 'none'}`,
                 }
                 const { data } = await axios.get(generateUrl(urlMap[appId]))
-                // Picker endpoints return { resources: [...] }
                 this.connectPickerItems = Array.isArray(data.resources) ? data.resources : []
             } catch (e) {
                 this.connectPickerItems = []
@@ -1897,36 +1993,9 @@ export default {
             }
         },
 
-        async openFilePicker() {
-            try {
-                const { getFilePickerBuilder } = await import('@nextcloud/dialogs')
-                const picker = getFilePickerBuilder(t('teamhub', 'Choose a folder to connect'))
-                    .setMultiSelect(false)
-                    .setMimeTypeFilter(['httpd/unix-directory'])
-                    .setType(1)
-                    .allowDirectories()
-                    .build()
-                const nodes = await picker.pick()
-                if (nodes && nodes.length > 0) {
-                    const node = nodes[0]
-                    // NC file picker returns a node with fileid as the resource ID
-                    const fileId = node.fileid || node.id
-                    if (fileId) {
-                        await axios.post(
-                            generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/files/connect`),
-                            { resourceId: fileId }
-                        )
-                        await this.loadPendingResources()
-                        this.$store.dispatch('fetchResources', this.team.id)
-                    }
-                }
-            } catch (e) {
-                // User cancelled or picker not available
-            }
-        },
-
         async connectExisting(item) {
             const appId = this.connectPickerApp
+            // Close picker immediately so it doesn't look stuck
             this.connectPickerApp = null
             try {
                 await axios.post(
@@ -1936,7 +2005,12 @@ export default {
                 await this.loadPendingResources()
                 this.$store.dispatch('fetchResources', this.team.id)
             } catch (e) {
-                // silent — picker closed, user can retry
+                console.error('[TeamHub][ManageTeamView] connectExisting failed', e?.response?.data ?? e)
+                const msg = e?.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Failed to connect resource: {error}', { error: msg })
+                    : t('teamhub', 'Failed to connect resource')
+                )
             }
         },
 
@@ -2607,6 +2681,62 @@ export default {
     padding: 12px 16px;
     background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
+
+/* Inline variant — inside team-apps-list, above app rows */
+.manage-section--pending-inline {
+    margin-bottom: 4px;
+    border-color: var(--color-info);
+    background: color-mix(in srgb, var(--color-info) 6%, transparent);
+}
+
+.manage-section--pending-inline .team-app-section__header--info {
+    color: var(--color-info-text);
+}
+
+/* Dual-folder migration notice */
+.dual-folder-notice {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: color-mix(in srgb, var(--color-primary-element) 8%, transparent);
+    border: 1px solid var(--color-primary-element);
+    border-radius: var(--border-radius);
+}
+
+.dual-folder-notice__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--color-main-text);
+}
+
+.dual-folder-notice__body {
+    margin: 0;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    line-height: 1.5;
+}
+
+.manage-section-desc--inline {
+    margin: 4px 0 8px 28px;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+}
+
+.team-app-section__header--info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--color-info-text, var(--color-main-text));
+    padding: 8px 0 4px;
+}
+
+
 .pending-resources-list {
     display: flex;
     flex-direction: column;
@@ -2710,6 +2840,25 @@ export default {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.resource-type-badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin: 0 8px;
+    white-space: nowrap;
+}
+.resource-type-badge--gf {
+    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
+    color: var(--color-primary-element-text, var(--color-primary-element));
+    border: 1px solid color-mix(in srgb, var(--color-primary-element) 30%, transparent);
+}
+.resource-type-badge--shared {
+    background: color-mix(in srgb, var(--color-text-maxcontrast) 10%, transparent);
+    color: var(--color-text-maxcontrast);
+    border: 1px solid color-mix(in srgb, var(--color-text-maxcontrast) 25%, transparent);
+}
 .resource-row__empty-label {
     flex: 1;
     font-size: 13px;
@@ -2785,6 +2934,26 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.teamhub-resource-picker__badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+
+.teamhub-resource-picker__badge--gf {
+    background-color: var(--color-primary-element-light);
+    color: var(--color-primary-element-text);
+}
+
+.teamhub-resource-picker__badge--shared {
+    background-color: var(--color-background-darker);
+    color: var(--color-text-maxcontrast);
 }
 
 /* Team Apps toggle items (shared_files, intravox) */

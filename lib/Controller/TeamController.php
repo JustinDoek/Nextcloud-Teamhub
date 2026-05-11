@@ -694,6 +694,107 @@ class TeamController extends Controller {
         }
     }
 
+    /**
+     * GET /api/v1/teams/{teamId}/calendar/events/week
+     *
+     * Returns VEVENT objects whose DTSTART falls within the week identified by
+     * the `weekStart` query parameter (ISO 8601 datetime string, e.g. 2026-05-11T00:00:00).
+     * The week is always Mon–Sun in the server's local timezone.
+     *
+     * All team members may call this endpoint.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getCalendarEventsForWeek(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            $weekStartParam = trim((string)$this->request->getParam('weekStart', ''));
+            if ($weekStartParam === '') {
+                // Default to current week Monday.
+                $weekStartDt = new \DateTime('monday this week');
+                $weekStartDt->setTime(0, 0, 0);
+            } else {
+                try {
+                    $weekStartDt = new \DateTime($weekStartParam);
+                    $weekStartDt->setTime(0, 0, 0);
+                } catch (\Exception $e) {
+                    return new JSONResponse(['error' => 'Invalid weekStart parameter'], Http::STATUS_BAD_REQUEST);
+                }
+            }
+
+            // Week ends Sunday 23:59:59 — use +7 days so the upper bound is exclusive.
+            $weekEndDt = clone $weekStartDt;
+            $weekEndDt->modify('+7 days');
+
+            $this->logger->debug('[TeamHub][TeamController] getCalendarEventsForWeek', [
+                'teamId'    => $teamId,
+                'weekStart' => $weekStartDt->format('c'),
+                'weekEnd'   => $weekEndDt->format('c'),
+                'app'       => Application::APP_ID,
+            ]);
+
+            $events = $this->activityService->getTeamCalendarEventsForWeek(
+                $teamId,
+                $weekStartDt->getTimestamp(),
+                $weekEndDt->getTimestamp(),
+            );
+
+            return new JSONResponse($events);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->warning('[TeamHub][TeamController] getCalendarEventsForWeek failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * DELETE /api/v1/teams/{teamId}/calendar/events
+     *
+     * Deletes one or more calendar events by their (calendarId, uri) pairs.
+     * Body: { events: [{ calendarId: int, uri: string, title: string }] }
+     *
+     * All team members may delete events. Each deletion is audit-logged as
+     * calendar.event_deleted.
+     */
+    #[NoAdminRequired]
+    public function deleteCalendarEvents(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            $body   = $this->request->getParams();
+            $events = $body['events'] ?? [];
+
+            if (!is_array($events) || count($events) === 0) {
+                return new JSONResponse(['error' => 'events array is required and must not be empty'], Http::STATUS_BAD_REQUEST);
+            }
+
+            // Basic structural validation — reject obviously malformed entries.
+            foreach ($events as $ev) {
+                if (!isset($ev['calendarId'], $ev['uri']) || (int)$ev['calendarId'] <= 0 || trim((string)$ev['uri']) === '') {
+                    return new JSONResponse(['error' => 'Each event must have calendarId (int > 0) and uri (string)'], Http::STATUS_BAD_REQUEST);
+                }
+            }
+
+            $this->logger->debug('[TeamHub][TeamController] deleteCalendarEvents', [
+                'teamId' => $teamId, 'count' => count($events), 'app' => Application::APP_ID,
+            ]);
+
+            $result = $this->activityService->deleteCalendarEvents($teamId, $events);
+            return new JSONResponse($result);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->warning('[TeamHub][TeamController] deleteCalendarEvents failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function browseAllTeams(): JSONResponse {

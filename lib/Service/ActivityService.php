@@ -8,6 +8,7 @@ use OCP\App\IAppManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use OCA\TeamHub\Service\AuditService;
 
 /**
  * ActivityService — team activity feed and calendar event read/write.
@@ -26,6 +27,7 @@ class ActivityService {
         private IAppManager $appManager,
         private ContainerInterface $container,
         private LoggerInterface $logger,
+        private AuditService $auditService,
     ) {
     }
 
@@ -560,5 +562,209 @@ class ActivityService {
             ['\\n',  '\\n', '\\n', '\\,', '\\;', '\\\\'],
             $text
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Week-scoped calendar events (for the delete-events modal in the iframe bar)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Return VEVENT objects that fall within a specific week for all calendars
+     * connected to the team. An event is included when its DTSTART falls within
+     * [weekStart, weekEnd).
+     *
+     * @param string $teamId
+     * @param int    $weekStart  Unix timestamp — Monday 00:00:00 local
+     * @param int    $weekEnd    Unix timestamp — Sunday 23:59:59 local (exclusive upper)
+     * @return array<int, array{id: string, uri: string, calendarId: int, title: string,
+     *                          start: string, end: string|null, allDay: bool, calendarName: string}>
+     */
+    public function getTeamCalendarEventsForWeek(string $teamId, int $weekStart, int $weekEnd): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+
+        if (!$this->appManager->isInstalled('calendar')) {
+            return [];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // All calendar IDs connected to this team's circle.
+            $qb     = $db->getQueryBuilder();
+            $result = $qb->select('resourceid')
+                ->from('dav_shares')
+                ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter('principals/circles/' . $teamId)))
+                ->executeQuery();
+
+            $calendarIds = [];
+            while ($row = $result->fetch()) {
+                $calendarIds[] = (int)$row['resourceid'];
+            }
+            $result->closeCursor();
+
+            if (empty($calendarIds)) {
+                return [];
+            }
+
+            $events = [];
+
+            foreach ($calendarIds as $calendarId) {
+                // Resolve calendar name.
+                $calQb  = $db->getQueryBuilder();
+                $calRes = $calQb->select('displayname', 'uri')
+                    ->from('calendars')
+                    ->where($calQb->expr()->eq('id', $calQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $calRow  = $calRes->fetch();
+                $calRes->closeCursor();
+                $calName = $calRow ? ($calRow['displayname'] ?: $calRow['uri']) : (string)$calendarId;
+
+                // All VEVENT rows for this calendar; we filter by week in PHP
+                // after parsing (DTSTART may be a DATE or DATE-TIME).
+                $evQb  = $db->getQueryBuilder();
+                $evRes = $evQb->select('co.id', 'co.uri', 'co.calendardata')
+                    ->from('calendarobjects', 'co')
+                    ->where($evQb->expr()->eq('co.calendarid', $evQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($evQb->expr()->eq('co.componenttype', $evQb->createNamedParameter('VEVENT')))
+                    ->andWhere($evQb->expr()->notLike('co.uri', $evQb->createNamedParameter('%-deleted.ics')))
+                    ->executeQuery();
+
+                while ($row = $evRes->fetch()) {
+                    try {
+                        $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
+                        if (!isset($vcalendar->VEVENT)) {
+                            continue;
+                        }
+                        $vevent = $vcalendar->VEVENT;
+                        if (!isset($vevent->DTSTART)) {
+                            continue;
+                        }
+
+                        $dtstart   = $vevent->DTSTART;
+                        $startTime = $dtstart->getDateTime();
+                        $startTs   = $startTime->getTimestamp();
+
+                        // Only include events whose start falls within the requested week.
+                        if ($startTs < $weekStart || $startTs >= $weekEnd) {
+                            continue;
+                        }
+
+                        $endTime = null;
+                        if (isset($vevent->DTEND)) {
+                            $endTime = $vevent->DTEND->getDateTime();
+                        } elseif (isset($vevent->DURATION)) {
+                            $endTime = clone $startTime;
+                            $endTime->add($vevent->DURATION->getDateInterval());
+                        }
+
+                        $events[] = [
+                            'id'           => (string)($vevent->UID ?? $row['uri']),
+                            'uri'          => (string)$row['uri'],
+                            'calendarId'   => $calendarId,
+                            'title'        => (string)($vevent->SUMMARY ?? 'Untitled'),
+                            'start'        => $startTime->format('c'),
+                            'end'          => $endTime?->format('c'),
+                            'allDay'       => !$dtstart->hasTime(),
+                            'calendarName' => $calName,
+                        ];
+                    } catch (\Throwable $e) {
+                        $this->logger->warning('[ActivityService] Error parsing VEVENT in week query', [
+                            'uri'       => $row['uri'] ?? '',
+                            'exception' => $e,
+                            'app'       => Application::APP_ID,
+                        ]);
+                    }
+                }
+                $evRes->closeCursor();
+            }
+
+            usort($events, fn($a, $b) => strcmp($a['start'], $b['start']));
+            return $events;
+
+        } catch (\Exception $e) {
+            $this->logger->error('[ActivityService] getTeamCalendarEventsForWeek failed', [
+                'teamId'    => $teamId,
+                'exception' => $e,
+                'app'       => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Delete calendar events
+    // -------------------------------------------------------------------------
+
+    /**
+     * Delete one or more calendar events identified by their (calendarId, uri) pairs.
+     *
+     * Membership check is the caller's responsibility (controller layer).
+     * Each deletion is written to the audit log as `calendar.event_deleted`.
+     *
+     * @param string $teamId
+     * @param array<int, array{calendarId: int, uri: string, title: string}> $events
+     * @return array{deleted: int, errors: int}
+     */
+    public function deleteCalendarEvents(string $teamId, array $events): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+
+        if (!$this->appManager->isInstalled('calendar')) {
+            throw new \Exception('Calendar app is not installed');
+        }
+
+        $caldav  = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
+        $deleted = 0;
+        $errors  = 0;
+
+        foreach ($events as $event) {
+            $calendarId = (int)($event['calendarId'] ?? 0);
+            $uri        = trim((string)($event['uri'] ?? ''));
+            $title      = trim((string)($event['title'] ?? ''));
+
+            if ($calendarId <= 0 || $uri === '') {
+                $errors++;
+                continue;
+            }
+
+            try {
+                $caldav->deleteCalendarObject($calendarId, $uri);
+                $deleted++;
+
+                $this->logger->debug('[ActivityService] Deleted calendar event', [
+                    'teamId'     => $teamId,
+                    'calendarId' => $calendarId,
+                    'uri'        => $uri,
+                    'app'        => Application::APP_ID,
+                ]);
+
+                $this->auditService->log(
+                    $teamId,
+                    'calendar.event_deleted',
+                    $user->getUID(),
+                    'calendar',
+                    (string)$calendarId,
+                    ['uri' => $uri, 'title' => $title],
+                );
+            } catch (\Throwable $e) {
+                $errors++;
+                $this->logger->warning('[ActivityService] Failed to delete calendar event', [
+                    'teamId'     => $teamId,
+                    'calendarId' => $calendarId,
+                    'uri'        => $uri,
+                    'exception'  => $e,
+                    'app'        => Application::APP_ID,
+                ]);
+            }
+        }
+
+        return ['deleted' => $deleted, 'errors' => $errors];
     }
 }

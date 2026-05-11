@@ -1,20 +1,7 @@
 <template>
     <div class="resource-picker">
-        <!-- Files: button-triggered NC file picker dialog -->
-        <div v-if="app === 'files'" class="resource-picker__files">
-            <NcButton
-                type="secondary"
-                :disabled="disabled || loading"
-                @click="openFilePicker">
-                <template #icon>
-                    <Folder :size="18" />
-                </template>
-                {{ selectedFolderLabel || t('teamhub', 'Choose folder…') }}
-            </NcButton>
-        </div>
-
-        <!-- Calendar / Deck / Talk: dropdown of user-owned resources -->
-        <div v-else class="resource-picker__select">
+        <!-- Files / Calendar / Deck / Talk: dropdown of available resources -->
+        <div class="resource-picker__select">
             <select
                 v-model="selectedId"
                 class="resource-picker__select-el"
@@ -32,7 +19,7 @@
                     v-for="r in resources"
                     :key="r.id"
                     :value="r.id">
-                    {{ r.name || t('teamhub', 'Untitled') }}
+                    {{ resourceLabel(r) }}
                 </option>
             </select>
             <span v-if="loadError" class="resource-picker__error" role="alert">
@@ -45,30 +32,29 @@
 <script>
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
-import { getFilePickerBuilder, FilePickerType } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import { NcButton } from '@nextcloud/vue'
-import Folder from 'vue-material-design-icons/Folder.vue'
 
 /**
- * ResourcePicker — pick an existing user-owned resource for connecting to a team.
+ * ResourcePicker — pick an existing resource for connecting to a team.
  *
- * For 'calendar', 'deck', 'talk': renders a native <select> populated from the
- * corresponding /api/v1/pickers/{app} endpoint.
+ * All apps (files, calendar, deck, talk) use a server-driven list from
+ * /api/v1/pickers/{app}. For files, the endpoint returns group folders
+ * (type=group_folder) first, then shared folders (type=shared_folder).
  *
- * For 'files': renders a button that opens NC's standard file picker dialog
- * (getFilePickerBuilder from @nextcloud/dialogs).
- *
- * Emits 'input' (v-model) with the selected resource ID, or null when cleared.
+ * Emits 'input' (v-model) with the selected resource ID (string or int).
  */
 export default {
     name: 'ResourcePicker',
-    components: { NcButton, Folder },
     props: {
         app: {
             type: String,
             required: true,
             validator: v => ['talk', 'files', 'calendar', 'deck'].includes(v),
+        },
+        // teamId required for files to scope group folder results to team membership
+        teamId: {
+            type: String,
+            default: '',
         },
         value: {
             type: [Number, String, null],
@@ -86,21 +72,21 @@ export default {
             loading: false,
             loadError: '',
             selectedId: this.value,
-            selectedFolderLabel: '',
         }
     },
     computed: {
         placeholderText() {
-            // TRANSLATORS: placeholder shown in a dropdown that lists the user's resources to connect to a team
             switch (this.app) {
-            case 'calendar': return t('teamhub', 'Select a calendar…')
-            case 'deck':     return t('teamhub', 'Select a board…')
-            case 'talk':     return t('teamhub', 'Select a conversation…')
-            default:         return t('teamhub', 'Select…')
+            case 'files':    return t('teamhub', 'Select a folder\u2026')
+            case 'calendar': return t('teamhub', 'Select a calendar\u2026')
+            case 'deck':     return t('teamhub', 'Select a board\u2026')
+            case 'talk':     return t('teamhub', 'Select a conversation\u2026')
+            default:         return t('teamhub', 'Select\u2026')
             }
         },
         ariaLabel() {
             switch (this.app) {
+            case 'files':    return t('teamhub', 'Folder to connect')
             case 'calendar': return t('teamhub', 'Calendar to connect')
             case 'deck':     return t('teamhub', 'Deck board to connect')
             case 'talk':     return t('teamhub', 'Talk conversation to connect')
@@ -111,15 +97,10 @@ export default {
     watch: {
         value(newVal) {
             this.selectedId = newVal
-            if (newVal === null) {
-                this.selectedFolderLabel = ''
-            }
         },
     },
     mounted() {
-        if (this.app !== 'files') {
-            this.loadResources()
-        }
+        this.loadResources()
     },
     methods: {
         t,
@@ -128,13 +109,13 @@ export default {
             this.loading = true
             this.loadError = ''
             try {
-                const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/pickers/${this.app}`)
-                )
+                const url = this.app === 'files'
+                    ? generateUrl(`/apps/teamhub/api/v1/pickers/files?teamId=${encodeURIComponent(this.teamId)}`)
+                    : generateUrl(`/apps/teamhub/api/v1/pickers/${this.app}`)
+                const { data } = await axios.get(url)
                 this.resources = Array.isArray(data?.resources) ? data.resources : []
             } catch (e) {
                 const detail = e?.response?.data?.error || e?.message || ''
-                // TRANSLATORS: error shown when the picker fails to load the user's resources
                 this.loadError = detail
                     ? t('teamhub', 'Could not load list: {error}', { error: detail })
                     : t('teamhub', 'Could not load list')
@@ -143,68 +124,25 @@ export default {
             }
         },
 
+        resourceLabel(r) {
+            if (this.app === 'files') {
+                if (r.type === 'group_folder') {
+                    // TRANSLATORS: badge prefix for a Group Folder item in the file folder picker
+                    return t('teamhub', '[Group Folder] {name}', { name: r.name || r.id })
+                }
+                if (r.type === 'shared_folder') {
+                    // TRANSLATORS: badge prefix for a personal shared folder in the file folder picker
+                    return t('teamhub', '[Shared folder] {name}', { name: r.name || r.id })
+                }
+            }
+            return r.name || t('teamhub', 'Untitled')
+        },
+
         onSelectChange() {
-            const id = this.selectedId === null ? null : Number(this.selectedId)
-            this.$emit('input', id)
-            const found = this.resources.find(r => r.id === id)
+            const val = this.selectedId
+            this.$emit('input', val)
+            const found = this.resources.find(r => String(r.id) === String(val))
             this.$emit('selected-name', found ? (found.name || '') : '')
-        },
-
-        async openFilePicker() {
-            try {
-                const picker = getFilePickerBuilder(t('teamhub', 'Select a folder to connect'))
-                    .setMultiSelect(false)
-                    .setMimeTypeFilter(['httpd/unix-directory'])
-                    .setType(FilePickerType.Choose)
-                    .allowDirectories(true)
-                    .build()
-
-                const result = await picker.pick()
-                // result is a path string in NC dialogs v5; we need to resolve to a fileId
-                const path = Array.isArray(result) ? result[0] : result
-                if (!path) {
-                    return
-                }
-
-                // Resolve path → fileId via WebDAV PROPFIND on the user's home (cheap, one request).
-                const fileId = await this.resolveFileIdByPath(path)
-                if (!fileId) {
-                    // TRANSLATORS: error shown when the selected folder cannot be resolved to an internal file ID
-                    this.loadError = t('teamhub', 'Could not resolve folder. Please try a different folder.')
-                    return
-                }
-
-                this.selectedFolderLabel = path
-                this.selectedId = fileId
-                this.$emit('input', fileId)
-                this.$emit('selected-name', path)
-            } catch (e) {
-                // User cancelled or picker failed — silent unless it was a real error
-                if (e && e.message && !/cancel/i.test(e.message)) {
-                    this.loadError = t('teamhub', 'Folder picker failed: {error}', { error: e.message })
-                }
-            }
-        },
-
-        async resolveFileIdByPath(path) {
-            // WebDAV PROPFIND on the user's files endpoint to fetch fileid.
-            // Path is e.g. "/Photos/2024" — we strip the leading slash.
-            const userId = window.OC?.getCurrentUser?.()?.uid
-            if (!userId) return null
-            const cleanPath = String(path).replace(/^\//, '')
-            const url = window.OC.linkToRemote('dav') + '/files/' + encodeURIComponent(userId) + '/' + cleanPath.split('/').map(encodeURIComponent).join('/')
-            try {
-                const resp = await axios({
-                    method: 'PROPFIND',
-                    url,
-                    headers: { 'Content-Type': 'application/xml', Depth: '0' },
-                    data: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><oc:fileid/></d:prop></d:propfind>',
-                })
-                const m = String(resp.data).match(/<oc:fileid>(\d+)<\/oc:fileid>/)
-                return m ? Number(m[1]) : null
-            } catch (e) {
-                return null
-            }
         },
     },
 }

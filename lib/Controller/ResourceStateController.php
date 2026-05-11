@@ -53,6 +53,10 @@ class ResourceStateController extends Controller {
         }
 
         try {
+            // Reconcile before returning panel data so externally added/removed
+            // resources (e.g. GF assigned via Group Folders app) are reflected
+            // immediately without waiting for the next getTeamResources call.
+            $this->discoveryService->reconcileTeam($teamId);
             $data = $this->discoveryService->getSettingsPanelData($teamId);
             return new JSONResponse($data);
         } catch (\Throwable $e) {

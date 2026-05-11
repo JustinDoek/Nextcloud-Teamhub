@@ -42,20 +42,28 @@ List Talk rooms where the current user is owner or moderator. Excludes one-to-on
 **Auth:** Authenticated.
 **Response 200:** `{ resources: [{ id, token, name, type }] }`
 
-> **Note:** No equivalent `/pickers/files` endpoint. The Files picker uses NC's standard client-side `getFilePickerBuilder` dialog (`@nextcloud/dialogs`) with WebDAV PROPFIND to resolve path → `fileId`.
+### GET `/pickers/files`
+List file folders available to connect to a team.
+**Auth:** Authenticated. Requires team membership (verified server-side).
+**Query:** `?teamId={teamId}&activeFilesType={shared|gf|none}`
+- `activeFilesType=none` (default): returns both group folders and shared folders.
+- `activeFilesType=shared`: returns group folders only (the team already has a shared folder; only GFs are connect targets).
+- `activeFilesType=gf`: returns nothing (team already has a GF; 1:1 enforced).
+**Response:** `{ resources: [{ id: string, name: string, type: 'group_folder'|'shared_folder' }] }`
+Group folders where the team's circle is a member appear first (id = `gf:{folderId}`). Shared folders owned by the current user and not yet connected to any team follow (id = filecache integer string).
 
 ---
 
 ## Connect existing resource (added v3.28.0)
 
 ### POST `/teams/{teamId}/resources/{app}/connect`
-Connect an existing app resource to a team by inserting the appropriate share/ACL row. The user must own the resource — each sub-service re-verifies ownership before any insert. Refuses to connect a second resource if one is already linked to the team for the given app.
+Connect an existing app resource to a team by inserting the appropriate share/ACL row. The user must own the resource — each sub-service re-verifies ownership before any insert. For files, refuses to connect when a duplicate type is already active (1:1 rule); accepts a GF connect when a shared folder is active (dual state allowed for manual migration window).
 
 **Path params:** `app` ∈ `{talk, files, calendar, deck}`.
-**Body:** `{ resourceId: <int> }` — the calendar ID / file ID / board ID / room ID.
+**Body:** `{ resourceId: <int|string> }` — the calendar ID / file ID / board ID / room ID. For files, `gf:{folderId}` for group folders or integer string for shared folders.
 **Auth:** Team admin (level 8+).
-**Response 200:** `{ success: true, ...app-specific fields }`. Calendar returns `{calendar_id, name, public_token}`; Files returns `{folder_id, path, share_id}`; Deck returns `{board_id, name}`; Talk returns `{room_id, token, name}`.
-**Response 400:** Unknown app, missing `resourceId`, or the resource is not owned by the user / team already has a resource of that type.
+**Response 200:** `{ success: true, ...app-specific fields }`.
+**Response 400:** Unknown app, missing `resourceId`, or duplicate file resource type when 1:1 applies.
 **Response 403:** Caller is not team admin.
 
 ---

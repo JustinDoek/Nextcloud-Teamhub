@@ -43,6 +43,8 @@ return [
         ['name' => 'team#getTeamActivity',        'url' => '/api/v1/teams/{teamId}/activity',                'verb' => 'GET'],
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
+        ['name' => 'team#getCalendarEventsForWeek', 'url' => '/api/v1/teams/{teamId}/calendar/events/week',  'verb' => 'GET'],
+        ['name' => 'team#deleteCalendarEvents',   'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'DELETE'],
 
         // Files widgets — favourite files and recently modified files
         ['name' => 'team#getTeamFavoriteFiles',   'url' => '/api/v1/teams/{teamId}/files/favorites',         'verb' => 'GET'],
@@ -70,6 +72,7 @@ return [
         ['name' => 'picker#listCalendars',         'url' => '/api/v1/pickers/calendar',                       'verb' => 'GET'],
         ['name' => 'picker#listDeckBoards',        'url' => '/api/v1/pickers/deck',                           'verb' => 'GET'],
         ['name' => 'picker#listTalkRooms',         'url' => '/api/v1/pickers/talk',                           'verb' => 'GET'],
+        ['name' => 'picker#listFileFolders',       'url' => '/api/v1/pickers/files',                          'verb' => 'GET'],
         ['name' => 'team#createIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'POST'],
         ['name' => 'team#deleteIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'DELETE'],
         ['name' => 'team#getIntravoxSubPages',    'url' => '/api/v1/teams/{teamId}/intravox/subpages',       'verb' => 'GET'],
@@ -223,3 +226,4 @@ return [
         ['name' => 'archive#saveAdminArchiveSettings','url' => '/api/v1/admin/archive/settings',                          'verb' => 'PUT'],
     ],
 ];
+// Note: just checking structure

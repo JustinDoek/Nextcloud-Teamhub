@@ -63,12 +63,17 @@ class ResourceConnectController extends Controller {
                 );
             }
 
-            // 2. Validate input
+            // 2. Validate input — resourceId is either a positive integer or a 'gf:{int}' string
             $body       = $this->request->getParams();
-            $resourceId = isset($body['resourceId']) ? (int)$body['resourceId'] : 0;
-            if ($resourceId <= 0) {
+            $resourceId = isset($body['resourceId']) ? (string)$body['resourceId'] : '';
+            $isGf       = str_starts_with($resourceId, 'gf:');
+            $isValid    = $isGf
+                ? ((int)substr($resourceId, 3)) > 0
+                : ((int)$resourceId) > 0;
+
+            if (!$isValid || $resourceId === '') {
                 return new JSONResponse(
-                    ['error' => 'resourceId is required and must be a positive integer'],
+                    ['error' => 'resourceId is required and must be a positive integer or gf:{id}'],
                     Http::STATUS_BAD_REQUEST
                 );
             }

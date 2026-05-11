@@ -6,6 +6,9 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\CalendarService;
 use OCA\TeamHub\Service\DeckService;
+use OCA\TeamHub\Service\FilesService;
+use OCA\TeamHub\Service\GroupFolderService;
+use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\TalkService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -42,6 +45,9 @@ class PickerController extends Controller {
         private CalendarService $calendarService,
         private DeckService $deckService,
         private TalkService $talkService,
+        private FilesService $filesService,
+        private GroupFolderService $groupFolderService,
+        private MemberService $memberService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -101,6 +107,44 @@ class PickerController extends Controller {
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => 'Failed to list Talk rooms'], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * GET /api/v1/pickers/files?teamId={teamId}
+     *
+     * Returns available file folders to connect to the team, in two sections:
+     *   1. Group Folders where the team's circle is already a member (type=group_folder) — top
+     *   2. Shared folders owned by the current user not yet connected to any team (type=shared_folder)
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function listFileFolders(): JSONResponse {
+        try {
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            $teamId = (string)($this->request->getParam('teamId') ?? '');
+
+            // Security: verify the requesting user is a member of the team before
+            // exposing group folder names associated with its circle.
+            if ($teamId !== '' && !$this->memberService->isCurrentUserDirectMember($teamId)) {
+                return new JSONResponse(['error' => 'Not a team member'], Http::STATUS_FORBIDDEN);
+            }
+
+            $resources = $this->filesService->listConnectableFileFolders(
+                $user->getUID(),
+                $teamId,
+                $this->groupFolderService,
+                (string)($this->request->getParam('activeFilesType', 'none'))
+            );
+            return new JSONResponse(['resources' => $resources]);
+        } catch (\Throwable $e) {
+            $this->logger->error('PickerController::listFileFolders failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to list file folders'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 }

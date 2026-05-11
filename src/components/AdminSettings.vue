@@ -82,9 +82,61 @@
                     </p>
                 </div>
             </NcSettingsSection>
-        </div>
 
-        <!-- ── Tab: Invitations ───────────────────────────────────────────── -->
+            <!-- ── Group Folders integration status ────────────────────────── -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Group Folders integration')"
+                :description="t('teamhub', 'When Group Folders is installed and properly configured, TeamHub will automatically create a Group Folder for each new team instead of a shared personal folder. Group Folders are owned by the server, not by individual users.')">
+
+                <div class="admin-gf-status">
+                    <div class="admin-gf-status__row">
+                        <span
+                            class="admin-gf-status__indicator"
+                            :class="gfDelegation.groupFoldersInstalled ? 'admin-gf-status__indicator--ok' : 'admin-gf-status__indicator--warn'"
+                            aria-hidden="true">
+                            {{ gfDelegation.groupFoldersInstalled ? '✓' : '✗' }}
+                        </span>
+                        <span class="admin-gf-status__label">
+                            {{ t('teamhub', 'Group Folders app installed') }}
+                        </span>
+                        <span v-if="!gfDelegation.groupFoldersInstalled" class="admin-gf-status__hint">
+                            {{ t('teamhub', 'Install the Group Folders app to enable automatic team folder creation.') }}
+                        </span>
+                    </div>
+
+                    <div class="admin-gf-status__row">
+                        <span
+                            class="admin-gf-status__indicator"
+                            :class="gfDelegation.teamCreatorGroupsConfigured ? 'admin-gf-status__indicator--ok' : 'admin-gf-status__indicator--warn'"
+                            aria-hidden="true">
+                            {{ gfDelegation.teamCreatorGroupsConfigured ? '✓' : '⚠' }}
+                        </span>
+                        <span class="admin-gf-status__label">
+                            {{ t('teamhub', 'Team-creator group configured above') }}
+                        </span>
+                        <span v-if="!gfDelegation.teamCreatorGroupsConfigured" class="admin-gf-status__hint">
+                            {{ t('teamhub', 'Set a team-creator group above. Without one, group creation permissions cannot be verified.') }}
+                        </span>
+                    </div>
+
+                    <p
+                        v-if="gfDelegation.groupFoldersInstalled && gfDelegation.teamCreatorGroupsConfigured"
+                        class="admin-gf-status__summary admin-gf-status__summary--ok">
+                        {{ t('teamhub', 'Group Folders is correctly configured. New teams will automatically get a Group Folder.') }}
+                    </p>
+                    <p
+                        v-else-if="gfDelegation.groupFoldersInstalled"
+                        class="admin-gf-status__summary admin-gf-status__summary--warn">
+                        {{ t('teamhub', 'Group Folders is installed but not fully configured. New teams will fall back to shared personal folders until the issues above are resolved.') }}
+                    </p>
+                    <p
+                        v-else
+                        class="admin-gf-status__summary">
+                        {{ t('teamhub', 'Group Folders is not installed. New teams will use shared personal folders.') }}
+                    </p>
+                </div>
+            </NcSettingsSection>
+        </div>
         <div
             v-show="activeTab === 'invitations'"
             id="tab-panel-invitations"
@@ -1112,6 +1164,11 @@ export default {
             groupResults: [],
             groupSearching: false,
             groupSearchTimer: null,
+            // Group Folders delegation status (loaded from admin settings API)
+            gfDelegation: {
+                groupFoldersInstalled:       false,
+                teamCreatorGroupsConfigured: false,
+            },
             // Integrations tab
             integrations: [],
             integrationsLoading: false,
@@ -1178,6 +1235,7 @@ export default {
             ],
             // ── Archive tab ────────────────────────────────────────────────
             archiveSettings: {
+                archiveBeforeDelete: false,
                 archiveMode:     'soft30',
                 archiveLocation: '',
                 archiveMaxMb:    5120,
@@ -1301,6 +1359,13 @@ export default {
                 this.inviteFederated = types.includes('federated')
 
                 this.selectedGroups = Array.isArray(data.createTeamGroups) ? data.createTeamGroups : []
+
+                if (data.groupFoldersDelegation && typeof data.groupFoldersDelegation === 'object') {
+                    this.gfDelegation = {
+                        groupFoldersInstalled:       !!data.groupFoldersDelegation.groupFoldersInstalled,
+                        teamCreatorGroupsConfigured: !!data.groupFoldersDelegation.teamCreatorGroupsConfigured,
+                    }
+                }
             } catch (e) {
                 this.saveError = this.t('teamhub', 'Failed to load settings')
             } finally {
@@ -1377,6 +1442,7 @@ export default {
         addGroup(group) {
             if (!this.selectedGroups.find(g => g.id === group.id)) {
                 this.selectedGroups.push(group)
+                this.save()
             }
             this.groupQuery   = ''
             this.groupResults = []
@@ -1384,6 +1450,7 @@ export default {
 
         removeGroup(group) {
             this.selectedGroups = this.selectedGroups.filter(g => g.id !== group.id)
+            this.save()
         },
 
         // ── Save ─────────────────────────────────────────────────────────
@@ -1818,6 +1885,7 @@ export default {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/archive/settings'))
                 this.archiveSettings = {
+                    archiveBeforeDelete: !!data.archiveBeforeDelete,
                     archiveMode:     data.archiveMode     ?? 'soft30',
                     archiveLocation: data.archiveLocation ?? '',
                     archiveMaxMb:    data.archiveMaxMb    ?? 5120,
@@ -2966,6 +3034,65 @@ export default {
     display: flex;
     gap: 8px;
     margin-top: 4px;
+}
+
+/* ── Group Folders delegation status ──────────────────────────────────────── */
+.admin-gf-status {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.admin-gf-status__row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.admin-gf-status__indicator {
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: 14px;
+    width: 20px;
+    text-align: center;
+    margin-top: 1px;
+}
+
+.admin-gf-status__indicator--ok   { color: var(--color-success-text); }
+.admin-gf-status__indicator--warn { color: var(--color-warning-text); }
+
+.admin-gf-status__label {
+    font-weight: 500;
+    color: var(--color-main-text);
+}
+
+.admin-gf-status__hint {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+    width: 100%;
+    padding-left: 28px;
+    margin-top: 2px;
+}
+
+.admin-gf-status__summary {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: var(--border-radius);
+    font-size: 13px;
+}
+
+.admin-gf-status__summary--ok {
+    background-color: var(--color-success-background);
+    color: var(--color-success-text);
+    border: 1px solid var(--color-success);
+}
+
+.admin-gf-status__summary--warn {
+    background-color: var(--color-warning-background);
+    color: var(--color-warning-text);
+    border: 1px solid var(--color-warning);
 }
 
 </style>

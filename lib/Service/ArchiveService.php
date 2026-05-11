@@ -1528,12 +1528,147 @@ class ArchiveService {
      *
      * @return array<int, array{path: string, bytes: int, sha256: string}>
      */
+    private function extractGroupFolderData(
+        string $teamId,
+        string $teamName,
+        string $workDir,
+        int $gfFolderId,
+        \OCP\Files\IRootFolder $rootFolder
+    ): array {
+        // Group folders mount under every member's root as the mount point name.
+        // We resolve the node via filecache using the group folder's storage.
+        // The group folder storage root is at __groupfolders/{folder_id}/files/
+        // NC registers this as a storage; we find the filecache entry for the root.
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $qb->select('gf.mount_point')
+                ->from('group_folders', 'gf')
+                ->where($qb->expr()->eq('gf.folder_id', $qb->createNamedParameter($gfFolderId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1);
+            $r = $qb->executeQuery();
+            $row = $r->fetch();
+            $r->closeCursor();
+
+            if (!$row) {
+                $this->logger->warning('[TeamHub][ArchiveService] extractGroupFolderData — GF row not found', [
+                    'teamId' => $teamId, 'gfFolderId' => $gfFolderId, 'app' => Application::APP_ID,
+                ]);
+                return [];
+            }
+
+            $mountPoint = (string)$row['mount_point'];
+
+            // Find any team member to resolve the node through their user folder.
+            // Group folders appear in every member's file tree under the mount point name.
+            $memberQb = $db->getQueryBuilder();
+            $memberQb->select('user_id')
+                ->from('circles_member')
+                ->where($memberQb->expr()->eq('circle_id', $memberQb->createNamedParameter($teamId)))
+                ->andWhere($memberQb->expr()->eq('user_type', $memberQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($memberQb->expr()->eq('status', $memberQb->createNamedParameter('Member')))
+                ->setMaxResults(1);
+            $mr = $memberQb->executeQuery();
+            $memberRow = $mr->fetch();
+            $mr->closeCursor();
+
+            if (!$memberRow) {
+                $this->logger->warning('[TeamHub][ArchiveService] extractGroupFolderData — no member found', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return [];
+            }
+
+            $memberUid  = (string)$memberRow['user_id'];
+            $userFolder = $rootFolder->getUserFolder($memberUid);
+
+            if (!$userFolder->nodeExists($mountPoint)) {
+                $this->logger->warning('[TeamHub][ArchiveService] extractGroupFolderData — mount point not in member files', [
+                    'teamId' => $teamId, 'mountPoint' => $mountPoint, 'uid' => $memberUid, 'app' => Application::APP_ID,
+                ]);
+                return [];
+            }
+
+            $gfNode = $userFolder->get($mountPoint);
+            if (!($gfNode instanceof \OCP\Files\Folder)) {
+                return [];
+            }
+
+            $destDir = $workDir . '/apps/files';
+            if (!is_dir($destDir)) {
+                mkdir($destDir, 0777, true);
+            }
+
+            $fileLog = [];
+            $maxBytes = (int)$this->config->getAppValue(
+                Application::APP_ID, self::CFG_MAX_BYTES, (string)self::DEFAULT_MAX_BYTES
+            );
+            $singleFileMaxBytes = min(100 * 1024 * 1024, (int)($maxBytes * 0.1));
+
+            $this->walkAndCopyFiles($gfNode, 'apps/files', $workDir, $fileLog, $singleFileMaxBytes);
+
+            // Write index
+            file_put_contents($destDir . '/index.json', json_encode([
+                'folder_name'  => $mountPoint,
+                'folder_type'  => 'group_folder',
+                'gf_folder_id' => $gfFolderId,
+                'total_files'  => count(array_filter($fileLog, fn($f) => !($f['skipped'] ?? false))),
+                'files'        => $fileLog,
+            ], JSON_PRETTY_PRINT));
+
+            $this->logger->debug('[TeamHub][ArchiveService] extractGroupFolderData complete', [
+                'teamId'     => $teamId,
+                'gfFolderId' => $gfFolderId,
+                'fileCount'  => count($fileLog),
+                'app'        => Application::APP_ID,
+            ]);
+
+            return $fileLog;
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][ArchiveService] extractGroupFolderData failed', [
+                'teamId'     => $teamId,
+                'gfFolderId' => $gfFolderId,
+                'error'      => $e->getMessage(),
+                'app'        => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
     private function extractFilesData(
         string $teamId,
         string $teamName,
         string $workDir
     ): array {
-        // ── Find the circle share ─────────────────────────────────────────────
+        // ── Detect resource type from teamhub_team_app_resources ─────────────
+        $filesResourceId = null;
+        try {
+            $rqb = $this->db->getQueryBuilder();
+            $rres = $rqb->select('resource_id')
+                ->from('teamhub_team_app_resources')
+                ->where($rqb->expr()->eq('team_id', $rqb->createNamedParameter($teamId)))
+                ->andWhere($rqb->expr()->eq('app_id', $rqb->createNamedParameter('files')))
+                ->andWhere($rqb->expr()->eq('status', $rqb->createNamedParameter('active')))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $rrow = $rres->fetch();
+            $rres->closeCursor();
+            $filesResourceId = $rrow ? (string)$rrow['resource_id'] : null;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ArchiveService] extractFilesData — could not look up resource_id', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        $rootFolder = $this->container->get(IRootFolder::class);
+
+        if ($filesResourceId !== null && str_starts_with($filesResourceId, 'gf:')) {
+            // ── Group Folder-backed: resolve via any member's user folder ─────
+            $gfFolderId = (int) substr($filesResourceId, 3);
+            return $this->extractGroupFolderData($teamId, $teamName, $workDir, $gfFolderId, $rootFolder);
+        }
+
+        // ── Legacy: Find the circle share ─────────────────────────────────────
         $qb  = $this->db->getQueryBuilder();
         $res = $qb->select('uid_initiator', 'file_source')
             ->from('share')
@@ -1546,7 +1681,7 @@ class ArchiveService {
         $res->closeCursor();
 
         if ($shareRow === false) {
-            $this->logger->debug('[TeamHub][ArchiveService] No Files share found — skipping', [
+            $this->logger->debug('[TeamHub][ArchiveService] No Files resource found — skipping', [
                 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
             return [];
@@ -1556,7 +1691,6 @@ class ArchiveService {
         $fileId   = (int)$shareRow['file_source'];
 
         // ── Resolve folder node ───────────────────────────────────────────────
-        $rootFolder = $this->container->get(IRootFolder::class);
         $userFolder = $rootFolder->getUserFolder($ownerUid);
         $nodes      = $userFolder->getById($fileId);
 
@@ -2585,14 +2719,48 @@ HTML;
             ]);
         }
 
-        // Files — remove circle share row (folder and contents stay intact).
+        // Files — remove circle access. Handles both group-folder-backed (gf:) and
+        // legacy share-based resources. Detection via teamhub_team_app_resources.
         try {
-            $filesMeta = $this->filesService->suspendFilesAccess($teamId, $this->db);
-            if ($filesMeta !== null) {
-                $suspended['files'] = $filesMeta;
-                $this->logger->debug('[TeamHub][ArchiveService] Files access suspended', [
-                    'teamId' => $teamId, 'shareId' => $filesMeta['share_id'], 'app' => Application::APP_ID,
+            $filesResourceId = null;
+            try {
+                $db = $this->container->get(\OCP\IDBConnection::class);
+                $fqb = $db->getQueryBuilder();
+                $fres = $fqb->select('resource_id')
+                    ->from('teamhub_team_app_resources')
+                    ->where($fqb->expr()->eq('team_id', $fqb->createNamedParameter($teamId)))
+                    ->andWhere($fqb->expr()->eq('app_id', $fqb->createNamedParameter('files')))
+                    ->andWhere($fqb->expr()->eq('status', $fqb->createNamedParameter('active')))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $frow = $fres->fetch();
+                $fres->closeCursor();
+                $filesResourceId = $frow ? (string)$frow['resource_id'] : null;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][ArchiveService] Could not look up files resource_id', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
+            }
+
+            if ($filesResourceId !== null && str_starts_with($filesResourceId, 'gf:')) {
+                // Group Folder-backed: remove circle from folder, store GF folder ID for resume.
+                $gfFolderId = (int) substr($filesResourceId, 3);
+                /** @var \OCA\TeamHub\Service\GroupFolderService $gfService */
+                $gfService = $this->container->get(\OCA\TeamHub\Service\GroupFolderService::class);
+                $gfService->removeCircleFromFolder($gfFolderId, $teamId);
+                $suspended['files'] = ['type' => 'group_folder', 'folder_id' => $gfFolderId];
+                $this->logger->debug('[TeamHub][ArchiveService] Group Folder access suspended', [
+                    'teamId' => $teamId, 'gfFolderId' => $gfFolderId, 'app' => Application::APP_ID,
+                ]);
+            } else {
+                // Legacy share-based: remove circle share row.
+                $filesMeta = $this->filesService->suspendFilesAccess($teamId, $this->db);
+                if ($filesMeta !== null) {
+                    $suspended['files'] = array_merge(['type' => 'shared'], $filesMeta);
+                    $this->logger->debug('[TeamHub][ArchiveService] Files access suspended', [
+                        'teamId' => $teamId, 'shareId' => $filesMeta['share_id'], 'app' => Application::APP_ID,
+                    ]);
+                }
             }
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][ArchiveService] Could not suspend Files access', [
@@ -2667,18 +2835,30 @@ HTML;
         }
 
         // Files.
-        if (isset($suspended['files']['uid_initiator'], $suspended['files']['file_source'])) {
+        if (isset($suspended['files'])) {
             try {
-                $this->filesService->resumeFilesAccess(
-                    $teamId,
-                    (string)$suspended['files']['uid_initiator'],
-                    (int)$suspended['files']['file_source'],
-                    (int)($suspended['files']['permissions'] ?? 31),
-                    $this->db
-                );
-                $this->logger->debug('[TeamHub][ArchiveService] Files access resumed', [
-                    'teamId' => $teamId, 'app' => Application::APP_ID,
-                ]);
+                if (($suspended['files']['type'] ?? '') === 'group_folder' && isset($suspended['files']['folder_id'])) {
+                    // Group Folder-backed: re-assign circle to folder.
+                    /** @var \OCA\TeamHub\Service\GroupFolderService $gfService */
+                    $gfService = $this->container->get(\OCA\TeamHub\Service\GroupFolderService::class);
+                    $gfService->assignCircleToFolder((int)$suspended['files']['folder_id'], $teamId);
+                    $this->logger->debug('[TeamHub][ArchiveService] Group Folder access resumed', [
+                        'teamId' => $teamId, 'gfFolderId' => $suspended['files']['folder_id'],
+                        'app' => Application::APP_ID,
+                    ]);
+                } elseif (isset($suspended['files']['uid_initiator'], $suspended['files']['file_source'])) {
+                    // Legacy share-based: re-create the circle share.
+                    $this->filesService->resumeFilesAccess(
+                        $teamId,
+                        (string)$suspended['files']['uid_initiator'],
+                        (int)$suspended['files']['file_source'],
+                        (int)($suspended['files']['permissions'] ?? 31),
+                        $this->db
+                    );
+                    $this->logger->debug('[TeamHub][ArchiveService] Files access resumed', [
+                        'teamId' => $teamId, 'app' => Application::APP_ID,
+                    ]);
+                }
             } catch (\Throwable $e) {
                 $this->logger->warning('[TeamHub][ArchiveService] Could not resume Files access', [
                     'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
