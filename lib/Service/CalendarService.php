@@ -169,7 +169,7 @@ class CalendarService {
             $iqb->insert('dav_shares')
                 ->setValue('principaluri', $iqb->createNamedParameter($principalUri))
                 ->setValue('type',        $iqb->createNamedParameter('calendar'))
-                ->setValue('access',      $iqb->createNamedParameter(1))  // read-write
+                ->setValue('access',      $iqb->createNamedParameter(2))  // 2 = read-write
                 ->setValue('resourceid',  $iqb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                 ->executeStatement();
 

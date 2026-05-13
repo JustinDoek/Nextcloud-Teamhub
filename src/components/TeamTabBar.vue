@@ -126,7 +126,25 @@
                     {{ tab.label }}
                 </button>
 
-                <!-- Web link tabs — navigate externally, no role="tab" -->
+                <!-- NC-relative web link tabs — open in iframe, behave like built-in tabs -->
+                <button
+                    v-else-if="tab.key.startsWith('link-') && tab.isNcRelative"
+                    :key="'tab-' + tab.key"
+                    :id="'tab-' + tab.key"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === tab.key }"
+                    :aria-selected="currentView === tab.key ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView(tab.key)"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <Web :size="14" />
+                    {{ tab.label }}
+                </button>
+
+                <!-- External web link tabs — open in new browser tab -->
                 <a
                     v-else-if="tab.key.startsWith('link-')"
                     :key="'tab-' + tab.key"
@@ -185,6 +203,7 @@ import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
+import Web from 'vue-material-design-icons/Web.vue'
 
 export default {
     name: 'TeamTabBar',
@@ -193,7 +212,7 @@ export default {
         NcButton,
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
-        OpenInNew, Plus, Puzzle, ViewDashboardEdit,
+        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web,
     },
 
     props: {

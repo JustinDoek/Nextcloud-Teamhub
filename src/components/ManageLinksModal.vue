@@ -8,10 +8,16 @@
                 <h3>{{ t('teamhub', 'Current links') }}</h3>
                 <ul class="links-list">
                     <li v-for="link in webLinks" :key="link.id" class="links-list__item">
-                        <LinkVariant :size="16" />
+                        <Web v-if="isNcRelativeUrl(link.url)" :size="16" />
+                        <LinkVariant v-else :size="16" />
                         <div class="links-list__info">
                             <span class="links-list__title">{{ link.title }}</span>
-                            <a :href="link.url" target="_blank" class="links-list__url">{{ link.url }}</a>
+                            <!-- NC-relative links: show path with iframe badge, no clickable href -->
+                            <span v-if="isNcRelativeUrl(link.url)" class="links-list__url links-list__url--nc">
+                                {{ link.url }}
+                                <span class="links-list__nc-badge">{{ t('teamhub', 'iframe') }}</span>
+                            </span>
+                            <a v-else :href="link.url" target="_blank" class="links-list__url">{{ link.url }}</a>
                         </div>
                         <NcButton
                             type="tertiary"
@@ -41,9 +47,9 @@
                     <NcTextField
                         v-model="newUrl"
                         :label="t('teamhub', 'URL')"
-                        :placeholder="t('teamhub', 'https://…')"
+                        :placeholder="t('teamhub', 'https://… or apps/collectives/…')"
                         :error="!!urlError"
-                        :helper-text="urlError"
+                        :helper-text="urlError || t('teamhub', 'Use https://… for external links or apps/… for Nextcloud apps (opens in iframe)')"
                         @input="validateUrl" />
                 </div>
                 <NcButton
@@ -75,10 +81,11 @@ import {
 import Delete from 'vue-material-design-icons/Delete.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
+import Web from 'vue-material-design-icons/Web.vue'
 
 export default {
     name: 'ManageLinksModal',
-    components: { NcModal, NcButton, NcTextField, NcEmptyContent, NcLoadingIcon, Delete, LinkVariant, Plus },
+    components: { NcModal, NcButton, NcTextField, NcEmptyContent, NcLoadingIcon, Delete, LinkVariant, Plus, Web },
     emits: ['close'],
     data() {
         return {
@@ -94,11 +101,21 @@ export default {
     methods: {
         t,
         ...mapActions(['saveWebLink', 'deleteWebLink']),
+
+        /** Mirrors WebLinkService::normaliseUrl — true when URL opens in iframe. */
+        isNcRelativeUrl(url) {
+            if (!url) return false
+            return url.startsWith('/apps/') || url.startsWith('/index.php/')
+        },
         validateUrl() {
             const v = this.newUrl.trim()
             if (!v) { this.urlError = ''; return }
-            if (!v.startsWith('http://') && !v.startsWith('https://')) {
-                this.urlError = t('teamhub', 'URL must start with http:// or https://')
+            const isExternal  = v.startsWith('http://') || v.startsWith('https://')
+            const isNcRelative = v.startsWith('/apps/') || v.startsWith('apps/')
+                || v.startsWith('/index.php/') || v.startsWith('index.php/')
+            if (!isExternal && !isNcRelative) {
+                // TRANSLATORS: validation error shown below the URL input in the manage links modal
+                this.urlError = t('teamhub', 'URL must start with https://, http://, or apps/')
             } else {
                 this.urlError = ''
             }
@@ -190,6 +207,23 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.links-list__url--nc {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.links-list__nc-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 10px;
+    background: var(--color-primary-light);
+    color: var(--color-primary-element);
+    flex-shrink: 0;
 }
 
 .links-modal__add { border-top: 1px solid var(--color-border); padding-top: 16px; }

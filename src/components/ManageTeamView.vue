@@ -2005,10 +2005,16 @@ export default {
                 await this.loadPendingResources()
                 this.$store.dispatch('fetchResources', this.team.id)
             } catch (e) {
-                console.error('[TeamHub][ManageTeamView] connectExisting failed', e?.response?.data ?? e)
-                const msg = e?.response?.data?.error
-                showError(msg
-                    ? t('teamhub', 'Failed to connect resource: {error}', { error: msg })
+                // Avoid logging the full response body — a 500 returns an HTML error page
+                // which floods the console. Extract only what's useful.
+                const status  = e?.response?.status ?? 'network error'
+                const errData = e?.response?.data
+                const errMsg  = (errData && typeof errData === 'object')
+                    ? (errData.error ?? JSON.stringify(errData))
+                    : `HTTP ${status}`
+                console.error('[TeamHub][ManageTeamView] connectExisting failed', { status, error: errMsg })
+                showError(errData?.error
+                    ? t('teamhub', 'Failed to connect resource: {error}', { error: errData.error })
                     : t('teamhub', 'Failed to connect resource')
                 )
             }

@@ -717,8 +717,16 @@ class ResourceDiscoveryService {
 
     /**
      * Calendar: oc_dav_shares rows where principaluri='principals/circles/{teamId}'
-     * and type='calendar' and access IN (1,2) (read or read-write).
-     * resource_id = resourceid (integer, stored as string).
+     * and type='calendar' and access IN (1,2,3).
+     *
+     * NC Calendar uses these access values for circle/group shares:
+     *   1 = read-only
+     *   2 = read-write (older NC Calendar versions)
+     *   3 = read-write (NC Calendar 5.x+ circle shares)
+     *   4 = public link (publicuri) — not a team share, excluded
+     *
+     * We include all three to survive NC Calendar version changes without
+     * losing connected calendars.
      */
     private function getRealCalendarIds(string $teamId): array {
         try {
@@ -730,7 +738,7 @@ class ResourceDiscoveryService {
                 ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
                 ->andWhere($qb->expr()->in(
                     'access',
-                    $qb->createNamedParameter([1, 2], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                    $qb->createNamedParameter([1, 2, 3], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
                 ));
 
             $result = $qb->executeQuery();
@@ -739,10 +747,15 @@ class ResourceDiscoveryService {
                 $ids[] = (string)(int)$row['resourceid'];
             }
             $result->closeCursor();
+
+            $this->logger->debug('[TeamHub][ResourceDiscoveryService] getRealCalendarIds', [
+                'teamId' => $teamId, 'count' => count($ids), 'app' => \OCA\TeamHub\AppInfo\Application::APP_ID,
+            ]);
+
             return $ids;
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][ResourceDiscoveryService] getRealCalendarIds failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => \OCA\TeamHub\AppInfo\Application::APP_ID,
             ]);
             return [];
         }

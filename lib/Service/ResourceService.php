@@ -615,9 +615,9 @@ class ResourceService {
                 return $result;
 
             case 'calendar':
-                $result = $this->calendarService->connectExistingCalendar($teamId, $resourceId, $uid);
+                $result = $this->calendarService->connectExistingCalendar($teamId, (int)$resourceId, $uid);
                 if (!empty($result['success'])) {
-                    $this->upsertResourceRow($teamId, 'calendar', (string) $resourceId, 'teamhub_connect', $uid);
+                    $this->upsertResourceRow($teamId, 'calendar', (string)(int)$resourceId, 'teamhub_connect', $uid);
                 }
                 return $result;
 

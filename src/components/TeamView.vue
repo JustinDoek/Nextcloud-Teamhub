@@ -86,6 +86,16 @@
                     :url="menuItemUrl(menuItem)"
                     :label="menuItem.title" />
             </template>
+
+            <!-- NC-relative web link tabs — shown in an iframe like built-in apps -->
+            <template v-for="tab in ncRelativeLinkTabs">
+                <AppEmbed
+                    v-if="preloadedViews.has(tab.key) || currentView === tab.key"
+                    v-show="currentView === tab.key"
+                    :key="'link-canvas-' + tab.key"
+                    :url="linkEmbedUrl(tab.url)"
+                    :label="tab.label" />
+            </template>
         </div>
 
         <!-- ── Modals ─────────────────────────────────────────────── -->
@@ -332,15 +342,13 @@ export default {
             return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
         },
         calendarUrl() {
-            // Use the public share token URL (/apps/calendar/p/{token}) so only
-            // the team calendar is shown — the full /apps/calendar view shows all
-            // the user's personal calendars which is confusing.
-            // Falls back to the full app when no public token is available
-            // (older calendars connected before token creation was added).
+            // NC Calendar app (updated 2026-05-12) requires the full path including
+            // view and date suffix: /apps/calendar/p/{token}/dayGridMonth/now
+            // Without the suffix the app redirects or shows a blank view.
             const cal = this.selectedCalendar || (this.resources.calendar && this.resources.calendar[0])
             if (cal?.public_token) {
                 console.log('[TeamHub][TeamView] calendarUrl using public token for calendarId:', cal.id)
-                return generateUrl('/apps/calendar/p/' + cal.public_token)
+                return generateUrl('/apps/calendar/p/' + cal.public_token + '/dayGridMonth/now')
             }
             console.log('[TeamHub][TeamView] calendarUrl: no public token, falling back to full app')
             return generateUrl('/apps/calendar')
@@ -372,6 +380,11 @@ export default {
         },
         externalMenuItems() {
             return (this.teamMenuItems || []).filter(item => !item.is_builtin)
+        },
+
+        /** Link tabs whose URL is NC-relative — these open in an iframe. */
+        ncRelativeLinkTabs() {
+            return (this.orderedTabs || []).filter(t => t.key.startsWith('link-') && t.isNcRelative)
         },
 
         /**
@@ -702,12 +715,12 @@ export default {
             ].forEach(b => tabs.push(b))
             ;(this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url }))
+            ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
             return tabs
         },
 
         syncLinkTabs() {
-            const linkTabs = (this.webLinks || []).map(link => ({ key: 'link-' + link.id, label: link.title, url: link.url }))
+            const linkTabs = (this.webLinks || []).map(link => ({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
             this.orderedTabs = [...this.orderedTabs.filter(t => !t.key.startsWith('link-')), ...linkTabs]
         },
 
@@ -755,6 +768,30 @@ export default {
         },
 
         openManageTeam() { this.$emit('show-manage-team') },
+
+        /**
+         * Returns true when a stored link URL is a Nextcloud-relative path
+         * that should open in an iframe rather than a new browser tab.
+         * Mirrors the normalisation in WebLinkService::normaliseUrl().
+         */
+        isNcRelativeUrl(url) {
+            if (!url) return false
+            return url.startsWith('/apps/') || url.startsWith('/index.php/')
+        },
+
+        /**
+         * Build the final iframe src for an NC-relative link tab.
+         * The URL is already normalised (leading slash guaranteed by the backend).
+         * We prepend the NC base path via generateUrl to handle sub-directory installs.
+         */
+        linkEmbedUrl(url) {
+            console.log('[TeamHub][TeamView] linkEmbedUrl:', url)
+            // generateUrl('/apps/foo') → /nextcloud/apps/foo (handles sub-dir installs)
+            // Strip the leading slash from our stored path before passing to generateUrl
+            // so we don't end up with a double slash.
+            const path = url.startsWith('/') ? url.slice(1) : url
+            return generateUrl('/' + path)
+        },
 
         onCalendarEmbedAction(actionId) {
             console.log('[TeamHub][TeamView] Calendar embed action:', actionId)
