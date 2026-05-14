@@ -736,10 +736,30 @@ class ArchiveService {
      * Return the admin-facing archive settings.
      */
     public function getAdminSettings(): array {
+        $archivePath = $this->config->getAppValue(Application::APP_ID, self::CFG_PATH, '');
+
+        // Resolve /f/{id} to a human-readable folder name for display in the UI.
+        $archiveLocationName = $archivePath;
+        if (preg_match('#^/f/(\d+)$#', trim($archivePath), $m)) {
+            try {
+                $rootFolder = $this->container->get(\OCP\Files\IRootFolder::class);
+                $nodes = $rootFolder->getById((int)$m[1]);
+                if (!empty($nodes)) {
+                    $archiveLocationName = $nodes[0]->getName();
+                }
+            } catch (\Throwable $e) {
+                // Keep the raw /f/ID as fallback — resolution failed (e.g. deleted folder)
+                $this->logger->debug('[ArchiveService] getAdminSettings — could not resolve /f/ node', [
+                    'path' => $archivePath, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
         return [
             'archiveBeforeDelete' => $this->config->getAppValue(Application::APP_ID, self::CFG_ARCHIVE_BEFORE_DELETE, '0') === '1',
             'archiveMode'         => $this->config->getAppValue(Application::APP_ID, self::CFG_MODE, self::DEFAULT_MODE),
-            'archiveLocation'     => $this->config->getAppValue(Application::APP_ID, self::CFG_PATH, ''),
+            'archiveLocation'     => $archivePath,
+            'archiveLocationName' => $archiveLocationName,
             'archiveMaxMb'        => (int)round(
                 (int)$this->config->getAppValue(Application::APP_ID, self::CFG_MAX_BYTES, (string)self::DEFAULT_MAX_BYTES)
                 / 1048576

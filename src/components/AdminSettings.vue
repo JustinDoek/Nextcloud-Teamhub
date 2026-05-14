@@ -583,6 +583,100 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ── Ghost member cleanup ──────────────────────────────────── -->
+            <div class="maint-header" style="margin-top: 40px;">
+                <h2 class="maint-header__title">{{ t('teamhub', 'Deleted users in teams') }}</h2>
+                <p class="maint-header__desc">
+                    {{ t('teamhub', 'These users have been deleted from Nextcloud but are still listed as members in one or more teams. Removing them cleans up the team membership without affecting any other data.') }}
+                </p>
+            </div>
+
+            <div class="maint-toolbar">
+                <NcTextField
+                    v-model="ghostSearch"
+                    :label="t('teamhub', 'Search by user ID')"
+                    :placeholder="t('teamhub', 'Filter by user ID…')"
+                    class="maint-search"
+                    @input="onGhostSearchInput" />
+                <NcButton
+                    type="secondary"
+                    :disabled="ghostLoading"
+                    :aria-label="t('teamhub', 'Scan for deleted users')"
+                    @click="loadGhostMembers">
+                    <template #icon>
+                        <NcLoadingIcon v-if="ghostLoading" :size="18" />
+                        <MagnifyIcon v-else :size="18" />
+                    </template>
+                    {{ t('teamhub', 'Scan') }}
+                </NcButton>
+            </div>
+
+            <div v-if="ghostLoading" class="admin-loading">
+                <NcLoadingIcon :size="24" />
+                <span>{{ t('teamhub', 'Scanning team memberships…') }}</span>
+            </div>
+            <div v-else-if="ghostError" class="admin-error">{{ ghostError }}</div>
+            <div v-else-if="!ghostScanned" class="admin-empty">
+                {{ t('teamhub', 'Click "Scan" to search for deleted users still listed in teams.') }}
+            </div>
+            <div v-else-if="ghostMembers.length === 0" class="admin-empty">
+                {{ t('teamhub', 'No deleted users found in any team. All memberships look clean.') }}
+            </div>
+
+            <template v-else>
+                <p class="ghost-result-summary">
+                    {{ n('teamhub', '{n} deleted user found in team memberships.', '{n} deleted users found in team memberships.', ghostMembers.length, { n: ghostMembers.length }) }}
+                </p>
+                <div class="ghost-grid" role="table" :aria-label="t('teamhub', 'Deleted users')">
+                    <div class="ghost-grid__head" role="row">
+                        <div class="ghost-grid__cell ghost-grid__cell--uid" role="columnheader">{{ t('teamhub', 'User ID') }}</div>
+                        <div class="ghost-grid__cell ghost-grid__cell--teams" role="columnheader">{{ t('teamhub', 'Teams') }}</div>
+                        <div class="ghost-grid__cell ghost-grid__cell--actions" role="columnheader">{{ t('teamhub', 'Actions') }}</div>
+                    </div>
+                    <div
+                        v-for="ghost in ghostMembers"
+                        :key="ghost.userId"
+                        class="ghost-grid__row"
+                        role="row">
+                        <div class="ghost-grid__cell ghost-grid__cell--uid" role="cell">
+                            <span class="ghost-uid">{{ ghost.userId }}</span>
+                            <span class="ghost-deleted-badge">{{ t('teamhub', 'Deleted') }}</span>
+                        </div>
+                        <div class="ghost-grid__cell ghost-grid__cell--teams" role="cell">
+                            <ul class="ghost-team-list">
+                                <li v-for="team in ghost.teams" :key="team.teamId" class="ghost-team-item">
+                                    <span class="ghost-team-name">{{ team.teamName }}</span>
+                                    <NcButton
+                                        type="tertiary"
+                                        :aria-label="removeFromTeamLabel(ghost.userId, team.teamName)"
+                                        :disabled="ghostRemoving[ghost.userId + ':' + team.teamId]"
+                                        @click="removeGhostFromTeam(ghost, team)">
+                                        <template #icon>
+                                            <NcLoadingIcon v-if="ghostRemoving[ghost.userId + ':' + team.teamId]" :size="16" />
+                                            <AccountRemoveIcon v-else :size="16" />
+                                        </template>
+                                        {{ t('teamhub', 'Remove from this team') }}
+                                    </NcButton>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="ghost-grid__cell ghost-grid__cell--actions" role="cell">
+                            <NcButton
+                                type="error"
+                                :aria-label="removeFromAllLabel(ghost.userId)"
+                                :disabled="ghostRemoving[ghost.userId + ':all']"
+                                @click="removeGhostFromAll(ghost)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="ghostRemoving[ghost.userId + ':all']" :size="16" />
+                                    <DeleteIcon v-else :size="16" />
+                                </template>
+                                {{ t('teamhub', 'Remove from all teams') }}
+                            </NcButton>
+                        </div>
+                    </div>
+                </div>
+            </template>
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
@@ -1106,6 +1200,9 @@ import DownloadIcon from 'vue-material-design-icons/Download.vue'
 import RefreshIcon from 'vue-material-design-icons/Refresh.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
+import AccountOffIcon from 'vue-material-design-icons/AccountOff.vue'
+import AccountRemoveIcon from 'vue-material-design-icons/AccountRemove.vue'
+import MagnifyIcon from 'vue-material-design-icons/Magnify.vue'
 
 export default {
     name: 'AdminSettings',
@@ -1114,7 +1211,7 @@ export default {
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
         ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon,
-        InformationOutline, ArchiveIcon,
+        InformationOutline, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon,
     },
     data() {
         return {
@@ -1177,6 +1274,14 @@ export default {
             membershipCheckLoading: false,
             membershipCheckError: null,
             membershipRepairing: {},   // { teamId: bool }
+            // ── Ghost member cleanup tab ────────────────────────────────────
+            ghostMembers: [],          // [{ userId, displayName, teams: [{ teamId, teamName }] }]
+            ghostLoading: false,
+            ghostError: null,
+            ghostScanned: false,
+            ghostSearch: '',
+            ghostSearchTimer: null,
+            ghostRemoving: {},         // { 'userId:teamId': bool, 'userId:all': bool }
             // ── Audit tab ──────────────────────────────────────────────
             auditTeams: [],            // [{ team_id, display_name, event_count, last_event_at }]
             auditTeamsLoading: false,
@@ -1695,6 +1800,77 @@ export default {
             } finally {
                 this.$set(this.membershipRepairing, teamId, false)
             }
+        },
+
+        // ── Ghost member cleanup tab ────────────────────────────────────────
+
+        onGhostSearchInput() {
+            clearTimeout(this.ghostSearchTimer)
+            this.ghostSearchTimer = setTimeout(() => this.loadGhostMembers(), 400)
+        },
+
+        async loadGhostMembers() {
+            this.ghostLoading = true
+            this.ghostError = null
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/ghost-members'),
+                    { params: { search: this.ghostSearch } }
+                )
+                this.ghostMembers = data.ghosts || []
+                this.ghostScanned = true
+            } catch (e) {
+                this.ghostError = e?.response?.data?.error || this.t('teamhub', 'Scan failed')
+            } finally {
+                this.ghostLoading = false
+            }
+        },
+
+        async removeGhostFromTeam(ghost, team) {
+            const key = ghost.userId + ':' + team.teamId
+            this.$set(this.ghostRemoving, key, true)
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/ghost-members/${encodeURIComponent(ghost.userId)}`),
+                    { data: { teamId: team.teamId } }
+                )
+                // Remove that team from this ghost's list; if empty, remove ghost entirely
+                ghost.teams = ghost.teams.filter(t => t.teamId !== team.teamId)
+                if (ghost.teams.length === 0) {
+                    this.ghostMembers = this.ghostMembers.filter(g => g.userId !== ghost.userId)
+                }
+                showSuccess(this.t('teamhub', '{user} removed from {team}', { user: ghost.userId, team: team.teamName }))
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(msg ? this.t('teamhub', 'Remove failed: {error}', { error: msg }) : this.t('teamhub', 'Remove failed'))
+            } finally {
+                this.$set(this.ghostRemoving, key, false)
+            }
+        },
+
+        async removeGhostFromAll(ghost) {
+            const key = ghost.userId + ':all'
+            this.$set(this.ghostRemoving, key, true)
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/ghost-members/${encodeURIComponent(ghost.userId)}`)
+                )
+                this.ghostMembers = this.ghostMembers.filter(g => g.userId !== ghost.userId)
+                showSuccess(this.t('teamhub', '{user} removed from all teams', { user: ghost.userId }))
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(msg ? this.t('teamhub', 'Remove failed: {error}', { error: msg }) : this.t('teamhub', 'Remove failed'))
+            } finally {
+                this.$set(this.ghostRemoving, key, false)
+            }
+        },
+
+        removeFromTeamLabel(userId, teamName) {
+            return this.t('teamhub', 'Remove {user} from {team}', { user: userId, team: teamName })
+        },
+
+        removeFromAllLabel(userId) {
+            return this.t('teamhub', 'Remove {user} from all teams', { user: userId })
         },
 
         // ── Audit tab ──────────────────────────────────────────────────
@@ -3066,6 +3242,98 @@ export default {
     background-color: var(--color-warning-background);
     color: var(--color-warning-text);
     border: 1px solid var(--color-warning);
+}
+
+/* ── Ghost member cleanup tab ── */
+.ghost-result-summary {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+    margin: 0 0 16px;
+}
+
+.ghost-grid {
+    display: grid;
+    grid-template-columns: 200px 1fr auto;
+    gap: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.ghost-grid__head {
+    display: contents;
+}
+
+.ghost-grid__head .ghost-grid__cell {
+    background-color: var(--color-background-dark);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.ghost-grid__row {
+    display: contents;
+}
+
+.ghost-grid__row:last-child .ghost-grid__cell {
+    border-bottom: none;
+}
+
+.ghost-grid__cell {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ghost-grid__cell--uid {
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+.ghost-uid {
+    font-family: var(--font-face-monospace, monospace);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.ghost-deleted-badge {
+    display: inline-block;
+    background-color: var(--color-error-background);
+    color: var(--color-error-text);
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    border: 1px solid var(--color-error);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.ghost-team-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ghost-team-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ghost-team-name {
+    font-size: 13px;
+    flex: 1;
 }
 
 </style>

@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
+use OCP\IConfig;
 use OCP\ITagManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
@@ -23,6 +24,7 @@ class FilesService {
         private ContainerInterface $container,
         private ITagManager $tagManager,
         private LoggerInterface $logger,
+        private IConfig $config,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -307,12 +309,46 @@ class FilesService {
         }
 
         $userFolder = $this->container->get(IRootFolder::class)->getUserFolder($uid);
+
+        // Respect NC's 'share_folder' config.php setting (used by AIO and others).
+        // When set, new shares land inside that path rather than the user root.
+        // Example: 'share_folder' => '/Shared' means we create inside /Shared/.
+        // Fall back to the user root when the setting is absent or the folder
+        // doesn't exist (rather than fail silently or create it unexpectedly).
+        $shareFolder = trim($this->config->getSystemValue('share_folder', ''), '/');
+        $targetFolder = $userFolder;
+        if ($shareFolder !== '') {
+            try {
+                if ($userFolder->nodeExists($shareFolder)) {
+                    $node = $userFolder->get($shareFolder);
+                    if ($node instanceof \OCP\Files\Folder) {
+                        $targetFolder = $node;
+                        $this->logger->debug('[FilesService] createSharedFolder — using share_folder path', [
+                            'path' => $shareFolder, 'uid' => $uid, 'app' => Application::APP_ID,
+                        ]);
+                    } else {
+                        $this->logger->warning('[FilesService] createSharedFolder — share_folder path is not a folder, falling back to root', [
+                            'path' => $shareFolder, 'uid' => $uid, 'app' => Application::APP_ID,
+                        ]);
+                    }
+                } else {
+                    $this->logger->warning('[FilesService] createSharedFolder — share_folder path does not exist, falling back to root', [
+                        'path' => $shareFolder, 'uid' => $uid, 'app' => Application::APP_ID,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[FilesService] createSharedFolder — share_folder resolution failed, falling back to root', [
+                    'path' => $shareFolder, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
         $folderName = $teamName;
         $counter    = 1;
-        while ($userFolder->nodeExists($folderName)) {
+        while ($targetFolder->nodeExists($folderName)) {
             $folderName = $teamName . ' (' . $counter++ . ')';
         }
-        $folder = $userFolder->newFolder($folderName);
+        $folder = $targetFolder->newFolder($folderName);
 
         try {
             $shareManager = $this->container->get(\OCP\Share\IManager::class);

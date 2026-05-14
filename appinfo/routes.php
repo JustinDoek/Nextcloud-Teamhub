@@ -132,6 +132,8 @@ return [
         ['name' => 'maintenance#searchUsers',        'url' => '/api/v1/admin/users/search',                                    'verb' => 'GET'],
         ['name' => 'maintenance#checkMembershipIntegrity', 'url' => '/api/v1/admin/maintenance/membership-check',              'verb' => 'GET'],
         ['name' => 'maintenance#repairMembershipCache',    'url' => '/api/v1/admin/maintenance/membership-repair/{teamId}',    'verb' => 'POST'],
+        ['name' => 'maintenance#findGhostMembers',         'url' => '/api/v1/admin/maintenance/ghost-members',                'verb' => 'GET'],
+        ['name' => 'maintenance#removeGhostMember',        'url' => '/api/v1/admin/maintenance/ghost-members/{userId}',       'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver

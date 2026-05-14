@@ -210,4 +210,60 @@ class MaintenanceController extends Controller {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Ghost member cleanup
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/v1/admin/maintenance/ghost-members
+     * Return all circles_member rows (user_type=1) whose NC account is gone.
+     *
+     * Query params:
+     *   search  string  Optional uid substring filter (default: '')
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function findGhostMembers(string $search = ''): JSONResponse {
+        $search = trim(substr($search, 0, 100));
+        try {
+            $ghosts = $this->maintenanceService->findGhostMembers($search);
+            return new JSONResponse(['ghosts' => $ghosts, 'total' => count($ghosts)]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] findGhostMembers failed', [
+                'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * DELETE /api/v1/admin/maintenance/ghost-members/{userId}
+     * Remove a ghost user from all teams, or from a specific team.
+     *
+     * Body (JSON):
+     *   teamId  string|null  If given, remove from that team only; else from all
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function removeGhostMember(string $userId): JSONResponse {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return new JSONResponse(['error' => 'userId is required'], Http::STATUS_BAD_REQUEST);
+        }
+
+        $body   = $this->request->getParams();
+        $teamId = isset($body['teamId']) && is_string($body['teamId']) && $body['teamId'] !== ''
+            ? trim($body['teamId'])
+            : null;
+
+        try {
+            $removed = $this->maintenanceService->removeGhostMember($userId, $teamId);
+            return new JSONResponse(['removed' => $removed]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] removeGhostMember failed', [
+                'userId' => $userId, 'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
 }

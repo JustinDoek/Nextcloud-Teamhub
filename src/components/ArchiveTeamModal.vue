@@ -122,10 +122,13 @@ export default {
             return 0
         },
         archiveLocationText() {
-            const loc = this.archiveSettings.archiveLocation || ''
+            const loc     = this.archiveSettings.archiveLocation || ''
+            // archiveLocationName is the resolved human-readable name (e.g. "TeamHub Archives"
+            // instead of "/f/150770"). Fall back to the raw path if resolution failed.
+            const locName = this.archiveSettings.archiveLocationName || loc
             if (loc) {
-                // TRANSLATORS: {location} is a Team Folder path or link like /f/150770
-                return t('teamhub', 'An archive of all team data will be saved to {location}.', { location: loc })
+                // TRANSLATORS: {location} is a folder name like "TeamHub Archives" or a path
+                return t('teamhub', 'An archive of all team data will be saved to {location}.', { location: locName })
             }
             return t('teamhub', 'An archive of all team data will be saved to your Files folder.')
         },

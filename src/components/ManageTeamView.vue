@@ -654,7 +654,17 @@
 
             <!-- Direct members -->
             <div class="manage-section">
-                <h3>{{ t('teamhub', 'Direct Members') }} ({{ manageMembers.direct.length }})</h3>
+                <div class="manage-section__header">
+                    <h3>{{ t('teamhub', 'Direct Members') }} ({{ manageMembers.direct.length }})</h3>
+                    <NcButton
+                        v-if="isAdminOrOwner"
+                        type="secondary"
+                        :aria-label="t('teamhub', 'Invite members to this team')"
+                        @click="showInviteModal = true">
+                        <template #icon><AccountPlusIcon :size="18" /></template>
+                        {{ t('teamhub', 'Invite members') }}
+                    </NcButton>
+                </div>
                 <div v-if="loadingMembers" class="section-loading">
                     <NcLoadingIcon :size="32" />
                 </div>
@@ -814,6 +824,13 @@
                 </div>
             </div>
         </div>
+
+        <!-- InviteMemberModal — triggered from Members tab -->
+        <InviteMemberModal
+            v-if="showInviteModal"
+            :team-id="team.id"
+            @close="showInviteModal = false"
+            @invited="onMembersInvited" />
 
         <!-- TAB: Integrations -->
         <div v-else-if="activeTab === 'integrations'" class="manage-tab-content">
@@ -1172,6 +1189,8 @@ import UploadIcon from 'vue-material-design-icons/Upload.vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
 import ArchiveTeamModal from './ArchiveTeamModal.vue'
 import ResourcePicker from './ResourcePicker.vue'
+import InviteMemberModal from './InviteMemberModal.vue'
+import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
 
 // Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
 const CFG_OPEN         = 1
@@ -1192,6 +1211,8 @@ export default {
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
         ArchiveTeamModal,
         ResourcePicker,
+        InviteMemberModal,
+        AccountPlusIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -1212,6 +1233,7 @@ export default {
             deleting: false,
             archiving: false,
             showArchiveModal: false,
+            showInviteModal: false,
             archiveSettings: {},
             changingLevel: null,
             circleConfig: {
@@ -1460,6 +1482,9 @@ export default {
         currentUserIsOwner() {
             return this.currentUserLevel >= 9
         },
+        isAdminOrOwner() {
+            return this.currentUserLevel >= 8
+        },
 
         /**
          * Only EXTERNAL (non-builtin) integrations.
@@ -1668,6 +1693,15 @@ export default {
             }
         },
 
+        /**
+         * Called when InviteMemberModal finishes — reload the member list
+         * so newly invited users appear immediately.
+         */
+        onMembersInvited() {
+            this.showInviteModal = false
+            this.loadMembers()
+        },
+
         async loadMembers() {
             this.loadingMembers = true
             try {
@@ -1686,7 +1720,6 @@ export default {
                 this.loadingMembers = false
             }
         },
-
         async loadPendingRequests() {
             this.loadingPending = true
             try {
@@ -2587,6 +2620,16 @@ export default {
     font-size: 15px;
     font-weight: 600;
     margin: 0 0 16px;
+}
+.manage-section__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.manage-section__header h3 {
+    margin: 0;
 }
 
 .manage-section-desc {

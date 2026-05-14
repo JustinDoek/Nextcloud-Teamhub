@@ -219,6 +219,20 @@ nav.app-navigation,
     display: none !important;
 }
 
+/* ── Third-party "Announcement Banner" app (announcementbanner) ──
+   Suppresses the notification bar injected by mohamedsakhri/nextcloud-announcementbanner.
+   The app renders its banners inside a stack wrapper with class "announcementbanner-stack".
+   We target both the stack and any individual banner elements. ── */
+#announcementbanner,
+.announcementbanner-stack,
+.announcement-banner,
+.announcement-banner-container,
+.announcement-banner-wrapper,
+[id^="announcementbanner"],
+[class^="announcementbanner"] {
+    display: none !important;
+}
+
 /* ── Layout: zero out NC 32 CSS variable offsets ── */
 :root {
     --body-container-margin: 0px !important;

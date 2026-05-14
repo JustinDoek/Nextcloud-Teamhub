@@ -860,6 +860,163 @@ class MaintenanceService {
         ];
     }
 
+    // -------------------------------------------------------------------------
+    // Ghost member cleanup — deleted NC users still in circles_member
+    // -------------------------------------------------------------------------
+
+    /**
+     * Find direct user members (user_type=1, status=Member) whose NC account
+     * no longer exists. Optionally filter by display-name / uid substring.
+     *
+     * Returns array of shape:
+     *   [{ userId, displayName, teams: [{ teamId, teamName }] }]
+     *
+     * Grouped by user: one entry per ghost uid, listing every team they appear in.
+     * Capped at 200 results to prevent overloading the admin view.
+     */
+    public function findGhostMembers(string $search = ''): array {
+        $this->requireNcAdmin();
+
+        $search = trim(strtolower($search));
+
+        // Query all user_type=1 (local user) rows from circles_member, regardless of status.
+        // Circles does NOT immediately remove rows when NC deletes a user — the row stays,
+        // which is why deleted users still appear in the members widget.
+        // We intentionally omit the status filter to catch rows in any state.
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('cm.user_id', 'cc.unique_id AS team_id', 'cc.name AS team_name')
+            ->from('circles_member', 'cm')
+            ->innerJoin('cm', 'circles_circle', 'cc', $qb->expr()->eq('cm.circle_id', 'cc.unique_id'))
+            ->where($qb->expr()->eq('cm.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+
+        // Optionally select display_name / sanitized_name — column presence varies by Circles version.
+        try {
+            $this->db->getQueryBuilder()->select('display_name')->from('circles_circle')->setMaxResults(1)->executeQuery()->closeCursor();
+            $qb->addSelect('cc.display_name AS team_display_name');
+        } catch (\Throwable $e) {
+            // Column absent — ignored
+        }
+        try {
+            $this->db->getQueryBuilder()->select('sanitized_name')->from('circles_circle')->setMaxResults(1)->executeQuery()->closeCursor();
+            $qb->addSelect('cc.sanitized_name AS team_sanitized_name');
+        } catch (\Throwable $e) {
+            // Column absent — ignored
+        }
+
+        $result = $qb->executeQuery();
+
+        // System circle prefixes — same exclusion list as getAllTeams()
+        $systemPrefixes = ['user:', 'group:', 'mail:', 'app:occ:', 'contact:'];
+
+        /** @var array<string, array{userId: string, displayName: string, teams: list<array{teamId: string, teamName: string}>}> $ghosts */
+        $ghosts = [];
+
+        while ($row = $result->fetch()) {
+            $uid              = (string)$row['user_id'];
+            $teamId           = (string)$row['team_id'];
+            $rawName          = (string)$row['team_name'];
+            $displayNameCol   = (string)($row['team_display_name'] ?? '');
+            $sanitizedNameCol = (string)($row['team_sanitized_name'] ?? '');
+            // Skip Circles internal placeholders
+            if ($uid === '' || $uid === 'owner') {
+                continue;
+            }
+
+            // Skip system-generated circles (same logic as getAllTeams)
+            $isSystem = false;
+            foreach ($systemPrefixes as $prefix) {
+                if (str_starts_with($rawName, $prefix)) {
+                    $isSystem = true;
+                    break;
+                }
+            }
+            if ($isSystem) {
+                continue;
+            }
+
+            // Only flag users whose NC account no longer exists.
+            // userExists() returns false for fully deleted accounts.
+            // Disabled accounts still return true — they are not ghosts.
+            if ($this->userManager->userExists($uid)) {
+                continue;
+            }
+
+            // Apply optional search filter against uid
+            if ($search !== '' && !str_contains(strtolower($uid), $search)) {
+                continue;
+            }
+
+            if (!isset($ghosts[$uid])) {
+                $ghosts[$uid] = [
+                    'userId'      => $uid,
+                    'displayName' => $uid,
+                    'teams'       => [],
+                ];
+            }
+
+            // Resolve human-readable team name — same priority as getAllTeams()
+            if ($displayNameCol !== '') {
+                $teamDisplayName = $displayNameCol;
+            } elseif ($sanitizedNameCol !== '') {
+                $teamDisplayName = $sanitizedNameCol;
+            } elseif (str_starts_with($rawName, 'app:circles:')) {
+                $teamDisplayName = substr($rawName, strlen('app:circles:'));
+            } else {
+                $teamDisplayName = $rawName;
+            }
+
+            $ghosts[$uid]['teams'][] = [
+                'teamId'   => $teamId,
+                'teamName' => $teamDisplayName,
+            ];
+        }
+        $result->closeCursor();
+
+        // Sort by uid, cap at 200
+        usort($ghosts, fn($a, $b) => strcmp($a['userId'], $b['userId']));
+        $ghosts = array_values(array_slice($ghosts, 0, 200));
+
+        $this->logger->info('[MaintenanceService] findGhostMembers: scan complete', [
+            'ghost_count' => count($ghosts), 'search' => $search, 'app' => Application::APP_ID,
+        ]);
+
+        return $ghosts;
+    }
+
+    /**
+     * Remove a single ghost user from all teams, or from a specific team.
+     *
+     * @param string      $userId NC uid of the deleted user
+     * @param string|null $teamId If given, remove only from that team; otherwise from all
+     */
+    public function removeGhostMember(string $userId, ?string $teamId = null): int {
+        $this->requireNcAdmin();
+
+        // Safety: refuse to remove an account that still exists
+        if ($this->userManager->userExists($userId)) {
+            throw new \Exception("User {$userId} still exists — only deleted users can be removed via ghost cleanup.");
+        }
+
+        $qb = $this->db->getQueryBuilder();
+        $qb->delete('circles_member')
+            ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+
+        if ($teamId !== null) {
+            $qb->andWhere($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)));
+        }
+
+        $removed = $qb->executeStatement();
+
+        $this->logger->info('[MaintenanceService] removeGhostMember: removed rows', [
+            'userId' => $userId, 'teamId' => $teamId ?? 'all', 'rows' => $removed, 'app' => Application::APP_ID,
+        ]);
+
+        return $removed;
+    }
+
+    // -------------------------------------------------------------------------
+
     /**
      * Rebuild the circles_membership cache for a single team.
      * Equivalent to `occ circles:memberships --force <teamId>`.

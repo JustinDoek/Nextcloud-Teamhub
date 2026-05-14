@@ -3,6 +3,15 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.38.0] — 2026-05-14 — Session H
+
+### Added
+- **Ghost member cleanup.** New "Ghost cleanup" tab in Admin settings. Scans all team memberships for users whose NC account has been deleted, grouped by uid. Admin can remove a ghost from a single team or from all teams at once. Includes a live-account safety guard. Endpoint: `GET /api/v1/admin/maintenance/ghost-members`, `DELETE /api/v1/admin/maintenance/ghost-members/{userId}`.
+- **share_folder config.php support.** When an NC instance sets `'share_folder' => '/Shared'` (or any path) in config.php (common in AIO installations), TeamHub creates the shared team folder inside that path. Falls back to the user root when the path is absent, missing, or not a folder.
+- **Invite button in Manage team → Members tab.** Team admins and owners now have an "Invite members" button directly on the Members tab, opening the existing InviteMemberModal. Member list refreshes after invite completes.
+- **Archive location name resolution.** The archive/delete confirmation modal now shows the human-readable folder name (e.g. "TeamHub Archives") instead of the raw `/f/150770` file ID link. Resolved server-side in `ArchiveService::getAdminSettings()`.
+- **Announcement banner suppression in iframe.** The CSS injected into embedded iframes now hides banners rendered by the `announcementbanner` app (mohamedsakhri/nextcloud-announcementbanner). The banner remains visible on the parent TeamHub page.
+
 ## [3.37.0] — 2026-05-14 — Session G
 
 ### Added

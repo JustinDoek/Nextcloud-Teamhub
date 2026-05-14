@@ -233,7 +233,10 @@ Force immediate hard-delete of a pending-deletion team, ignoring remaining grace
 Returns the current archive configuration.
 
 **Auth:** NC admin.
-**Response 200:** `{ archiveMode: 'soft30'|'soft60'|'hard', archiveOwner: string, archivePath: string, archiveMaxMb: int, anonymizeData: bool }`
+**Response 200:** `{ archiveMode: 'soft30'|'soft60'|'hard', archiveOwner: string, archiveLocation: string, archiveLocationName: string, archiveMaxMb: int, anonymizeData: bool }`
+
+`archiveLocation` — the raw stored value (e.g. `/f/150770` or empty string).
+`archiveLocationName` — the resolved human-readable folder name (e.g. `TeamHub Archives`). Equals `archiveLocation` if resolution fails or the value is not a `/f/{id}` link.
 
 ---
 
@@ -819,6 +822,18 @@ Scan all user-created teams and compare `circles_member` active member count aga
 Rebuild the `circles_membership` cache for a single team. Equivalent to `occ circles:memberships --force <teamId>`. Should be called after `membership-check` identifies a mismatch.
 **Auth:** NC admin.
 **Response:** `{ success: true }`
+
+### GET `/admin/maintenance/ghost-members`
+Scan all team memberships (`user_type=1, status=Member`) for users whose NC account no longer exists. Results are grouped by uid, each entry listing the teams the ghost appears in. Capped at 200 results.
+**Auth:** NC admin.
+**Query params:** `search` (string, optional) — substring filter on uid.
+**Response:** `{ ghosts: [ { userId, displayName, teams: [ { teamId, teamName } ] } ], total: int }`
+
+### DELETE `/admin/maintenance/ghost-members/{userId}`
+Remove a deleted user from team memberships. Only removes `user_type=1` (direct user) rows; group and sub-team rows are unaffected. Refuses with 400 if the user account still exists (live-account safety guard).
+**Auth:** NC admin.
+**Body (JSON, optional):** `{ teamId: string }` — if provided, removes from that team only; if omitted, removes from all teams.
+**Response:** `{ removed: int }` — number of `circles_member` rows deleted.
 
 ### GET `/admin/telemetry`
 Current telemetry settings and payload preview.
