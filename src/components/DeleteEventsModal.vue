@@ -198,16 +198,13 @@ export default {
             this.loading   = true
             this.loadError = null
             this.events    = []
-            console.log('[TeamHub][DeleteEventsModal] Fetching events for week:', this.weekStart.toISOString())
             try {
                 const resp = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/calendar/events/week`),
                     { params: { weekStart: this.weekStart.toISOString() } }
                 )
                 this.events = Array.isArray(resp.data) ? resp.data : []
-                console.log('[TeamHub][DeleteEventsModal] Loaded events:', this.events.length)
             } catch (e) {
-                console.error('[TeamHub][DeleteEventsModal] fetchEvents error:', e)
                 this.loadError = t('teamhub', 'Failed to load events')
             } finally {
                 this.loading = false
@@ -232,7 +229,6 @@ export default {
             if (this.checkedEvents.length === 0 || this.deleting) return
             this.deleting     = true
             this.deleteError  = null
-            console.log('[TeamHub][DeleteEventsModal] Deleting events:', this.checkedEvents.map(e => e.uri))
             try {
                 const payload = this.checkedEvents.map(ev => ({
                     calendarId: ev.calendarId,
@@ -244,7 +240,6 @@ export default {
                     { data: { events: payload } }
                 )
                 const result = resp.data
-                console.log('[TeamHub][DeleteEventsModal] Delete result:', result)
 
                 if (result.errors > 0 && result.deleted === 0) {
                     showError(t('teamhub', 'Failed to delete events'))
@@ -270,7 +265,6 @@ export default {
                 this.$emit('deleted')
                 this.$emit('close')
             } catch (e) {
-                console.error('[TeamHub][DeleteEventsModal] confirmDelete error:', e)
                 const msg = e?.response?.data?.error || ''
                 this.deleteError = msg
                     ? t('teamhub', 'Failed to delete events: {error}', { error: msg })

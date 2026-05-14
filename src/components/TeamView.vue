@@ -70,7 +70,9 @@
                 :url="calendarUrl"
                 :label="t('teamhub', 'Calendar')"
                 :embed-actions="calendarEmbedActions"
-                @action="onCalendarEmbedAction" />
+                :embed-selects="calendarEmbedSelects"
+                @action="onCalendarEmbedAction"
+                @select="onCalendarEmbedSelect" />
             <AppEmbed
                 v-if="(preloadedViews.has('deck') || currentView === 'deck') && resources.deck && resources.deck.length > 0"
                 v-show="currentView === 'deck'"
@@ -310,6 +312,7 @@ export default {
             showScheduleMeeting: false,
             showAddEvent:        false,
             showDeleteEvents:    false,
+            calendarView:        'dayGridMonth',  // current calendar view mode
             showTeamMeeting:     false,
             showAddTask:         false,
             // Multi-resource picker state (§10.1)
@@ -342,15 +345,12 @@ export default {
             return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
         },
         calendarUrl() {
-            // NC Calendar app (updated 2026-05-12) requires the full path including
-            // view and date suffix: /apps/calendar/p/{token}/dayGridMonth/now
-            // Without the suffix the app redirects or shows a blank view.
+            // NC Calendar app requires the full path including view and date suffix.
+            // calendarView is user-selectable from the embed bar dropdown.
             const cal = this.selectedCalendar || (this.resources.calendar && this.resources.calendar[0])
             if (cal?.public_token) {
-                console.log('[TeamHub][TeamView] calendarUrl using public token for calendarId:', cal.id)
-                return generateUrl('/apps/calendar/p/' + cal.public_token + '/dayGridMonth/now')
+                return generateUrl('/apps/calendar/p/' + cal.public_token + '/' + this.calendarView + '/now')
             }
-            console.log('[TeamHub][TeamView] calendarUrl: no public token, falling back to full app')
             return generateUrl('/apps/calendar')
         },
 
@@ -371,6 +371,29 @@ export default {
                     // TRANSLATORS: button label in the calendar embed toolbar — opens a modal to select and delete events
                     label: t('teamhub', 'Delete events'),
                     icon:  CalendarRemove,
+                },
+            ]
+        },
+
+        /**
+         * Select dropdowns injected into the calendar AppEmbed bar.
+         * Allows the user to switch between calendar views.
+         */
+        calendarEmbedSelects() {
+            return [
+                {
+                    id:    'calendar-view',
+                    // TRANSLATORS: aria-label for the calendar view selector dropdown in the embed bar
+                    label: t('teamhub', 'Calendar view'),
+                    value: this.calendarView,
+                    options: [
+                        { value: 'dayGridMonth', label: t('teamhub', 'Month') },
+                        { value: 'timeGridWeek', label: t('teamhub', 'Week') },
+                        { value: 'timeGridDay',  label: t('teamhub', 'Day') },
+                        { value: 'listMonth',    label: t('teamhub', 'List (month)') },
+                        { value: 'listWeek',     label: t('teamhub', 'List (week)') },
+                        { value: 'listDay',      label: t('teamhub', 'List (day)') },
+                    ],
                 },
             ]
         },
@@ -753,7 +776,6 @@ export default {
             const isAppRel   = raw.startsWith('/apps/')
             const isIndexRel = raw.startsWith('/index.php/')
             if (!isHttps && !isAppRel && !isIndexRel) {
-                console.warn('[TeamHub][TeamView] Rejected unsafe iframe_url for registry_id=' + menuItem.registry_id + ': scheme not allowed')
                 return ''
             }
 
@@ -785,7 +807,6 @@ export default {
          * We prepend the NC base path via generateUrl to handle sub-directory installs.
          */
         linkEmbedUrl(url) {
-            console.log('[TeamHub][TeamView] linkEmbedUrl:', url)
             // generateUrl('/apps/foo') → /nextcloud/apps/foo (handles sub-dir installs)
             // Strip the leading slash from our stored path before passing to generateUrl
             // so we don't end up with a double slash.
@@ -794,11 +815,18 @@ export default {
         },
 
         onCalendarEmbedAction(actionId) {
-            console.log('[TeamHub][TeamView] Calendar embed action:', actionId)
             if (actionId === 'add-event') {
                 this.showAddEvent = true
             } else if (actionId === 'delete-events') {
                 this.showDeleteEvents = true
+            }
+        },
+
+        onCalendarEmbedSelect({ id, value }) {
+            if (id === 'calendar-view') {
+                this.calendarView = value
+                // calendarUrl recomputes automatically; reload the iframe with the new URL.
+                this.$nextTick(() => this.$refs.calendarEmbed?.reload())
             }
         },
 

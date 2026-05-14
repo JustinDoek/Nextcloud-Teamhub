@@ -296,3 +296,54 @@ export default {
     }
 }
 </style>
+
+<!--
+    Global (non-scoped) styles for the Tribute.js @-mention autocomplete dropdown.
+    NcRichContenteditable appends the .tribute-container ul to document.body so
+    scoped styles never reach it. NC vue 8.x uses CSS modules (hashed class names)
+    internally but the outer container also retains the plain `tribute-container`
+    class. We set explicit colors here so the dropdown is readable in all themes.
+-->
+<style>
+/* Outer container — appended to document.body by Tribute.js */
+ul.tribute-container,
+[class*="tribute-container"] {
+    background-color: var(--color-main-background) !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: var(--border-radius-large) !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2) !important;
+    z-index: 10000 !important;
+    max-height: 240px !important;
+    overflow-y: auto !important;
+}
+
+ul.tribute-container li,
+[class*="tribute-container"] li {
+    background-color: var(--color-main-background) !important;
+    color: var(--color-main-text) !important;
+    cursor: pointer !important;
+}
+
+ul.tribute-container li.highlight,
+ul.tribute-container li:hover,
+[class*="tribute-container"] li.highlight,
+[class*="tribute-container"] li:hover {
+    background-color: var(--color-background-hover) !important;
+    color: var(--color-main-text) !important;
+}
+
+/* NC vue renders items inside a div with id="nc-rich-contenteditable-tribute-item-*" */
+[id^="nc-rich-contenteditable-tribute-item-"] {
+    color: var(--color-main-text) !important;
+    background-color: transparent !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 6px 12px !important;
+    font-size: 13px !important;
+}
+
+[id^="nc-rich-contenteditable-tribute-item-"] * {
+    color: var(--color-main-text) !important;
+}
+</style>

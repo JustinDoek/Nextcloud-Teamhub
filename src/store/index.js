@@ -15,6 +15,10 @@ export default new Vuex.Store({
         messages: [],
         pinnedMessage: null,   // single pinned message for the current team, or null
         pinMinLevel: 4,        // minimum Circles level to pin (loaded from admin settings)
+        messagesPage: 1,       // current page (1-based)
+        messagesTotal: 0,      // total non-pinned message count from last fetch
+        messagesLimit: 5,      // messages per page
+        messageSettings: { pinMinLevel: 'moderator', postMinLevel: 'member' }, // per-team message settings
         comments: {},          // { messageId: [comments] }
         members: [],
         memberships: [],           // flat list of {type: 'group'|'circle', displayName, memberCount}
@@ -47,22 +51,35 @@ export default new Vuex.Store({
         commentsForMessage: state => id => state.comments[id] || [],
 
         /**
-         * True if the current user's level meets the pinMinLevel threshold.
-         * members array rows have { userId, level } where level is the Circles integer.
+         * True if the current user's level meets the per-team pinMinLevel threshold.
+         * Reads from messageSettings (loaded per team) and falls back to pinMinLevel.
          */
         canPin: state => {
             const uid = state.currentUser?.uid
             if (!uid) return false
             const member = state.members.find(m => m.userId === uid)
             if (!member) return false
-            return (member.level || 0) >= state.pinMinLevel
+            const levelMap = { member: 1, moderator: 4, admin: 8 }
+            const required = levelMap[state.messageSettings?.pinMinLevel] ?? state.pinMinLevel
+            return (member.level || 0) >= required
         },
 
         /**
-         * True if the current user is a team admin (Circles level >= 8) on the
-         * active team. Mirrors MemberService::requireAdminLevel() on the backend.
-         * Used to decide whether to show admin-only UI affordances (e.g. delete
-         * button on other users' comments).
+         * True if the current user's level meets the per-team postMinLevel threshold.
+         */
+        canPost: state => {
+            const uid = state.currentUser?.uid
+            if (!uid) return false
+            const member = state.members.find(m => m.userId === uid)
+            // Indirect members (via group/team) have no direct level row — default to 1
+            const userLevel = member ? (member.level || 1) : 1
+            const levelMap = { member: 1, moderator: 4, admin: 8 }
+            const required = levelMap[state.messageSettings?.postMinLevel] ?? 1
+            return userLevel >= required
+        },
+
+        /**
+         * True if the current user is a team admin (Circles level >= 8).
          */
         currentUserIsTeamAdmin: state => (state.currentUserLevel || 0) >= 8,
     },
@@ -81,6 +98,9 @@ export default new Vuex.Store({
         SET_MESSAGES(state, messages) { state.messages = messages },
         SET_PINNED_MESSAGE(state, message) { state.pinnedMessage = message },
         SET_PIN_MIN_LEVEL(state, level) { state.pinMinLevel = level },
+        SET_MESSAGES_PAGE(state, page) { state.messagesPage = page },
+        SET_MESSAGES_TOTAL(state, total) { state.messagesTotal = total },
+        SET_MESSAGE_SETTINGS(state, settings) { state.messageSettings = settings },
         ADD_MESSAGE(state, message) { state.messages.unshift(message) },
         REMOVE_MESSAGE(state, messageId) {
             state.messages = state.messages.filter(m => m.id !== messageId)
@@ -190,6 +210,9 @@ export default new Vuex.Store({
             commit('SET_VIEW', 'msgstream')
             commit('SET_MESSAGES', [])
             commit('SET_PINNED_MESSAGE', null)
+            commit('SET_MESSAGES_PAGE', 1)
+            commit('SET_MESSAGES_TOTAL', 0)
+            commit('SET_MESSAGE_SETTINGS', { pinMinLevel: 'moderator', postMinLevel: 'member' })
             commit('SET_MEMBERS', [])
             commit('SET_RESOURCES', {})
             commit('SET_WEB_LINKS', [])
@@ -206,20 +229,41 @@ export default new Vuex.Store({
                 dispatch('fetchResources', teamId),
                 dispatch('fetchWebLinks', teamId),
                 dispatch('fetchTeamIntegrations', teamId),
+                dispatch('fetchMessageSettings', teamId),
             ])
         },
 
-        async fetchMessages({ commit }, teamId) {
+        async fetchMessages({ commit, state }, { teamId, page } = {}) {
+            // Allow callers to pass just teamId as a string (backwards compat)
+            if (typeof teamId !== 'string') {
+                teamId = teamId || state.currentTeamId
+            }
+            const targetPage = page || state.messagesPage || 1
             commit('SET_LOADING', { key: 'messages', value: true })
             try {
-                const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages`))
-                // Backend now returns { pinned: object|null, messages: array }
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages`),
+                    { params: { page: targetPage, limit: state.messagesLimit } }
+                )
                 commit('SET_PINNED_MESSAGE', data.pinned || null)
                 commit('SET_MESSAGES', Array.isArray(data.messages) ? data.messages : [])
+                commit('SET_MESSAGES_TOTAL', data.total || 0)
+                commit('SET_MESSAGES_PAGE', targetPage)
             } catch (e) {
                 commit('SET_ERROR', 'Failed to load messages')
             } finally {
                 commit('SET_LOADING', { key: 'messages', value: false })
+            }
+        },
+
+        async fetchMessageSettings({ commit }, teamId) {
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages/settings`)
+                )
+                commit('SET_MESSAGE_SETTINGS', data)
+            } catch (e) {
+                // Non-fatal — defaults remain in state
             }
         },
 

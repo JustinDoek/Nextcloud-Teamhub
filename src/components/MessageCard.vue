@@ -70,12 +70,15 @@
             <label class="message-card__edit-label" :for="'edit-body-' + message.id">
                 {{ t('teamhub', 'Message') }}
             </label>
-            <textarea
+            <NcRichContenteditable
                 :id="'edit-body-' + message.id"
                 ref="editBodyRef"
                 v-model="editBody"
-                class="message-card__edit-body"
-                rows="5" />
+                :placeholder="t('teamhub', 'Write your message… (@ to mention)')"
+                :multiline="true"
+                :link-autocomplete="true"
+                :auto-complete="editMentionAutoComplete"
+                :user-data="mentionsObj" />
             <!-- Markdown formatting toolbar for the edit body textarea.
                  Uses selectionStart/End (plain textarea API) rather than
                  execCommand, so no contenteditable quirks.
@@ -309,11 +312,11 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
+import { mapState, mapGetters } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl, generateRemoteUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
-import { NcAvatar, NcButton, NcLoadingIcon } from '@nextcloud/vue'
+import { NcAvatar, NcButton, NcLoadingIcon, NcRichContenteditable } from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import CommentOutline from 'vue-material-design-icons/CommentOutline.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
@@ -402,25 +405,15 @@ import DOMPurify from 'dompurify'
 // Tags and attributes that our regex renderer intentionally produces.
 // DOMPurify drops everything not on these lists — defence-in-depth even if
 // a future regex change accidentally widens the output.
-const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3']
-const ALLOWED_ATTR = ['href', 'target', 'rel']
+const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'span']
+const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'data-mention-user']
 
 /**
  * Convert a subset of Markdown to sanitised HTML.
- *
- * Processing order matters:
- *   1. Code blocks   — replace with null-byte placeholders so that inner
- *                      content is never touched by subsequent regexes.
- *   2. Inline code   — same placeholder treatment for backtick spans.
- *   3. Inline styles — bold, italic.
- *   4. Links         — [text](url) then bare auto-links.
- *   5. Block elements (headings, bullet lists) — must happen BEFORE \n→<br>
- *      so that /^…$/m anchors still match line boundaries.
- *   6. Remaining \n  — converted to <br>.
- *   7. Restore placeholders.
- *   8. DOMPurify sanitize.
+ * @param {string} text - raw message body
+ * @param {Object} membersMap - optional { [userId]: displayName } for @mention rendering
  */
-function renderMarkdown(text) {
+function renderMarkdown(text, membersMap = {}) {
     if (!text) return ''
 
     // 1. Fenced code blocks
@@ -437,25 +430,31 @@ function renderMarkdown(text) {
         return `\u0001${inlineCodes.length - 1}\u0001`
     })
 
-    // 3. Bold and italic
+    // 3. @mentions — convert @userId to a styled mention span with display name
+    html = html.replace(/@([a-zA-Z0-9._-]+)/g, (match, userId) => {
+        const displayName = membersMap[userId] || userId
+        return `<span class="teamhub-mention" data-mention-user="${userId}">@${displayName}</span>`
+    })
+
+    // 4. Bold and italic
     html = html
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
         .replace(/__([^_]+)__/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
         .replace(/_([^_]+)_/g, '<em>$1</em>')
 
-    // 4. Links — explicit [text](url) then bare https?:// URLs
+    // 5. Links — explicit [text](url) then bare https?:// URLs
     html = html
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
         .replace(/(?<!href=")(?<!\()https?:\/\/[^\s<>"'\)]+/g, '<a href="$&" target="_blank" rel="noopener noreferrer">$&</a>')
 
-    // 5a. Headings — match at start of line (multiline flag)
+    // 6a. Headings
     html = html
         .replace(/^### (.+)$/gm, '<h3>$1</h3>')
         .replace(/^## (.+)$/gm, '<h2>$1</h2>')
         .replace(/^# (.+)$/gm, '<h1>$1</h1>')
 
-    // 5b. Bullet lists — group consecutive '- ' lines into one <ul>
+    // 6b. Bullet lists
     html = html.replace(/((?:^- .+(?:\n|$))+)/gm, (block) => {
         const items = block.trimEnd().split('\n')
             .map(line => `<li>${line.replace(/^- /, '')}</li>`)
@@ -463,15 +462,15 @@ function renderMarkdown(text) {
         return `<ul>${items}</ul>\n`
     })
 
-    // 6. Remaining newlines → <br>
+    // 7. Remaining newlines → <br>
     html = html.replace(/\n/g, '<br>')
 
-    // 7. Restore code placeholders (their content never saw steps 3–6)
+    // 8. Restore code placeholders
     html = html
         .replace(/\u0000(\d+)\u0000/g, (_, i) => codeBlocks[+i])
         .replace(/\u0001(\d+)\u0001/g, (_, i) => inlineCodes[+i])
 
-    // 8. Sanitize before injecting into v-html
+    // 9. Sanitize
     return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR })
 }
 
@@ -481,6 +480,7 @@ export default {
         NcAvatar,
         NcButton,
         NcLoadingIcon,
+        NcRichContenteditable,
         CommentOutline,
         ClipboardCheckOutline,
         HelpCircleOutline,
@@ -519,11 +519,22 @@ export default {
         }
     },
     computed: {
+        ...mapState(['members']),
         ...mapGetters(['commentsForMessage']),
         isPriority() { return this.message.priority === 'priority' },
         isPollClosed() { return this.message.pollClosed === true },
         isQuestionSolved() { return this.message.questionSolved === true },
-        renderedMessage() { return renderMarkdown(this.message.message) },
+
+        /** { [userId]: displayName } for @mention rendering */
+        membersMap() {
+            const map = {}
+            for (const m of (this.members || [])) {
+                map[m.userId] = m.displayName || m.userId
+            }
+            return map
+        },
+
+        renderedMessage() { return renderMarkdown(this.message.message, this.membersMap) },
         formattedDate() {
             return new Date(this.message.created_at * 1000).toLocaleString()
         },
@@ -551,6 +562,21 @@ export default {
         isAuthor() {
             return this.$store.state.currentUser?.uid === this.message.author_id
         },
+
+        /** user-data object for NcRichContenteditable — keyed by userId */
+        mentionsObj() {
+            const result = {}
+            for (const m of (this.members || [])) {
+                result[m.userId] = {
+                    id:     m.userId,
+                    label:  m.displayName || m.userId,
+                    source: 'users',
+                    icon:   'icon-user',
+                    status: null,
+                }
+            }
+            return result
+        },
     },
     mounted() {
         if (this.message.messageType === 'poll') {
@@ -560,6 +586,30 @@ export default {
     },
     methods: {
         t, n,
+
+        /** Same NC OCS autocomplete approach as PostMessageForm */
+        async editMentionAutoComplete(search, callback) {
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/ocs/v2.php/core/autocomplete/get'),
+                    {
+                        params: { search: search || '', itemType: 'call', itemId: 'new', limit: 20, format: 'json' },
+                        headers: { 'OCS-APIREQUEST': 'true' },
+                    }
+                )
+                const users = data?.ocs?.data || []
+                const memberIds = new Set((this.members || []).map(m => m.userId))
+                callback(users.filter(u => memberIds.has(u.id) || memberIds.has(u.value?.shareWith)))
+            } catch (e) {
+                const lower = (search || '').toLowerCase()
+                callback(
+                    (this.members || [])
+                        .filter(m => (m.displayName || '').toLowerCase().includes(lower) || (m.userId || '').toLowerCase().includes(lower))
+                        .slice(0, 8)
+                        .map(m => ({ id: m.userId, label: m.displayName || m.userId, source: 'users', icon: 'icon-user', status: null }))
+                )
+            }
+        },
         async doPin() {
             try {
                 await this.$store.dispatch('pinMessage', {
@@ -969,6 +1019,17 @@ export default {
 .message-card__body :deep(a) {
     color: var(--color-primary-element);
     text-decoration: underline;
+}
+
+/* @mention rendered pill in message body */
+.message-card__body :deep(.teamhub-mention) {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--color-primary-light);
+    color: var(--color-primary-element);
+    font-weight: 500;
+    cursor: default;
 }
 
 .message-card__footer {

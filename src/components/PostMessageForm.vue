@@ -1,5 +1,6 @@
 <template>
     <div class="post-form">
+        <template>
         <!-- Message type selector -->
         <div class="post-form__type">
             <label class="post-form__type-option" :class="{ active: messageType === 'normal' }">
@@ -33,6 +34,7 @@
                 :placeholder="bodyPlaceholder"
                 :multiline="true"
                 :link-autocomplete="true"
+                :auto-complete="mentionAutoComplete"
                 :user-data="mentions" />
 
             <!-- Markdown formatting toolbar.
@@ -211,6 +213,7 @@
                 {{ t('teamhub', 'Cancel') }}
             </NcButton>
         </div>
+        </template>
     </div>
 </template>
 
@@ -270,16 +273,23 @@ export default {
     },
 
     computed: {
-        ...mapState(['members']),
+        ...mapState(['members', 'messageSettings']),
 
         mentions() {
-            return (this.members || []).map(m => ({
-                id: m.userId,
-                label: m.displayName,
-                icon: 'icon-user',
-                source: 'users',
-                status: null,
-            }))
+            // NcRichContenteditable user-data must be a plain object keyed by userId.
+            // Each value: { id, label, source, icon, status }
+            // An array is silently ignored, producing no mention autocomplete.
+            const result = {}
+            for (const m of (this.members || [])) {
+                result[m.userId] = {
+                    id:     m.userId,
+                    label:  m.displayName || m.userId,
+                    source: 'users',
+                    icon:   'icon-user',
+                    status: null,
+                }
+            }
+            return result
         },
 
         subjectLabel() {
@@ -321,6 +331,61 @@ export default {
     methods: {
         t,
         ...mapActions(['postMessage']),
+
+        /**
+         * Auto-complete callback for NcRichContenteditable @-mentions.
+         *
+         * We use the NC core OCS autocomplete API rather than filtering the local
+         * members array ourselves. This is the same endpoint NC Talk and NC Comments
+         * use — it returns users in the exact shape NcRichContenteditable expects,
+         * and its results render correctly via NcAutoCompleteResult (themed, avatar, etc).
+         *
+         * We scope results to the team's members by intersecting with the store's
+         * members list after fetching.
+         */
+        async mentionAutoComplete(search, callback) {
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/ocs/v2.php/core/autocomplete/get'),
+                    {
+                        params: {
+                            search:        search || '',
+                            itemType:      'call',
+                            itemId:        'new',
+                            sorter:        '',
+                            limit:         20,
+                            format:        'json',
+                        },
+                        headers: { 'OCS-APIREQUEST': 'true' },
+                    }
+                )
+                // OCS wraps response in ocs.data
+                const users = data?.ocs?.data || []
+
+                // Scope to team members only
+                const memberIds = new Set((this.members || []).map(m => m.userId))
+                const filtered = users.filter(u => memberIds.has(u.id) || memberIds.has(u.value?.shareWith))
+
+                callback(filtered)
+            } catch (e) {
+                // Fallback: use local members list with basic shape
+                const lower = (search || '').toLowerCase()
+                const fallback = (this.members || [])
+                    .filter(m =>
+                        (m.displayName || '').toLowerCase().includes(lower) ||
+                        (m.userId || '').toLowerCase().includes(lower)
+                    )
+                    .slice(0, 8)
+                    .map(m => ({
+                        id:     m.userId,
+                        label:  m.displayName || m.userId,
+                        source: 'users',
+                        icon:   'icon-user',
+                        status: null,
+                    }))
+                callback(fallback)
+            }
+        },
 
         // ── Markdown toolbar ────────────────────────────────────────────────
         /**

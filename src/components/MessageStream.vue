@@ -1,14 +1,14 @@
 <template>
     <div class="message-stream" :class="{ 'message-stream--no-header': hideHeader }">
         <div v-if="!hideHeader" class="message-stream__header">
-            <NcButton type="primary" @click="showPostForm = true">
+            <NcButton v-if="canPost" type="primary" @click="showPostForm = true">
                 <template #icon><Plus :size="20" /></template>
                 {{ t('teamhub', 'Post Message') }}
             </NcButton>
         </div>
 
-        <!-- Post form inline -->
-        <PostMessageForm v-if="showPostForm" @submitted="showPostForm = false" @cancel="showPostForm = false" />
+        <!-- Post form inline — only rendered when the user has the right to post -->
+        <PostMessageForm v-if="showPostForm && canPost" @submitted="onMessagePosted" @cancel="showPostForm = false" />
 
         <!-- Loading -->
         <div v-if="loading.messages" class="message-stream__loading">
@@ -45,6 +45,29 @@
                     :can-pin="canPin"
                     :is-pinned-slot="false" />
             </TransitionGroup>
+
+            <!-- Pagination -->
+            <div v-if="totalPages > 1" class="message-stream__pagination" role="navigation" :aria-label="t('teamhub', 'Message pages')">
+                <NcButton
+                    type="tertiary"
+                    :disabled="messagesPage <= 1"
+                    :aria-label="t('teamhub', 'Previous page')"
+                    @click="goToPage(messagesPage - 1)">
+                    <template #icon><ChevronLeft :size="20" /></template>
+                </NcButton>
+
+                <span class="message-stream__pagination-info">
+                    {{ t('teamhub', 'Page {page} of {total}', { page: messagesPage, total: totalPages }) }}
+                </span>
+
+                <NcButton
+                    type="tertiary"
+                    :disabled="messagesPage >= totalPages"
+                    :aria-label="t('teamhub', 'Next page')"
+                    @click="goToPage(messagesPage + 1)">
+                    <template #icon><ChevronRight :size="20" /></template>
+                </NcButton>
+            </div>
         </template>
     </div>
 </template>
@@ -55,34 +78,51 @@ import { translate as t } from '@nextcloud/l10n'
 import { NcButton, NcLoadingIcon, NcEmptyContent } from '@nextcloud/vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Pin from 'vue-material-design-icons/Pin.vue'
+import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
+import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import MessageCard from './MessageCard.vue'
 import PostMessageForm from './PostMessageForm.vue'
 
 export default {
     name: 'MessageStream',
-    components: { NcButton, NcLoadingIcon, NcEmptyContent, Plus, Pin, MessageOutline, MessageCard, PostMessageForm },
+    components: {
+        NcButton, NcLoadingIcon, NcEmptyContent,
+        Plus, Pin, ChevronLeft, ChevronRight, MessageOutline,
+        MessageCard, PostMessageForm,
+    },
     props: {
-        // When true, hides the inline "Post Message" button at the top of
-        // the stream. Used by the mobile view, where the FAB is the only
-        // entry point to the post form.
         hideHeader: { type: Boolean, default: false },
     },
     data() {
         return { showPostForm: false }
     },
     computed: {
-        ...mapState(['messages', 'pinnedMessage', 'loading']),
-        ...mapGetters(['canPin']),
+        ...mapState(['messages', 'pinnedMessage', 'loading', 'currentTeamId',
+                     'messagesPage', 'messagesTotal', 'messagesLimit']),
+        ...mapGetters(['canPin', 'canPost']),
+
+        totalPages() {
+            if (!this.messagesTotal || !this.messagesLimit) return 1
+            return Math.max(1, Math.ceil(this.messagesTotal / this.messagesLimit))
+        },
     },
     methods: {
         t,
-        /**
-         * Public entry point used by parents that hide the inline header.
-         * Mobile FAB calls this via $refs.messageStream.openPostForm().
-         */
+
         openPostForm() {
             this.showPostForm = true
+        },
+
+        goToPage(page) {
+            if (page < 1 || page > this.totalPages) return
+            this.$store.dispatch('fetchMessages', { teamId: this.currentTeamId, page })
+        },
+
+        onMessagePosted() {
+            this.showPostForm = false
+            // After posting go to page 1 so user sees the new message at the top
+            this.$store.dispatch('fetchMessages', { teamId: this.currentTeamId, page: 1 })
         },
     },
 }
@@ -94,10 +134,6 @@ export default {
     min-height: 100%;
 }
 
-/*
- * When the inline header is hidden (mobile view), shrink the side padding
- * a touch so cards have more room on a narrow screen.
- */
 .message-stream--no-header {
     padding: 12px;
 }
@@ -148,4 +184,22 @@ export default {
     opacity: 0;
     transform: translateY(-10px);
 }
+
+.message-stream__pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+}
+
+.message-stream__pagination-info {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    min-width: 100px;
+    text-align: center;
+}
 </style>
+

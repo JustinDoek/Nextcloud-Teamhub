@@ -176,32 +176,6 @@
             </NcSettingsSection>
         </div>
 
-        <!-- ── Tab: Messages ─────────────────────────────────────────────── -->
-        <div
-            v-show="activeTab === 'messages'"
-            id="tab-panel-messages"
-            role="tabpanel"
-            class="teamhub-admin-panel">
-
-            <NcSettingsSection
-                :name="t('teamhub', 'Pin messages')"
-                :description="t('teamhub', 'Minimum member role required to pin or unpin a message. One message can be pinned per team at a time.')">
-                <div class="admin-select-row">
-                    <label for="teamhub-pin-level" class="admin-select-label">
-                        {{ t('teamhub', 'Minimum role to pin') }}
-                    </label>
-                    <select
-                        id="teamhub-pin-level"
-                        v-model="form.pinMinLevel"
-                        class="admin-select">
-                        <option value="member">{{ t('teamhub', 'Member') }}</option>
-                        <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                        <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                    </select>
-                </div>
-            </NcSettingsSection>
-        </div>
-
         <!-- ── Tab: Integrations ─────────────────────────────────────────── -->
         <div
             v-show="activeTab === 'integrations'"
@@ -1257,7 +1231,6 @@ export default {
             return [
                 { id: 'creation',      label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
                 { id: 'invitations',   label: this.t('teamhub', 'Invitations'),   icon: 'EmailSendIcon'   },
-                { id: 'messages',      label: this.t('teamhub', 'Messages'),       icon: 'MessageTextIcon' },
                 { id: 'integrations',  label: this.t('teamhub', 'Integrations'),  icon: 'PuzzleIcon'      },
                 { id: 'statistics',    label: this.t('teamhub', 'Statistics'),    icon: 'ChartBarIcon'    },
                 { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },

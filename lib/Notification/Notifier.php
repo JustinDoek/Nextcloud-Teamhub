@@ -154,6 +154,31 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            case 'message_mention':
+                $params     = $notification->getSubjectParameters();
+                $authorName = $params['author']   ?? 'Someone';
+
+                $notification->setRichSubject(
+                    '{author} mentioned you in a message',
+                    [
+                        'author' => [
+                            'type' => 'user',
+                            'id'   => $params['authorId'] ?? $authorName,
+                            'name' => $authorName,
+                        ],
+                    ]
+                );
+                $notification->setParsedSubject($authorName . ' mentioned you in a message');
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+                return $notification;
+
             default:
                 throw new UnknownNotificationException('Unknown subject');
         }

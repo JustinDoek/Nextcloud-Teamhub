@@ -582,6 +582,73 @@
             </div>
         </div>
 
+        <!-- TAB: Messages -->
+        <div v-else-if="activeTab === 'messages'" class="manage-tab-content">
+            <div v-if="loadingMessageSettings" class="section-loading">
+                <NcLoadingIcon :size="32" />
+            </div>
+            <template v-else>
+                <!-- Pin level -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Pin messages') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Minimum role required to pin or unpin a message in this team. One message can be pinned at a time.') }}
+                    </p>
+                    <div class="manage-setting-row">
+                        <label class="manage-setting-label" for="pin-min-level">
+                            {{ t('teamhub', 'Minimum role to pin') }}
+                        </label>
+                        <select
+                            id="pin-min-level"
+                            v-model="messageSettingsForm.pinMinLevel"
+                            class="manage-setting-select">
+                            <option value="member">{{ t('teamhub', 'Member') }}</option>
+                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Post level -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Post messages') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Minimum role required to post new messages, questions, and polls in this team.') }}
+                    </p>
+                    <div class="manage-setting-row">
+                        <label class="manage-setting-label" for="post-min-level">
+                            {{ t('teamhub', 'Minimum role to post') }}
+                        </label>
+                        <select
+                            id="post-min-level"
+                            v-model="messageSettingsForm.postMinLevel"
+                            class="manage-setting-select">
+                            <option value="member">{{ t('teamhub', 'Member') }}</option>
+                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Save -->
+                <div class="manage-section">
+                    <NcButton
+                        type="primary"
+                        :disabled="savingMessageSettings"
+                        @click="saveMessageSettings">
+                        <template #icon>
+                            <NcLoadingIcon v-if="savingMessageSettings" :size="18" />
+                            <Check v-else :size="18" />
+                        </template>
+                        {{ savingMessageSettings ? t('teamhub', 'Saving…') : t('teamhub', 'Save message settings') }}
+                    </NcButton>
+                    <span v-if="messageSettingsSaved" class="manage-saved-indicator">
+                        {{ t('teamhub', 'Saved') }}
+                    </span>
+                </div>
+            </template>
+        </div>
+
         <!-- TAB: Members -->
         <div v-else-if="activeTab === 'members'" class="manage-tab-content">
 
@@ -1158,6 +1225,11 @@ export default {
             integrationRegistry: [],
             loadingWidgets: false,
             togglingWidget: null,
+            // Message settings
+            messageSettingsForm: { pinMinLevel: 'moderator', postMinLevel: 'member' },
+            loadingMessageSettings: false,
+            savingMessageSettings: false,
+            messageSettingsSaved: false,
             dragSourceWidget: null,
             teamApps: [],
             installedApps: {},
@@ -1237,7 +1309,6 @@ export default {
 
         /** True when any active files resource is a group folder. */
         activeFilesIsGf() {
-            console.log('[TeamHub][ManageTeamView] activeFilesIsGf check — activeFilesRows:', JSON.stringify(this.activeFilesRows.map(r => ({ id: r.id, resourceId: r.resourceId, status: r.status }))))
             return this.activeFilesRows.some(r => r.resourceId.startsWith('gf:'))
         },
 
@@ -1344,6 +1415,7 @@ export default {
             return [
                 { key: 'description',  label: t('teamhub', 'Description'),  icon: 'TextIcon' },
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
+                { key: 'messages',     label: t('teamhub', 'Messages'),     icon: 'MessageIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
                 { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
                 { key: 'danger',       label: t('teamhub', 'Maintenance'),  icon: 'AlertIcon' },
@@ -1474,6 +1546,9 @@ export default {
             if (tab === 'danger') {
                 this.loadArchiveStatus()
                 this.loadArchiveSettings()
+            }
+            if (tab === 'messages') {
+                this.loadMessageSettings()
             }
             // If the warning block sent us here with focus flag set, scroll to at-risk section.
             if (tab === 'settings' && this.resourceWarningFocus) {
@@ -1858,6 +1933,42 @@ export default {
         // Pending / ignored resource management
         // ------------------------------------------------------------------
 
+        async loadMessageSettings() {
+            this.loadingMessageSettings = true
+            try {
+                const resp = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/settings`)
+                )
+                this.messageSettingsForm = {
+                    pinMinLevel:  resp.data.pinMinLevel  || 'moderator',
+                    postMinLevel: resp.data.postMinLevel || 'member',
+                }
+            } catch (e) {
+                showError(t('teamhub', 'Failed to load message settings'))
+            } finally {
+                this.loadingMessageSettings = false
+            }
+        },
+
+        async saveMessageSettings() {
+            this.savingMessageSettings = true
+            this.messageSettingsSaved = false
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/settings`),
+                    this.messageSettingsForm
+                )
+                // Update the store so PostMessageForm and canPost/canPin reflect the new settings immediately
+                this.$store.dispatch('fetchMessageSettings', this.team.id)
+                this.messageSettingsSaved = true
+                setTimeout(() => { this.messageSettingsSaved = false }, 2500)
+            } catch (e) {
+                showError(t('teamhub', 'Failed to save message settings'))
+            } finally {
+                this.savingMessageSettings = false
+            }
+        },
+
         async loadPendingResources() {
             this.loadingPendingResources = true
             try {
@@ -2012,7 +2123,6 @@ export default {
                 const errMsg  = (errData && typeof errData === 'object')
                     ? (errData.error ?? JSON.stringify(errData))
                     : `HTTP ${status}`
-                console.error('[TeamHub][ManageTeamView] connectExisting failed', { status, error: errMsg })
                 showError(errData?.error
                     ? t('teamhub', 'Failed to connect resource: {error}', { error: errData.error })
                     : t('teamhub', 'Failed to connect resource')
@@ -3471,5 +3581,48 @@ export default {
     flex-shrink: 0;
     margin-top: 1px;
     color: var(--color-warning-text, #7a5900);
+}
+
+/* Message settings tab */
+.manage-setting-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.manage-setting-label {
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 180px;
+    color: var(--color-main-text);
+}
+
+.manage-setting-select {
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    color: var(--color-main-text);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.manage-setting-select:focus-visible {
+    outline: none;
+    border-color: var(--color-primary-element);
+    box-shadow: 0 0 0 2px var(--color-primary-element-light);
+}
+
+.manage-saved-indicator {
+    font-size: 13px;
+    color: var(--color-success-text);
+    margin-left: 10px;
+}
+
+.manage-section__desc {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    margin: 4px 0 0;
 }
 </style>

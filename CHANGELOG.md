@@ -3,7 +3,37 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.36.0] — 2026-05-11 — Session F
+## [3.37.0] — 2026-05-14 — Session G
+
+### Added
+- **Message @mentions.** `PostMessageForm` and `MessageCard` edit mode use `NcRichContenteditable` with the NC core OCS autocomplete API (`/ocs/v2.php/core/autocomplete/get`), scoped to team members. Mentions render as styled highlight pills in the message body. Backend sends a `message_mention` NC notification to each mentioned team member (on create and edit).
+- **Message pagination.** 5 messages per page with prev/next controls in the message stream. Page resets to 1 on team switch and after posting. `MessageMapper::countByTeamId()` added. `listMessages` now returns `total`, `page`, and `limit` alongside messages.
+- **Per-team message settings.** New Messages tab in Manage team for team admins. Configures minimum role to pin messages and minimum role to post messages, stored as per-team `IConfig` keys. Post Message button hidden (not just disabled) when the user lacks the post role.
+- **Calendar view dropdown.** Embed bar now has a native select for Month / Week / Day / List variants; selecting reloads the iframe with the chosen view in the URL.
+- **Calendar embed auto-reload.** After adding or deleting events, the calendar iframe reloads automatically so changes appear immediately.
+- **NC-relative team links.** Custom team links now accept `apps/...` or `/apps/...` paths (e.g. `apps/collectives/s5`) and open in an iframe tab, just like built-in app tabs. External `https://` links continue to open in a new browser tab.
+- **VitePress documentation site** in `docs/`. Covers Nextcloud admins, Team management, Developers, and Users — 20 pages total.
+- **New migration `Version000336200`** — remediates auto-generated primary key name on `oc_teamhub_team_app_resources` for existing PostgreSQL installs.
+- **`message_mention` notifier subject** in `Notifier.php`.
+- **`getMessageSettings` / `saveMessageSettings`** endpoints (`GET/POST /api/v1/teams/{teamId}/messages/settings`).
+- **`getCalendarEventsForWeek`** endpoint (`GET /api/v1/teams/{teamId}/calendar/events/week`).
+- **`deleteCalendarEvents`** endpoint (`DELETE /api/v1/teams/{teamId}/calendar/events`).
+
+### Changed
+- **Calendar iframe URL** now uses the public share token path `/apps/calendar/p/{token}/{view}/now` (team-calendar-only, no personal calendars). Falls back to full app when no token available.
+- **Calendar connect error handling** in `ManageTeamView` no longer logs the full HTML 500 response body to the console.
+- **`getPinMinLevel`** reads per-team `IConfig` key first, falls back to global key. Admin settings Messages tab removed (settings are now entirely per-team).
+- **`activeFilesIsGf` / `activeFilesIsShared`** in `ManageTeamView` use `.some()` across all active files rows so the GF connect buttons correctly hide when a GF is active even if a shared folder row appears first.
+- **`dav_shares` access filter** in `getRealCalendarIds` broadened from `IN (1,2)` to `IN (1,2,3)` for compatibility with NC Calendar 5.x circle shares.
+- **`resumeCalendarAccess`** corrected from `access=1` (read-only) to `access=2` (read-write).
+- **Select dropdowns** in `AppEmbed` bar and Manage team Messages tab have no background color (theme-transparent).
+
+### Fixed
+- **MariaDB migration failure** on NC 32.0.9: `Version000328200` now uses explicit `'th_tar_pk'` for `setPrimaryKey()` — auto-generated name was 31 chars, one over the 30-char DBAL limit.
+- **Calendar `connectExistingCalendar` TypeError** — `ResourceService` was passing `$resourceId` as `string` to a method expecting `int`; cast to `(int)` at the call site.
+- **GF connect buttons visible when GF already active** — `activeFilesIsGf` now uses `.some()` instead of `.find()` so ordering of rows doesn't affect the result.
+
+
 
 ### Added
 - **Strict 1:1 enforcement for files resources.** `ResourceDiscoveryService::reconcileApp` now snapshots the team's active files state and routes newly discovered rows accordingly: active shared + incoming GF → pending (with `isDualFolderPending` flag); active GF + anything → ignored (GF precedence); active shared + another shared → ignored. `acceptResource` and `unignoreResource` apply the same guard. All refusals write `resource.suppressed_duplicate` audit entries with reason codes.

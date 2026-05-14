@@ -26,16 +26,32 @@ class MessageController extends Controller {
     }
 
     /**
-     * Returns { pinned: object|null, messages: array }
+     * Returns { pinned: object|null, messages: array, total: int, page: int, limit: int }
+     * Query params: page (1-based, default 1), limit (default 5, max 50)
      * SEC: membership enforced — non-members receive 403.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
-    public function listMessages(string $teamId, int $limit = 50, int $offset = 0): JSONResponse {
+    public function listMessages(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
+            $page  = max(1, (int)$this->request->getParam('page', 1));
+            $limit = min(50, max(1, (int)$this->request->getParam('limit', 5)));
+            $offset = ($page - 1) * $limit;
+
+            $this->logger->debug('[TeamHub][MessageController] listMessages', [
+                'teamId' => $teamId, 'page' => $page, 'limit' => $limit, 'offset' => $offset,
+                'app'    => \OCA\TeamHub\AppInfo\Application::APP_ID,
+            ]);
+
             $result = $this->messageService->getTeamMessages($teamId, $limit, $offset);
-            return new JSONResponse($result);
+            return new JSONResponse([
+                'pinned'   => $result['pinned'],
+                'messages' => $result['messages'],
+                'total'    => $result['total'],
+                'page'     => $page,
+                'limit'    => $limit,
+            ]);
         } catch (\Exception $e) {
             $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
                 ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
@@ -193,6 +209,51 @@ class MessageController extends Controller {
                 'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/messages/settings
+     * Returns per-team message settings: pinMinLevel and postMinLevel.
+     * Accessible by any team member.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getMessageSettings(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            return new JSONResponse($this->messageService->getMessageSettings($teamId));
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/messages/settings
+     * Saves per-team message settings. Requires team admin level (8).
+     * Body: { pinMinLevel: 'member'|'moderator'|'admin', postMinLevel: 'member'|'moderator'|'admin' }
+     */
+    #[NoAdminRequired]
+    public function saveMessageSettings(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+            $body = $this->request->getParams();
+            $pin  = trim((string)($body['pinMinLevel']  ?? 'moderator'));
+            $post = trim((string)($body['postMinLevel'] ?? 'member'));
+            $this->messageService->saveMessageSettings($teamId, $pin, $post);
+            $this->logger->debug('[TeamHub][MessageController] saveMessageSettings', [
+                'teamId' => $teamId, 'pin' => $pin, 'post' => $post,
+                'app'    => Application::APP_ID,
+            ]);
+            return new JSONResponse(['success' => true]);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 }

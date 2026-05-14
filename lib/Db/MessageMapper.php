@@ -14,6 +14,22 @@ class MessageMapper {
     }
 
     /**
+     * Count non-pinned messages for a team (for pagination total).
+     */
+    public function countByTeamId(string $teamId): int {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select($qb->createFunction('COUNT(*) AS cnt'))
+            ->from('teamhub_messages')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('pinned', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)));
+
+        $result = $qb->executeQuery();
+        $row    = $result->fetch();
+        $result->closeCursor();
+        return (int)($row['cnt'] ?? 0);
+    }
+
+    /**
      * Find non-pinned messages by team ID (pinned message is returned separately).
      */
     public function findByTeamId(string $teamId, int $limit = 50, int $offset = 0): array {

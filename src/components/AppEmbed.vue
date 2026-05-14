@@ -3,6 +3,23 @@
         <div class="app-embed__bar">
             <span class="app-embed__label">{{ label }}</span>
             <div class="app-embed__bar-actions">
+                <!-- Inline select dropdowns (e.g. calendar view switcher) -->
+                <select
+                    v-for="sel in embedSelects"
+                    :key="sel.id"
+                    class="app-embed__bar-select"
+                    :value="sel.value"
+                    :aria-label="sel.label"
+                    :title="sel.label"
+                    @change="$emit('select', { id: sel.id, value: $event.target.value })">
+                    <option
+                        v-for="opt in sel.options"
+                        :key="opt.value"
+                        :value="opt.value">
+                        {{ opt.label }}
+                    </option>
+                </select>
+
                 <!-- Custom action buttons injected by the parent (e.g. calendar add/delete) -->
                 <NcButton
                     v-for="action in embedActions"
@@ -303,9 +320,16 @@ export default {
          * When the user clicks a button, the component emits 'action' with the id.
          */
         embedActions: { type: Array, default: () => [] },
+        /**
+         * Optional array of select dropdowns rendered in the embed bar before
+         * the action buttons.
+         * Each item: { id: string, label: string, value: string, options: [{ value, label }] }
+         * When the user changes the select, the component emits 'select' with { id, value }.
+         */
+        embedSelects: { type: Array, default: () => [] },
     },
 
-    emits: ['action'],
+    emits: ['action', 'select'],
 
     data() {
         return {
@@ -498,6 +522,23 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
+}
+
+.app-embed__bar-select {
+    height: 34px;
+    padding: 0 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    color: var(--color-main-text);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+    margin-right: 4px;
+}
+
+.app-embed__bar-select:focus-visible {
+    border-color: var(--color-primary-element);
+    box-shadow: 0 0 0 2px var(--color-primary-element-light);
 }
 
 .app-embed__label {

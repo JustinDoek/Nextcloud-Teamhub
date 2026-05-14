@@ -1,7 +1,7 @@
-# TeamHub API Endpoints — v3.28.0
+# TeamHub API Endpoints — v3.37.0
 
-> v3.28.0 adds 5 new endpoints: 3 picker endpoints (Calendar/Deck/Talk), 1 connect endpoint, and 1 soft-delete-without-archive endpoint.
-> v3.18.0 is a frontend-only release (iframe overhaul + Audit tab info banner).
+> v3.37.0 adds 4 new endpoints: 2 calendar event endpoints (week query, delete), 2 message settings endpoints (get, save).
+> v3.28.0 added 5 endpoints: 3 picker endpoints, 1 connect endpoint, 1 soft-delete endpoint.
 
 All endpoints are prefixed with `/apps/teamhub/api/v1`.
 All endpoints require an authenticated Nextcloud session unless noted.
@@ -21,6 +21,43 @@ CSRF protection is disabled (`#[NoCSRFRequired]`) on all listed endpoints.
 All team-scoped membership checks use a direct indexed DB query against `circles_member` — no Circles API session overhead.
 
 ---
+
+## Message settings (added v3.37.0)
+
+### GET `/teams/{teamId}/messages/settings`
+Return per-team message permission settings.
+
+**Auth:** Team member.
+**Response 200:** `{ pinMinLevel: 'member'|'moderator'|'admin', postMinLevel: 'member'|'moderator'|'admin' }`
+
+### POST `/teams/{teamId}/messages/settings`
+Save per-team message permission settings.
+
+**Auth:** Team admin.
+**Body:** `{ pinMinLevel: 'member'|'moderator'|'admin', postMinLevel: 'member'|'moderator'|'admin' }`
+**Response 200:** `{ success: true }`
+
+---
+
+## Calendar events — week query (added v3.37.0)
+
+### GET `/teams/{teamId}/calendar/events/week`
+Return VEVENT objects whose DTSTART falls within the week identified by `weekStart`. Used by the Delete events modal to show the current week's events.
+
+**Auth:** Team member.
+**Query:** `weekStart` — ISO 8601 datetime string for Monday 00:00:00 of the desired week (defaults to current week).
+**Response 200:** `[{ id, uri, calendarId, title, start, end, allDay, calendarName }]`
+
+### DELETE `/teams/{teamId}/calendar/events`
+Delete one or more calendar events. Each deletion is audit-logged as `calendar.event_deleted`.
+
+**Auth:** Team member.
+**Body:** `{ events: [{ calendarId: int, uri: string, title: string }] }`
+**Response 200:** `{ deleted: int, errors: int }`
+
+---
+
+
 
 ## Resource pickers (added v3.28.0)
 

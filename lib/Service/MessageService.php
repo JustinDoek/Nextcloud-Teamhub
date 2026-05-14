@@ -71,12 +71,14 @@ class MessageService {
     }
 
     /**
-     * Get messages for a team. Returns ['pinned' => array|null, 'messages' => array].
+     * Get messages for a team. Returns ['pinned' => array|null, 'messages' => array, 'total' => int].
+     * total is the count of non-pinned messages, used for pagination.
      */
     public function getTeamMessages(string $teamId, int $limit = 50, int $offset = 0): array {
         return [
             'pinned'   => $this->messageMapper->findPinnedByTeamId($teamId),
             'messages' => $this->messageMapper->findByTeamId($teamId, $limit, $offset),
+            'total'    => $this->messageMapper->countByTeamId($teamId),
         ];
     }
 
@@ -95,6 +97,15 @@ class MessageService {
         
         if (!in_array($messageType, ['normal', 'poll', 'question'])) {
             $messageType = 'normal';
+        }
+
+        // Check whether the user meets the team's minimum post level.
+        $postRequired = $this->getPostMinLevel($teamId);
+        if ($postRequired > 1) {
+            $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
+            if ($callerLevel < $postRequired) {
+                throw new \Exception('Insufficient permissions to post messages in this team');
+            }
         }
 
         try {
@@ -121,8 +132,11 @@ class MessageService {
 
             $messageData = $this->messageMapper->create($teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions);
 
-            // Send notifications using DB-resolved team name (not probeCircles).
+            // Send new-message notifications to all members.
             $this->sendNotificationsWithName($teamId, $messageData['id'], $subject, $user->getDisplayName(), $teamName, $circle);
+
+            // Send targeted mention notifications to @mentioned users.
+            $this->sendMentionNotifications($teamId, $messageData['id'], $message, $user, $circle);
 
             // Send email to all members if priority message.
             if ($priority === 'priority') {
@@ -148,7 +162,28 @@ class MessageService {
         if ($existing['author_id'] !== $user->getUID()) {
             throw new \Exception('Only the author can edit this message');
         }
-        return $this->messageMapper->update($messageId, $subject, $message);
+        $updated = $this->messageMapper->update($messageId, $subject, $message);
+
+        // Re-send mention notifications for the updated body.
+        // We don't re-notify the whole team — only newly mentioned users.
+        $teamId = $existing['team_id'];
+        try {
+            $circlesManager = $this->getCirclesManager();
+            $federatedUser = $circlesManager->getFederatedUser($user->getUID(), 1);
+            $circlesManager->startSession($federatedUser);
+            try {
+                $circle = $circlesManager->getCircle($teamId);
+            } finally {
+                $circlesManager->stopSession();
+            }
+            $this->sendMentionNotifications($teamId, $messageId, $message, $user, $circle);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MessageService] Could not send mention notifications on update', [
+                'messageId' => $messageId, 'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+        }
+
+        return $updated;
     }
 
     /**
@@ -229,6 +264,65 @@ class MessageService {
         $row = $result->fetch();
         $result->closeCursor();
         return $row ? (int)$row['level'] : 0;
+    }
+
+    /**
+     * Parse @userId mentions from a message body and send a targeted
+     * `message_mention` notification to each mentioned user who is a team member.
+     * The author is never notified of their own mentions.
+     */
+    private function sendMentionNotifications(string $teamId, int $messageId, string $body, \OCP\IUser $author, $circle): void {
+        try {
+            // Extract all @userId tokens from the message body.
+            preg_match_all('/@([a-zA-Z0-9._-]+)/', $body, $matches);
+            $mentionedIds = array_unique($matches[1] ?? []);
+            if (empty($mentionedIds)) {
+                return;
+            }
+
+            // Build a set of valid circle member userIds for quick lookup.
+            $memberUserIds = [];
+            foreach ($circle->getMembers() as $member) {
+                $uid = method_exists($member, 'getUserId') ? $member->getUserId() : null;
+                if ($uid) {
+                    $memberUserIds[$uid] = true;
+                }
+            }
+
+            $link = $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?team=' . urlencode($teamId);
+
+            foreach ($mentionedIds as $mentionedId) {
+                // Only notify actual team members, never the author.
+                if (!isset($memberUserIds[$mentionedId]) || $mentionedId === $author->getUID()) {
+                    continue;
+                }
+                try {
+                    $notification = $this->notificationManager->createNotification();
+                    $notification->setApp('teamhub')
+                        ->setUser($mentionedId)
+                        ->setDateTime(new \DateTime())
+                        ->setObject('message', (string)$messageId)
+                        ->setSubject('message_mention', [
+                            'author'   => $author->getDisplayName(),
+                            'authorId' => $author->getUID(),
+                            'teamId'   => $teamId,
+                        ])
+                        ->setLink($link);
+                    $this->notificationManager->notify($notification);
+                    $this->logger->debug('[MessageService] Sent mention notification', [
+                        'to' => $mentionedId, 'messageId' => $messageId, 'app' => Application::APP_ID,
+                    ]);
+                } catch (\Exception $e) {
+                    $this->logger->warning('[MessageService] Failed to send mention notification', [
+                        'to' => $mentionedId, 'exception' => $e, 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MessageService] sendMentionNotifications failed', [
+                'messageId' => $messageId, 'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+        }
     }
 
     /**
@@ -329,8 +423,8 @@ class MessageService {
             throw new \Exception('Message does not belong to this team');
         }
 
-        // Check caller's member level against the admin-configured threshold
-        $requiredLevel = $this->getPinMinLevel();
+        // Check caller's member level against the per-team (or global) threshold
+        $requiredLevel = $this->getPinMinLevel($teamId);
         $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
         if ($callerLevel < $requiredLevel) {
             throw new \Exception('Insufficient permissions to pin messages');
@@ -355,7 +449,7 @@ class MessageService {
             throw new \Exception('Message does not belong to this team');
         }
 
-        $requiredLevel = $this->getPinMinLevel();
+        $requiredLevel = $this->getPinMinLevel($teamId);
         $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
         if ($callerLevel < $requiredLevel) {
             throw new \Exception('Insufficient permissions to unpin messages');
@@ -372,20 +466,71 @@ class MessageService {
     }
 
     /**
-     * Return the minimum Circles level required to pin, based on admin setting.
+     * Return the minimum Circles level required to pin for a specific team.
+     * Reads per-team key first, falls back to global app-level setting.
      * Levels: member=1, moderator=4, admin=8.
      */
-    private function getPinMinLevel(): int {
-        $setting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
+    private function getPinMinLevel(string $teamId = ''): int {
+        $setting = $teamId
+            ? $this->config->getAppValue(Application::APP_ID, 'pinMinLevel_' . $teamId, '')
+            : '';
+        if ($setting === '') {
+            $setting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
+        }
         return match($setting) {
-            'member'    => 1,
-            'admin'     => 8,
-            default     => 4, // moderator
+            'member' => 1,
+            'admin'  => 8,
+            default  => 4,
         };
     }
 
     /**
+     * Return the minimum Circles level required to post messages for a team.
+     * Default: member (1) — everyone can post unless overridden per team.
+     */
+    private function getPostMinLevel(string $teamId): int {
+        $setting = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, 'member');
+        return match($setting) {
+            'moderator' => 4,
+            'admin'     => 8,
+            default     => 1,
+        };
+    }
+
+    /**
+     * Return message settings for a team (pin level + post level) as strings.
+     */
+    public function getMessageSettings(string $teamId): array {
+        $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel_' . $teamId, '');
+        if ($pinSetting === '') {
+            $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
+        }
+        $postSetting = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, 'member');
+        return [
+            'pinMinLevel'  => $pinSetting,
+            'postMinLevel' => $postSetting,
+        ];
+    }
+
+    /**
+     * Save per-team message settings.
+     * Accepts pinMinLevel and postMinLevel, both as strings: 'member'|'moderator'|'admin'.
+     */
+    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel): void {
+        $valid = ['member', 'moderator', 'admin'];
+        if (!in_array($pinMinLevel, $valid, true)) {
+            throw new \InvalidArgumentException('Invalid pinMinLevel: ' . $pinMinLevel);
+        }
+        if (!in_array($postMinLevel, $valid, true)) {
+            throw new \InvalidArgumentException('Invalid postMinLevel: ' . $postMinLevel);
+        }
+        $this->config->setAppValue(Application::APP_ID, 'pinMinLevel_'  . $teamId, $pinMinLevel);
+        $this->config->setAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, $postMinLevel);
+    }
+
+    /**
      * Return the configured pinMinLevel string (for the admin API response).
+     * Still reads the global setting for the admin panel.
      */
     public function getPinMinLevelSetting(): string {
         return $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');

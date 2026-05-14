@@ -104,6 +104,8 @@ return [
         ['name' => 'message#deleteMessage',       'url' => '/api/v1/teams/{teamId}/messages/{messageId}',   'verb' => 'DELETE'],
         ['name' => 'message#pinMessage',          'url' => '/api/v1/teams/{teamId}/messages/{messageId}/pin',   'verb' => 'POST'],
         ['name' => 'message#unpinMessage',        'url' => '/api/v1/teams/{teamId}/messages/{messageId}/unpin', 'verb' => 'POST'],
+        ['name' => 'message#getMessageSettings',  'url' => '/api/v1/teams/{teamId}/messages/settings',      'verb' => 'GET'],
+        ['name' => 'message#saveMessageSettings', 'url' => '/api/v1/teams/{teamId}/messages/settings',      'verb' => 'POST'],
         ['name' => 'message#getAggregatedMessages','url' => '/api/v1/messages/aggregated',                   'verb' => 'GET'],
         ['name' => 'message#votePoll',            'url' => '/api/v1/messages/{messageId}/vote',              'verb' => 'POST'],
         ['name' => 'message#getPollResults',      'url' => '/api/v1/messages/{messageId}/poll-results',      'verb' => 'GET'],
