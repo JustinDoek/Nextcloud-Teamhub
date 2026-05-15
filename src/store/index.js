@@ -79,6 +79,20 @@ export default new Vuex.Store({
         },
 
         /**
+         * True if the current user's level meets the per-team linkMinLevel threshold.
+         * Default: admin (level 8) when no setting is stored.
+         */
+        canManageLinks: state => {
+            const uid = state.currentUser?.uid
+            if (!uid) return false
+            const member = state.members.find(m => m.userId === uid)
+            const userLevel = member ? (member.level || 1) : 1
+            const levelMap = { member: 1, moderator: 4, admin: 8 }
+            const required = levelMap[state.messageSettings?.linkMinLevel] ?? 8
+            return userLevel >= required
+        },
+
+        /**
          * True if the current user is a team admin (Circles level >= 8).
          */
         currentUserIsTeamAdmin: state => (state.currentUserLevel || 0) >= 8,

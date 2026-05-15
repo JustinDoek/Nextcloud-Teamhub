@@ -100,8 +100,16 @@ class MaintenanceService {
 
             $result = $qb->executeQuery();
             $rawRows = [];
+            $seen    = [];
             while ($row = $result->fetch()) {
-                $rawRows[] = $row;
+                $uid = $row['unique_id'];
+                // Deduplicate: if a circle has multiple level=9 member rows (edge case
+                // after manual repair attempts), the LEFT JOIN produces duplicate rows.
+                // Keep the first occurrence (it has an owner_uid set) and skip the rest.
+                if (!isset($seen[$uid])) {
+                    $seen[$uid] = true;
+                    $rawRows[] = $row;
+                }
             }
             $result->closeCursor();
 
@@ -281,10 +289,17 @@ class MaintenanceService {
                 $id   = $row['unique_id'];
                 $name = $row['name'] ?? '';
 
-                // Only include real user-created teams — these always start with 'app:circles:'.
-                // Skip system circles: user personal circles (user:), group circles (group:),
-                // app-internal circles (app:occ:), mail/contact circles (mail:), etc.
-                if (!str_starts_with($name, 'app:circles:')) {
+                // Skip system circles — same exclusion list as getAllTeams() and checkMembershipIntegrity().
+                // Real user-created teams have a plain name (NC33+) or 'app:circles:' prefix (older NC).
+                $systemPrefixes = ['user:', 'group:', 'mail:', 'app:occ:', 'contact:'];
+                $isSystemCircle = false;
+                foreach ($systemPrefixes as $pfx) {
+                    if (str_starts_with($name, $pfx)) {
+                        $isSystemCircle = true;
+                        break;
+                    }
+                }
+                if ($isSystemCircle) {
                     continue;
                 }
                 // Skip circles that have an owner
@@ -810,6 +825,230 @@ class MaintenanceService {
         $circles = $res->fetchAll();
         $res->closeCursor();
 
+        // ── Step A: detect teams nested inside other teams ───────────────────
+        // When team B is invited into team A, Circles writes a circles_member row
+        // with user_type=16, circle_id=teamA, single_id=teamB.
+        // This corrupts Circles' visibility queries and breaks posting.
+        $nestedQb = $this->db->getQueryBuilder();
+        $nestedRes = $nestedQb
+            ->select('cm.circle_id', 'cm.single_id', 'parent.name AS parent_name', 'child.name AS child_name')
+            ->from('circles_member', 'cm')
+            ->innerJoin('cm', 'circles_circle', 'parent', $nestedQb->expr()->eq('parent.unique_id', 'cm.circle_id'))
+            ->innerJoin('cm', 'circles_circle', 'child',  $nestedQb->expr()->eq('child.unique_id',  'cm.single_id'))
+            ->where($nestedQb->expr()->eq('cm.user_type',    $nestedQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($nestedQb->expr()->eq('cm.status',    $nestedQb->createNamedParameter('Member')))
+            ->andWhere($nestedQb->expr()->eq('child.source', $nestedQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($nestedQb->expr()->eq('parent.source', $nestedQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeQuery();
+
+        while ($nestedRow = $nestedRes->fetch()) {
+            $issues[] = [
+                'id'               => $nestedRow['circle_id'],
+                'name'             => $nestedRow['parent_name'],
+                'issue_type'       => 'nested_team',
+                'nested_team_id'   => $nestedRow['single_id'],
+                'nested_team_name' => $nestedRow['child_name'],
+                'direct_count'     => 0,
+                'effective_count'  => 0,
+                'member_count'     => 0,
+                'membership_count' => 0,
+            ];
+        }
+        $nestedRes->closeCursor();
+
+        // ── Step B: detect user-created teams with CFG_SINGLE (1024) wrongly set ─
+        // CFG_SINGLE marks a circle as a "personal circle" (the auto-created
+        // per-user circle). When set on a user-created team (source=16), Circles
+        // treats the team as personal and hides it from all API queries.
+        // This happens when TeamHub previously wrote bitmask 1024 as the
+        // "prevent nesting" setting — which was the wrong bit.
+        // Fix: clear bit 1024 from the config.
+        $CFG_SINGLE = 1024;
+        $singleQb = $this->db->getQueryBuilder();
+        $singleRes = $singleQb
+            ->select('c.unique_id', 'c.name', 'c.config', 'c.display_name', 'c.sanitized_name')
+            ->from('circles_circle', 'c')
+            ->where($singleQb->expr()->eq('c.source', $singleQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeQuery();
+
+        while ($singleRow = $singleRes->fetch()) {
+            $cfg  = (int)$singleRow['config'];
+            $name = (string)($singleRow['name'] ?? '');
+
+            if (!($cfg & $CFG_SINGLE)) {
+                continue; // bit not set — fine
+            }
+
+            // Skip circles that are legitimately personal or system — these
+            // are supposed to have CFG_SINGLE set. Only flag user-created teams.
+            $skipPrefixes = ['user:', 'mail:', 'app:occ:', 'group:', 'contact:'];
+            $skip = false;
+            foreach ($skipPrefixes as $pfx) {
+                if (str_starts_with($name, $pfx)) {
+                    $skip = true;
+                    break;
+                }
+            }
+            if ($skip) {
+                continue;
+            }
+            // Resolve display name
+            $displayName = $singleRow['display_name'] ?? '';
+            if ($displayName === '') {
+                $displayName = $singleRow['sanitized_name'] ?? '';
+            }
+            if ($displayName === '') {
+                $n = $singleRow['name'] ?? '';
+                $displayName = str_starts_with($n, 'app:circles:') ? substr($n, 12) : $n;
+            }
+            $issues[] = [
+                'id'               => $singleRow['unique_id'],
+                'name'             => $displayName,
+                'issue_type'       => 'cfg_single_set',
+                'direct_count'     => 0,
+                'effective_count'  => 0,
+                'member_count'     => 0,
+                'membership_count' => 0,
+            ];
+        }
+        $singleRes->closeCursor();
+
+        // ── Step C: detect circles with duplicate user rows (same user_id, user_type=1) ─
+        // This happens when a team-nesting operation adds a side-effect member row
+        // for a user that is already a direct member, or when a repair attempt
+        // inserts a second owner row. Both cause duplicate entries in the admin list
+        // and confusion in Circles' membership checks.
+        // We detect ANY case where the same user_id appears more than once as a
+        // direct member (user_type=1) in the same circle.
+        $dupQb = $this->db->getQueryBuilder();
+        $dupQb->select('cm.circle_id', 'cm.user_id', 'cc.name',
+                       $dupQb->func()->count('cm.id', 'row_count'),
+                       $dupQb->func()->max('cm.level', 'max_level'))
+            ->from('circles_member', 'cm')
+            ->innerJoin('cm', 'circles_circle', 'cc', $dupQb->expr()->eq('cc.unique_id', 'cm.circle_id'))
+            ->where($dupQb->expr()->eq('cm.user_type', $dupQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($dupQb->expr()->eq('cm.status',   $dupQb->createNamedParameter('Member')))
+            ->andWhere($dupQb->expr()->eq('cc.source',   $dupQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->groupBy('cm.circle_id', 'cm.user_id', 'cc.name')
+            ->having($dupQb->expr()->gt(
+                $dupQb->createFunction('COUNT(cm.id)'),
+                $dupQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+            ));
+
+        $dupRes = $dupQb->executeQuery();
+        while ($dupRow = $dupRes->fetch()) {
+            $issues[] = [
+                'id'               => $dupRow['circle_id'],
+                'name'             => $dupRow['name'],
+                'issue_type'       => 'duplicate_member',
+                'duplicate_uid'    => $dupRow['user_id'],
+                'row_count'        => (int)$dupRow['row_count'],
+                'max_level'        => (int)$dupRow['max_level'],
+                'direct_count'     => 0,
+                'effective_count'  => 0,
+                'member_count'     => 0,
+                'membership_count' => 0,
+            ];
+        }
+        $dupRes->closeCursor();
+
+        // ── Step D: detect source=16 teams with no owner (level=9) ──────────
+        // Uses LEFT JOIN to find circles with zero level=9 member rows.
+        $noOwnerQb  = $this->db->getQueryBuilder();
+        $noOwnerRes = $noOwnerQb
+            ->select('c.unique_id', 'c.name', 'c.display_name', 'c.sanitized_name')
+            ->from('circles_circle', 'c')
+            ->leftJoin('c', 'circles_member', 'o',
+                $noOwnerQb->expr()->andX(
+                    $noOwnerQb->expr()->eq('o.circle_id',  'c.unique_id'),
+                    $noOwnerQb->expr()->eq('o.level',      $noOwnerQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                    $noOwnerQb->expr()->eq('o.status',     $noOwnerQb->createNamedParameter('Member')),
+                    $noOwnerQb->expr()->eq('o.user_type',  $noOwnerQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                )
+            )
+            ->where($noOwnerQb->expr()->eq('c.source', $noOwnerQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($noOwnerQb->expr()->isNull('o.circle_id'))
+            ->executeQuery();
+
+        $systemPfx = ['user:', 'mail:', 'app:occ:', 'group:', 'contact:'];
+        while ($noOwnerRow = $noOwnerRes->fetch()) {
+            $name = (string)($noOwnerRow['name'] ?? '');
+            $skip = false;
+            foreach ($systemPfx as $pfx) {
+                if (str_starts_with($name, $pfx)) { $skip = true; break; }
+            }
+            if ($skip) continue;
+
+            $displayName = $noOwnerRow['display_name'] ?? '';
+            if ($displayName === '') $displayName = $noOwnerRow['sanitized_name'] ?? '';
+            if ($displayName === '') {
+                $displayName = str_starts_with($name, 'app:circles:') ? substr($name, 12) : $name;
+            }
+
+            // Count existing direct members to determine if auto-repair is possible
+            $mbQb  = $this->db->getQueryBuilder();
+            $mbRes = $mbQb->select($mbQb->func()->count('id', 'cnt'))
+                ->from('circles_member')
+                ->where($mbQb->expr()->eq('circle_id', $mbQb->createNamedParameter($noOwnerRow['unique_id'])))
+                ->andWhere($mbQb->expr()->eq('status',   $mbQb->createNamedParameter('Member')))
+                ->andWhere($mbQb->expr()->eq('user_type', $mbQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeQuery();
+            $memberCount = (int)$mbRes->fetchOne();
+            $mbRes->closeCursor();
+
+            $issues[] = [
+                'id'               => $noOwnerRow['unique_id'],
+                'name'             => $displayName,
+                'issue_type'       => 'no_owner',
+                'has_members'      => $memberCount > 0,
+                'direct_count'     => $memberCount,
+                'effective_count'  => 0,
+                'member_count'     => $memberCount,
+                'membership_count' => 0,
+            ];
+        }
+        $noOwnerRes->closeCursor();
+
+        // ── Step E: detect source=16 teams where display_name doesn't match ──
+        // Circles sometimes sets display_name to the owner's name instead of the
+        // team name (a Circles bug). This causes Circles to treat the circle as a
+        // personal circle, applying CFG_SINGLE and hiding it from all API queries.
+        // We detect cases where display_name differs from sanitized_name.
+        // Repair: set display_name = sanitized_name (or the stripped team name).
+        $dnQb  = $this->db->getQueryBuilder();
+        $dnRes = $dnQb
+            ->select('c.unique_id', 'c.name', 'c.display_name', 'c.sanitized_name')
+            ->from('circles_circle', 'c')
+            ->where($dnQb->expr()->eq('c.source', $dnQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($dnQb->expr()->neq('c.display_name', $dnQb->createNamedParameter('')))
+            ->andWhere($dnQb->expr()->neq('c.sanitized_name', $dnQb->createNamedParameter('')))
+            ->andWhere($dnQb->expr()->neq('c.display_name', 'c.sanitized_name'))
+            ->executeQuery();
+
+        while ($dnRow = $dnRes->fetch()) {
+            $name = (string)($dnRow['name'] ?? '');
+            $skip = false;
+            foreach ($systemPfx as $pfx) {
+                if (str_starts_with($name, $pfx)) { $skip = true; break; }
+            }
+            if ($skip) continue;
+
+            $displayName    = (string)$dnRow['display_name'];
+            $sanitizedName  = (string)$dnRow['sanitized_name'];
+
+            $issues[] = [
+                'id'               => $dnRow['unique_id'],
+                'name'             => $displayName,   // show the wrong name so admin recognises it
+                'issue_type'       => 'wrong_display_name',
+                'correct_name'     => $sanitizedName,
+                'direct_count'     => 0,
+                'effective_count'  => 0,
+                'member_count'     => 0,
+                'membership_count' => 0,
+            ];
+        }
+        $dnRes->closeCursor();
+
         foreach ($circles as $circle) {
             $total++;
             $teamId = $circle['unique_id'];
@@ -839,13 +1078,12 @@ class MaintenanceService {
             if ($isHealthy) {
                 $healthy++;
             } else {
-                // Stale cache: has members but cache is empty
                 $issues[] = [
-                    'id'              => $teamId,
-                    'name'            => $circle['name'],
-                    'direct_count'    => $directCount,
-                    'effective_count' => $effectiveCount,
-                    // Keep legacy keys so the frontend stays compatible
+                    'id'               => $teamId,
+                    'name'             => $circle['name'],
+                    'issue_type'       => 'stale_cache',
+                    'direct_count'     => $directCount,
+                    'effective_count'  => $effectiveCount,
                     'member_count'     => $directCount,
                     'membership_count' => $effectiveCount,
                 ];
@@ -858,6 +1096,232 @@ class MaintenanceService {
             'mismatched'  => count($issues),
             'issues'      => $issues,
         ];
+    }
+
+    /**
+     * Remove duplicate circles_member rows for the same user_id in a circle.
+     * Keeps the row with the highest level (owner survives over moderator/member).
+     * If levels are equal, keeps the oldest row by id.
+     * Returns the number of rows deleted.
+     */
+    public function repairDuplicateMember(string $teamId, string $userId): int {
+        $this->requireNcAdmin();
+
+        // Fetch all rows for this user in this circle, ordered by level DESC then id ASC
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('id', 'level')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id',  $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id',  $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('status',   $qb->createNamedParameter('Member')))
+            ->orderBy('level', 'DESC')
+            ->addOrderBy('id', 'ASC')
+            ->executeQuery();
+
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = ['id' => (int)$row['id'], 'level' => (int)$row['level']];
+        }
+        $res->closeCursor();
+
+        if (count($rows) <= 1) {
+            return 0;
+        }
+
+        // Keep the first row (highest level, oldest id among ties), delete the rest
+        $keepId = $rows[0]['id'];
+        $delIds = array_map(fn($r) => $r['id'], array_slice($rows, 1));
+
+        $delQb = $this->db->getQueryBuilder();
+        $delQb->delete('circles_member')
+            ->where($delQb->expr()->in('id', $delQb->createNamedParameter($delIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)));
+        $removed = $delQb->executeStatement();
+
+        $this->logger->info('[MaintenanceService] repairDuplicateMember: removed duplicate rows', [
+            'teamId' => $teamId, 'userId' => $userId,
+            'kept' => $keepId, 'removed' => $removed, 'app' => Application::APP_ID,
+        ]);
+
+        return $removed;
+    }
+
+    /**
+     * Fix a circle's display_name to match its sanitized_name.
+     * Used when Circles has incorrectly set display_name to the owner's name.
+     */
+    public function fixDisplayName(string $teamId): string {
+        $this->requireNcAdmin();
+
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('sanitized_name', 'name', 'source')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        if (!$row) {
+            throw new \Exception("Circle not found: {$teamId}");
+        }
+
+        $correctName = (string)$row['sanitized_name'];
+        if ($correctName === '') {
+            // Fall back to stripping the app:circles: prefix from name
+            $rawName = (string)$row['name'];
+            $correctName = str_starts_with($rawName, 'app:circles:')
+                ? substr($rawName, strlen('app:circles:'))
+                : $rawName;
+        }
+
+        $updQb = $this->db->getQueryBuilder();
+        $updQb->update('circles_circle')
+            ->set('display_name', $updQb->createNamedParameter($correctName))
+            ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
+            ->executeStatement();
+
+        $this->logger->info('[MaintenanceService] fixDisplayName: corrected display_name', [
+            'teamId' => $teamId, 'newDisplayName' => $correctName, 'app' => Application::APP_ID,
+        ]);
+
+        return $correctName;
+    }
+
+    /**
+     * Repair a team with no owner by promoting the highest-level member
+     * or inserting the calling admin if the team is empty.
+     * Returns the uid of the new owner.
+     */
+    public function repairMissingOwner(string $teamId): string {
+        $this->requireNcAdmin();
+
+        $adminUser = $this->userSession->getUser();
+        if (!$adminUser) {
+            throw new \Exception('No authenticated session');
+        }
+
+        // Find the highest-level existing direct member (excluding any already at 9)
+        $mbQb  = $this->db->getQueryBuilder();
+        $mbRes = $mbQb->select('id', 'user_id', 'level')
+            ->from('circles_member')
+            ->where($mbQb->expr()->eq('circle_id',  $mbQb->createNamedParameter($teamId)))
+            ->andWhere($mbQb->expr()->eq('status',   $mbQb->createNamedParameter('Member')))
+            ->andWhere($mbQb->expr()->eq('user_type', $mbQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->orderBy('level', 'DESC')
+            ->addOrderBy('id', 'ASC')
+            ->setMaxResults(1)
+            ->executeQuery();
+        $existing = $mbRes->fetch();
+        $mbRes->closeCursor();
+
+        if ($existing) {
+            // Promote existing highest-level member to owner
+            $rowId  = (int)$existing['id'];
+            $newUid = (string)$existing['user_id'];
+
+            $updQb = $this->db->getQueryBuilder();
+            $updQb->update('circles_member')
+                ->set('level', $updQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->where($updQb->expr()->eq('id', $updQb->createNamedParameter($rowId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            $this->logger->info('[MaintenanceService] assignOwner: promoted existing member to owner', [
+                'teamId' => $teamId, 'uid' => $newUid, 'app' => Application::APP_ID,
+            ]);
+            return $newUid;
+        }
+
+        // No members — insert the calling admin as owner
+        $adminUid = $adminUser->getUID();
+        $now      = time();
+
+        // Generate a single_id for the new member row — use the admin's personal circle unique_id
+        $singleId = $this->memberService->resolveUserSingleId($adminUid, $this->db) ?? $adminUid;
+
+        $insQb = $this->db->getQueryBuilder();
+        $insQb->insert('circles_member')
+            ->setValue('circle_id',  $insQb->createNamedParameter($teamId))
+            ->setValue('single_id',  $insQb->createNamedParameter($singleId))
+            ->setValue('user_id',    $insQb->createNamedParameter($adminUid))
+            ->setValue('user_type',  $insQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->setValue('level',      $insQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->setValue('status',     $insQb->createNamedParameter('Member'))
+            ->setValue('cached_name', $insQb->createNamedParameter($adminUid))
+            ->setValue('cached_update', $insQb->createNamedParameter($now, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->setValue('joined',     $insQb->createNamedParameter($now, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->executeStatement();
+
+        $this->logger->info('[MaintenanceService] assignOwner: inserted admin as owner', [
+            'teamId' => $teamId, 'uid' => $adminUid, 'app' => Application::APP_ID,
+        ]);
+        return $adminUid;
+    }
+
+    /**
+     * Clear the CFG_SINGLE (1024) bit from a user-created team's config.
+     * This bit marks a circle as a "personal circle" and hides it from
+     * Circles' own API when set incorrectly on a user-created team (source=16).
+     */
+    public function clearCfgSingle(string $teamId): void {
+        $this->requireNcAdmin();
+
+        // Read current config
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('config', 'source')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        if (!$row) {
+            throw new \Exception("Circle not found: {$teamId}");
+        }
+        if ((int)$row['source'] !== 16) {
+            throw new \Exception("Circle {$teamId} is not a user-created team (source={$row['source']})");
+        }
+
+        $currentConfig = (int)$row['config'];
+        $newConfig     = $currentConfig & ~1024; // clear CFG_SINGLE
+
+        $updQb = $this->db->getQueryBuilder();
+        $updQb->update('circles_circle')
+            ->set('config', $updQb->createNamedParameter($newConfig, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
+            ->executeStatement();
+
+        $this->logger->info('[MaintenanceService] clearCfgSingle: cleared bit 1024', [
+            'teamId' => $teamId, 'oldConfig' => $currentConfig, 'newConfig' => $newConfig,
+            'app' => Application::APP_ID,
+        ]);
+    }
+
+    /**
+     * Remove a team-as-member row from circles_member.
+     * Deletes the row where circle_id=parentTeamId, single_id=childTeamId, user_type=16.
+     * This repairs the visibility corruption caused by a team being nested inside another team.
+     */
+    public function removeNestedTeam(string $parentTeamId, string $childTeamId): void {
+        $this->requireNcAdmin();
+
+        $qb = $this->db->getQueryBuilder();
+        $qb->delete('circles_member')
+            ->where($qb->expr()->eq('circle_id',  $qb->createNamedParameter($parentTeamId)))
+            ->andWhere($qb->expr()->eq('single_id', $qb->createNamedParameter($childTeamId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+
+        $removed = $qb->executeStatement();
+
+        $this->logger->info('[MaintenanceService] removeNestedTeam: removed circles_member rows', [
+            'parentTeamId' => $parentTeamId, 'childTeamId' => $childTeamId,
+            'rows' => $removed, 'app' => Application::APP_ID,
+        ]);
+
+        if ($removed === 0) {
+            throw new \Exception("No nested-team row found for parent={$parentTeamId} child={$childTeamId}");
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1025,6 +1489,38 @@ class MaintenanceService {
      */
     public function repairMembershipCache(string $teamId): void {
         $this->requireNcAdmin();
+
+        // Always clear CFG_SINGLE (1024) before rebuilding the cache.
+        // This bit makes Circles treat user-created teams as personal circles,
+        // hiding them from its own API. It should never be set on source=16 circles.
+        // Clearing it here ensures the cache rebuild works on a valid circle config.
+        try {
+            $cfgQb  = $this->db->getQueryBuilder();
+            $cfgRes = $cfgQb->select('config', 'source')
+                ->from('circles_circle')
+                ->where($cfgQb->expr()->eq('unique_id', $cfgQb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $cfgRow = $cfgRes->fetch();
+            $cfgRes->closeCursor();
+
+            if ($cfgRow && (int)$cfgRow['source'] === 16 && ((int)$cfgRow['config'] & 1024)) {
+                $newCfg = (int)$cfgRow['config'] & ~1024;
+                $updQb  = $this->db->getQueryBuilder();
+                $updQb->update('circles_circle')
+                    ->set('config', $updQb->createNamedParameter($newCfg, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
+                    ->executeStatement();
+                $this->logger->info('[MaintenanceService] repairMembershipCache: cleared CFG_SINGLE bit', [
+                    'teamId' => $teamId, 'oldConfig' => (int)$cfgRow['config'], 'newConfig' => $newCfg,
+                    'app' => Application::APP_ID,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MaintenanceService] repairMembershipCache: CFG_SINGLE clear failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
 
         try {
             $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);

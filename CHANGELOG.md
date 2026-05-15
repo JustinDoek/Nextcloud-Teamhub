@@ -3,7 +3,35 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.38.0] — 2026-05-14 — Session H
+## [3.39.0] — 2026-05-15 — Session I
+
+### Added
+- **Integrity check: nested team detection.** Flags any `circles_member` row where a user-created team (source=16) is a member of another. Repair removes the offending row.
+- **Integrity check: CFG_SINGLE corruption detection.** Flags source=16 circles with bit 1024 set (causes Circles to hide the team from its own API). Excludes legitimate personal/system circles. Repair: clears the bit.
+- **Integrity check: duplicate member detection.** Flags circles where the same user_id appears more than once as a direct member. Repair: keeps highest-level row, deletes rest.
+- **Integrity check: no-owner detection.** Flags source=16 teams with no level=9 member row. Repair: promotes highest-level existing member, or inserts calling NC admin if team is empty.
+- **Integrity check: wrong display_name detection.** Flags circles where display_name ≠ sanitized_name — this causes Circles to misclassify user-created teams as personal circles. Repair: sets display_name = sanitized_name.
+- **Link permissions.** New `linkMinLevel` setting per team (member/moderator/admin, default admin). The `+` button in the tab bar is hidden for users below the required level. Configurable in Manage team → Permissions.
+- **`getTeamMemberUids()` in MessageService.** Direct DB member lookup for notifications — replaces Circles API `getCircle()` call in the message write path. Eliminates "Circle not found" 500 errors when posting to teams with config issues.
+
+### Changed
+- **Manage team tab renamed: Messages → Permissions.** Pin level, post level, and new link level settings consolidated here.
+- **`updateTeamConfig()` no longer calls `getCircle()` for cache flush.** The Circles API was triggering internal sync that re-applied CFG_SINGLE (1024) after every config write. Only APCu cache is flushed now.
+- **CFG_SINGLE (1024) removed from `MANAGED_BITS`.** This bit marks personal circles and must not be written to user-created teams. Frontend no longer sends it; backend no longer includes it in the write mask.
+- **`repairMembershipCache()` auto-clears CFG_SINGLE** before rebuilding the membership cache.
+- **`searchUsers()` no longer returns teams/circles** in invite search results. Inviting a team into another team corrupts Circles' visibility queries.
+- **Orphaned teams query** no longer requires `app:circles:` name prefix — compatible with NC33 which stores plain team names.
+- **`getAllTeams()` deduplicates** by `unique_id` — prevents duplicate rows when a circle has multiple level=9 member rows.
+- **Ghost cleanup** moved from its own tab into the Maintenance tab.
+
+### Fixed
+- **PostgreSQL: backtick quoting** in `resolveUserSingleId()` (`c.\`config\`` → `c.config`) caused syntax errors on PostgreSQL, breaking indirect member detection.
+- **SQL HAVING clause** for duplicate member detection used aliased `COUNT()` which MySQL rejects. Replaced with `createFunction('COUNT(cm.id)')`.
+- **`InviteMemberModal`** no longer shows teams in search results (`AccountMultiple` icon removed, circle type branch removed).
+- **`ArchiveTeamModal`** displays resolved folder name instead of raw `/f/{id}` link.
+- **Announcement banner** (mohamedsakhri/nextcloud-announcementbanner) suppressed in iframes via `.announcementbanner-stack` CSS selector.
+- **share_folder config.php** respected when creating team folders (AIO and similar installations).
+
 
 ### Added
 - **Ghost member cleanup.** New "Ghost cleanup" tab in Admin settings. Scans all team memberships for users whose NC account has been deleted, grouped by uid. Admin can remove a ghost from a single team or from all teams at once. Includes a live-account safety guard. Endpoint: `GET /api/v1/admin/maintenance/ghost-members`, `DELETE /api/v1/admin/maintenance/ghost-members/{userId}`.

@@ -835,6 +835,33 @@ Remove a deleted user from team memberships. Only removes `user_type=1` (direct 
 **Body (JSON, optional):** `{ teamId: string }` — if provided, removes from that team only; if omitted, removes from all teams.
 **Response:** `{ removed: int }` — number of `circles_member` rows deleted.
 
+### DELETE `/admin/maintenance/nested-team`
+Remove a nested-team row from `circles_member` (a user-created team invited into another team).
+**Auth:** NC admin.
+**Body (JSON):** `{ parentTeamId: string, childTeamId: string }`
+**Response:** `{ success: true }`
+
+### POST `/admin/maintenance/clear-cfg-single/{teamId}`
+Clear the CFG_SINGLE (1024) bit from a user-created team's config. Restores Circles API visibility.
+**Auth:** NC admin.
+**Response:** `{ success: true }`
+
+### POST `/admin/maintenance/repair-duplicate-member/{teamId}`
+Remove duplicate `circles_member` rows for the same user_id. Keeps the highest-level row (owner survives).
+**Auth:** NC admin.
+**Body (JSON):** `{ userId: string }`
+**Response:** `{ success: true, removed: int }`
+
+### POST `/admin/maintenance/assign-owner/{teamId}`
+Assign an owner to a team with no level=9 member row. Promotes the highest-level existing member, or inserts the calling NC admin if the team is empty.
+**Auth:** NC admin.
+**Response:** `{ success: true, newOwner: string }` — uid of the new owner.
+
+### POST `/admin/maintenance/fix-display-name/{teamId}`
+Fix a circle's `display_name` to match `sanitized_name`. Corrects misclassification by Circles when display_name was set to the owner's name instead of the team name.
+**Auth:** NC admin.
+**Response:** `{ success: true, newName: string }`
+
 ### GET `/admin/telemetry`
 Current telemetry settings and payload preview.
 **Auth:** NC admin.

@@ -1487,10 +1487,11 @@ class MemberService {
                 ->andWhere($cQb->expr()->eq('m.user_type', $cQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($cQb->expr()->eq('m.level',   $cQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere(
-                    // CFG_SINGLE bit (2048) is set: config & 2048 > 0
-                    // QB does not support bitwise AND natively — use raw expression
+                    // CFG_SINGLE bit (2048) is set: config & 2048 > 0.
+                    // Backtick quoting removed — backticks are MySQL-only syntax
+                    // and cause a syntax error on PostgreSQL.
                     $cQb->expr()->gt(
-                        $cQb->createFunction('(c.`config` & 2048)'),
+                        $cQb->createFunction('(c.config & 2048)'),
                         $cQb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                     )
                 )
@@ -1799,50 +1800,11 @@ class MemberService {
             ];
         }
 
-        // Circles / Teams — search user-created circles by name (source=16).
-        // Always shown when circles app is available; no separate admin toggle needed
-        // since they are just other teams within the same NC instance.
-        // Excludes personal circles (name starts with 'user:') and
-        // group-backed circles (name starts with 'group:').
-        if ($this->appManager->isInstalled('circles')) {
-            try {
-                $db   = $this->container->get(\OCP\IDBConnection::class);
-                $cQb  = $db->getQueryBuilder();
-                $cRes = $cQb->select('unique_id', 'name')
-                    ->from('circles_circle')
-                    ->where(
-                        $cQb->expr()->like(
-                            'name',
-                            $cQb->createNamedParameter('%' . $db->escapeLikeParameter($query) . '%')
-                        )
-                    )
-                    ->andWhere($cQb->expr()->eq('source', $cQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->setMaxResults($limit)
-                    ->executeQuery();
-
-                while ($cRow = $cRes->fetch()) {
-                    $name = (string)$cRow['name'];
-                    // Skip personal and group-backed circles
-                    if (str_starts_with($name, 'user:') || str_starts_with($name, 'group:')) {
-                        continue;
-                    }
-                    if (count($results) >= $limit * 3) {
-                        break;
-                    }
-                    $results[] = [
-                        'id'          => (string)$cRow['unique_id'],
-                        'displayName' => $name,
-                        'type'        => 'circle',
-                        'icon'        => 'circle',
-                    ];
-                }
-                $cRes->closeCursor();
-            } catch (\Throwable $e) {
-                $this->logger->warning('[MemberService] searchUsers: circle search failed', [
-                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-            }
-        }
+        // Note: Circles/Teams are intentionally excluded from invite search results.
+        // Inviting a team into another team (user_type=16 in circles_member) corrupts
+        // Circles' own visibility queries, causing the parent team to disappear from
+        // Nextcloud Teams and breaking message posting. CFG_SINGLE is always enforced
+        // on TeamHub teams for the same reason.
 
         return $results;
     }

@@ -7,6 +7,7 @@
             :edit-mode="editMode"
             :is-mobile="isMobile"
             :is-tablet="isTablet"
+            :can-manage-links="canManageLinks"
             @tab-reorder="onTabReorder"
             @manage-links="showManageLinks = true"
             @toggle-edit-mode="toggleEditMode"
@@ -334,7 +335,7 @@ export default {
             'currentTeamId', 'currentView', 'resources', 'webLinks',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
         ]),
-        ...mapGetters(['currentTeam']),
+        ...mapGetters(['currentTeam', 'canManageLinks']),
 
         talkUrl() {
             const token = this.resources.talk?.token

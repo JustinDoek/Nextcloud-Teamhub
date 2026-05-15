@@ -126,13 +126,14 @@
                     </div>
                     <div class="manage-settings-group">
                         <h4>{{ t('teamhub', 'Membership') }}</h4>
+                        <!-- CFG_SINGLE is always enforced — teams cannot be members of other teams.
+                             Allowing this breaks Circles' visibility and posting. Shown locked. -->
                         <NcCheckboxRadioSwitch
-                            v-for="opt in membershipOptions"
-                            :key="opt.key"
-                            :checked.sync="circleConfig[opt.key]"
+                            :checked="true"
+                            :disabled="true"
                             type="checkbox"
-                            @update:checked="saveConfig">
-                            {{ opt.label }}
+                            :title="t('teamhub', 'This setting is enforced to prevent visibility issues in Nextcloud Teams')">
+                            {{ t('teamhub', 'Prevent teams from being a member of another team') }}
                         </NcCheckboxRadioSwitch>
                     </div>
                     <div class="manage-settings-group">
@@ -630,6 +631,27 @@
                     </div>
                 </div>
 
+                <!-- Link level -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Custom links') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Minimum role required to add, edit, or delete custom links in the tab bar of this team.') }}
+                    </p>
+                    <div class="manage-setting-row">
+                        <label class="manage-setting-label" for="link-min-level">
+                            {{ t('teamhub', 'Minimum role to manage links') }}
+                        </label>
+                        <select
+                            id="link-min-level"
+                            v-model="messageSettingsForm.linkMinLevel"
+                            class="manage-setting-select">
+                            <option value="member">{{ t('teamhub', 'Member') }}</option>
+                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- Save -->
                 <div class="manage-section">
                     <NcButton
@@ -640,7 +662,7 @@
                             <NcLoadingIcon v-if="savingMessageSettings" :size="18" />
                             <Check v-else :size="18" />
                         </template>
-                        {{ savingMessageSettings ? t('teamhub', 'Saving…') : t('teamhub', 'Save message settings') }}
+                        {{ savingMessageSettings ? t('teamhub', 'Saving…') : t('teamhub', 'Save permission settings') }}
                     </NcButton>
                     <span v-if="messageSettingsSaved" class="manage-saved-indicator">
                         {{ t('teamhub', 'Saved') }}
@@ -1248,7 +1270,7 @@ export default {
             loadingWidgets: false,
             togglingWidget: null,
             // Message settings
-            messageSettingsForm: { pinMinLevel: 'moderator', postMinLevel: 'member' },
+            messageSettingsForm: { pinMinLevel: 'moderator', postMinLevel: 'member', linkMinLevel: 'admin' },
             loadingMessageSettings: false,
             savingMessageSettings: false,
             messageSettingsSaved: false,
@@ -1437,7 +1459,7 @@ export default {
             return [
                 { key: 'description',  label: t('teamhub', 'Description'),  icon: 'TextIcon' },
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
-                { key: 'messages',     label: t('teamhub', 'Messages'),     icon: 'MessageIcon' },
+                { key: 'messages',     label: t('teamhub', 'Permissions'),  icon: 'MessageIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
                 { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
                 { key: 'danger',       label: t('teamhub', 'Maintenance'),  icon: 'AlertIcon' },
@@ -1469,7 +1491,7 @@ export default {
             if (this.circleConfig.request)      v |= CFG_REQUEST
             if (this.circleConfig.visible)      v |= CFG_VISIBLE
             if (this.circleConfig.protected)    v |= CFG_PROTECTED
-            if (this.circleConfig.singleMember) v |= CFG_SINGLE
+            // CFG_SINGLE (1024) intentionally omitted — managed internally by Circles
             return v
         },
         currentUserId() {
@@ -1673,7 +1695,7 @@ export default {
                 this.circleConfig.request       = !!(v & CFG_REQUEST)
                 this.circleConfig.visible       = !!(v & CFG_VISIBLE)
                 this.circleConfig.protected     = !!(v & CFG_PROTECTED)
-                this.circleConfig.singleMember  = !!(v & CFG_SINGLE)
+                // CFG_SINGLE (1024) not read — it is managed internally by Circles
             } catch (e) {
             } finally {
                 this.loadingConfig = false
@@ -1975,6 +1997,7 @@ export default {
                 this.messageSettingsForm = {
                     pinMinLevel:  resp.data.pinMinLevel  || 'moderator',
                     postMinLevel: resp.data.postMinLevel || 'member',
+                    linkMinLevel: resp.data.linkMinLevel || 'admin',
                 }
             } catch (e) {
                 showError(t('teamhub', 'Failed to load message settings'))

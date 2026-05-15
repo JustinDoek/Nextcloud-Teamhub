@@ -242,9 +242,10 @@ class MessageController extends Controller {
             $body = $this->request->getParams();
             $pin  = trim((string)($body['pinMinLevel']  ?? 'moderator'));
             $post = trim((string)($body['postMinLevel'] ?? 'member'));
-            $this->messageService->saveMessageSettings($teamId, $pin, $post);
+            $link = trim((string)($body['linkMinLevel'] ?? 'admin'));
+            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link);
             $this->logger->debug('[TeamHub][MessageController] saveMessageSettings', [
-                'teamId' => $teamId, 'pin' => $pin, 'post' => $post,
+                'teamId' => $teamId, 'pin' => $pin, 'post' => $post, 'link' => $link,
                 'app'    => Application::APP_ID,
             ]);
             return new JSONResponse(['success' => true]);

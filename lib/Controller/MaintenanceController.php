@@ -238,6 +238,101 @@ class MaintenanceController extends Controller {
     }
 
     /**
+     * POST /api/v1/admin/maintenance/fix-display-name/{teamId}
+     * Fix a circle's display_name to match its sanitized_name.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function fixDisplayName(string $teamId): JSONResponse {
+        try {
+            $newName = $this->maintenanceService->fixDisplayName($teamId);
+            return new JSONResponse(['success' => true, 'newName' => $newName]);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/assign-owner/{teamId}
+     * Repair a team with no owner.
+     * Promotes the highest-level existing member, or inserts the calling admin.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function repairMissingOwner(string $teamId): JSONResponse {
+        try {
+            $newOwner = $this->maintenanceService->repairMissingOwner($teamId);
+            return new JSONResponse(['success' => true, 'newOwner' => $newOwner]);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/repair-duplicate-member/{teamId}
+     * Remove duplicate circles_member rows for the same user in a circle.
+     * Keeps the highest-level row (owner survives). Body: { userId: string }
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function repairDuplicateMember(string $teamId): JSONResponse {
+        $body   = $this->request->getParams();
+        $userId = trim((string)($body['userId'] ?? ''));
+        if ($userId === '') {
+            return new JSONResponse(['error' => 'userId is required'], Http::STATUS_BAD_REQUEST);
+        }
+        try {
+            $removed = $this->maintenanceService->repairDuplicateMember($teamId, $userId);
+            return new JSONResponse(['success' => true, 'removed' => $removed]);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/clear-cfg-single/{teamId}
+     * Clears the CFG_SINGLE (1024) bit from a team that was incorrectly
+     * marked as a personal circle, restoring its visibility to Circles.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function clearCfgSingle(string $teamId): JSONResponse {
+        try {
+            $this->maintenanceService->clearCfgSingle($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] clearCfgSingle failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * DELETE /api/v1/admin/maintenance/nested-team
+     * Remove a team-as-member row from another team's circles_member.
+     *
+     * Body: { parentTeamId: string, childTeamId: string }
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function removeNestedTeam(): JSONResponse {
+        $body         = $this->request->getParams();
+        $parentTeamId = isset($body['parentTeamId']) ? trim((string)$body['parentTeamId']) : '';
+        $childTeamId  = isset($body['childTeamId'])  ? trim((string)$body['childTeamId'])  : '';
+
+        if ($parentTeamId === '' || $childTeamId === '') {
+            return new JSONResponse(['error' => 'parentTeamId and childTeamId are required'], Http::STATUS_BAD_REQUEST);
+        }
+
+        try {
+            $this->maintenanceService->removeNestedTeam($parentTeamId, $childTeamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] removeNestedTeam failed', [
+                'parentTeamId' => $parentTeamId, 'childTeamId' => $childTeamId,
+                'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * DELETE /api/v1/admin/maintenance/ghost-members/{userId}
      * Remove a ghost user from all teams, or from a specific team.
      *

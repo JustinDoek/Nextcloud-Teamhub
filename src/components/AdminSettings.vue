@@ -546,7 +546,7 @@
                     <span
                         class="maint-integrity-summary__item"
                         :class="{ 'maint-integrity-summary__item--bad': membershipCheck.mismatched > 0 }">
-                        {{ t('teamhub', 'Stale cache') }}: <strong>{{ membershipCheck.mismatched }}</strong>
+                        {{ t('teamhub', 'Issues') }}: <strong>{{ membershipCheck.mismatched }}</strong>
                     </span>
                 </div>
 
@@ -557,29 +557,149 @@
                 <div v-else class="maint-integrity-list">
                     <div
                         v-for="issue in membershipCheck.issues"
-                        :key="issue.id"
-                        class="maint-integrity-row">
-                        <div class="maint-integrity-row__info">
-                            <span class="maint-integrity-row__name">{{ issue.name }}</span>
-                            <span class="maint-integrity-row__detail">
-                                {{ t('teamhub', 'Direct members: {m} — Effective cache: {c} (stale)', {
-                                    m: issue.direct_count,
-                                    c: issue.effective_count,
-                                }) }}
-                            </span>
-                        </div>
-                        <NcButton
-                            type="secondary"
-                            :disabled="!!membershipRepairing[issue.id]"
-                            @click="repairMembership(issue.id)">
-                            <template #icon>
-                                <NcLoadingIcon v-if="membershipRepairing[issue.id]" :size="18" />
-                                <WrenchIcon v-else :size="18" />
-                            </template>
-                            {{ membershipRepairing[issue.id]
-                                ? t('teamhub', 'Repairing…')
-                                : t('teamhub', 'Repair') }}
-                        </NcButton>
+                        :key="issue.id + (issue.nested_team_id || '')"
+                        class="maint-integrity-row"
+                        :class="{ 'maint-integrity-row--nested': issue.issue_type === 'nested_team' }">
+
+                        <!-- Nested team issue -->
+                        <template v-if="issue.issue_type === 'nested_team'">
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                    {{ t('teamhub', 'Team "{child}" is a member of this team — this breaks Nextcloud Teams visibility and posting.', { child: issue.nested_team_name }) }}
+                                </span>
+                            </div>
+                            <NcButton
+                                type="error"
+                                :disabled="!!membershipRepairing[issue.id + '_nested']"
+                                @click="removeNestedTeam(issue)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_nested']" :size="18" />
+                                    <AccountRemoveIcon v-else :size="18" />
+                                </template>
+                                {{ membershipRepairing[issue.id + '_nested']
+                                    ? t('teamhub', 'Removing…')
+                                    : t('teamhub', 'Remove nested team') }}
+                            </NcButton>
+                        </template>
+
+                        <!-- Wrong display_name (owner name instead of team name) -->
+                        <template v-else-if="issue.issue_type === 'wrong_display_name'">
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                    {{ t('teamhub', 'Display name is incorrectly set to "{wrong}" instead of "{correct}". This can cause Circles to hide the team.', { wrong: issue.name, correct: issue.correct_name }) }}
+                                </span>
+                            </div>
+                            <NcButton
+                                type="secondary"
+                                :disabled="!!membershipRepairing[issue.id + '_dn']"
+                                @click="fixDisplayName(issue)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_dn']" :size="18" />
+                                    <WrenchIcon v-else :size="18" />
+                                </template>
+                                {{ membershipRepairing[issue.id + '_dn']
+                                    ? t('teamhub', 'Fixing…')
+                                    : t('teamhub', 'Fix display name') }}
+                            </NcButton>
+                        </template>
+
+                        <!-- No owner -->
+                        <template v-else-if="issue.issue_type === 'no_owner'">
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                    <span v-if="issue.has_members">
+                                        {{ t('teamhub', 'This team has no owner. The highest-level member will be promoted to owner.') }}
+                                    </span>
+                                    <span v-else>
+                                        {{ t('teamhub', 'This team has no owner and no members. You will be assigned as owner.') }}
+                                    </span>
+                                </span>
+                            </div>
+                            <NcButton
+                                type="secondary"
+                                :disabled="!!membershipRepairing[issue.id + '_noowner']"
+                                @click="assignOwner(issue)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_noowner']" :size="18" />
+                                    <WrenchIcon v-else :size="18" />
+                                </template>
+                                {{ membershipRepairing[issue.id + '_noowner']
+                                    ? t('teamhub', 'Assigning…')
+                                    : t('teamhub', 'Assign owner') }}
+                            </NcButton>
+                        </template>
+
+                        <!-- Duplicate member rows (same user_id twice in same circle) -->
+                        <template v-else-if="issue.issue_type === 'duplicate_member'">
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                    {{ t('teamhub', '{uid} appears {n} times in this team\'s membership. The highest-level row will be kept.', { uid: issue.duplicate_uid, n: issue.row_count }) }}
+                                </span>
+                            </div>
+                            <NcButton
+                                type="secondary"
+                                :disabled="!!membershipRepairing[issue.id + '_' + issue.duplicate_uid]"
+                                @click="repairDuplicateMember(issue)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_' + issue.duplicate_uid]" :size="18" />
+                                    <WrenchIcon v-else :size="18" />
+                                </template>
+                                {{ membershipRepairing[issue.id + '_' + issue.duplicate_uid]
+                                    ? t('teamhub', 'Repairing…')
+                                    : t('teamhub', 'Remove duplicate rows') }}
+                            </NcButton>
+                        </template>
+
+                        <!-- CFG_SINGLE wrongly set — team hidden from Circles API -->
+                        <template v-else-if="issue.issue_type === 'cfg_single_set'">
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                    {{ t('teamhub', 'This team has been incorrectly marked as a personal circle (bit 1024 set) and is hidden from Nextcloud Teams. Repair to restore visibility.') }}
+                                </span>
+                            </div>
+                            <NcButton
+                                type="warning"
+                                :disabled="!!membershipRepairing[issue.id + '_cfgsingle']"
+                                @click="clearCfgSingle(issue)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_cfgsingle']" :size="18" />
+                                    <WrenchIcon v-else :size="18" />
+                                </template>
+                                {{ membershipRepairing[issue.id + '_cfgsingle']
+                                    ? t('teamhub', 'Repairing…')
+                                    : t('teamhub', 'Repair visibility') }}
+                            </NcButton>
+                        </template>
+
+                        <!-- Stale cache issue -->
+                        <template v-else>
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail">
+                                    {{ t('teamhub', 'Direct members: {m} — Effective cache: {c} (stale)', {
+                                        m: issue.direct_count,
+                                        c: issue.effective_count,
+                                    }) }}
+                                </span>
+                            </div>
+                            <NcButton
+                                type="secondary"
+                                :disabled="!!membershipRepairing[issue.id]"
+                                @click="repairMembership(issue.id)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id]" :size="18" />
+                                    <WrenchIcon v-else :size="18" />
+                                </template>
+                                {{ membershipRepairing[issue.id]
+                                    ? t('teamhub', 'Repairing…')
+                                    : t('teamhub', 'Repair') }}
+                            </NcButton>
+                        </template>
                     </div>
                 </div>
             </div>
@@ -1785,8 +1905,114 @@ export default {
             }
         },
 
+        async removeNestedTeam(issue) {
+            const key = issue.id + '_nested'
+            this.$set(this.membershipRepairing, key, true)
+            try {
+                await axios.delete(
+                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/nested-team'),
+                    { data: { parentTeamId: issue.id, childTeamId: issue.nested_team_id } }
+                )
+                this.membershipCheck.issues = this.membershipCheck.issues.filter(
+                    i => !(i.id === issue.id && i.nested_team_id === issue.nested_team_id)
+                )
+                this.membershipCheck.mismatched = this.membershipCheck.issues.length
+                showSuccess(this.t('teamhub', 'Nested team removed. The team should now be visible again.'))
+            } catch (e) {
+                showError(this.t('teamhub', 'Failed to remove nested team: {error}', {
+                    error: e?.response?.data?.error || e.message,
+                }))
+            } finally {
+                this.$set(this.membershipRepairing, key, false)
+            }
+        },
+
+        async fixDisplayName(issue) {
+            const key = issue.id + '_dn'
+            this.$set(this.membershipRepairing, key, true)
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/fix-display-name/${issue.id}`)
+                )
+                this.membershipCheck.issues = this.membershipCheck.issues.filter(
+                    i => !(i.id === issue.id && i.issue_type === 'wrong_display_name')
+                )
+                this.membershipCheck.mismatched = this.membershipCheck.issues.length
+                showSuccess(this.t('teamhub', 'Display name fixed to "{name}"', { name: data.newName }))
+            } catch (e) {
+                showError(this.t('teamhub', 'Failed to fix display name: {error}', {
+                    error: e?.response?.data?.error || e.message,
+                }))
+            } finally {
+                this.$set(this.membershipRepairing, key, false)
+            }
+        },
+
+        async assignOwner(issue) {
+            const key = issue.id + '_noowner'
+            this.$set(this.membershipRepairing, key, true)
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/assign-owner/${issue.id}`)
+                )
+                this.membershipCheck.issues = this.membershipCheck.issues.filter(
+                    i => !(i.id === issue.id && i.issue_type === 'no_owner')
+                )
+                this.membershipCheck.mismatched = this.membershipCheck.issues.length
+                showSuccess(this.t('teamhub', 'Owner assigned: {uid}', { uid: data.newOwner }))
+            } catch (e) {
+                showError(this.t('teamhub', 'Failed to assign owner: {error}', {
+                    error: e?.response?.data?.error || e.message,
+                }))
+            } finally {
+                this.$set(this.membershipRepairing, key, false)
+            }
+        },
+
+        async repairDuplicateMember(issue) {
+            const key = issue.id + '_' + issue.duplicate_uid
+            this.$set(this.membershipRepairing, key, true)
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/repair-duplicate-member/${issue.id}`),
+                    { userId: issue.duplicate_uid }
+                )
+                this.membershipCheck.issues = this.membershipCheck.issues.filter(
+                    i => !(i.id === issue.id && i.issue_type === 'duplicate_member' && i.duplicate_uid === issue.duplicate_uid)
+                )
+                this.membershipCheck.mismatched = this.membershipCheck.issues.length
+                showSuccess(this.t('teamhub', 'Duplicate member rows removed.'))
+            } catch (e) {
+                showError(this.t('teamhub', 'Failed to repair: {error}', {
+                    error: e?.response?.data?.error || e.message,
+                }))
+            } finally {
+                this.$set(this.membershipRepairing, key, false)
+            }
+        },
+
+        async clearCfgSingle(issue) {
+            const key = issue.id + '_cfgsingle'
+            this.$set(this.membershipRepairing, key, true)
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/clear-cfg-single/${issue.id}`)
+                )
+                this.membershipCheck.issues = this.membershipCheck.issues.filter(
+                    i => !(i.id === issue.id && i.issue_type === 'cfg_single_set')
+                )
+                this.membershipCheck.mismatched = this.membershipCheck.issues.length
+                showSuccess(this.t('teamhub', 'Team visibility restored. Run occ circles:maintenance to rebuild caches.'))
+            } catch (e) {
+                showError(this.t('teamhub', 'Failed to repair team: {error}', {
+                    error: e?.response?.data?.error || e.message,
+                }))
+            } finally {
+                this.$set(this.membershipRepairing, key, false)
+            }
+        },
+
         async repairMembership(teamId) {
-            this.$set(this.membershipRepairing, teamId, true)
             try {
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/membership-repair/${teamId}`)

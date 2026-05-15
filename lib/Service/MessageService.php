@@ -116,31 +116,29 @@ class MessageService {
                 throw new \Exception('Team not found');
             }
 
-            // Verify membership via Circles API (individual getCircle still works).
-            $circlesManager = $this->getCirclesManager();
-            $federatedUser = $circlesManager->getFederatedUser($user->getUID(), 1);
-            $circlesManager->startSession($federatedUser);
-            try {
-                $circle = $circlesManager->getCircle($teamId);
-            } finally {
-                $circlesManager->stopSession();
-            }
-
-            if (!$circle) {
-                throw new \Exception('Team not found or access denied');
+            // Verify membership via direct DB — avoids getCircle() which fails on
+            // non-zero config bitmasks and on PostgreSQL with Circles API issues.
+            $accessLevel = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $user->getUID());
+            if ($accessLevel < 1) {
+                if (!$this->memberService->isEffectiveMember($teamId, $user->getUID(), $this->db)) {
+                    throw new \Exception('Team not found or access denied');
+                }
             }
 
             $messageData = $this->messageMapper->create($teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions);
 
+            // Get member UIDs from DB for notifications — no Circles API needed.
+            $memberUids = $this->getTeamMemberUids($teamId);
+
             // Send new-message notifications to all members.
-            $this->sendNotificationsWithName($teamId, $messageData['id'], $subject, $user->getDisplayName(), $teamName, $circle);
+            $this->sendNotificationsWithName($teamId, $messageData['id'], $subject, $user->getDisplayName(), $teamName, $memberUids);
 
             // Send targeted mention notifications to @mentioned users.
-            $this->sendMentionNotifications($teamId, $messageData['id'], $message, $user, $circle);
+            $this->sendMentionNotifications($teamId, $messageData['id'], $message, $user, $memberUids);
 
             // Send email to all members if priority message.
             if ($priority === 'priority') {
-                $this->sendPriorityEmailsWithName($subject, $message, $user->getDisplayName(), $teamName, $circle);
+                $this->sendPriorityEmailsWithName($subject, $message, $user->getDisplayName(), $teamName, $memberUids);
             }
 
             return $messageData;
@@ -168,15 +166,8 @@ class MessageService {
         // We don't re-notify the whole team — only newly mentioned users.
         $teamId = $existing['team_id'];
         try {
-            $circlesManager = $this->getCirclesManager();
-            $federatedUser = $circlesManager->getFederatedUser($user->getUID(), 1);
-            $circlesManager->startSession($federatedUser);
-            try {
-                $circle = $circlesManager->getCircle($teamId);
-            } finally {
-                $circlesManager->stopSession();
-            }
-            $this->sendMentionNotifications($teamId, $messageId, $message, $user, $circle);
+            $memberUids = $this->getTeamMemberUids($teamId);
+            $this->sendMentionNotifications($teamId, $messageId, $message, $user, $memberUids);
         } catch (\Throwable $e) {
             $this->logger->warning('[MessageService] Could not send mention notifications on update', [
                 'messageId' => $messageId, 'exception' => $e, 'app' => Application::APP_ID,
@@ -271,29 +262,77 @@ class MessageService {
      * `message_mention` notification to each mentioned user who is a team member.
      * The author is never notified of their own mentions.
      */
-    private function sendMentionNotifications(string $teamId, int $messageId, string $body, \OCP\IUser $author, $circle): void {
+    /**
+     * Get all effective member UIDs for a team directly from DB.
+     * Replaces $circle->getMembers() to avoid the Circles API entirely.
+     * Returns UIDs of user_type=1 (direct) members with status=Member,
+     * plus UIDs resolved from group/circle memberships via circles_membership.
+     *
+     * @return string[] list of NC user IDs
+     */
+    private function getTeamMemberUids(string $teamId): array {
+        $uids = [];
+
+        // Direct members (user_type=1, status=Member)
+        $qb = $this->db->getQueryBuilder();
+        $res = $qb->select('user_id')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id',  $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('status',    $qb->createNamedParameter('Member')))
+            ->executeQuery();
+        while ($row = $res->fetch()) {
+            if (!empty($row['user_id'])) {
+                $uids[$row['user_id']] = true;
+            }
+        }
+        $res->closeCursor();
+
+        // Effective members via circles_membership (group/sub-team members).
+        // single_id maps back to the user's personal circle; resolve to uid via
+        // circles_member where user_type=1 and level=9 (owner of personal circle).
         try {
-            // Extract all @userId tokens from the message body.
+            $msQb = $this->db->getQueryBuilder();
+            $msRes = $msQb->select('cm.user_id')
+                ->from('circles_membership', 'ms')
+                ->innerJoin('ms', 'circles_member', 'cm',
+                    $msQb->expr()->andX(
+                        $msQb->expr()->eq('cm.single_id', 'ms.single_id'),
+                        $msQb->expr()->eq('cm.user_type', $msQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                        $msQb->expr()->eq('cm.level',     $msQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    )
+                )
+                ->where($msQb->expr()->eq('ms.circle_id', $msQb->createNamedParameter($teamId)))
+                ->executeQuery();
+            while ($row = $msRes->fetch()) {
+                if (!empty($row['user_id'])) {
+                    $uids[$row['user_id']] = true;
+                }
+            }
+            $msRes->closeCursor();
+        } catch (\Throwable $e) {
+            // circles_membership may not exist on older Circles versions — non-fatal
+            $this->logger->debug('[MessageService] getTeamMemberUids: circles_membership lookup failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        return array_keys($uids);
+    }
+
+    private function sendMentionNotifications(string $teamId, int $messageId, string $body, \OCP\IUser $author, array $memberUids): void {
+        try {
             preg_match_all('/@([a-zA-Z0-9._-]+)/', $body, $matches);
             $mentionedIds = array_unique($matches[1] ?? []);
             if (empty($mentionedIds)) {
                 return;
             }
 
-            // Build a set of valid circle member userIds for quick lookup.
-            $memberUserIds = [];
-            foreach ($circle->getMembers() as $member) {
-                $uid = method_exists($member, 'getUserId') ? $member->getUserId() : null;
-                if ($uid) {
-                    $memberUserIds[$uid] = true;
-                }
-            }
-
+            $memberSet = array_flip($memberUids);
             $link = $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?team=' . urlencode($teamId);
 
             foreach ($mentionedIds as $mentionedId) {
-                // Only notify actual team members, never the author.
-                if (!isset($memberUserIds[$mentionedId]) || $mentionedId === $author->getUID()) {
+                if (!isset($memberSet[$mentionedId]) || $mentionedId === $author->getUID()) {
                     continue;
                 }
                 try {
@@ -329,16 +368,18 @@ class MessageService {
      * Send in-app notifications to all members.
      * Uses a pre-resolved $teamName string so we never need probeCircles().
      */
-    private function sendNotificationsWithName(string $teamId, int $messageId, string $subject, string $authorName, string $teamName, $circle): void {
+    /**
+     * Send in-app notifications to all members.
+     * Uses pre-resolved $memberUids — no Circles API needed.
+     */
+    private function sendNotificationsWithName(string $teamId, int $messageId, string $subject, string $authorName, string $teamName, array $memberUids): void {
         try {
-            $members = $circle->getMembers();
             $currentUser = $this->userSession->getUser();
             $link = $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?team=' . urlencode($teamId);
 
-            foreach ($members as $member) {
+            foreach ($memberUids as $userId) {
                 try {
-                    $userId = method_exists($member, 'getUserId') ? $member->getUserId() : null;
-                    if (!$userId || $userId === $currentUser->getUID()) continue;
+                    if ($userId === $currentUser->getUID()) continue;
 
                     $notification = $this->notificationManager->createNotification();
                     $notification->setApp('teamhub')
@@ -365,16 +406,15 @@ class MessageService {
 
     /**
      * Send priority emails to all members.
+     * Uses pre-resolved $memberUids — no Circles API needed.
      */
-    private function sendPriorityEmailsWithName(string $subject, string $message, string $authorName, string $teamName, $circle): void {
+    private function sendPriorityEmailsWithName(string $subject, string $message, string $authorName, string $teamName, array $memberUids): void {
         try {
-            $members = $circle->getMembers();
             $currentUser = $this->userSession->getUser();
 
-            foreach ($members as $member) {
+            foreach ($memberUids as $userId) {
                 try {
-                    $userId = method_exists($member, 'getUserId') ? $member->getUserId() : null;
-                    if (!$userId || $userId === $currentUser->getUID()) continue;
+                    if ($userId === $currentUser->getUID()) continue;
 
                     $ncUser = $this->userManager->get($userId);
                     if (!$ncUser) continue;
@@ -396,7 +436,6 @@ class MessageService {
                         "<h3>" . htmlspecialchars($subject) . "</h3>" .
                         "<p>" . nl2br(htmlspecialchars($message)) . "</p>"
                     );
-
                     $this->mailer->send($mail);
                 } catch (\Exception $e) {
                     $this->logger->error('Failed to send priority email - ', ['exception' => $e, 'app' => Application::APP_ID]);
@@ -407,10 +446,6 @@ class MessageService {
         }
     }
 
-    /**
-     * Pin a message. Only callable by members meeting the configured minimum level.
-     * Enforces the one-pin-per-team limit by unpinning any existing pin first.
-     */
     public function pinMessage(string $teamId, int $messageId): array {
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -506,17 +541,19 @@ class MessageService {
             $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
         }
         $postSetting = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, 'member');
+        $linkSetting = $this->config->getAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, 'admin');
         return [
             'pinMinLevel'  => $pinSetting,
             'postMinLevel' => $postSetting,
+            'linkMinLevel' => $linkSetting,
         ];
     }
 
     /**
      * Save per-team message settings.
-     * Accepts pinMinLevel and postMinLevel, both as strings: 'member'|'moderator'|'admin'.
+     * Accepts pinMinLevel, postMinLevel, and linkMinLevel, all as strings: 'member'|'moderator'|'admin'.
      */
-    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel): void {
+    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel, string $linkMinLevel = 'admin'): void {
         $valid = ['member', 'moderator', 'admin'];
         if (!in_array($pinMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid pinMinLevel: ' . $pinMinLevel);
@@ -524,8 +561,25 @@ class MessageService {
         if (!in_array($postMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid postMinLevel: ' . $postMinLevel);
         }
+        if (!in_array($linkMinLevel, $valid, true)) {
+            throw new \InvalidArgumentException('Invalid linkMinLevel: ' . $linkMinLevel);
+        }
         $this->config->setAppValue(Application::APP_ID, 'pinMinLevel_'  . $teamId, $pinMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, $postMinLevel);
+        $this->config->setAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, $linkMinLevel);
+    }
+
+    /**
+     * Return the configured linkMinLevel as an integer for permission checks.
+     * 'member'=1, 'moderator'=4, 'admin'=8. Default: 8 (admin).
+     */
+    public function getLinkMinLevelInt(string $teamId): int {
+        $setting = $this->config->getAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, 'admin');
+        return match($setting) {
+            'member'    => 1,
+            'moderator' => 4,
+            default     => 8,
+        };
     }
 
     /**

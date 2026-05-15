@@ -130,10 +130,15 @@ return [
         ['name' => 'maintenance#getTelemetry',       'url' => '/api/v1/admin/telemetry',                                       'verb' => 'GET'],
         ['name' => 'maintenance#saveTelemetry',      'url' => '/api/v1/admin/telemetry',                                       'verb' => 'PUT'],
         ['name' => 'maintenance#searchUsers',        'url' => '/api/v1/admin/users/search',                                    'verb' => 'GET'],
-        ['name' => 'maintenance#checkMembershipIntegrity', 'url' => '/api/v1/admin/maintenance/membership-check',              'verb' => 'GET'],
-        ['name' => 'maintenance#repairMembershipCache',    'url' => '/api/v1/admin/maintenance/membership-repair/{teamId}',    'verb' => 'POST'],
-        ['name' => 'maintenance#findGhostMembers',         'url' => '/api/v1/admin/maintenance/ghost-members',                'verb' => 'GET'],
-        ['name' => 'maintenance#removeGhostMember',        'url' => '/api/v1/admin/maintenance/ghost-members/{userId}',       'verb' => 'DELETE'],
+        ['name' => 'maintenance#checkMembershipIntegrity',  'url' => '/api/v1/admin/maintenance/membership-check',                   'verb' => 'GET'],
+        ['name' => 'maintenance#repairMembershipCache',     'url' => '/api/v1/admin/maintenance/membership-repair/{teamId}',         'verb' => 'POST'],
+        ['name' => 'maintenance#fixDisplayName',             'url' => '/api/v1/admin/maintenance/fix-display-name/{teamId}',        'verb' => 'POST'],
+        ['name' => 'maintenance#repairMissingOwner',         'url' => '/api/v1/admin/maintenance/assign-owner/{teamId}',           'verb' => 'POST'],
+        ['name' => 'maintenance#repairDuplicateMember',      'url' => '/api/v1/admin/maintenance/repair-duplicate-member/{teamId}', 'verb' => 'POST'],
+        ['name' => 'maintenance#clearCfgSingle',            'url' => '/api/v1/admin/maintenance/clear-cfg-single/{teamId}',         'verb' => 'POST'],
+        ['name' => 'maintenance#removeNestedTeam',          'url' => '/api/v1/admin/maintenance/nested-team',                       'verb' => 'DELETE'],
+        ['name' => 'maintenance#findGhostMembers',          'url' => '/api/v1/admin/maintenance/ghost-members',                     'verb' => 'GET'],
+        ['name' => 'maintenance#removeGhostMember',         'url' => '/api/v1/admin/maintenance/ghost-members/{userId}',            'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver

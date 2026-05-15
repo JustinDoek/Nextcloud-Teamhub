@@ -627,7 +627,11 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        $MANAGED_BITS = 1 | 2 | 4 | 16 | 512 | 1024;
+        // Managed bits: only the bits TeamHub exposes in the UI.
+        // CFG_SINGLE (1024) is intentionally excluded — it is managed internally by
+        // Circles to mark personal circles. Setting it on a user-created team (source=16)
+        // makes Circles hide the team from its own API queries. Never touch this bit.
+        $MANAGED_BITS = 1 | 2 | 4 | 16 | 512;
 
         $db     = $this->container->get(\OCP\IDBConnection::class);
         $qb     = $db->getQueryBuilder();
@@ -652,20 +656,10 @@ class TeamService {
             ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
             ->executeStatement();
 
-        // Flush Circles' in-process object cache
-        try {
-            $manager       = $this->getCirclesManager();
-            $federatedUser = $manager->getFederatedUser($user->getUID(), 1);
-            $manager->startSession($federatedUser);
-            try {
-                $manager->getCircle($teamId);
-            } finally {
-                $manager->stopSession();
-            }
-        } catch (\Throwable $e) {
-        }
-
-        // Bust APCu cache
+        // Bust APCu cache to flush Circles' in-process object cache.
+        // We deliberately do NOT call $manager->getCircle() here — doing so
+        // triggers Circles' internal sync logic which may re-apply config bits
+        // (including CFG_SINGLE=1024) that we just cleared, corrupting the value.
         if (function_exists('apcu_delete') && class_exists('APCUIterator')) {
             try {
                 foreach (new \APCUIterator('/^(circles|NC__circles)/') as $item) {

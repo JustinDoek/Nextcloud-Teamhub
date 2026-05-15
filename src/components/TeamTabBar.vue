@@ -164,6 +164,7 @@
         </draggable>
 
         <NcButton
+            v-if="canManageLinks"
             class="teamhub-tab-add"
             type="tertiary"
             :aria-label="t('teamhub', 'Manage links')"
@@ -222,6 +223,9 @@ export default {
         isMobile: { type: Boolean, default: false },
         // True when tablet landscape (≤1200px landscape) — also hides Edit layout button.
         isTablet: { type: Boolean, default: false },
+        // Whether the current user can manage (add/edit/delete) links.
+        // Controlled by the per-team linkMinLevel setting.
+        canManageLinks: { type: Boolean, default: false },
     },
 
     emits: ['input', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker'],
