@@ -519,7 +519,7 @@ export default {
         }
     },
     computed: {
-        ...mapState(['members']),
+        ...mapState(['members', 'allEffectiveMembers']),
         ...mapGetters(['commentsForMessage']),
         isPriority() { return this.message.priority === 'priority' },
         isPollClosed() { return this.message.pollClosed === true },
@@ -590,23 +590,92 @@ export default {
         /** Same NC OCS autocomplete approach as PostMessageForm */
         async editMentionAutoComplete(search, callback) {
             try {
-                const { data } = await axios.get(
+                // Ensure we have the full effective member list
+                let mentionList = this.allEffectiveMembers.length > 0
+                    ? this.allEffectiveMembers
+                    : (this.members || [])
+
+                if (mentionList.length === 0) {
+                    const teamId = this.$store.state.currentTeamId
+                    if (teamId) {
+                        try {
+                            const { data: allData } = await axios.get(
+                                generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`)
+                            )
+                            const allList = Array.isArray(allData) ? allData : (Array.isArray(allData?.members) ? allData.members : [])
+                            if (allList.length > 0) {
+                                this.$store.commit('SET_ALL_EFFECTIVE_MEMBERS', allList)
+                                mentionList = allList
+                            }
+                        } catch (_) { /* non-fatal */ }
+                    }
+                }
+
+                const ocsUsers = await axios.get(
                     generateUrl('/ocs/v2.php/core/autocomplete/get'),
                     {
                         params: { search: search || '', itemType: 'call', itemId: 'new', limit: 20, format: 'json' },
                         headers: { 'OCS-APIREQUEST': 'true' },
                     }
+                ).then(r => r.data?.ocs?.data || []).catch(() => [])
+
+                const memberIds = new Set(mentionList.map(m => m.userId))
+                const lower = (search || '').toLowerCase()
+
+                const filtered = ocsUsers.filter(u =>
+                    memberIds.has(u.id) || memberIds.has(u.value?.shareWith)
                 )
-                const users = data?.ocs?.data || []
-                const memberIds = new Set((this.members || []).map(m => m.userId))
-                callback(users.filter(u => memberIds.has(u.id) || memberIds.has(u.value?.shareWith)))
+
+                const foundIds = new Set(filtered.map(u => u.id))
+                const supplemental = mentionList
+                    .filter(m =>
+                        !foundIds.has(m.userId) && (
+                            (m.displayName || '').toLowerCase().includes(lower) ||
+                            (m.userId     || '').toLowerCase().includes(lower)
+                        )
+                    )
+                    .map(m => ({
+                        id:     m.userId,
+                        label:  m.displayName || m.userId,
+                        source: 'users',
+                        icon:   'icon-user',
+                        value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                    }))
+
+                callback([...filtered, ...supplemental])
             } catch (e) {
                 const lower = (search || '').toLowerCase()
+                let fallbackList = this.allEffectiveMembers.length > 0
+                    ? this.allEffectiveMembers
+                    : (this.members || [])
+
+                if (fallbackList.length === 0) {
+                    const teamId = this.$store.state.currentTeamId
+                    if (teamId) {
+                        try {
+                            const { data: allData } = await axios.get(
+                                generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`)
+                            )
+                            const allList = Array.isArray(allData) ? allData : (Array.isArray(allData?.members) ? allData.members : [])
+                            if (allList.length > 0) fallbackList = allList
+                        } catch (_) { /* give up */ }
+                    }
+                }
+
                 callback(
-                    (this.members || [])
-                        .filter(m => (m.displayName || '').toLowerCase().includes(lower) || (m.userId || '').toLowerCase().includes(lower))
-                        .slice(0, 8)
-                        .map(m => ({ id: m.userId, label: m.displayName || m.userId, source: 'users', icon: 'icon-user', status: null }))
+                    fallbackList
+                        .filter(m =>
+                            (m.displayName || '').toLowerCase().includes(lower) ||
+                            (m.userId     || '').toLowerCase().includes(lower)
+                        )
+                        .slice(0, 10)
+                        .map(m => ({
+                            id:     m.userId,
+                            label:  m.displayName || m.userId,
+                            source: 'users',
+                            icon:   'icon-user',
+                            value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                        }))
                 )
             }
         },

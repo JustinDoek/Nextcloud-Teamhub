@@ -139,6 +139,8 @@ return [
         ['name' => 'maintenance#removeNestedTeam',          'url' => '/api/v1/admin/maintenance/nested-team',                       'verb' => 'DELETE'],
         ['name' => 'maintenance#findGhostMembers',          'url' => '/api/v1/admin/maintenance/ghost-members',                     'verb' => 'GET'],
         ['name' => 'maintenance#removeGhostMember',         'url' => '/api/v1/admin/maintenance/ghost-members/{userId}',            'verb' => 'DELETE'],
+        ['name' => 'maintenance#resetTeamConfig',           'url' => '/api/v1/admin/maintenance/reset-team-config/{teamId}',        'verb' => 'POST'],
+        ['name' => 'maintenance#checkConfigIntegrity',      'url' => '/api/v1/admin/maintenance/config-check',                      'verb' => 'GET'],
 
         // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver

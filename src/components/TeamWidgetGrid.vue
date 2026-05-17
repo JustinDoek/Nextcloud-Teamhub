@@ -990,6 +990,15 @@ import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
+
+// Canonical Circles config bit values — see src/constants/circlesConfig.js
+import {
+    CFG_VISIBLE,
+    CFG_OPEN,
+    CFG_INVITE,
+    CFG_REQUEST,
+    CFG_PROTECTED,
+} from '../constants/circlesConfig.js'
 import Cog from 'vue-material-design-icons/Cog.vue'
 import VideoIcon from 'vue-material-design-icons/Video.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
@@ -1110,13 +1119,13 @@ export default {
         /**
          * Human-readable labels derived from the Circles config bitmask (team.config).
          *
-         * Mapping (matches CFG_* constants in ManageTeamView.vue and TeamService.php):
-         *   1    CFG_OPEN       — anyone can join
-         *   2    CFG_INVITE     — members can invite others
-         *   4    CFG_REQUEST    — join requests need moderator approval (only with OPEN)
-         *   16   CFG_PROTECTED  — password-protected file shares
-         *   512  CFG_VISIBLE    — discoverable (public listing)
-         *   1024 CFG_SINGLE     — prevents team-of-team nesting
+         * Uses the canonical Circles bit values (imported from circlesConfig.js).
+         * Real meanings:
+         *   8   CFG_VISIBLE   — discoverable (public listing)
+         *   16  CFG_OPEN      — anyone can join
+         *   32  CFG_INVITE    — members can invite others
+         *   64  CFG_REQUEST   — join requests need moderator approval (only with OPEN)
+         *   256 CFG_PROTECTED — password-protected file shares
          *
          * Strategy: conditional — we only surface a label when it tells the member
          * something meaningful. `CFG_VISIBLE=0` (hidden) and `CFG_INVITE=0` (no
@@ -1133,13 +1142,6 @@ export default {
         teamLabels() {
             const config = Number(this.team?.config || 0)
             if (!this.currentTeamId) return []
-
-            const CFG_OPEN      = 1
-            const CFG_INVITE    = 2
-            const CFG_REQUEST   = 4
-            const CFG_PROTECTED = 16
-            const CFG_VISIBLE   = 512
-            const CFG_SINGLE    = 1024
 
             const labels = []
 
@@ -1200,16 +1202,9 @@ export default {
                 })
             }
 
-            // Nested team restriction (niche)
-            if (config & CFG_SINGLE) {
-                labels.push({
-                    key: 'single',
-                    text: t('teamhub', 'No nested teams'),
-                    tooltip: t('teamhub', 'This team cannot be added as a member of another team.'),
-                    tone: 'neutral',
-                })
-            }
-
+            // Note: no "No nested teams" label any more. That restriction is enforced
+            // server-side for all teams via the invite-members controller — it is not
+            // a per-team toggle and was previously misrepresented as CFG_SINGLE.
 
             return labels
         },

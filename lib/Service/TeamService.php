@@ -231,50 +231,54 @@ class TeamService {
             }
             $cRes->closeCursor();
 
-            // ── Step 3: unread status for all teams (2 queries, not 2×N) ─────
-            // Last-seen timestamps per team for this user
-            $lsQb  = $db->getQueryBuilder();
-            $lsRes = $lsQb->select('team_id', 'last_seen_at')
-                ->from('teamhub_last_seen')
-                ->where($lsQb->expr()->eq('user_id', $lsQb->createNamedParameter($uid)))
-                ->andWhere($lsQb->expr()->in('team_id', $lsQb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
-                ->executeQuery();
-            $lastSeen = [];
-            while ($lsRow = $lsRes->fetch()) {
-                $lastSeen[$lsRow['team_id']] = (int)$lsRow['last_seen_at'];
-            }
-            $lsRes->closeCursor();
-
-            // Latest message timestamp per team
-            $mqb  = $db->getQueryBuilder();
-            // func()->max() with an alias is unreliable across DB drivers — MySQL exposes
-            // the key as 'latest' but PostgreSQL and some MariaDB versions use the raw
-            // expression 'max(created_at)' as the key, causing "Undefined array key latest".
-            // Fix: select team_id + MAX(created_at) separately and read both by name.
-            $mqb->select('team_id')
-                ->addSelect($mqb->func()->max('created_at', 'max_created_at'))
-                ->from('teamhub_messages')
-                ->where($mqb->expr()->in('team_id', $mqb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
-                ->groupBy('team_id');
-            $mRes = $mqb->executeQuery();
-            $latestMsg = [];
-            while ($mRow = $mRes->fetch()) {
-                // Normalise: the alias key may vary by driver — try 'max_created_at' first,
-                // then fall back to the raw expression key used by some drivers.
-                $val = $mRow['max_created_at'] ?? $mRow['max(created_at)'] ?? $mRow['MAX(created_at)'] ?? null;
-                if ($val !== null) {
-                    $latestMsg[$mRow['team_id']] = (int)$val;
+            // ── Step 3: unread counts — one JOIN query across all teams ──────
+            // LEFT JOIN teamhub_last_seen to get the per-team last-seen timestamp
+            // in a single query. Count messages by others newer than that threshold.
+            // NULL last_seen_at (user never visited) → COALESCE to 0 → all messages
+            // are newer → they're all unread.
+            $unreadCounts = [];
+            if (!empty($ids)) {
+                $urQb  = $db->getQueryBuilder();
+                $urRes = $urQb->select('m.team_id')
+                    ->addSelect($urQb->createFunction('COUNT(*) AS unread_count'))
+                    ->from('teamhub_messages', 'm')
+                    ->leftJoin(
+                        'm',
+                        'teamhub_last_seen',
+                        'ls',
+                        $urQb->expr()->andX(
+                            $urQb->expr()->eq('ls.team_id', 'm.team_id'),
+                            $urQb->expr()->eq('ls.user_id', $urQb->createNamedParameter($uid))
+                        )
+                    )
+                    ->where($urQb->expr()->in('m.team_id', $urQb->createNamedParameter($ids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                    ->andWhere($urQb->expr()->neq('m.author_id', $urQb->createNamedParameter($uid)))
+                    ->andWhere(
+                        $urQb->expr()->gt(
+                            'm.created_at',
+                            $urQb->createFunction('COALESCE(ls.last_seen_at, 0)')
+                        )
+                    )
+                    ->groupBy('m.team_id')
+                    ->executeQuery();
+                while ($urRow = $urRes->fetch()) {
+                    $unreadCounts[$urRow['team_id']] = (int)$urRow['unread_count'];
                 }
+                $urRes->closeCursor();
             }
-            $mRes->closeCursor();
+
+            $this->logger->info('[TeamService] getTeams: unread counts computed', [
+                'uid'    => $uid,
+                'teams'  => count($ids),
+                'unread' => array_filter($unreadCounts),
+                'app'    => Application::APP_ID,
+            ]);
 
             // ── Assemble result ───────────────────────────────────────────────
             $teams = [];
             foreach ($rows as $row) {
                 $id     = $row['unique_id'];
-                $latest = $latestMsg[$id] ?? 0;
-                $seen   = $lastSeen[$id]  ?? 0;
-                $unread = $latest > 0 && $latest > $seen;
+                $unread = $unreadCounts[$id] ?? 0;
 
                 $teams[] = [
                     'id'          => $id,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Service\AuditService;
 use OCP\App\IAppManager;
@@ -329,10 +330,27 @@ class MemberService {
 
         $db = $this->container->get(\OCP\IDBConnection::class);
 
-        // Step 1: pull all single_ids with non-zero level from circles_membership.
-        // Only keep rows whose single_id points to a user circle (source=1),
-        // since circles_membership also contains sub-circle entries — those rows
-        // represent "this sub-circle is reachable from this parent", not a user.
+        $seen = [];
+        $list = [];
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Approach: circles_membership is Circles' own denormalized cache of
+        // "every single_id reachable from this circle". For team Sugar this
+        // contains JDoek (direct), justin.doek (direct), and Jaap (via the
+        // teamhubbies group). We resolve each user single_id to a NC user by
+        // joining back to circles_member with user_type=1 (the row Circles
+        // writes for each personal user circle).
+        //
+        // This is the proven approach — verified in production SQL that
+        // `circles_membership` contains all three users' single_ids for Sugar
+        // even when the user is in only via a group.
+        //
+        // (Previous attempts to enumerate via IGroupManager were unreliable
+        // because circles_member.user_id for group rows is a human-readable
+        // label, not necessarily the actual NC group GID.)
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Step 1: get all user single_ids reachable from this team
         $qb  = $db->getQueryBuilder();
         $res = $qb->select('ms.single_id')
             ->from('circles_membership', 'ms')
@@ -348,26 +366,46 @@ class MemberService {
         }
         $res->closeCursor();
 
-        if (empty($singleIds)) {
-            return [];
+        // Step 2: resolve each single_id → NC user via circles_member
+        if (!empty($singleIds)) {
+            $uQb  = $db->getQueryBuilder();
+            $uRes = $uQb->select('m.user_id', 'u.displayname')
+                ->from('circles_member', 'm')
+                ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
+                ->where($uQb->expr()->in('m.circle_id',
+                    $uQb->createNamedParameter($singleIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                ->andWhere($uQb->expr()->eq('m.user_type',
+                    $uQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeQuery();
+
+            while ($r = $uRes->fetch()) {
+                $uid = (string)$r['user_id'];
+                if ($uid === '' || isset($seen[$uid])) {
+                    continue;
+                }
+                $seen[$uid] = true;
+                $list[] = [
+                    'userId'      => $uid,
+                    'displayName' => !empty($r['displayname']) ? $r['displayname'] : $uid,
+                ];
+            }
+            $uRes->closeCursor();
         }
 
-        // Step 2: resolve each single_id to a NC user. Circles stores a user-circle
-        // row in circles_member for each personal circle: circle_id = the user's
-        // personal-circle unique_id (= single_id), user_type=1, user_id=NC uid.
-        $uQb  = $db->getQueryBuilder();
-        $uRes = $uQb->select('m.user_id', 'u.displayname')
+        // Step 3 (safety net): also pull direct user members straight from
+        // circles_member. In rare cases circles_membership may not contain
+        // a direct member's row yet (very freshly added). This is a no-op
+        // for the common case but prevents direct members ever being missed.
+        $dQb  = $db->getQueryBuilder();
+        $dRes = $dQb->select('m.user_id', 'u.displayname')
             ->from('circles_member', 'm')
             ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
-            ->where($uQb->expr()->in('m.circle_id',
-                $uQb->createNamedParameter($singleIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
-            ->andWhere($uQb->expr()->eq('m.user_type',
-                $uQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->where($dQb->expr()->eq('m.circle_id',  $dQb->createNamedParameter($teamId)))
+            ->andWhere($dQb->expr()->eq('m.user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($dQb->expr()->eq('m.status',    $dQb->createNamedParameter('Member')))
             ->executeQuery();
 
-        $seen = [];
-        $list = [];
-        while ($r = $uRes->fetch()) {
+        while ($r = $dRes->fetch()) {
             $uid = (string)$r['user_id'];
             if ($uid === '' || isset($seen[$uid])) {
                 continue;
@@ -378,10 +416,14 @@ class MemberService {
                 'displayName' => !empty($r['displayname']) ? $r['displayname'] : $uid,
             ];
         }
-        $uRes->closeCursor();
+        $dRes->closeCursor();
 
         // Sort by display name, case-insensitive
         usort($list, fn ($a, $b) => strcasecmp($a['displayName'], $b['displayName']));
+
+        $this->logger->info('[MemberService] getAllEffectiveMembers: resolved', [
+            'teamId' => $teamId, 'count' => count($list), 'app' => Application::APP_ID,
+        ]);
 
         return $list;
     }
@@ -970,6 +1012,8 @@ class MemberService {
         $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
         $federatedUserService->setLocalCurrentUser($user);
 
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
         $results = [];
         foreach ($members as $entry) {
             // Support both plain string (legacy) and {id, type} object
@@ -995,6 +1039,74 @@ class MemberService {
             try {
                 $invitee = $federatedUserService->generateFederatedUser($memberId, $memberType);
                 $circleMemberService->addMember($teamId, $invitee);
+
+                // Circles' addMember() creates an 'Invited' status row for non-user
+                // types (groups, circles). For user_type=1, it goes straight to
+                // 'Member'. For groups and circles added by a team admin, we treat
+                // the invite as immediately confirmed — the admin is explicitly
+                // choosing to include this group; no secondary acceptance is needed.
+                //
+                // We update the row directly: status → 'Member', level → 1.
+                // Then rebuild the Circles membership cache so the group's users
+                // immediately appear in share pickers and resource ACLs.
+                //
+                // Note: we do NOT filter by user_type = $memberType here. Circles
+                // converts groups (type=2) to their backing circle representation
+                // (user_type=16) internally when inserting the circles_member row,
+                // so filtering on the original type would match nothing. We target
+                // all Invited rows with user_type IN(2,16) for this team — safe
+                // because (a) we are scoped to the current team only, (b) we only
+                // touch 'Invited' rows (not already-confirmed members), and (c) we
+                // run this only after addMember() succeeds.
+                if ($memberType !== 1) {
+                    try {
+                        $confirmQb = $db->getQueryBuilder();
+                        $updated   = $confirmQb->update('circles_member')
+                            ->set('status', $confirmQb->createNamedParameter('Member'))
+                            ->set('level',  $confirmQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                            ->where($confirmQb->expr()->eq('circle_id', $confirmQb->createNamedParameter($teamId)))
+                            ->andWhere($confirmQb->expr()->in(
+                                'user_type',
+                                $confirmQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                            ))
+                            ->andWhere($confirmQb->expr()->eq('status', $confirmQb->createNamedParameter('Invited')))
+                            ->executeStatement();
+
+                        $this->logger->info('[MemberService] inviteMembers: auto-confirmed group/circle membership', [
+                            'id'      => $memberId,
+                            'type'    => $memberType,
+                            'teamId'  => $teamId,
+                            'updated' => $updated,
+                            'app'     => Application::APP_ID,
+                        ]);
+
+                        // Rebuild Circles membership cache so the group's users get
+                        // immediate access to resources (share pickers, Files ACLs etc).
+                        try {
+                            $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
+                            $membershipService->onUpdate($teamId);
+                        } catch (\Throwable $cacheEx) {
+                            // Cache rebuild failure is non-fatal — access will be
+                            // reconciled by the Circles background job.
+                            $this->logger->warning('[MemberService] inviteMembers: membership cache rebuild failed (non-fatal)', [
+                                'teamId' => $teamId,
+                                'error'  => $cacheEx->getMessage(),
+                                'app'    => Application::APP_ID,
+                            ]);
+                        }
+                    } catch (\Throwable $confirmEx) {
+                        // Confirm failure is logged but does not fail the overall invite —
+                        // the group IS in the circle (addMember succeeded); it just needs
+                        // a manual acceptance or the next Circles background job to fix status.
+                        $this->logger->warning('[MemberService] inviteMembers: could not auto-confirm group/circle (addMember succeeded)', [
+                            'id'    => $memberId,
+                            'type'  => $memberType,
+                            'error' => $confirmEx->getMessage(),
+                            'app'   => Application::APP_ID,
+                        ]);
+                    }
+                }
+
                 $results[$memberId] = 'invited';
                 $this->logger->info('[MemberService] inviteMembers: member added', [
                     'id' => $memberId, 'type' => $memberType, 'app' => Application::APP_ID,
@@ -1078,7 +1190,8 @@ class MemberService {
         //   1. NC preferences: Circles writes the single_id to oc_preferences / oc_user_preferences
         //      under app='circles', key='userSingleId' after creating the personal circle.
         //   2. DB join on circles_circle + circles_member: find the CFG_SINGLE circle
-        //      (config & 2048 > 0) where this user is the owner (level=9).
+        //      (config & 1 > 0) where this user is the owner (level=9). CFG_SINGLE is
+        //      bit 0 (value 1), not 2048 as an earlier version of this code claimed.
         //
         // single_id is NOT a free-form ID — Circles uses it to resolve the member
         // identity. Inserting a random value corrupts the circle for all members.
@@ -1155,7 +1268,7 @@ class MemberService {
             throw new \Exception('Failed to request team membership: ' . $e->getMessage());
         }
 
-        // Check if the circle is open-join (CFG_OPEN bit 1 set = no approval needed).
+        // Check if the circle is open-join (CFG_OPEN bit set = no approval needed).
         // This must happen BEFORE sending a notification so admins are only notified
         // when the join actually requires their approval.
         try {
@@ -1169,7 +1282,7 @@ class MemberService {
             $cfgRes->closeCursor();
 
             $circleConfig = $cfgRow ? (int)$cfgRow['config'] : 0;
-            $isOpen = ($circleConfig & 1) > 0; // CFG_OPEN = bit 1
+            $isOpen = ($circleConfig & CirclesConfig::CFG_OPEN) > 0;
 
 
             $this->logger->info('[MemberService] requestJoinTeam: circle config check', [
@@ -1476,8 +1589,11 @@ class MemberService {
         }
 
         // Strategy 2: DB join on circles_circle + circles_member.
-        // CFG_SINGLE = 2048 (bit 11). Personal circles always have this bit set.
+        // CFG_SINGLE = 1 (bit 0). Personal circles always have this bit set.
         // The user is the owner (level=9) of their own personal circle.
+        // (Previous code used 2048 by mistake — that bit is CFG_BACKEND, which
+        // personal circles never have, so this path always returned null. The
+        // user-preference path above silently saved most calls.)
         try {
             $cQb  = $db->getQueryBuilder();
             $cRes = $cQb->select('c.unique_id')
@@ -1487,11 +1603,9 @@ class MemberService {
                 ->andWhere($cQb->expr()->eq('m.user_type', $cQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($cQb->expr()->eq('m.level',   $cQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere(
-                    // CFG_SINGLE bit (2048) is set: config & 2048 > 0.
-                    // Backtick quoting removed — backticks are MySQL-only syntax
-                    // and cause a syntax error on PostgreSQL.
+                    // CFG_SINGLE bit is set: config & 1 > 0.
                     $cQb->expr()->gt(
-                        $cQb->createFunction('(c.config & 2048)'),
+                        $cQb->createFunction('(c.config & ' . CirclesConfig::CFG_SINGLE . ')'),
                         $cQb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                     )
                 )
@@ -1803,8 +1917,8 @@ class MemberService {
         // Note: Circles/Teams are intentionally excluded from invite search results.
         // Inviting a team into another team (user_type=16 in circles_member) corrupts
         // Circles' own visibility queries, causing the parent team to disappear from
-        // Nextcloud Teams and breaking message posting. CFG_SINGLE is always enforced
-        // on TeamHub teams for the same reason.
+        // Nextcloud Teams and breaking message posting. This restriction is enforced
+        // at the controller level in inviteMembers() — not via any config bit.
 
         return $results;
     }

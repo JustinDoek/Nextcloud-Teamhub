@@ -3,6 +3,56 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.40.0] — 2026-05-18 — Session J close
+
+### Fixed
+
+#### Circles config bit encoding (was 3.39.1)
+- **Critical: Circles config bit encoding.** Every TeamHub release prior to 3.39.1 wrote the wrong Circles config bits when users toggled checkboxes in the Manage Team settings panel. Each TeamHub label was mapped to a bit that meant something completely different in Circles' real encoding. Consequences observed in production:
+  - "Anyone can join" wrote bit 1 (real `CFG_SINGLE`) → Circles tagged the team as a personal identity circle → Contacts hid it.
+  - "Visible to everyone" wrote bit 512 (real `CFG_NO_OWNER`) → Contacts refused config edits.
+  - "Enforce password protection" wrote bit 16 (real `CFG_OPEN`) → team became open-join.
+  - The always-on "Prevent sub-team membership" hint wrote bit 1024 (real `CFG_HIDDEN`) → team disappeared from listings.
+  - Settings made via Contacts and TeamHub no longer round-tripped — each side read a different field of meaning from the same column.
+
+  This release corrects the bit encoding in both PHP and Vue, introduces canonical constants in `lib/Constants/CirclesConfig.php` (mirrored in `src/constants/circlesConfig.js`) so the drift cannot recur, and ships a one-shot migration (`Version000339001`) that decodes admin intent from the old (wrong) encoding and re-encodes with correct Circles bit values. Admin sees the same checkbox states before and after — only the underlying storage changes.
+
+- **`resolveUserSingleId()` DB-join fallback** was checking `config & 2048` (which is `CFG_BACKEND`) thinking it was `CFG_SINGLE`. Now correctly uses `config & 1`.
+- **`browseAllTeams()` CFG_VISIBLE filter** was filtering on bit 512 (`CFG_NO_OWNER`) instead of bit 8 (real `CFG_VISIBLE`).
+- **`isOpen` checks in `browseAllTeams()` and `MemberService::requestJoinTeam()`** read bit 1 (`CFG_SINGLE`) instead of bit 16 (real `CFG_OPEN`).
+- **Manage team → Settings tab now always reloads from the database** when activated. Previously the checkboxes showed cached state and external changes (e.g. via Contacts) were not reflected until page refresh.
+
+#### Unread message counter (was 3.39.2)
+- **Unread message counter restored in sidebar.** The `NcCounterBubble` badge next to team names was effectively dead: no polling caused `team.unread` to go stale immediately after page load, the counter was hardcoded to display `"1"` regardless of count, and `team.unread` was a boolean not a count. Fixed: backend returns a real per-team count, the badge displays the actual number, a 60-second background poll keeps badges current, and posting a message triggers an immediate refresh. Excludes own messages from the count.
+
+#### Group invitations (was 3.39.6 → 3.39.14)
+- **Inviting a group to a team now works correctly.** Circles' `addMember()` was creating an `Invited` row with `level=0` for non-user types (groups, circles), and Circles has no working notification path for group invitations — so groups stayed in permanent limbo and TeamHub's filters silently hid them. Fixed by auto-confirming group/circle membership immediately after `addMember()` succeeds (UPDATE to `status='Member', level=1`) and triggering a Circles membership cache rebuild so users in the group get immediate access to team resources.
+- **@mention now works for indirect members (users added via a group).** Multiple cascading bugs fixed:
+  - `getAllEffectiveMembers` now correctly reads from `circles_membership` (Circles' denormalized cache) which contains every reachable user including those via groups, instead of attempting unreliable `IGroupManager` lookups by GID labels.
+  - Frontend store correctly unwraps the `{members: [...]}` response shape (was treating it as a bare array and discarding the data).
+  - Mention autocomplete supplements OCS results with team members that NC's user-enumeration privacy settings would normally hide.
+  - Manage team → invite flow refreshes `allEffectiveMembers` in the store after adding a group so mentions work immediately.
+
+### Added
+- **`lib/Constants/CirclesConfig.php`** — single source of truth for Circles bit values, plus `MANAGED_BITS`, `SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS`, and the `migrateLegacyConfig()` decoder.
+- **`src/constants/circlesConfig.js`** — JS mirror of the same constants, imported by `ManageTeamView.vue`, `CreateTeamView.vue`, and `TeamWidgetGrid.vue`.
+- **Reset config action** (icon button) in admin settings → maintenance → per-team row. Clears all user-managed and forbidden-system bits to clean defaults. Confirmation dialog before applying.
+- **Config bitmask integrity check** in admin settings → maintenance. Scans every user-created team for forbidden system bits (`CFG_SINGLE`, `CFG_SYSTEM`, `CFG_NO_OWNER`, `CFG_HIDDEN`, `CFG_BACKEND`, `CFG_APP`). Per-team Repair button calls `resetTeamConfig()`.
+- **Three new API endpoints:**
+  - `POST /api/v1/admin/maintenance/reset-team-config/{teamId}` — clears user-managed and forbidden-system bits, returns `{ oldConfig, newConfig }`. Logs to `teamhub_audit_log`.
+  - `GET /api/v1/admin/maintenance/config-check` — returns array of teams with corrupted bits.
+- **New Vuex state `allEffectiveMembers`** + `fetchAllEffectiveMembers` action + `UPDATE_UNREAD_COUNTS` mutation + `refreshUnreadCounts` action.
+
+### Changed
+- **`repairMembershipCache()`** now strips every bit in `SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS` before rebuilding the cache.
+- **`updateTeamConfig()`** `MANAGED_BITS` mask updated to the correct Circles bit values (`8 | 16 | 32 | 64 | 256` = 376).
+- **`TeamWidgetGrid.vue::teamLabels`** — labels now read from real Circles bits. The misleading "No nested teams" label removed.
+- **`CreateTeamView.vue`** — the "Prevent sub-team membership" checkbox removed entirely. It controlled nothing real and wrote `CFG_HIDDEN`.
+- **Audit log event types:** new `team.config_reset`, `team.config_migrated_3_39_1`, `team.config_migrated_3_40_0`.
+
+### Migration
+- **`Version000339001Date20260518000000`** — one-shot data migration. For every `source=16` team where any legacy-damage bit (1, 4, 512, 1024) is set, decodes admin intent from the old encoding and re-encodes with real Circles bits. Skips teams that have no legacy-damage bits. Logs every change to nextcloud.log and writes an audit log entry per team. Bursts Circles' APCu cache when done.
+
 ## [3.39.0] — 2026-05-15 — Session I
 
 ### Added

@@ -862,6 +862,16 @@ Fix a circle's `display_name` to match `sanitized_name`. Corrects misclassificat
 **Auth:** NC admin.
 **Response:** `{ success: true, newName: string }`
 
+### POST `/admin/maintenance/reset-team-config/{teamId}`
+Reset a team's user-managed config bits AND all forbidden system bits to clean defaults. Use when a team's `circles_circle.config` is corrupted (e.g. by an external tool, or by TeamHub <= 3.39.0 before the bit-encoding fix). Writes an audit log entry (`team.config_reset`). Bursts Circles' APCu cache.
+**Auth:** NC admin.
+**Response:** `{ oldConfig: int, newConfig: int }`
+
+### GET `/admin/maintenance/config-check`
+Scan every user-created team (`source=16`) for forbidden system bits in `circles_circle.config` (`CFG_SINGLE`, `CFG_SYSTEM`, `CFG_NO_OWNER`, `CFG_HIDDEN`, `CFG_BACKEND`, `CFG_APP`). Returns one entry per affected team. The admin can call `reset-team-config` per-team to repair.
+**Auth:** NC admin.
+**Response:** `{ issues: [{ id: string, name: string, config: int, badBits: int }] }`
+
 ### GET `/admin/telemetry`
 Current telemetry settings and payload preview.
 **Auth:** NC admin.

@@ -449,6 +449,17 @@
                                     <template #icon><AccountEditIcon :size="18" /></template>
                                 </NcButton>
                                 <NcButton
+                                    type="secondary"
+                                    :disabled="resettingConfigTeamId === team.id"
+                                    :aria-label="t('teamhub', 'Reset config bitmask for {name}', { name: team.name })"
+                                    :title="t('teamhub', 'Reset config to clean defaults — clears any corrupted bits set on this team')"
+                                    @click="confirmResetTeamConfig(team)">
+                                    <template #icon>
+                                        <NcLoadingIcon v-if="resettingConfigTeamId === team.id" :size="18" />
+                                        <RestoreIcon v-else :size="18" />
+                                    </template>
+                                </NcButton>
+                                <NcButton
                                     type="error"
                                     :disabled="deletingTeam === team.id"
                                     :aria-label="t('teamhub', 'Delete {name}', { name: team.name })"
@@ -700,6 +711,81 @@
                                     : t('teamhub', 'Repair') }}
                             </NcButton>
                         </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Config bitmask integrity ─────────────────────────────── -->
+            <div class="maint-divider" style="margin-top: 40px;"></div>
+            <div class="maint-header">
+                <h2 class="maint-header__title">{{ t('teamhub', 'Team config bitmask integrity') }}</h2>
+                <p class="maint-header__desc">
+                    {{ t('teamhub', 'Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND, CFG_APP). These bits make Circles treat the team as system-managed, hiding it from listings and blocking edits. Use Repair to reset a team\'s config to clean defaults.') }}
+                </p>
+            </div>
+
+            <div class="maint-integrity-actions">
+                <NcButton
+                    type="primary"
+                    :disabled="configCheckLoading"
+                    @click="runConfigCheck">
+                    <template #icon>
+                        <NcLoadingIcon v-if="configCheckLoading" :size="18" />
+                        <ShieldCheckIcon v-else :size="18" />
+                    </template>
+                    {{ configCheckLoading
+                        ? t('teamhub', 'Scanning…')
+                        : t('teamhub', 'Run config check') }}
+                </NcButton>
+            </div>
+
+            <div v-if="configCheckError" class="admin-error">
+                {{ configCheckError }}
+            </div>
+
+            <div v-if="configCheck" class="maint-integrity-result">
+                <div class="maint-integrity-summary">
+                    <span
+                        class="maint-integrity-summary__item"
+                        :class="{
+                            'maint-integrity-summary__item--ok':  configCheck.issues.length === 0,
+                            'maint-integrity-summary__item--bad': configCheck.issues.length > 0,
+                        }">
+                        {{ t('teamhub', 'Teams with corrupted config') }}: <strong>{{ configCheck.issues.length }}</strong>
+                    </span>
+                </div>
+
+                <div v-if="configCheck.issues.length === 0" class="admin-empty">
+                    {{ t('teamhub', 'All team config bitmasks are clean.') }}
+                </div>
+
+                <div v-else class="maint-integrity-list">
+                    <div
+                        v-for="issue in configCheck.issues"
+                        :key="issue.id"
+                        class="maint-integrity-row">
+                        <div class="maint-integrity-row__info">
+                            <span class="maint-integrity-row__name">{{ issue.name || issue.id }}</span>
+                            <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                {{ t(
+                                    'teamhub',
+                                    'Current config: {config}. Bad bits: {badBits}',
+                                    { config: issue.config, badBits: issue.badBits },
+                                ) }}
+                            </span>
+                        </div>
+                        <NcButton
+                            type="primary"
+                            :disabled="resettingConfigTeamId === issue.id"
+                            @click="repairConfigIssue(issue)">
+                            <template #icon>
+                                <NcLoadingIcon v-if="resettingConfigTeamId === issue.id" :size="18" />
+                                <RestoreIcon v-else :size="18" />
+                            </template>
+                            {{ resettingConfigTeamId === issue.id
+                                ? t('teamhub', 'Repairing…')
+                                : t('teamhub', 'Repair') }}
+                        </NcButton>
                     </div>
                 </div>
             </div>
@@ -1294,6 +1380,37 @@
                 </NcButton>
             </template>
         </NcDialog>
+
+        <!-- ── Reset team config confirmation dialog ─────────────────── -->
+        <NcDialog
+            v-if="confirmResetConfigDialog && confirmResetConfigTeam"
+            :name="t('teamhub', 'Reset team config')"
+            :open="confirmResetConfigDialog"
+            @update:open="cancelResetTeamConfig">
+            <template #default>
+                <p style="margin: 0 0 8px;">
+                    {{ t('teamhub', 'Reset all user-managed and system-flag bits on "{name}" to clean defaults?', { name: confirmResetConfigTeam.name || confirmResetConfigTeam.id }) }}
+                </p>
+                <p style="margin: 0; color: var(--color-text-maxcontrast);">
+                    {{ t('teamhub', 'This clears any corrupted bits set by older versions of TeamHub. The team owner will need to reconfigure its checkbox settings afterwards.') }}
+                </p>
+            </template>
+            <template #actions>
+                <NcButton type="tertiary" @click="cancelResetTeamConfig">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    type="primary"
+                    :disabled="resettingConfigTeamId === confirmResetConfigTeam.id"
+                    @click="executeResetTeamConfig">
+                    <template #icon>
+                        <NcLoadingIcon v-if="resettingConfigTeamId === confirmResetConfigTeam.id" :size="18" />
+                        <RestoreIcon v-else :size="18" />
+                    </template>
+                    {{ t('teamhub', 'Reset config') }}
+                </NcButton>
+            </template>
+        </NcDialog>
     </div>
 </template>
 
@@ -1318,6 +1435,7 @@ import AccountEditIcon from 'vue-material-design-icons/AccountEdit.vue'
 import ShieldCheckIcon from 'vue-material-design-icons/ShieldCheck.vue'
 import DownloadIcon from 'vue-material-design-icons/Download.vue'
 import RefreshIcon from 'vue-material-design-icons/Refresh.vue'
+import RestoreIcon from 'vue-material-design-icons/Restore.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
 import AccountOffIcon from 'vue-material-design-icons/AccountOff.vue'
@@ -1330,7 +1448,7 @@ export default {
         NcSettingsSection, NcButton, NcLoadingIcon,
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
-        ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon,
+        ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon, RestoreIcon,
         InformationOutline, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon,
     },
     data() {
@@ -1379,6 +1497,14 @@ export default {
             teamsError: null,
             teamsSearchTimer: null,
             deletingTeam: null,
+            // Reset team config (per-team action + integrity repair)
+            resettingConfigTeamId: null,
+            confirmResetConfigDialog: false,
+            confirmResetConfigTeam: null,
+            // Config integrity scan
+            configCheck: null,         // { issues: [{id, name, config, badBits}] }
+            configCheckLoading: false,
+            configCheckError: null,
             // Delete confirmation dialog
             confirmDeleteDialog: false,
             confirmDeleteTeam: null,
@@ -1823,6 +1949,80 @@ export default {
                 showError(msg ? this.t('teamhub', 'Failed to delete team: {error}', { error: msg }) : this.t('teamhub', 'Failed to delete team'))
             } finally {
                 this.deletingTeam = null
+            }
+        },
+
+        // ── Reset team config (clears corrupted bitmask) ──────────────────
+
+        confirmResetTeamConfig(team) {
+            this.confirmResetConfigTeam   = team
+            this.confirmResetConfigDialog = true
+        },
+
+        cancelResetTeamConfig() {
+            this.confirmResetConfigDialog = false
+            this.confirmResetConfigTeam   = null
+        },
+
+        async executeResetTeamConfig() {
+            if (!this.confirmResetConfigTeam) return
+            const team = this.confirmResetConfigTeam
+            this.resettingConfigTeamId = team.id
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/reset-team-config/${team.id}`)
+                )
+                this.cancelResetTeamConfig()
+                showSuccess(this.t(
+                    'teamhub',
+                    'Team config reset: {oldConfig} → {newConfig}',
+                    { oldConfig: data?.oldConfig ?? '?', newConfig: data?.newConfig ?? '?' },
+                ))
+                // Reload the integrity scan if it was previously run
+                if (this.configCheck) {
+                    await this.runConfigCheck()
+                }
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(msg
+                    ? this.t('teamhub', 'Failed to reset team config: {error}', { error: msg })
+                    : this.t('teamhub', 'Failed to reset team config'))
+            } finally {
+                this.resettingConfigTeamId = null
+            }
+        },
+
+        async runConfigCheck() {
+            this.configCheckLoading = true
+            this.configCheckError   = null
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/maintenance/config-check')
+                )
+                this.configCheck = data
+            } catch (e) {
+                this.configCheckError = e?.response?.data?.error || this.t('teamhub', 'Config integrity check failed')
+                this.configCheck = null
+            } finally {
+                this.configCheckLoading = false
+            }
+        },
+
+        async repairConfigIssue(issue) {
+            this.resettingConfigTeamId = issue.id
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/reset-team-config/${issue.id}`)
+                )
+                showSuccess(this.t('teamhub', 'Team config repaired'))
+                await this.runConfigCheck()
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(msg
+                    ? this.t('teamhub', 'Failed to repair team config: {error}', { error: msg })
+                    : this.t('teamhub', 'Failed to repair team config'))
+            } finally {
+                this.resettingConfigTeamId = null
             }
         },
 

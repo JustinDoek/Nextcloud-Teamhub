@@ -33,8 +33,8 @@
                     <template #icon>
                         <AccountGroup :size="20" />
                     </template>
-                    <template v-if="team.unread" #counter>
-                        <NcCounterBubble type="highlighted">1</NcCounterBubble>
+                    <template v-if="team.unread > 0" #counter>
+                        <NcCounterBubble type="highlighted">{{ team.unread }}</NcCounterBubble>
                     </template>
                 </NcAppNavigationItem>
 
@@ -161,9 +161,20 @@ export default {
             this.fetchTeams(),
             this.fetchCanCreateTeam(),
         ])
+
+        // Poll for new messages every 60s so the unread badge stays current
+        // without requiring a page reload. Uses refreshUnreadCounts (silent —
+        // no loading spinner) rather than fetchTeams to avoid UI flicker.
+        this._unreadPollInterval = setInterval(() => {
+            this.$store.dispatch('refreshUnreadCounts')
+        }, 60000)
     },
 
     beforeDestroy() {
+        if (this._unreadPollInterval) {
+            clearInterval(this._unreadPollInterval)
+            this._unreadPollInterval = null
+        }
         if (this._mobileSidebarMql && this._mobileSidebarMqlHandler) {
             if (typeof this._mobileSidebarMql.removeEventListener === 'function') {
                 this._mobileSidebarMql.removeEventListener('change', this._mobileSidebarMqlHandler)

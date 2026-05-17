@@ -70,17 +70,6 @@
                             </NcCheckboxRadioSwitch>
                         </div>
                         <div class="ctv__settings-group">
-                            <span class="ctv__settings-group-label">{{ t('teamhub', 'Membership') }}</span>
-                            <NcCheckboxRadioSwitch
-                                v-for="opt in configOptions.filter(o => o.group === 'member')"
-                                :key="opt.key"
-                                :checked.sync="form.config[opt.key]"
-                                type="checkbox">
-                                <span class="ctv__setting-name">{{ opt.label }}</span>
-                                <span class="ctv__setting-desc">{{ opt.description }}</span>
-                            </NcCheckboxRadioSwitch>
-                        </div>
-                        <div class="ctv__settings-group">
                             <span class="ctv__settings-group-label">{{ t('teamhub', 'Privacy') }}</span>
                             <NcCheckboxRadioSwitch
                                 v-for="opt in configOptions.filter(o => o.group === 'privacy')"
@@ -248,6 +237,15 @@ import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutline.vue'
 import ResourcePicker from './ResourcePicker.vue'
 
+// Canonical Circles config bit values — see src/constants/circlesConfig.js
+import {
+    CFG_VISIBLE,
+    CFG_OPEN,
+    CFG_INVITE,
+    CFG_REQUEST,
+    CFG_PROTECTED,
+} from '../constants/circlesConfig.js'
+
 export default {
     name: 'CreateTeamView',
     components: {
@@ -289,7 +287,6 @@ export default {
                     request: false,      // requests need approval
                     visible: false,      // visible to all
                     protected: false,    // password-protect shared files
-                    singleMember: false, // prevent sub-teams
                 },
             },
         }
@@ -319,19 +316,21 @@ export default {
                 { key: 'open',         group: 'invite', label: t('teamhub', 'Anyone can join'),               description: t('teamhub', 'No invitation needed — anyone can become a member') },
                 { key: 'invite',       group: 'invite', label: t('teamhub', 'Members can invite others'),      description: t('teamhub', 'Existing members can invite new people') },
                 { key: 'request',      group: 'invite', label: t('teamhub', 'Requests need moderator approval'), description: t('teamhub', 'Requires "Anyone can join" to be active') },
-                { key: 'singleMember', group: 'member', label: t('teamhub', 'Prevent sub-team membership'),    description: t('teamhub', 'Prevent other teams from being added as members') },
                 { key: 'visible',      group: 'privacy', label: t('teamhub', 'Visible to everyone'),           description: t('teamhub', 'This team appears in the team directory') },
                 { key: 'protected',    group: 'privacy', label: t('teamhub', 'Password-protect shared files'), description: t('teamhub', 'Enforce password on files shared with this team') },
             ]
         },
         configValue() {
             let v = 0
-            if (this.form.config.open)         v |= 1     // CFG_OPEN
-            if (this.form.config.invite)        v |= 2     // CFG_INVITE
-            if (this.form.config.request)       v |= 4     // CFG_REQUEST
-            if (this.form.config.protected)     v |= 16    // CFG_PROTECTED
-            if (this.form.config.visible)       v |= 512   // CFG_VISIBLE
-            if (this.form.config.singleMember)  v |= 1024  // CFG_SINGLE
+            if (this.form.config.open)         v |= CFG_OPEN
+            if (this.form.config.invite)        v |= CFG_INVITE
+            if (this.form.config.request)       v |= CFG_REQUEST
+            if (this.form.config.protected)     v |= CFG_PROTECTED
+            if (this.form.config.visible)       v |= CFG_VISIBLE
+            // System bits (CFG_SINGLE, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN,
+            // CFG_BACKEND) are never written by TeamHub — Circles manages them
+            // internally and setting them on a user team corrupts its state.
+            // Team-as-member prevention is enforced server-side in MemberService.
             return v
         },
     },

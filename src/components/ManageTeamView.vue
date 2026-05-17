@@ -1722,6 +1722,9 @@ export default {
         onMembersInvited() {
             this.showInviteModal = false
             this.loadMembers()
+            // Refresh the full effective member list in the store so @mention
+            // autocomplete immediately includes users from any newly added group.
+            this.$store.dispatch('fetchAllEffectiveMembers', this.team.id)
         },
 
         async loadMembers() {

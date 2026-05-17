@@ -273,7 +273,7 @@ export default {
     },
 
     computed: {
-        ...mapState(['members', 'messageSettings']),
+        ...mapState(['members', 'allEffectiveMembers', 'messageSettings']),
 
         mentions() {
             // NcRichContenteditable user-data must be a plain object keyed by userId.
@@ -345,45 +345,104 @@ export default {
          */
         async mentionAutoComplete(search, callback) {
             try {
-                const { data } = await axios.get(
+                // Ensure we have the full effective member list — fetch live if
+                // the store is empty (e.g. component mounted before selectTeam
+                // completed, or the fetch failed silently on team load).
+                let mentionList = this.allEffectiveMembers.length > 0
+                    ? this.allEffectiveMembers
+                    : (this.members || [])
+
+                if (mentionList.length === 0) {
+                    const teamId = this.$store.state.currentTeamId
+                    if (teamId) {
+                        try {
+                            const { data: allData } = await axios.get(
+                                generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`)
+                            )
+                            const allList = Array.isArray(allData) ? allData : (Array.isArray(allData?.members) ? allData.members : [])
+                            if (allList.length > 0) {
+                                this.$store.commit('SET_ALL_EFFECTIVE_MEMBERS', allList)
+                                mentionList = allList
+                            }
+                        } catch (fetchErr) {
+                            // Non-fatal — continue with empty mentionList
+                        }
+                    }
+                }
+
+                // Run OCS autocomplete and team-member filter in parallel
+                const ocsPromise = axios.get(
                     generateUrl('/ocs/v2.php/core/autocomplete/get'),
                     {
-                        params: {
-                            search:        search || '',
-                            itemType:      'call',
-                            itemId:        'new',
-                            sorter:        '',
-                            limit:         20,
-                            format:        'json',
-                        },
+                        params: { search: search || '', itemType: 'call', itemId: 'new', sorter: '', limit: 20, format: 'json' },
                         headers: { 'OCS-APIREQUEST': 'true' },
                     }
-                )
-                // OCS wraps response in ocs.data
-                const users = data?.ocs?.data || []
+                ).then(r => r.data?.ocs?.data || []).catch(() => [])
 
-                // Scope to team members only
-                const memberIds = new Set((this.members || []).map(m => m.userId))
-                const filtered = users.filter(u => memberIds.has(u.id) || memberIds.has(u.value?.shareWith))
+                const ocsUsers = await ocsPromise
 
-                callback(filtered)
-            } catch (e) {
-                // Fallback: use local members list with basic shape
+                const memberIds = new Set(mentionList.map(m => m.userId))
                 const lower = (search || '').toLowerCase()
-                const fallback = (this.members || [])
+
+                // OCS results scoped to team members
+                const filtered = ocsUsers.filter(u =>
+                    memberIds.has(u.id) || memberIds.has(u.value?.shareWith)
+                )
+
+                // Supplement with team members absent from OCS (NC privacy settings
+                // may restrict user enumeration for users in other groups/orgs).
+                const foundIds = new Set(filtered.map(u => u.id))
+                const supplemental = mentionList
                     .filter(m =>
-                        (m.displayName || '').toLowerCase().includes(lower) ||
-                        (m.userId || '').toLowerCase().includes(lower)
+                        !foundIds.has(m.userId) && (
+                            (m.displayName || '').toLowerCase().includes(lower) ||
+                            (m.userId     || '').toLowerCase().includes(lower)
+                        )
                     )
-                    .slice(0, 8)
                     .map(m => ({
                         id:     m.userId,
                         label:  m.displayName || m.userId,
                         source: 'users',
                         icon:   'icon-user',
-                        status: null,
+                        value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
                     }))
-                callback(fallback)
+
+                callback([...filtered, ...supplemental])
+            } catch (e) {
+                // Full fallback — fetch live from API, bypass OCS entirely
+                const lower = (search || '').toLowerCase()
+                let fallbackList = this.allEffectiveMembers.length > 0
+                    ? this.allEffectiveMembers
+                    : (this.members || [])
+
+                if (fallbackList.length === 0) {
+                    const teamId = this.$store.state.currentTeamId
+                    if (teamId) {
+                        try {
+                            const { data: allData } = await axios.get(
+                                generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`)
+                            )
+                            const allList = Array.isArray(allData) ? allData : (Array.isArray(allData?.members) ? allData.members : [])
+                            if (allList.length > 0) fallbackList = allList
+                        } catch (_) { /* give up */ }
+                    }
+                }
+
+                callback(
+                    fallbackList
+                        .filter(m =>
+                            (m.displayName || '').toLowerCase().includes(lower) ||
+                            (m.userId     || '').toLowerCase().includes(lower)
+                        )
+                        .slice(0, 10)
+                        .map(m => ({
+                            id:     m.userId,
+                            label:  m.displayName || m.userId,
+                            source: 'users',
+                            icon:   'icon-user',
+                            value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                        }))
+                )
             }
         },
 

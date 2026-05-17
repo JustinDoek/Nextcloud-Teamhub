@@ -21,7 +21,6 @@ export default new Vuex.Store({
         messageSettings: { pinMinLevel: 'moderator', postMinLevel: 'member' }, // per-team message settings
         comments: {},          // { messageId: [comments] }
         members: [],
-        allEffectiveMembers: [],   // flat [{userId, displayName}] of ALL members including indirect (via groups/teams) — used for @mention autocomplete
         memberships: [],           // flat list of {type: 'group'|'circle', displayName, memberCount}
         effectiveMemberCount: 0,   // total users including those via groups/teams (from circles_membership)
         hasMoreMembers: false,     // true when effective_count > members shown in widget
@@ -101,18 +100,6 @@ export default new Vuex.Store({
 
     mutations: {
         SET_TEAMS(state, teams) { state.teams = teams },
-
-        // Patch only the unread count on each team — does NOT replace the
-        // teams array, so Vue does not tear down and re-mount navigation
-        // items. Safe to call on a background poll.
-        UPDATE_UNREAD_COUNTS(state, teams) {
-            if (!Array.isArray(teams)) return
-            const map = {}
-            teams.forEach(t => { map[t.id] = t.unread || 0 })
-            state.teams.forEach(t => {
-                Vue.set(t, 'unread', map[t.id] ?? t.unread ?? 0)
-            })
-        },
         UPDATE_TEAM_IMAGE(state, { teamId, imageUrl }) {
             const team = state.teams.find(t => t.id === teamId)
             if (team) {
@@ -179,7 +166,6 @@ export default new Vuex.Store({
             state.comments[messageId].push(comment)
         },
         SET_MEMBERS(state, members) { state.members = members },
-        SET_ALL_EFFECTIVE_MEMBERS(state, members) { state.allEffectiveMembers = Array.isArray(members) ? members : [] },
         SET_MEMBERSHIPS(state, memberships) { state.memberships = memberships },
         SET_EFFECTIVE_MEMBER_COUNT(state, count) { state.effectiveMemberCount = count },
         SET_HAS_MORE_MEMBERS(state, val) { state.hasMoreMembers = val },
@@ -242,7 +228,6 @@ export default new Vuex.Store({
             commit('SET_MESSAGES_TOTAL', 0)
             commit('SET_MESSAGE_SETTINGS', { pinMinLevel: 'moderator', postMinLevel: 'member' })
             commit('SET_MEMBERS', [])
-            commit('SET_ALL_EFFECTIVE_MEMBERS', [])
             commit('SET_RESOURCES', {})
             commit('SET_WEB_LINKS', [])
             commit('SET_TEAM_WIDGETS', [])
@@ -255,7 +240,6 @@ export default new Vuex.Store({
             await Promise.all([
                 dispatch('fetchMessages', teamId),
                 dispatch('fetchMembers', teamId),
-                dispatch('fetchAllEffectiveMembers', teamId),
                 dispatch('fetchResources', teamId),
                 dispatch('fetchWebLinks', teamId),
                 dispatch('fetchTeamIntegrations', teamId),
@@ -357,7 +341,7 @@ export default new Vuex.Store({
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/teams'))
                 if (Array.isArray(data)) {
-                    commit('UPDATE_UNREAD_COUNTS', data)
+                    commit('SET_TEAMS', data)
                 }
             } catch (e) {
                 // Non-critical — silently ignore
@@ -418,32 +402,6 @@ export default new Vuex.Store({
                 commit('SET_CURRENT_USER_LEVEL', 0)
             } finally {
                 commit('SET_LOADING', { key: 'members', value: false })
-            }
-        },
-
-        /**
-         * Fetch the full flat list of ALL effective members — direct and indirect
-         * (via groups or sub-teams). Uses circles_membership as the source of truth.
-         * Stored separately from `members` (which is the capped-at-16 widget list).
-         * Used exclusively for @mention autocomplete filtering so indirect members
-         * are mentionable.
-         *
-         * Silently degrades — if the call fails, mention filtering falls back to
-         * the direct members list via the OCS fallback path.
-         */
-        async fetchAllEffectiveMembers({ commit }, teamId) {
-            try {
-                const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`)
-                )
-                // Backend returns { members: [...] }, but tolerate a bare array too
-                // for compatibility with any future shape change.
-                const members = Array.isArray(data)
-                    ? data
-                    : (Array.isArray(data?.members) ? data.members : [])
-                commit('SET_ALL_EFFECTIVE_MEMBERS', members)
-            } catch (e) {
-                commit('SET_ALL_EFFECTIVE_MEMBERS', [])
             }
         },
 

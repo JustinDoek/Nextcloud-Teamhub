@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\CirclesConfig;
 use OCP\IDBConnection;
 use OCP\IUserManager;
 use OCP\IUserSession;
@@ -1490,10 +1491,11 @@ class MaintenanceService {
     public function repairMembershipCache(string $teamId): void {
         $this->requireNcAdmin();
 
-        // Always clear CFG_SINGLE (1024) before rebuilding the cache.
-        // This bit makes Circles treat user-created teams as personal circles,
-        // hiding them from its own API. It should never be set on source=16 circles.
-        // Clearing it here ensures the cache rebuild works on a valid circle config.
+        // Strip any system-managed bits that may be set on this user team
+        // (source=16). System bits like CFG_SINGLE (1), CFG_SYSTEM (4),
+        // CFG_NO_OWNER (512), CFG_HIDDEN (1024), CFG_BACKEND (2048) must never
+        // be set on a regular user team — they cause Circles to treat the team
+        // as system-managed, hiding it from listings and breaking edits.
         try {
             $cfgQb  = $this->db->getQueryBuilder();
             $cfgRes = $cfgQb->select('config', 'source')
@@ -1504,20 +1506,23 @@ class MaintenanceService {
             $cfgRow = $cfgRes->fetch();
             $cfgRes->closeCursor();
 
-            if ($cfgRow && (int)$cfgRow['source'] === 16 && ((int)$cfgRow['config'] & 1024)) {
-                $newCfg = (int)$cfgRow['config'] & ~1024;
+            $forbidden = CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS;
+            if ($cfgRow && (int)$cfgRow['source'] === 16 && ((int)$cfgRow['config'] & $forbidden)) {
+                $oldCfg = (int)$cfgRow['config'];
+                $newCfg = $oldCfg & ~$forbidden;
                 $updQb  = $this->db->getQueryBuilder();
                 $updQb->update('circles_circle')
                     ->set('config', $updQb->createNamedParameter($newCfg, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                     ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
                     ->executeStatement();
-                $this->logger->info('[MaintenanceService] repairMembershipCache: cleared CFG_SINGLE bit', [
-                    'teamId' => $teamId, 'oldConfig' => (int)$cfgRow['config'], 'newConfig' => $newCfg,
+                $this->logger->info('[MaintenanceService] repairMembershipCache: cleared forbidden system bits', [
+                    'teamId' => $teamId, 'oldConfig' => $oldCfg, 'newConfig' => $newCfg,
+                    'clearedMask' => $oldCfg & $forbidden,
                     'app' => Application::APP_ID,
                 ]);
             }
         } catch (\Throwable $e) {
-            $this->logger->warning('[MaintenanceService] repairMembershipCache: CFG_SINGLE clear failed', [
+            $this->logger->warning('[MaintenanceService] repairMembershipCache: forbidden-bit clear failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1534,5 +1539,138 @@ class MaintenanceService {
             ]);
             throw new \Exception('Failed to rebuild membership cache: ' . $e->getMessage());
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Config bitmask integrity & repair
+    // -------------------------------------------------------------------------
+
+    /**
+     * Reset a single team's user-managed config bits to clean defaults.
+     *
+     * Clears every TeamHub-managed bit (CFG_VISIBLE, CFG_OPEN, CFG_INVITE,
+     * CFG_REQUEST, CFG_PROTECTED) AND every system bit forbidden on user
+     * teams (CFG_SINGLE, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND,
+     * CFG_APP). Preserves federation/personal bits set by Circles itself.
+     *
+     * Use cases:
+     *   - Admin sees a team with corrupted config and wants a clean slate.
+     *   - Integrity check flagged forbidden bits set externally.
+     *   - The 3.39.1 one-shot migration's repair fallback.
+     *
+     * @return array{oldConfig: int, newConfig: int}
+     */
+    public function resetTeamConfig(string $teamId): array {
+        $this->requireNcAdmin();
+
+        $cfgQb  = $this->db->getQueryBuilder();
+        $cfgRes = $cfgQb->select('config', 'source')
+            ->from('circles_circle')
+            ->where($cfgQb->expr()->eq('unique_id', $cfgQb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $cfgRow = $cfgRes->fetch();
+        $cfgRes->closeCursor();
+
+        if (!$cfgRow) {
+            throw new \Exception('Team not found: ' . $teamId);
+        }
+        if ((int)$cfgRow['source'] !== 16) {
+            throw new \Exception('Team is not a user-created team (source != 16) — refusing to reset config: ' . $teamId);
+        }
+
+        $oldConfig    = (int)$cfgRow['config'];
+        $clearMask    = CirclesConfig::MANAGED_BITS | CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS;
+        $newConfig    = $oldConfig & ~$clearMask;
+
+        $updQb = $this->db->getQueryBuilder();
+        $updQb->update('circles_circle')
+            ->set('config', $updQb->createNamedParameter($newConfig, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
+            ->executeStatement();
+
+        // Bust Circles' APCu cache.
+        if (function_exists('apcu_delete') && class_exists('APCUIterator')) {
+            try {
+                foreach (new \APCUIterator('/^(circles|NC__circles)/') as $item) {
+                    apcu_delete($item['key']);
+                }
+            } catch (\Throwable $e) { /* non-fatal */ }
+        }
+
+        $this->logger->info('[MaintenanceService] resetTeamConfig: cleaned config bits', [
+            'teamId'    => $teamId,
+            'oldConfig' => $oldConfig,
+            'newConfig' => $newConfig,
+            'cleared'   => $oldConfig & $clearMask,
+            'app'       => Application::APP_ID,
+        ]);
+
+        // Audit log entry — visible in Manage team → Activity.
+        try {
+            $auditService = $this->container->get(\OCA\TeamHub\Service\AuditService::class);
+            $currentUid   = $this->userSession->getUser() ? $this->userSession->getUser()->getUID() : 'system';
+            $auditService->log(
+                $teamId,
+                'team.config_reset',
+                $currentUid,
+                'team',
+                $teamId,
+                ['oldConfig' => $oldConfig, 'newConfig' => $newConfig],
+            );
+        } catch (\Throwable $e) {
+            // Audit failure is non-fatal — the repair already succeeded.
+            $this->logger->warning('[MaintenanceService] resetTeamConfig: audit log failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        return ['oldConfig' => $oldConfig, 'newConfig' => $newConfig];
+    }
+
+    /**
+     * Scan every source=16 user team for config corruption — any system bit
+     * that must not appear on a user team.
+     *
+     * Returns one row per affected team:
+     *   { id, name, config, badBits }
+     *
+     * Admin can then call resetTeamConfig() per-team to repair.
+     */
+    public function checkConfigIntegrity(): array {
+        $this->requireNcAdmin();
+
+        $forbidden = CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS;
+
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('unique_id', 'name', 'config')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere(
+                $qb->expr()->gt(
+                    $qb->createFunction('(config & ' . $forbidden . ')'),
+                    $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+                )
+            )
+            ->executeQuery();
+
+        $issues = [];
+        while ($row = $res->fetch()) {
+            $config  = (int)$row['config'];
+            $badBits = $config & $forbidden;
+            $issues[] = [
+                'id'      => (string)$row['unique_id'],
+                'name'    => (string)($row['name'] ?? ''),
+                'config'  => $config,
+                'badBits' => $badBits,
+            ];
+        }
+        $res->closeCursor();
+
+        $this->logger->info('[MaintenanceService] checkConfigIntegrity: scan complete', [
+            'issuesFound' => count($issues), 'app' => Application::APP_ID,
+        ]);
+
+        return $issues;
     }
 }

@@ -361,4 +361,38 @@ class MaintenanceController extends Controller {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
+
+    /**
+     * Reset a team's user-managed config bits to clean defaults.
+     * Returns { oldConfig, newConfig } so the UI can confirm the change.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function resetTeamConfig(string $teamId): JSONResponse {
+        try {
+            $result = $this->maintenanceService->resetTeamConfig($teamId);
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] resetTeamConfig failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Scan for teams with corrupted config bits (system bits set on user teams).
+     * Returns an array of { id, name, config, badBits } — one entry per affected team.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function checkConfigIntegrity(): JSONResponse {
+        try {
+            $issues = $this->maintenanceService->checkConfigIntegrity();
+            return new JSONResponse(['issues' => $issues]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] checkConfigIntegrity failed', [
+                'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
 }
