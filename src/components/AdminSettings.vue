@@ -161,6 +161,12 @@
                         <template #description>{{ t('teamhub', 'Add all members of a Nextcloud group at once') }}</template>
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
+                        v-model="inviteCircle"
+                        type="checkbox">
+                        {{ t('teamhub', 'Teams') }}
+                        <template #description>{{ t('teamhub', 'Add another team as a sub-team member — all its members gain access') }}</template>
+                    </NcCheckboxRadioSwitch>
+                    <NcCheckboxRadioSwitch
                         v-model="inviteEmail"
                         type="checkbox">
                         {{ t('teamhub', 'Email addresses') }}
@@ -577,7 +583,7 @@
                             <div class="maint-integrity-row__info">
                                 <span class="maint-integrity-row__name">{{ issue.name }}</span>
                                 <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
-                                    {{ t('teamhub', 'Team "{child}" is a member of this team — this breaks Nextcloud Teams visibility and posting.', { child: issue.nested_team_name }) }}
+                                    {{ t('teamhub', 'Team "{child}" is a member of this team, but has "Prevent from being a member of another team" enabled — remove the membership or update {child}\'s settings.', { child: issue.nested_team_name }) }}
                                 </span>
                             </div>
                             <NcButton
@@ -1465,6 +1471,7 @@ export default {
             },
             // Invite type toggles
             inviteGroup: true,
+            inviteCircle: false,
             inviteEmail: false,
             inviteFederated: false,
             // Group picker
@@ -1679,6 +1686,7 @@ export default {
 
                 const types = (data.inviteTypes || 'user,group').split(',').map(s => s.trim())
                 this.inviteGroup     = types.includes('group')
+                this.inviteCircle    = types.includes('circle')
                 this.inviteEmail     = types.includes('email')
                 this.inviteFederated = types.includes('federated')
 
@@ -1786,6 +1794,7 @@ export default {
 
             const types = ['user']
             if (this.inviteGroup)     types.push('group')
+            if (this.inviteCircle)    types.push('circle')
             if (this.inviteEmail)     types.push('email')
             if (this.inviteFederated) types.push('federated')
 

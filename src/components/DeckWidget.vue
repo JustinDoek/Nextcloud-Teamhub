@@ -1,5 +1,27 @@
 <template>
     <div class="th-widget">
+
+        <!-- Unassigned nudge — shown per board whenever unassigned > 0.
+             Appears whether or not there are upcoming tasks. -->
+        <div v-if="unassignedBoards.length" class="th-unassigned">
+            <button
+                v-for="b in unassignedBoards"
+                :key="b.boardId"
+                type="button"
+                class="th-unassigned__row"
+                :aria-label="n('teamhub', '{n} unassigned card in {board} — open board', '{n} unassigned cards in {board} — open board', b.count, { n: b.count, board: b.boardName || 'board' })"
+                @click="openBoard(b)">
+                <AlertCircleOutline :size="15" class="th-unassigned__icon" aria-hidden="true" />
+                <span class="th-unassigned__text">
+                    <template v-if="b.boardName">
+                        <strong>{{ b.boardName }}</strong>{{ t('teamhub', ':') }}
+                    </template>
+                    {{ n('teamhub', '{n} unassigned card', '{n} unassigned cards', b.count, { n: b.count }) }}
+                </span>
+                <ChevronRightIcon :size="13" class="th-unassigned__ext" aria-hidden="true" />
+            </button>
+        </div>
+
         <!-- Empty state -->
         <div v-if="mergedTasks.length === 0" class="th-widget__state">
             <CardTextIcon :size="36" class="th-widget__empty-icon" />
@@ -77,13 +99,15 @@
 </template>
 
 <script>
-import { mapState } from 'vuex'
-import { translate as t } from '@nextcloud/l10n'
+import { mapState, mapMutations } from 'vuex'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { NcAvatar } from '@nextcloud/vue'
 import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutlineIcon from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import ClipboardCheckOutlineIcon from 'vue-material-design-icons/ClipboardCheckOutline.vue'
+import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
+import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 
 export default {
     name: 'DeckWidget',
@@ -93,10 +117,23 @@ export default {
         CardTextIcon,
         CheckboxMarkedOutlineIcon,
         ClipboardCheckOutlineIcon,
+        AlertCircleOutline,
+        ChevronRightIcon,
     },
 
     computed: {
-        ...mapState(['deckTasks', 'teamTasks', 'resources']),
+        ...mapState(['deckTasks', 'teamTasks', 'resources', 'deckUnassignedCounts']),
+
+        /**
+         * Boards with at least one unassigned non-overdue card, sorted by
+         * count descending so the board needing most attention is first.
+         */
+        unassignedBoards() {
+            return Object.entries(this.deckUnassignedCounts || {})
+                .filter(([, b]) => b.count > 0)
+                .map(([boardId, b]) => ({ boardId, count: b.count, boardName: b.boardName }))
+                .sort((a, b) => b.count - a.count)
+        },
 
         /**
          * Merge Deck cards and NC Tasks VTODOs into a single list sorted by
@@ -150,6 +187,18 @@ export default {
 
     methods: {
         t,
+        n,
+        ...mapMutations(['SET_VIEW', 'SET_SELECTED_DECK_BOARD']),
+
+        /**
+         * Open the board in the TeamHub iframe (same as clicking the Deck tab).
+         * With multiple boards, SET_SELECTED_DECK_BOARD pre-selects this board
+         * so deckUrl in TeamView resolves to the right one.
+         */
+        openBoard(b) {
+            this.SET_SELECTED_DECK_BOARD({ board_id: b.boardId, name: b.boardName })
+            this.SET_VIEW('deck')
+        },
 
         truncate(str, max) {
             if (!str) return ''
@@ -329,5 +378,62 @@ export default {
     align-items: center;
     gap: 2px;
     margin-left: auto;
+}
+
+/* ----------------------------------------------------------------
+   Unassigned nudge section — amber, top of widget body
+---------------------------------------------------------------- */
+
+.th-unassigned {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.th-unassigned__row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    width: 100%;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    background: var(--color-warning-soft, rgba(245, 158, 11, 0.08));
+    border: none;
+    border-bottom: 1px solid var(--color-warning-element-light, rgba(245, 158, 11, 0.18));
+    color: var(--color-warning-text, #92400e);
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.3;
+    transition: background 0.1s;
+}
+
+.th-unassigned__row:last-child {
+    border-bottom: none;
+}
+
+.th-unassigned__row:hover {
+    background: var(--color-warning-soft, rgba(245, 158, 11, 0.15));
+}
+
+.th-unassigned__row:focus-visible {
+    outline: 2px solid var(--color-warning, #f59e0b);
+    outline-offset: -2px;
+}
+
+.th-unassigned__icon {
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
+.th-unassigned__text {
+    flex: 1;
+    min-width: 0;
+}
+
+.th-unassigned__ext {
+    flex-shrink: 0;
+    opacity: 0.5;
 }
 </style>

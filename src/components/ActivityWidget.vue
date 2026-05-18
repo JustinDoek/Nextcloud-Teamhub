@@ -196,24 +196,26 @@ export default {
 
             // Deck — exact subject strings from oc_activity
             if (item.app === 'deck') {
-                if (s === 'card_create')             return `${u} created a card`
-                if (s === 'card_update_title')       return `${u} renamed a card`
-                if (s === 'card_update_description') return `${u} updated a card description`
-                if (s === 'card_update_duedate')     return `${u} set a card due date`
-                if (s === 'card_update_archive')     return `${u} archived a card`
-                if (s === 'card_delete')             return `${u} deleted a card`
-                if (s === 'card_user_assign')        return `${u} assigned a card`
-                if (s === 'card_user_unassign')      return `${u} unassigned a card`
-                if (s === 'stack_create')            return `${u} created a list`
-                if (s === 'stack_update')            return `${u} renamed a list`
-                if (s === 'stack_delete')            return `${u} deleted a list`
-                if (s === 'board_create')            return `${u} created the board`
-                if (s === 'board_update')            return `${u} updated the board`
-                if (s === 'board_delete')            return `${u} deleted the board`
-                if (s === 'board_share')             return `${u} shared the board`
-                if (s === 'label_assign')            return `${u} added a label`
-                if (s === 'label_unassign')          return `${u} removed a label`
-                return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
+                const board = item.board_name ? ` — ${item.board_name}` : ''
+                const card  = item.card_title  ? ` "${item.card_title}"` : ''
+                if (s === 'card_create')             return `${u} created card${card}${board}`
+                if (s === 'card_update_title')       return `${u} renamed a card${board}`
+                if (s === 'card_update_description') return `${u} updated card description${card}${board}`
+                if (s === 'card_update_duedate')     return `${u} set due date on${card}${board}`
+                if (s === 'card_update_archive')     return `${u} archived${card}${board}`
+                if (s === 'card_delete')             return `${u} deleted a card${board}`
+                if (s === 'card_user_assign')        return `${u} assigned${card}${board}`
+                if (s === 'card_user_unassign')      return `${u} unassigned${card}${board}`
+                if (s === 'stack_create')            return `${u} created a list${board}`
+                if (s === 'stack_update')            return `${u} renamed a list${board}`
+                if (s === 'stack_delete')            return `${u} deleted a list${board}`
+                if (s === 'board_create')            return `${u} created the board${board}`
+                if (s === 'board_update')            return `${u} updated the board${board}`
+                if (s === 'board_delete')            return `${u} deleted the board${board}`
+                if (s === 'board_share')             return `${u} shared the board${board}`
+                if (s === 'label_assign')            return `${u} added a label${card}${board}`
+                if (s === 'label_unassign')          return `${u} removed a label${card}${board}`
+                return u ? `${u} · ${s.replace(/_/g, ' ')}${board}` : s.replace(/_/g, ' ')
             }
 
             // Calendar / DAV — real subject strings from oc_activity

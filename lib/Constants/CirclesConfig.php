@@ -91,12 +91,15 @@ final class CirclesConfig {
      * CFG_HIDDEN flag.
      */
     public const MANAGED_BITS =
-          self::CFG_VISIBLE     //   8
-        | self::CFG_OPEN        //  16
-        | self::CFG_INVITE      //  32
-        | self::CFG_REQUEST     //  64
-        | self::CFG_PROTECTED;  // 256
-    // = 376
+          self::CFG_VISIBLE   //    8
+        | self::CFG_OPEN      //   16
+        | self::CFG_INVITE    //   32
+        | self::CFG_REQUEST   //   64
+        | self::CFG_PROTECTED // 256
+        | self::CFG_ROOT;     // 8192 — Contacts uses CFG_ROOT to implement
+                              //        "Prevent teams from being a member of
+                              //        another team". TeamHub syncs with this.
+    // = 8568
 
     /**
      * System bits that must never appear on a source=16 user team.

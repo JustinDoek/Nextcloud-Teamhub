@@ -457,7 +457,8 @@ Update managed config bits (open, invite, request, visible, protected, single). 
 Get the activity feed for a team (files, calendar, deck, circles events).
 **Auth:** Team member.
 **Query:** `?limit=25&since=0` (limit capped at 100)
-**Response:** `{ activities: [ { id, type, subject, timestamp, user, icon, url } ] }`
+**Response:** `{ activities: [ { activity_id, app, type, subject, datetime, user, icon, link, object_type, object_id, file, board_name, card_title } ] }`
+**Note:** `board_name` and `card_title` are non-empty only for `app=deck` events, parsed from Nextcloud's `subjectparams` JSON. All connected Deck boards are included (multi-board support since 3.41.0).
 
 ### GET `/teams/{teamId}/calendar-events`
 Get upcoming calendar events for the team (next 30 days).
@@ -634,10 +635,11 @@ Mark the team as seen by the current user (clears the unread indicator).
 ## Search
 
 ### GET `/users/search`
-Search Nextcloud users and groups for the invite member picker.
+Search Nextcloud users, groups, and teams for the invite member picker.
 **Auth:** Authenticated.
-**Query:** `?q=searchterm` (minimum 2 characters)
-**Response:** `[ { id, displayName, type, icon } ]` — type: `user` | `group` | `email` | `federated`
+**Query:** `?q=searchterm&teamId=` — `q` minimum 2 characters; optional `teamId` excludes the current team and prevents circular nesting in results.
+**Response:** `[ { id, displayName, type, icon } ]` — type: `user` | `group` | `circle` | `email` | `federated`
+**Note:** `circle` results only returned when the `circle` invite type is enabled in admin settings, and only for teams that have NOT checked "Prevent this team from being a member of another team" (CFG_ROOT not set).
 
 ---
 

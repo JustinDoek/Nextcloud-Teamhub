@@ -826,13 +826,19 @@ class MaintenanceService {
         $circles = $res->fetchAll();
         $res->closeCursor();
 
-        // ── Step A: detect teams nested inside other teams ───────────────────
-        // When team B is invited into team A, Circles writes a circles_member row
-        // with user_type=16, circle_id=teamA, single_id=teamB.
-        // This corrupts Circles' visibility queries and breaks posting.
+        // ── Step A: detect contradictory team nesting ────────────────────────
+        // Team-as-member is now a supported feature (>= 3.40.1). A sub-team
+        // relationship is only an issue when the child team has CFG_ROOT (8192)
+        // set — meaning "Prevent this team from being a member of another team"
+        // is active in both TeamHub and Contacts, yet the team IS nested.
+        // That is a contradictory state: the admin said "no nesting" but nesting
+        // exists. Flag it and offer to remove the membership.
+        //
+        // Valid nesting (CFG_ROOT NOT set on child) is intentional and is skipped.
+        $CFG_ROOT_BIT = \OCA\TeamHub\Constants\CirclesConfig::CFG_ROOT; // 8192
         $nestedQb = $this->db->getQueryBuilder();
         $nestedRes = $nestedQb
-            ->select('cm.circle_id', 'cm.single_id', 'parent.name AS parent_name', 'child.name AS child_name')
+            ->select('cm.circle_id', 'cm.single_id', 'parent.name AS parent_name', 'child.name AS child_name', 'child.config AS child_config')
             ->from('circles_member', 'cm')
             ->innerJoin('cm', 'circles_circle', 'parent', $nestedQb->expr()->eq('parent.unique_id', 'cm.circle_id'))
             ->innerJoin('cm', 'circles_circle', 'child',  $nestedQb->expr()->eq('child.unique_id',  'cm.single_id'))
@@ -840,6 +846,10 @@ class MaintenanceService {
             ->andWhere($nestedQb->expr()->eq('cm.status',    $nestedQb->createNamedParameter('Member')))
             ->andWhere($nestedQb->expr()->eq('child.source', $nestedQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->andWhere($nestedQb->expr()->eq('parent.source', $nestedQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere(
+                // Only flag when the child has CFG_ROOT set (prevention active but nesting exists)
+                $nestedQb->createFunction('(child.config & ' . $CFG_ROOT_BIT . ')') . ' > 0'
+            )
             ->executeQuery();
 
         while ($nestedRow = $nestedRes->fetch()) {

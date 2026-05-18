@@ -319,7 +319,6 @@ export default {
             // Multi-resource picker state (§10.1)
             showDeckPicker:      false,
             showCalendarPicker:  false,
-            selectedDeckBoard:   null,   // { board_id, name, color } — set when picker chooses
             selectedCalendar:    null,   // { id, name } — set when picker chooses
             showAddPersonalTask: false,
             widgetDynamicActions: {},
@@ -334,6 +333,7 @@ export default {
         ...mapState([
             'currentTeamId', 'currentView', 'resources', 'webLinks',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
+            'selectedDeckBoard',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -840,7 +840,7 @@ export default {
         },
 
         pickDeckBoard(board) {
-            this.selectedDeckBoard = board
+            this.$store.commit('SET_SELECTED_DECK_BOARD', board)
             this.showDeckPicker = false
             this.$store.commit('SET_VIEW', 'deck')
         },

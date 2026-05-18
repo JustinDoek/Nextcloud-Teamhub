@@ -3,6 +3,27 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.41.0] — 2026-05-18 — Session K
+
+### Added
+- **Unassigned card nudge in Upcoming Tasks widget.** Each connected Deck board now shows an amber row at the top of the widget listing the count of cards that have no assignee and are not yet overdue (no due date counts as not overdue). Clicking the row opens that board in the embedded Deck iframe — same behaviour as clicking the Deck tab. With multiple boards each board gets its own row, sorted by count descending.
+- **Team-as-member support.** One team can now be added as a sub-member of another team. A per-team toggle ("Prevent this team from being a member of another team") appears in Manage Team → Settings, using the same CFG_ROOT (8192) bit that Nextcloud Contacts uses — the two UIs are now in sync. Admins must enable the "Teams" invite type in Admin Settings → Invite Types before the invite picker shows teams. Teams with the prevention toggle checked are excluded from invite search results. The admin integrity check flags only the contradictory state (team is nested but also has prevention active).
+- **Deck board activity in team activity widget.** Deck board and card events now appear in the team activity feed. Includes board name and card title extracted from Nextcloud's own `subjectparams` JSON, producing descriptions like "Justin created card 'Fix login bug' — Sprint board".
+
+### Fixed
+- **Critical: Deck activity was completely missing.** `ActivityService` was checking `$resources['deck']['board_id']` but `deck` became an array of board objects in 3.28.0, so this check silently failed for all installs. No Deck activity appeared in the widget regardless of how many boards were connected.
+- **Critical: `updateTeamConfig()` used wrong bit mask.** `TeamService::updateTeamConfig()` still had `$MANAGED_BITS = 1|2|4|16|512` (pre-3.39.1 wrong values) as a local variable, overriding the canonical constant. Every toggle other than "Anyone can join" (CFG_OPEN=16 was in both old and new masks by coincidence) was silently discarded on save. Now uses `CirclesConfig::MANAGED_BITS`.
+- **Critical: ManageTeamView config constants were the old pre-3.39.1 wrong values.** Identical to the 3.39.1 bit-encoding bug: `ManageTeamView.vue` had its own local `const CFG_OPEN = 1` block instead of importing from `circlesConfig.js`. Enabling "Anyone can join" was writing CFG_SINGLE (1) again, hiding the team from Contacts. Fixed by replacing the local constants with a proper import.
+- **`searchUsers()` circle search used `iLike()` which does not exist on NC's QueryBuilder.** The exception was caught silently, returning zero results for the circle type every time.
+- **Deck board picker always opened the first board.** Moving `selectedDeckBoard` to Vuex introduced a Vue 2 data/computed shadowing bug — the local `data()` property with value `null` won the name collision against the `mapState` computed getter, so `deckUrl` always fell back to `resources.deck[0]`. Fixed by removing the dead `data` declaration.
+- **Integrity check falsely flagged all team-as-member relationships.** The check now only flags nesting as an issue when the sub-team has CFG_ROOT set (prevention active) but is nested anyway — a genuinely contradictory state. Valid nesting (CFG_ROOT not set) is silently skipped.
+- **PHP parse error in MemberService (3.40.1–3.40.3).** The `str_replace` tool double-escaped backslashes when embedding PHP namespace separators, producing `\\OCP\\DB\\...` instead of `\OCP\DB\...`. Caused 500 on every MemberService-dependent endpoint.
+
+### Changed
+- **"Prevent teams from being a member of another team" toggle** now uses CFG_ROOT (8192) — the same bit Nextcloud Contacts uses — instead of CFG_CIRCLE_INVITE (16384). The two UIs now write the same bit with the same meaning and stay in sync.
+- **`fetchDeckTasks` card-ID lookup** changed from one OR clause per card to a single `IN (board_ids)` query + one `IN (card_ids)` clause in the main activity query. Scales better with many boards and large boards.
+- **Activity `formatSubject` for Deck events** now includes board name and card title when available (e.g. "Justin created card 'Fix login bug' — Sprint board").
+
 ## [3.40.0] — 2026-05-18 — Session J close
 
 ### Fixed

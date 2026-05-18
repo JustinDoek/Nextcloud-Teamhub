@@ -124,7 +124,8 @@ class TeamController extends Controller {
             if (strlen($q) < 2) {
                 return new JSONResponse([]);
             }
-            $users = $this->memberService->searchUsers($q, 10);
+            $teamId = (string)($this->request->getParam('teamId', ''));
+            $users = $this->memberService->searchUsers($q, 10, $teamId);
             return new JSONResponse($users);
         } catch (\Throwable $e) {
             return new JSONResponse([], Http::STATUS_INTERNAL_SERVER_ERROR);

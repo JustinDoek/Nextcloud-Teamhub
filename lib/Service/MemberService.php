@@ -1038,6 +1038,51 @@ class MemberService {
 
             try {
                 $invitee = $federatedUserService->generateFederatedUser($memberId, $memberType);
+
+                // For circle (user_type=16) additions: enforce circular-nesting safety gate
+                // before calling addMember(). This mirrors the search-time exclusion but is
+                // the authoritative check — search results can be stale and the API is also
+                // called directly by developers.
+                //
+                // Block: $memberId (candidate circle) already has $teamId as a direct member.
+                // That would create A→B→A nesting. Indirect cycles (A→B→C→A) are out of scope
+                // and would have to be addressed in Circles itself.
+                if ($memberType === 16) {
+                    // Resolve the candidate circle's unique_id from the FederatedUser
+                    $candidateCircleId = null;
+                    try {
+                        $candidateCircleId = $invitee->getSingleId();
+                    } catch (\Throwable $e) {
+                        // getSingleId() may not be available on all Circles versions — fall back
+                        // to a direct lookup by name (the $memberId passed in is the unique_id
+                        // for circles, since generateFederatedUser uses it as the single_id)
+                        $candidateCircleId = $memberId;
+                    }
+
+                    if ($candidateCircleId) {
+                        // Check: is $teamId already a direct member of the candidate circle?
+                        $cycleQb  = $db->getQueryBuilder();
+                        $cycleRes = $cycleQb->select($cycleQb->func()->count('*', 'cnt'))
+                            ->from('circles_member')
+                            ->where($cycleQb->expr()->eq('circle_id', $cycleQb->createNamedParameter($candidateCircleId)))
+                            ->andWhere($cycleQb->expr()->eq('single_id', $cycleQb->createNamedParameter($teamId)))
+                            ->andWhere($cycleQb->expr()->eq('user_type', $cycleQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->executeQuery();
+                        $cycleCount = (int)$cycleRes->fetchOne();
+                        $cycleRes->closeCursor();
+
+                        if ($cycleCount > 0) {
+                            $results[$memberId] = 'failed: circular nesting not allowed — this team is already a member of the target team';
+                            $this->logger->warning('[MemberService] inviteMembers: circular nesting rejected', [
+                                'teamId'            => $teamId,
+                                'candidateCircleId' => $candidateCircleId,
+                                'app'               => Application::APP_ID,
+                            ]);
+                            continue;
+                        }
+                    }
+                }
+
                 $circleMemberService->addMember($teamId, $invitee);
 
                 // Circles' addMember() creates an 'Invited' status row for non-user
@@ -1815,7 +1860,16 @@ class MemberService {
      * Search users by display name or user ID (for member picker).
      * Respects the admin 'inviteTypes' setting.
      */
-    public function searchUsers(string $query, int $limit = 10): array {
+    /**
+     * Search users/groups/teams for the invite picker.
+     *
+     * @param string $query    Search term (minimum 2 chars enforced at controller level)
+     * @param int    $limit    Max results per type (default 10)
+     * @param string $teamId   Optional — parent team ID. When provided, 'circle' results
+     *                         exclude the team itself, teams already added, and teams
+     *                         that would create a direct circular nesting (A→B→A).
+     */
+    public function searchUsers(string $query, int $limit = 10, string $teamId = ''): array {
 
         $currentUser  = $this->userSession->getUser();
         $currentUid   = $currentUser ? $currentUser->getUID() : '';
@@ -1914,11 +1968,120 @@ class MemberService {
             ];
         }
 
-        // Note: Circles/Teams are intentionally excluded from invite search results.
-        // Inviting a team into another team (user_type=16 in circles_member) corrupts
-        // Circles' own visibility queries, causing the parent team to disappear from
-        // Nextcloud Teams and breaking message posting. This restriction is enforced
-        // at the controller level in inviteMembers() — not via any config bit.
+        // TeamHub teams / Circles (user_type=16)
+        //
+        // Prior to v3.40.1 these were excluded because nesting was believed to
+        // corrupt Circles' visibility queries. That corruption was caused by the
+        // CFG_SINGLE bit-encoding bug fixed in v3.39.1. With that resolved, adding
+        // one team as a member of another is safe.
+        //
+        // Safety gates (applied here in search AND enforced again in inviteMembers):
+        //   • Exclude the parent team itself (can't add a team to itself).
+        //   • Exclude teams already directly added as members of $teamId.
+        //   • Exclude teams where $teamId is already a direct member (A→B and now
+        //     B→A would be a direct circular nesting; Circles cache rebuild would loop).
+        //
+        // Only circles with source=16 (user-created teams) are surfaced. Personal
+        // circles (source=1) and group-backed circles (source=2) are excluded —
+        // they appear via the 'user' and 'group' flows respectively.
+        if (in_array('circle', $allowedTypes, true)) {
+            try {
+                $db = $this->container->get(\OCP\IDBConnection::class);
+
+                // Collect unique_ids to exclude from results
+                $excludeIds = [];
+
+                // 1. Exclude the parent team itself
+                if ($teamId !== '') {
+                    $excludeIds[] = $teamId;
+                }
+
+                // 2. Exclude circles already a direct member of $teamId
+                // (already in circles_member with user_type=16 for this parent circle)
+                if ($teamId !== '') {
+                    $exQb  = $db->getQueryBuilder();
+                    $exRes = $exQb->select('single_id')
+                        ->from('circles_member')
+                        ->where($exQb->expr()->eq('circle_id', $exQb->createNamedParameter($teamId)))
+                        ->andWhere($exQb->expr()->eq('user_type', $exQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($exQb->expr()->eq('status', $exQb->createNamedParameter('Member')))
+                        ->executeQuery();
+                    while ($r = $exRes->fetch()) {
+                        $excludeIds[] = (string)$r['single_id'];
+                    }
+                    $exRes->closeCursor();
+                }
+
+                // 3. Exclude circles that already have $teamId as a direct member
+                // (would create A→B→A circular nesting)
+                if ($teamId !== '') {
+                    $ciQb  = $db->getQueryBuilder();
+                    $ciRes = $ciQb->select('circle_id')
+                        ->from('circles_member')
+                        ->where($ciQb->expr()->eq('single_id', $ciQb->createNamedParameter($teamId)))
+                        ->andWhere($ciQb->expr()->eq('user_type', $ciQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($ciQb->expr()->eq('status', $ciQb->createNamedParameter('Member')))
+                        ->executeQuery();
+                    while ($r = $ciRes->fetch()) {
+                        $excludeIds[] = (string)$r['circle_id'];
+                    }
+                    $ciRes->closeCursor();
+                }
+
+                $excludeIds = array_unique(array_filter($excludeIds));
+
+                // Query circles_circle for user-created teams matching the search term
+                $cQb = $db->getQueryBuilder();
+                $cQb->select('c.unique_id', 'c.name')
+                    ->from('circles_circle', 'c')
+                    ->where(
+                        $cQb->expr()->eq('c.source', $cQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    )
+                    ->andWhere(
+                        // like() is case-insensitive on MySQL (default collation) and
+                        // case-sensitive on PostgreSQL — acceptable for team name search.
+                        // iLike() is not available on all NC/Doctrine DBAL versions.
+                        $cQb->expr()->like('c.name', $cQb->createNamedParameter('%' . $db->escapeLikeParameter($query) . '%'))
+                    )
+                    ->andWhere(
+                        // Exclude teams with CFG_ROOT (8192) set — that is the bit both
+                        // Contacts and TeamHub use for "Prevent this team from being a
+                        // member of another team". Showing a prevented team in search
+                        // results would produce a silent failure when the invite is sent.
+                        $cQb->createFunction('(c.config & ' . \OCA\TeamHub\Constants\CirclesConfig::CFG_ROOT . ')') . ' = 0'
+                    )
+                    ->setMaxResults($limit);
+
+                if (!empty($excludeIds)) {
+                    $cQb->andWhere(
+                        $cQb->expr()->notIn('c.unique_id', $cQb->createNamedParameter($excludeIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY))
+                    );
+                }
+
+                $cRes = $cQb->executeQuery();
+                while ($cRow = $cRes->fetch()) {
+                    $results[] = [
+                        'id'          => (string)$cRow['unique_id'],
+                        'displayName' => (string)$cRow['name'],
+                        'type'        => 'circle',
+                        'icon'        => 'circle',
+                    ];
+                }
+                $cRes->closeCursor();
+
+                $this->logger->debug('[MemberService] searchUsers: circle search', [
+                    'query'      => $query,
+                    'teamId'     => $teamId,
+                    'excluded'   => count($excludeIds),
+                    'found'      => count(array_filter($results, fn ($r) => $r['type'] === 'circle')),
+                    'app'        => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[MemberService] searchUsers: circle search failed (non-fatal)', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
 
         return $results;
     }

@@ -126,14 +126,13 @@
                     </div>
                     <div class="manage-settings-group">
                         <h4>{{ t('teamhub', 'Membership') }}</h4>
-                        <!-- CFG_SINGLE is always enforced — teams cannot be members of other teams.
-                             Allowing this breaks Circles' visibility and posting. Shown locked. -->
+                        <!-- CFG_ROOT (8192): same bit Contacts uses for "Prevent teams from being
+                             a member of another team". Checked = prevention is active (CFG_ROOT set). -->
                         <NcCheckboxRadioSwitch
-                            :checked="true"
-                            :disabled="true"
+                            :checked.sync="circleConfig.preventSubMembership"
                             type="checkbox"
-                            :title="t('teamhub', 'This setting is enforced to prevent visibility issues in Nextcloud Teams')">
-                            {{ t('teamhub', 'Prevent teams from being a member of another team') }}
+                            @update:checked="saveConfig">
+                            {{ t('teamhub', 'Prevent this team from being a member of another team') }}
                         </NcCheckboxRadioSwitch>
                     </div>
                     <div class="manage-settings-group">
@@ -1214,13 +1213,18 @@ import ResourcePicker from './ResourcePicker.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
 
-// Circles config bitmask constants (match MANAGED_BITS in TeamService.php)
-const CFG_OPEN         = 1
-const CFG_INVITE       = 2
-const CFG_REQUEST      = 4
-const CFG_PROTECTED    = 16
-const CFG_VISIBLE      = 512
-const CFG_SINGLE       = 1024
+// Circles config bitmask constants — canonical values from circlesConfig.js.
+// These MUST match OCA\Circles\Model\Circle::CFG_* in the Circles app.
+// DO NOT re-define them locally; the pre-3.39.1 values here caused the
+// CFG_SINGLE corruption bug (wrote bit 1 for "Anyone can join").
+import {
+    CFG_OPEN,
+    CFG_INVITE,
+    CFG_REQUEST,
+    CFG_VISIBLE,
+    CFG_PROTECTED,
+    CFG_ROOT,
+} from '../constants/circlesConfig.js'
 
 export default {
     name: 'ManageTeamView',
@@ -1264,7 +1268,7 @@ export default {
                 request: false,
                 visible: false,
                 protected: false,
-                singleMember: false,
+                preventSubMembership: false,
             },
             integrationRegistry: [],
             loadingWidgets: false,
@@ -1473,11 +1477,6 @@ export default {
                 { key: 'request', label: t('teamhub', 'Membership requests must be approved by a Moderator (requires "Anyone can join")') },
             ]
         },
-        membershipOptions() {
-            return [
-                { key: 'singleMember', label: t('teamhub', 'Prevent teams from being a member of another team') },
-            ]
-        },
         privacyOptions() {
             return [
                 { key: 'visible',   label: t('teamhub', 'Visible to everyone') },
@@ -1486,12 +1485,13 @@ export default {
         },
         configValue() {
             let v = 0
-            if (this.circleConfig.open)        v |= CFG_OPEN
-            if (this.circleConfig.invite)       v |= CFG_INVITE
-            if (this.circleConfig.request)      v |= CFG_REQUEST
-            if (this.circleConfig.visible)      v |= CFG_VISIBLE
-            if (this.circleConfig.protected)    v |= CFG_PROTECTED
-            // CFG_SINGLE (1024) intentionally omitted — managed internally by Circles
+            if (this.circleConfig.open)         v |= CFG_OPEN
+            if (this.circleConfig.invite)        v |= CFG_INVITE
+            if (this.circleConfig.request)       v |= CFG_REQUEST
+            if (this.circleConfig.visible)       v |= CFG_VISIBLE
+            if (this.circleConfig.protected)     v |= CFG_PROTECTED
+            if (this.circleConfig.preventSubMembership) v |= CFG_ROOT
+            // CFG_SINGLE (1) intentionally omitted — managed internally by Circles
             return v
         },
         currentUserId() {
@@ -1695,7 +1695,8 @@ export default {
                 this.circleConfig.request       = !!(v & CFG_REQUEST)
                 this.circleConfig.visible       = !!(v & CFG_VISIBLE)
                 this.circleConfig.protected     = !!(v & CFG_PROTECTED)
-                // CFG_SINGLE (1024) not read — it is managed internally by Circles
+                this.circleConfig.preventSubMembership = !!(v & CFG_ROOT)
+                // CFG_SINGLE (1) not read — it is managed internally by Circles
             } catch (e) {
             } finally {
                 this.loadingConfig = false

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\PendingDeletionMapper;
@@ -631,11 +632,10 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        // Managed bits: only the bits TeamHub exposes in the UI.
-        // CFG_SINGLE (1024) is intentionally excluded — it is managed internally by
-        // Circles to mark personal circles. Setting it on a user-created team (source=16)
-        // makes Circles hide the team from its own API queries. Never touch this bit.
-        $MANAGED_BITS = 1 | 2 | 4 | 16 | 512;
+        // Use the canonical MANAGED_BITS from CirclesConfig — the single source of truth
+        // for which bits TeamHub exposes as user-facing toggles. Using hardcoded values
+        // here caused the same class of bug as the CFG_SINGLE corruption in <= 3.39.0.
+        $MANAGED_BITS = CirclesConfig::MANAGED_BITS;
 
         $db     = $this->container->get(\OCP\IDBConnection::class);
         $qb     = $db->getQueryBuilder();
@@ -961,7 +961,7 @@ class TeamService {
             $config->setAppValue(Application::APP_ID, 'wizardDescription', (string)$settings['wizardDescription']);
         }
         if (isset($settings['inviteTypes'])) {
-            $allowed = ['user', 'group', 'email', 'federated'];
+            $allowed = ['user', 'group', 'email', 'federated', 'circle'];
             $types   = array_filter(
                 array_map('trim', explode(',', (string)$settings['inviteTypes'])),
                 fn($t) => in_array($t, $allowed, true)

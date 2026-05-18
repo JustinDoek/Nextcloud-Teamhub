@@ -76,35 +76,52 @@ class ActivityService {
             $conditions[] = ['object_type' => 'files', 'object_id' => $folderId];
         }
 
-        // Deck — two object_type values are used in oc_activity:
-        //   'deck_board' + boardId  → board-level events (board create/update, stack events)
-        //   'deck_card'  + cardId   → card-level events (card create/update/assign etc.)
-        // We match the board event directly, and look up all card IDs on the board
-        // so we can match card events too.
-        if (!empty($resources['deck']['board_id'])) {
-            $boardId = (int)$resources['deck']['board_id'];
-            // Board-level events
-            $conditions[] = ['object_type' => 'deck_board', 'object_id' => (string)$boardId];
+        // Deck — $resources['deck'] is an array of { board_id, name, color } objects
+        // (0, 1, or many boards). The old single-board check ($resources['deck']['board_id'])
+        // always failed for the multi-board shape introduced in 3.28.
+        //
+        // Two object_type values in oc_activity:
+        //   'deck_board' + boardId  → board-level events (create, stack rename, share, …)
+        //   'deck_card'  + cardId   → card-level events (create, assign, due date, …)
+        //
+        // We add one condition per board for board-level events, then fetch all card IDs
+        // for ALL connected boards in a single query and add a single deck_card_ids marker
+        // that becomes one IN clause in the main query (instead of one OR per card).
+        $deckBoardIds = [];
+        if (!empty($resources['deck']) && is_array($resources['deck'])) {
+            foreach ($resources['deck'] as $deckBoard) {
+                $bid = (int)($deckBoard['board_id'] ?? 0);
+                if ($bid > 0) {
+                    $deckBoardIds[] = $bid;
+                    $conditions[]   = ['object_type' => 'deck_board', 'object_id' => (string)$bid];
+                }
+            }
+        }
 
-            // Card-level events: fetch all card IDs that belong to this board
+        if (!empty($deckBoardIds)) {
+            // Card-level events: one query for all boards, one IN clause in the main query.
             try {
                 $cardQb  = $db->getQueryBuilder();
                 $cardRes = $cardQb->select('c.id')
                     ->from('deck_cards', 'c')
                     ->innerJoin('c', 'deck_stacks', 's', $cardQb->expr()->eq('c.stack_id', 's.id'))
-                    ->where($cardQb->expr()->eq('s.board_id', $cardQb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->where($cardQb->expr()->in(
+                        's.board_id',
+                        $cardQb->createNamedParameter($deckBoardIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                    ))
                     ->executeQuery();
-                $cardIds = array_column($cardRes->fetchAll(), 'id');
+                $allCardIds = array_map('intval', array_column($cardRes->fetchAll(), 'id'));
                 $cardRes->closeCursor();
 
-                foreach ($cardIds as $cardId) {
-                    $conditions[] = ['object_type' => 'deck_card', 'object_id' => (string)$cardId];
+                if (!empty($allCardIds)) {
+                    // Special marker: handled as a single IN clause in the OR assembly below
+                    $conditions[] = ['deck_card_ids' => $allCardIds];
                 }
             } catch (\Throwable $e) {
                 $this->logger->warning('[ActivityService] deck card ID lookup failed', [
-                    'boardId' => $boardId,
-                    'error'   => $e->getMessage(),
-                    'app'     => Application::APP_ID,
+                    'boardIds' => $deckBoardIds,
+                    'error'    => $e->getMessage(),
+                    'app'      => Application::APP_ID,
                 ]);
             }
         }
@@ -152,6 +169,17 @@ class ActivityService {
                 // app_only: match any row from this app (used for deck card events)
                 if (isset($cond['app_only'])) {
                     $orClauses[] = $qb->expr()->eq('app', $qb->createNamedParameter($cond['app_only']));
+                    continue;
+                }
+                // deck_card_ids: single IN clause for all deck card IDs across all boards
+                if (isset($cond['deck_card_ids'])) {
+                    $orClauses[] = $qb->expr()->andX(
+                        $qb->expr()->eq('object_type', $qb->createNamedParameter('deck_card')),
+                        $qb->expr()->in('object_id',   $qb->createNamedParameter(
+                            $cond['deck_card_ids'],
+                            \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                        ))
+                    );
                     continue;
                 }
                 $objId = $cond['object_id'];
@@ -234,6 +262,18 @@ class ActivityService {
             }
             $seen[$fp] = true;
 
+            // Parse Deck subjectparams JSON to extract board/card names for richer display.
+            // Schema (Deck writes this): {"board":{"id":N,"title":"X"},"card":{"id":N,"title":"Y"}}
+            $boardName = '';
+            $cardTitle  = '';
+            if ($row['app'] === 'deck' && !empty($row['subjectparams'])) {
+                try {
+                    $sp = json_decode($row['subjectparams'], true);
+                    $boardName = (string)($sp['board']['title'] ?? '');
+                    $cardTitle  = (string)($sp['card']['title']  ?? '');
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+
             $items[] = [
                 'activity_id' => (int)$row['activity_id'],
                 'app'         => $row['app'],
@@ -247,6 +287,8 @@ class ActivityService {
                 'object_type' => $row['object_type'],
                 'object_id'   => $row['object_id'],
                 'file'        => $row['file'] ?? '',
+                'board_name'  => $boardName,
+                'card_title'  => $cardTitle,
             ];
 
             if (count($items) >= $limit) {

@@ -32,6 +32,8 @@ export default new Vuex.Store({
         resourceWarningFocus: false,                  // true when warning block button clicked — ManageTeamView scrolls to at-risk section
         webLinks: [],
         deckTasks: [],
+        selectedDeckBoard: null,  // { board_id, name, color } — set by picker or widget click
+        deckUnassignedCounts: {}, // { [boardId]: { count: N, boardName: 'X' } }
         teamTasks: [],         // VTODO tasks from the team calendar (NC Tasks app)
         teamWidgets: [],        // enabled sidebar widgets for the current team
         teamMenuItems: [],      // enabled menu_item integrations for the current team
@@ -196,6 +198,8 @@ export default new Vuex.Store({
         SET_RESOURCE_WARNING_FOCUS(state, value) { state.resourceWarningFocus = value },
         SET_WEB_LINKS(state, links) { state.webLinks = links },
         SET_DECK_TASKS(state, tasks) { state.deckTasks = tasks },
+        SET_DECK_UNASSIGNED(state, counts) { state.deckUnassignedCounts = counts },
+        SET_SELECTED_DECK_BOARD(state, board) { state.selectedDeckBoard = board },
         SET_TEAM_TASKS(state, tasks) { state.teamTasks = tasks },
         SET_TEAM_WIDGETS(state, widgets) { state.teamWidgets = widgets },
         SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
@@ -510,6 +514,7 @@ export default new Vuex.Store({
 
             if (boardList.length === 0) {
                 commit('SET_DECK_TASKS', [])
+                commit('SET_DECK_UNASSIGNED', {})
                 return
             }
 
@@ -519,6 +524,10 @@ export default new Vuex.Store({
                 const cutoff = new Date(todayStart)
                 cutoff.setDate(cutoff.getDate() + 14)
                 const allCards = []
+                // Unassigned counts: { [boardId]: { count, boardName } }
+                // Card qualifies when: not archived, not done, no assignees,
+                // and due date is in the future OR absent (no due date = not overdue).
+                const unassignedCounts = {}
 
                 for (const board of boardList) {
                     const boardId = board.board_id ?? board
@@ -529,7 +538,10 @@ export default new Vuex.Store({
                         )
                         ;(Array.isArray(data) ? data : []).forEach(stack => {
                             ;(stack.cards || []).forEach(card => {
-                                if (!card.archived && !card.done && card.duedate) {
+                                if (card.archived || card.done) return
+
+                                // ── Upcoming tasks (for the task list) ──────────
+                                if (card.duedate) {
                                     const due = new Date(card.duedate)
                                     if (due >= todayStart && due <= cutoff) {
                                         allCards.push({
@@ -543,6 +555,21 @@ export default new Vuex.Store({
                                         })
                                     }
                                 }
+
+                                // ── Unassigned count ─────────────────────────────
+                                // Include cards with no assignees that are not yet
+                                // overdue: no due date counts as "not overdue".
+                                const hasAssignees = card.assignedUsers && card.assignedUsers.length > 0
+                                if (!hasAssignees) {
+                                    const due = card.duedate ? new Date(card.duedate) : null
+                                    const isOverdue = due && due < now
+                                    if (!isOverdue) {
+                                        if (!unassignedCounts[boardId]) {
+                                            unassignedCounts[boardId] = { count: 0, boardName: board.name || '' }
+                                        }
+                                        unassignedCounts[boardId].count++
+                                    }
+                                }
                             })
                         })
                     } catch (e) {
@@ -552,8 +579,10 @@ export default new Vuex.Store({
 
                 allCards.sort((a, b) => new Date(a.duedate) - new Date(b.duedate))
                 commit('SET_DECK_TASKS', allCards.slice(0, 20))
+                commit('SET_DECK_UNASSIGNED', unassignedCounts)
             } catch (e) {
                 commit('SET_DECK_TASKS', [])
+                commit('SET_DECK_UNASSIGNED', {})
             }
         },
 
