@@ -3,6 +3,10 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Presence module
+This release adds a presence module which is optional and needs to be activated by the NC admin in admin settings - teamhub - integrations first. 
+More info on this module will be in the documentation at https://tldr.host/teamhub/docs soon. 
+
 ## [3.48.0] — 2026-05-20 — Presence admin tab visibility + warning alignment + docs
 
 ### Fixed
