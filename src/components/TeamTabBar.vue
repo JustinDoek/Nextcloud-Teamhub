@@ -102,6 +102,24 @@
                     <span v-if="resources.deck.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} boards', { n: resources.deck.length })">{{ resources.deck.length }}</span>
                 </button>
 
+                <!-- Built-in: Presence -->
+                <button
+                    v-else-if="tab.key === 'presence'"
+                    id="tab-presence"
+                    :key="'tab-presence'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'presence' }"
+                    :aria-selected="currentView === 'presence' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('presence')"
+                    @keydown.left.prevent="moveTabLeft(tabIndex)"
+                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <OfficeBuildingIcon :size="16" />
+                    {{ t('teamhub', 'Presence') }}
+                </button>
+
                 <!-- External app tabs -->
                 <button
                     v-else-if="tab.key.startsWith('ext-')"
@@ -205,6 +223,7 @@ import Plus from 'vue-material-design-icons/Plus.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import Web from 'vue-material-design-icons/Web.vue'
+import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
 
 export default {
     name: 'TeamTabBar',
@@ -213,7 +232,7 @@ export default {
         NcButton,
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
-        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web,
+        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon,
     },
 
     props: {

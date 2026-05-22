@@ -80,6 +80,12 @@
                 :url="deckUrl"
                 :label="t('teamhub', 'Deck')" />
 
+            <!-- Presence tab — rendered when module is enabled globally AND for this team -->
+            <TeamPresenceView
+                v-if="currentView === 'presence' && presenceModuleEnabled && presenceConfig.presence_enabled"
+                :team-id="currentTeamId"
+                :hide-reasons="presenceConfig.hide_reasons" />
+
             <!-- External menu_item integrations — preloaded by registry_id -->
             <template v-for="menuItem in externalMenuItems">
                 <AppEmbed
@@ -260,6 +266,7 @@ import TeamMeetingModal from './TeamMeetingModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
+import TeamPresenceView from './TeamPresenceView.vue'
 
 function debounce(fn, delay) {
     let timer = null
@@ -279,6 +286,7 @@ export default {
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
         ScheduleMeetingModal, AddEventModal, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
         TeamMeetingModal,
+        TeamPresenceView,
     },
 
     data() {
@@ -326,6 +334,7 @@ export default {
             // Once a view is in this set the AppEmbed is kept in the DOM
             // (v-show) rather than destroyed, so tab switches are instant.
             preloadedViews: new Set(),
+            // Presence module — per-team config loaded from store (B3/B4)
         }
     },
 
@@ -333,7 +342,7 @@ export default {
         ...mapState([
             'currentTeamId', 'currentView', 'resources', 'webLinks',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
-            'selectedDeckBoard',
+            'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -457,8 +466,20 @@ export default {
                 this.layoutLoaded = false
                 this.editMode = false
                 this.preloadedViews = new Set()
+                this.SET_PRESENCE_CONFIG({ presence_enabled: false, hide_reasons: false })
+                // loadLayout now includes presenceConfig in its response,
+                // so a single request is all we need. No race conditions.
                 this.loadLayout(newId)
             }
+        },
+        // When ManageTeamView updates presenceConfig in the store (e.g. enabling
+        // the presence tab toggle), rebuild the tab list immediately so the
+        // Presence tab appears/disappears without a page reload.
+        presenceConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
         },
         webLinks() { this.syncLinkTabs() },
         externalMenuItems() { this.syncExtTabs() },
@@ -547,7 +568,7 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED']),
 
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
@@ -559,6 +580,13 @@ export default {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`))
                 this.gridLayout        = Array.isArray(data.layout)      ? data.layout      : []
                 this.userDefaultLayout = Array.isArray(data.userDefault) ? data.userDefault : []
+                // Presence module flag and per-team config both arrive with layout — no race.
+                if (typeof data.presenceModuleEnabled === 'boolean') {
+                    this.SET_PRESENCE_MODULE_ENABLED(data.presenceModuleEnabled)
+                }
+                if (data.presenceConfig) {
+                    this.SET_PRESENCE_CONFIG(data.presenceConfig)
+                }
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
                 this.applySnap()
@@ -737,10 +765,28 @@ export default {
                 { key: 'calendar', label: t('teamhub', 'Calendar'), icon: 'Calendar' },
                 { key: 'deck',     label: t('teamhub', 'Deck'),     icon: 'CardText' },
             ].forEach(b => tabs.push(b))
+            // Presence tab — only when the NC admin has enabled the module
+            // AND the team admin has enabled it for this specific team.
+            if (this.presenceModuleEnabled && this.presenceConfig && this.presenceConfig.presence_enabled) {
+                tabs.push({ key: 'presence', label: t('teamhub', 'Presence'), icon: 'OfficeBuilding' })
+            }
             ;(this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
             ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
             return tabs
+        },
+
+        async loadPresenceConfig(teamId) {
+            if (!teamId) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/presence/config`)
+                )
+                this.SET_PRESENCE_CONFIG(data)
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            } catch (err) {
+                this.SET_PRESENCE_CONFIG({ presence_enabled: false, hide_reasons: false })
+            }
         },
 
         syncLinkTabs() {
@@ -751,7 +797,7 @@ export default {
         syncExtTabs() {
             const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck'])
+            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence'])
             this.orderedTabs = [
                 ...this.orderedTabs.filter(t => builtinKeys.has(t.key)),
                 ...extTabs,

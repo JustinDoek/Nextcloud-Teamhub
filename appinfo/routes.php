@@ -235,6 +235,47 @@ return [
         ['name' => 'archive#getAdminArchiveSettings', 'url' => '/api/v1/admin/archive/settings',                          'verb' => 'GET'],
         // Admin: save archive settings.
         ['name' => 'archive#saveAdminArchiveSettings','url' => '/api/v1/admin/archive/settings',                          'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
+        // Presence module — admin (v3.42.0, Session B1)
+        // All routes are #[AuthorizedAdminSetting] inside the controller;
+        // path-level admin scoping is encoded in the URL prefix.
+        // ----------------------------------------------------------------
+        // Status types
+        ['name' => 'presenceAdmin#listTypes',        'url' => '/api/v1/admin/presence/types',                            'verb' => 'GET'],
+        ['name' => 'presenceAdmin#createType',       'url' => '/api/v1/admin/presence/types',                            'verb' => 'POST'],
+        ['name' => 'presenceAdmin#updateType',       'url' => '/api/v1/admin/presence/types/{id}',                       'verb' => 'PUT'],
+        ['name' => 'presenceAdmin#deleteType',       'url' => '/api/v1/admin/presence/types/{id}',                       'verb' => 'DELETE'],
+        // Locations — tree read + per-level CRUD
+        ['name' => 'presenceAdmin#getLocationTree',  'url' => '/api/v1/admin/presence/locations',                        'verb' => 'GET'],
+        ['name' => 'presenceAdmin#createBuilding',   'url' => '/api/v1/admin/presence/buildings',                        'verb' => 'POST'],
+        ['name' => 'presenceAdmin#updateBuilding',   'url' => '/api/v1/admin/presence/buildings/{id}',                   'verb' => 'PUT'],
+        ['name' => 'presenceAdmin#deleteBuilding',   'url' => '/api/v1/admin/presence/buildings/{id}',                   'verb' => 'DELETE'],
+        ['name' => 'presenceAdmin#createFloor',      'url' => '/api/v1/admin/presence/floors',                           'verb' => 'POST'],
+        ['name' => 'presenceAdmin#updateFloor',      'url' => '/api/v1/admin/presence/floors/{id}',                      'verb' => 'PUT'],
+        ['name' => 'presenceAdmin#deleteFloor',      'url' => '/api/v1/admin/presence/floors/{id}',                      'verb' => 'DELETE'],
+        ['name' => 'presenceAdmin#createRoom',       'url' => '/api/v1/admin/presence/rooms',                            'verb' => 'POST'],
+        ['name' => 'presenceAdmin#updateRoom',       'url' => '/api/v1/admin/presence/rooms/{id}',                       'verb' => 'PUT'],
+        ['name' => 'presenceAdmin#deleteRoom',       'url' => '/api/v1/admin/presence/rooms/{id}',                       'verb' => 'DELETE'],
+        // Holidays
+        ['name' => 'presenceAdmin#listHolidays',     'url' => '/api/v1/admin/presence/holidays',                         'verb' => 'GET'],
+        ['name' => 'presenceAdmin#previewHoliday',   'url' => '/api/v1/admin/presence/holidays/preview',                 'verb' => 'POST'],
+        ['name' => 'presenceAdmin#addHoliday',       'url' => '/api/v1/admin/presence/holidays',                         'verb' => 'POST'],
+        ['name' => 'presenceAdmin#deleteHoliday',    'url' => '/api/v1/admin/presence/holidays/{id}',                    'verb' => 'DELETE'],
+        // Presence module — user (v3.43.0, Session B2)
+        // Authenticated users only; no admin required; data scoped to current user.
+        ['name' => 'presenceUser#getTemplate',       'url' => '/api/v1/presence/template',          'verb' => 'GET'],
+        ['name' => 'presenceUser#setTemplateCell',   'url' => '/api/v1/presence/template/cell',    'verb' => 'PUT'],
+        ['name' => 'presenceUser#saveTemplateBulk',  'url' => '/api/v1/presence/template/bulk',    'verb' => 'PUT'],
+        ['name' => 'presenceUser#materialiseNow',    'url' => '/api/v1/presence/slots/materialise','verb' => 'POST'],
+        ['name' => 'presenceUser#getSlots',          'url' => '/api/v1/presence/slots',             'verb' => 'GET'],
+        ['name' => 'presenceUser#overrideSlot',      'url' => '/api/v1/presence/slots/override',   'verb' => 'PUT'],
+
+        // Presence module — team (v3.44.0, Session B3)
+        // Team-member-gated; config writes require team admin.
+        ['name' => 'presenceTeam#getTeamGrid', 'url' => '/api/v1/teams/{teamId}/presence',        'verb' => 'GET'],
+        ['name' => 'presenceTeam#getConfig',   'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'GET'],
+        ['name' => 'presenceTeam#saveConfig',  'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'PUT'],
     ],
 ];
 // Note: just checking structure

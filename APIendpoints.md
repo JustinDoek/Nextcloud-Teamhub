@@ -1,5 +1,6 @@
-# TeamHub API Endpoints — v3.37.0
+# TeamHub API Endpoints — v3.42.0
 
+> v3.42.0 adds 18 admin endpoints under `/api/v1/admin/presence/*` for the Presence module foundation (status types, locations, holidays).
 > v3.37.0 adds 4 new endpoints: 2 calendar event endpoints (week query, delete), 2 message settings endpoints (get, save).
 > v3.28.0 added 5 endpoints: 3 picker endpoints, 1 connect endpoint, 1 soft-delete endpoint.
 
@@ -1039,3 +1040,242 @@ Save the retention policy. Mirror job applies it on the next cycle.
 | `file.edited` | oc_activity `changed_self`, `changed_by` |
 | `file.deleted` | oc_activity `deleted_self`, `deleted_by` |
 | `share.created` / `share.permissions_changed` / `share.deleted` | Snapshot diff against `oc_share` |
+
+---
+
+## Presence module — admin (added v3.42.0)
+
+> v3.42.0 adds 18 admin endpoints under `/api/v1/admin/presence/*`. All require `#[AuthorizedAdminSetting(settings: AdminSettings::class)]` — either NC admin or a TeamHub-delegated admin group can call them. GET endpoints carry `#[NoCSRFRequired]`; all writes require CSRF.
+
+**Error mapping shared by every endpoint in this section:**
+
+| HTTP | When | Body |
+|---|---|---|
+| 200 / 201 | Success | Resource payload |
+| 400 | `InvalidArgumentException` (validation failure) | `{ "error": "..." }` |
+| 404 | `DoesNotExistException` | `{ "error": "..." }` |
+| 409 | `PresenceConflictException` (built-in delete, in-use delete, duplicate holiday, …) | `{ "error": "...", "affectedCount": N }` — `affectedCount` is present when the conflict relates to in-use rows |
+| 500 | Unexpected | `{ "error": "..." }` |
+
+### Status types — `/admin/presence/types`
+
+#### GET `/admin/presence/types`
+List all presence types, sorted by `sort_order` ascending then `label` ascending.
+
+**Auth:** NC admin or delegated admin.
+**Response 200:** Array of type rows:
+```json
+[
+  {
+    "id": 1,
+    "slug": "office",
+    "label": "Office",
+    "icon": "OfficeBuilding",
+    "color": "#1976D2",
+    "requires_location": true,
+    "is_busy": true,
+    "selectable_by_user": true,
+    "is_builtin": true,
+    "sort_order": 10,
+    "created_at": 1747600000
+  }
+]
+```
+
+#### POST `/admin/presence/types`
+Create a custom (`is_builtin=false`) presence type. Slug is generated server-side as `custom_<label-slug>[_n]`.
+
+**Body:** `{ label, icon?, color?, requires_location?, is_busy?, selectable_by_user?, sort_order? }`
+- `label` required, ≤128 chars.
+- `icon` optional, `[A-Za-z0-9-]{1,64}`.
+- `color` optional, `#RGB` or `#RRGGBB`.
+- Numeric booleans accepted as 0/1.
+**Response 201:** The created row.
+
+#### PUT `/admin/presence/types/{id}`
+Partial update. Built-ins accept only `label`, `icon`, `color`, `sort_order`. Custom types accept everything except `slug` and `is_builtin`. Unknown/rejected fields are silently ignored and logged.
+
+#### DELETE `/admin/presence/types/{id}`
+Delete a custom type. **409** if built-in, or if any template or slot row references the type (with `affectedCount`).
+
+### Locations — `/admin/presence/{locations,buildings,floors,rooms}`
+
+#### GET `/admin/presence/locations`
+Return the full nested tree.
+
+**Response 200:**
+```json
+[
+  {
+    "id": 1, "name": "HQ", "address": "Amsterdam", "sort_order": 0, "created_at": ...,
+    "floors": [
+      { "id": 1, "building_id": 1, "name": "3rd floor", "sort_order": 0, "created_at": ...,
+        "rooms": [
+          { "id": 7, "floor_id": 1, "name": "Conf A", "sort_order": 0, "created_at": ... }
+        ]
+      }
+    ]
+  }
+]
+```
+Three queries total regardless of tree size — bucketed in PHP.
+
+#### POST `/admin/presence/buildings`
+**Body:** `{ name, address?, sort_order? }`. `name` ≤255 chars, `address` ≤255 chars or null.
+
+#### PUT `/admin/presence/buildings/{id}`
+Partial update; same fields as POST.
+
+#### DELETE `/admin/presence/buildings/{id}`
+Cascading delete: removes every room in the subtree, then every floor, then the building. **409 with `affectedCount`** if any room in the subtree is referenced by an active template or slot row.
+
+#### POST `/admin/presence/floors`
+**Body:** `{ building_id, name, sort_order? }`. **404** if `building_id` does not exist.
+
+#### PUT `/admin/presence/floors/{id}`
+Partial update of `name` and `sort_order`. `building_id` is intentionally **non-updatable** — the field is logged-ignored if present (moves not supported; delete+recreate instead).
+
+#### DELETE `/admin/presence/floors/{id}`
+Cascading delete: removes every room on the floor, then the floor. **409 with `affectedCount`** if any room is referenced.
+
+#### POST `/admin/presence/rooms`
+**Body:** `{ floor_id, name, sort_order? }`. **404** if `floor_id` does not exist.
+
+#### PUT `/admin/presence/rooms/{id}`
+Partial update of `name` and `sort_order`. `floor_id` is non-updatable (same rationale as floor's `building_id`).
+
+#### DELETE `/admin/presence/rooms/{id}`
+**409 with `affectedCount`** if any template or slot row references the room.
+
+### Holidays — `/admin/presence/holidays`
+
+#### GET `/admin/presence/holidays?year=YYYY`
+List holidays, optionally filtered to a single year.
+
+**Response 200:**
+```json
+[
+  { "id": 1, "holiday_date": "2026-04-27", "name": "King's Day", "created_at": ... }
+]
+```
+
+#### POST `/admin/presence/holidays/preview`
+First half of the two-step add flow — drives the "this will overwrite N entries" confirmation.
+
+**Body:** `{ date: "YYYY-MM-DD" }`. Strict ISO regex + `checkdate()` validation. **400** on invalid date.
+**Response 200:** `{ "affectedSlots": N }`. No state mutation.
+
+#### POST `/admin/presence/holidays`
+Second half of the two-step add flow. Inserts the holiday row and overwrites every slot on that date with `presence_type=holiday`, `source='holiday'`, `location_room_id=null`. The `calendar_event_uid` column is preserved on overwrite so B4's calendar propagation can re-point existing VEVENTs.
+
+**Body:** `{ date: "YYYY-MM-DD", name: "..." }`. Name ≤128 chars, required.
+**Response 201:** `{ holiday: { ... }, affectedSlots: N }`.
+**409** if a holiday already exists for this date.
+
+#### DELETE `/admin/presence/holidays/{id}`
+Deletes the holiday row and invokes `PresenceTemplateService::recomputeSlotsForDate()` to revert every `source='holiday'` slot on that date back to its template-driven value.
+
+> **B1 note:** `recomputeSlotsForDate()` is a no-op stub in v3.42.0 (logs only). The real implementation lands in v3.43.0 (Session B2) alongside the week-template editor. Callers do not change when B2 lands.
+
+---
+
+## Presence module — user (added v3.43.0)
+
+> v3.43.0 adds 4 user-facing presence endpoints. All require `#[NoAdminRequired]` (authenticated NC session). Data is always scoped to the calling user — no userId parameter is accepted. GET endpoints carry `#[NoCSRFRequired]`; writes require CSRF.
+
+**Error mapping:** identical to the admin section (400/404/409/500). 409 is returned when trying to override a `source='holiday'` slot.
+
+### GET `/presence/template`
+Return the current user's week template as 14 cells (all combinations of day_of_week 0–6 × half_day 0–1, including unset cells with `presence_type_id=null`).
+
+**Response 200:**
+```json
+[
+  { "day_of_week": 0, "half_day": 0, "presence_type_id": 1, "location_room_id": 7, "updated_at": 1747600000 },
+  { "day_of_week": 0, "half_day": 1, "presence_type_id": null, "location_room_id": null, "updated_at": null }
+]
+```
+
+### PUT `/presence/template/cell`
+Upsert one template cell. Pass `presence_type_id=null` to clear the cell. Triggers immediate re-materialisation of `source='template'` slots for the rolling window (today → end of next year).
+
+**Body:** `{ day_of_week: 0–6, half_day: 0|1, presence_type_id: int|null, location_room_id: int|null }`
+
+**Response 200:** The saved cell in the same shape as the GET above.
+
+### GET `/presence/slots?from=YYYY-MM-DD&to=YYYY-MM-DD`
+Return the current user's materialised slots in the given date range. Enriched with type metadata.
+
+**Response 200:**
+```json
+[
+  {
+    "id": 42, "slot_date": "2026-05-19", "half_day": 0,
+    "half_day_label": "Morning",
+    "presence_type_id": 1, "presence_type_slug": "office",
+    "presence_type_label": "Office", "presence_type_icon": "OfficeBuilding",
+    "presence_type_color": "#1976D2", "requires_location": true,
+    "is_locked": false, "location_room_id": 7, "source": "template",
+    "updated_at": 1747600000
+  }
+]
+```
+`is_locked: true` when `source='holiday'` — the frontend should render these as non-editable.
+
+### PUT `/presence/slots/override`
+Override a single slot. Changes `source` to `'override'`. Returns **409** if the slot is `source='holiday'`.
+
+**Body:** `{ slot_date: "YYYY-MM-DD", half_day: 0|1, presence_type_id: int|null, location_room_id: int|null }`
+
+**Response 200:** Full enriched slot row (same shape as GET above).
+
+---
+
+## Presence module — team (added v3.44.0)
+
+> v3.44.0 adds 3 team-facing presence endpoints. All require an authenticated NC session (`#[NoAdminRequired]`) and team membership (`requireMemberLevel`). The config write additionally requires team admin (`requireAdminLevel`, level ≥ 8). GET endpoints carry `#[NoCSRFRequired]`.
+
+**Error mapping:** 400 bad input, 403 not a member / insufficient level, 500 unexpected.
+
+### GET `/teams/{teamId}/presence?from=YYYY-MM-DD&to=YYYY-MM-DD`
+Return the team presence grid for the given date range.
+
+Privacy filter (`hide_reasons`) is applied **server-side**. Members never see raw slot data when `hide_reasons=true`.
+
+**Response 200:**
+```json
+{
+  "members": [{ "userId": "alice", "displayName": "Alice" }],
+  "slots": {
+    "alice": {
+      "2026-05-19_0": {
+        "color": "#1976D2",
+        "label": "Office",
+        "icon": "OfficeBuilding",
+        "slug": "office",
+        "requires_location": true,
+        "location_room_id": 7,
+        "source": "template",
+        "is_locked": false
+      }
+    }
+  },
+  "hide_reasons": false,
+  "from": "2026-05-19",
+  "to": "2026-05-25"
+}
+```
+
+When `hide_reasons=true`, each cell is `{ color: "#EF5350"|"#66BB6A"|"#BDBDBD", label: null, icon: null, slug: null, requires_location: false, location_room_id: null, source: null, is_locked: false }`. Absent keys in `slots[userId]` mean no slot on that date/half.
+
+### GET `/teams/{teamId}/presence/config`
+Return per-team presence config.
+
+**Response 200:** `{ "presence_enabled": false, "hide_reasons": false }`
+
+### PUT `/teams/{teamId}/presence/config`
+Write one or both config flags. **Team admin only.** Only keys present in the body are changed.
+
+**Body:** `{ presence_enabled?: 0|1, hide_reasons?: 0|1 }`
+
+**Response 200:** Updated config `{ presence_enabled: bool, hide_reasons: bool }`.

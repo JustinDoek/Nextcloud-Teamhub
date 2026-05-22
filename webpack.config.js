@@ -9,6 +9,7 @@ module.exports = {
     entry: {
         teamhub: path.join(__dirname, 'src', 'main.js'),
         admin:   path.join(__dirname, 'src', 'admin.js'),
+        personal: path.join(__dirname, 'src', 'personal.js'),
     },
     output: {
         path: path.join(__dirname, 'js'),

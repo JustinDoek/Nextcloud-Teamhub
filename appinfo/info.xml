@@ -16,7 +16,7 @@ Each team gets a shared home with:
 - **Integrations** — developers can integrate their app with teamhub
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>3.41.0</version>
+    <version>3.48.0</version>
     <licence>agpl</licence>
     <author>Justin Doek</author>
     <namespace>TeamHub</namespace>
@@ -46,6 +46,8 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
     <settings>
         <admin>OCA\TeamHub\Settings\AdminSettings</admin>
         <admin-section>OCA\TeamHub\Settings\AdminSection</admin-section>
+        <personal>OCA\TeamHub\Settings\PersonalSettings</personal>
+        <personal-section>OCA\TeamHub\Settings\PersonalSection</personal-section>
     </settings>
 
     <background-jobs>
@@ -53,5 +55,12 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
         <job>OCA\TeamHub\BackgroundJob\AuditMirrorJob</job>
         <job>OCA\TeamHub\BackgroundJob\PendingDeletionJob</job>
         <job>OCA\TeamHub\BackgroundJob\ResourceDiscoveryJob</job>
+        <job>OCA\TeamHub\BackgroundJob\PresenceMaterialisationJob</job>
     </background-jobs>
+
+    <repair-steps>
+        <post-migration>
+            <step>OCA\TeamHub\Migration\RepairSteps\SeedPresenceTypes</step>
+        </post-migration>
+    </repair-steps>
 </info>

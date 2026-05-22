@@ -912,6 +912,8 @@ class TeamService {
             'createTeamGroup'        => $rawGroups,         // legacy flat string — keep for canCreateTeam()
             'createTeamGroups'       => $createTeamGroups, // structured array for the picker
             'groupFoldersDelegation' => $this->safeGetDelegationStatus(),
+            // Presence module — default off. NC admin must explicitly enable.
+            'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1',
         ];
     }
 
@@ -1003,6 +1005,13 @@ class TeamService {
             );
 
             $config->setAppValue(Application::APP_ID, 'createTeamGroup', implode(',', $gids));
+        }
+        if (isset($settings['presenceModuleEnabled'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                'presence_module_enabled',
+                $settings['presenceModuleEnabled'] ? '1' : '0'
+            );
         }
     }
 

@@ -190,6 +190,18 @@
             class="teamhub-admin-panel">
 
             <NcSettingsSection
+                :name="t('teamhub', 'Presence module')"
+                :description="t('teamhub', 'When enabled, team admins can activate a Presence tab for their team and members can set their weekly schedule. When disabled, all presence UI is hidden across the app.')">
+                <NcCheckboxRadioSwitch
+                    :checked="form.presenceModuleEnabled"
+                    type="switch"
+                    :aria-label="t('teamhub', 'Enable presence module for all teams')"
+                    @update:checked="form.presenceModuleEnabled = $event; if (!$event && activeTab === 'presence') { activeTab = 'integrations' } save()">
+                    {{ form.presenceModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                </NcCheckboxRadioSwitch>
+            </NcSettingsSection>
+
+            <NcSettingsSection
                 :name="t('teamhub', 'IntraVox integration')"
                 :description="t('teamhub', 'When IntraVox is enabled for a team, TeamHub creates a page at this path inside IntraVox. Use the format language/folder (e.g. en/teamhub or nl/teamhub). The folder must already exist in IntraVox.')">
                 <div class="admin-select-row">
@@ -892,6 +904,22 @@
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
+             Presence module tab (Session B1 / v3.42.0)
+             Admin-only foundation: catalogues + per-team toggle schema.
+             User-facing UI lands in B2/B3.
+             ───────────────────────────────────────────────────────────────── -->
+        <div
+            v-show="activeTab === 'presence'"
+            id="tab-panel-presence"
+            role="tabpanel"
+            class="teamhub-admin-panel">
+
+            <PresenceTypesManager v-if="activeTab === 'presence'" />
+            <PresenceLocationsManager v-if="activeTab === 'presence'" />
+            <PresenceHolidaysManager v-if="activeTab === 'presence'" />
+        </div>
+
+        <!-- ─────────────────────────────────────────────────────────────────
              Audit tab
              ───────────────────────────────────────────────────────────────── -->
         <NcSettingsSection
@@ -1447,6 +1475,12 @@ import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
 import AccountOffIcon from 'vue-material-design-icons/AccountOff.vue'
 import AccountRemoveIcon from 'vue-material-design-icons/AccountRemove.vue'
 import MagnifyIcon from 'vue-material-design-icons/Magnify.vue'
+import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
+
+// Presence module — Session B1 / v3.42.0 admin sub-panels.
+import PresenceTypesManager     from './PresenceTypesManager.vue'
+import PresenceLocationsManager from './PresenceLocationsManager.vue'
+import PresenceHolidaysManager  from './PresenceHolidaysManager.vue'
 
 export default {
     name: 'AdminSettings',
@@ -1456,6 +1490,8 @@ export default {
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
         ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon, RestoreIcon,
         InformationOutline, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon,
+        OfficeBuildingIcon,
+        PresenceTypesManager, PresenceLocationsManager, PresenceHolidaysManager,
     },
     data() {
         return {
@@ -1468,6 +1504,7 @@ export default {
                 wizardDescription: '',
                 pinMinLevel: 'moderator',
                 intravoxParentPath: 'en/teamhub',
+                presenceModuleEnabled: false,
             },
             // Invite type toggles
             inviteGroup: true,
@@ -1586,7 +1623,7 @@ export default {
     },
     computed: {
         tabs() {
-            return [
+            const list = [
                 { id: 'creation',      label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
                 { id: 'invitations',   label: this.t('teamhub', 'Invitations'),   icon: 'EmailSendIcon'   },
                 { id: 'integrations',  label: this.t('teamhub', 'Integrations'),  icon: 'PuzzleIcon'      },
@@ -1595,6 +1632,11 @@ export default {
                 { id: 'audit',         label: this.t('teamhub', 'Audit'),          icon: 'ShieldCheckIcon' },
                 { id: 'archive',       label: this.t('teamhub', 'Archive'),        icon: 'ArchiveIcon'     },
             ]
+            // Presence module tab only visible when the module is enabled.
+            if (this.form.presenceModuleEnabled) {
+                list.splice(5, 0, { id: 'presence', label: this.t('teamhub', 'Presence module'), icon: 'OfficeBuildingIcon' })
+            }
+            return list
         },
 
         /**
@@ -1680,9 +1722,14 @@ export default {
         async load() {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/settings'))
-                this.form.wizardDescription  = data.wizardDescription  || ''
-                this.form.pinMinLevel        = data.pinMinLevel         || 'moderator'
-                this.form.intravoxParentPath = data.intravoxParentPath  || 'en/teamhub'
+                this.form.wizardDescription    = data.wizardDescription     || ''
+                this.form.pinMinLevel          = data.pinMinLevel            || 'moderator'
+                this.form.intravoxParentPath   = data.intravoxParentPath     || 'en/teamhub'
+                this.form.presenceModuleEnabled = !!data.presenceModuleEnabled
+                // If we're on the presence tab but module is now off, switch away.
+                if (!this.form.presenceModuleEnabled && this.activeTab === 'presence') {
+                    this.activeTab = 'integrations'
+                }
 
                 const types = (data.inviteTypes || 'user,group').split(',').map(s => s.trim())
                 this.inviteGroup     = types.includes('group')
@@ -1801,11 +1848,12 @@ export default {
             const groupIds = JSON.stringify(this.selectedGroups.map(g => g.id))
 
             const params = new URLSearchParams()
-            params.set('wizardDescription',  this.form.wizardDescription)
-            params.set('intravoxParentPath', this.form.intravoxParentPath)
-            params.set('createTeamGroup',    groupIds)
-            params.set('pinMinLevel',        this.form.pinMinLevel)
-            params.set('inviteTypes',        types.join(','))
+            params.set('wizardDescription',    this.form.wizardDescription)
+            params.set('intravoxParentPath',   this.form.intravoxParentPath)
+            params.set('createTeamGroup',      groupIds)
+            params.set('pinMinLevel',          this.form.pinMinLevel)
+            params.set('inviteTypes',          types.join(','))
+            params.set('presenceModuleEnabled', this.form.presenceModuleEnabled ? '1' : '0')
 
             try {
                 await axios.post(

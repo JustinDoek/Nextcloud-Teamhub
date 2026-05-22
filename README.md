@@ -1,8 +1,6 @@
 # TeamHub for Nextcloud
 
-TeamHub gives every Nextcloud Team a proper home. It wraps the existing Teams (Circles) infrastructure and provisions a shared workspace — messages, Talk chat, Files folder, Calendar, Deck board — all accessible from one place.
-
-![TeamHub screenshot](screenshots/teamhub-main.jpg)
+TeamHub gives every Nextcloud Team a proper home. It wraps the existing Teams (Circles) infrastructure and provisions a shared workspace — messages, Talk chat, Files folder, Calendar, Deck board, and Presence — all from one place.
 
 ## Features
 
@@ -13,35 +11,39 @@ Each team gets a tab bar linking directly to its shared apps:
 - **Files** — opens the team's shared Files folder
 - **Calendar** — opens the team's shared calendar
 - **Deck** — opens the team's shared Deck board
+- **Presence** — team presence view showing who is working where today (when enabled)
 - Custom links can be added to the tab bar by team admins
 
 ### Sidebar widgets
 Always visible next to the message stream:
-- **Team info** — description, team type labels (open/invite-only/public etc.), owner, member avatar stack, admin actions
+- **Team info** — description, team type labels, owner, member avatar stack with today's presence indicators
 - **Upcoming events** — next events pulled from the team calendar
 - **Open tasks** — cards from the team Deck board
 - **Pages** — pages from the team's IntraVox space (if installed)
-- **Activity snapshot** — 5 most recent events across all team resources, with a "More" link
+- **Activity snapshot** — 5 most recent events across all team resources
 
-### Activity feed
-A dedicated full-canvas view showing everything that happened in the team over the past 30 days, grouped by day — file uploads and edits, calendar events, Deck card changes, member joins and leaves.
+### Presence module
+When enabled by the NC admin, team members can set a weekly presence template (Home / Office / Vacation / Non-working day) and override individual dates. The schedule is published to their default Nextcloud Calendar as VEVENT entries (TRANSP:OPAQUE for busy, TRANSPARENT for free), driving NC's calendar-status integration. Team admins can activate a Presence tab per team and optionally hide status details so the team view shows only a three-tone busy / free / off palette.
+
+**Enabling presence:** NC Admin Settings → TeamHub → Integrations → Presence module (default: off).
 
 ### Team messages
 Post announcements, questions and polls to your team. Members are notified. Messages support inline editing and threaded comments.
 
 ### Team management
 - Create teams with name, description and visibility settings
-- Invite members by local user, group, email address or federated account (configurable per instance by admins)
-- Remove members, approve or reject join requests
-- Configure team options (open join, invite-only, approval required, member invitations, visible, password-protected)
-- Transfer team ownership to another member (owner-only)
-- Browse and request access to teams you're not a member of
+- Invite members by local user, group, email address or federated account
+- Remove members, approve join requests, transfer ownership
+- Configure team options (open join, invite-only, approval required, password-protected)
+- Browse and request access to teams you are not a member of
 
 ### Admin settings
-- Set a custom wizard description shown during team creation
-- Control which invite types (user / group / email / federated) are available to team admins
-- Set the minimum member level required to pin messages
-- Manage all teams: set owner, delete teams, repair membership cache
+- Control team creation permissions (restrict to specific groups)
+- Configure invite types available to team admins
+- Set minimum member level required to pin messages
+- Enable/disable the Presence module for the whole instance
+- Manage presence types, office locations, and admin holidays
+- Telemetry, maintenance, audit, and archive tools
 
 ## Requirements
 
@@ -50,7 +52,7 @@ Post announcements, questions and polls to your team. Members are notified. Mess
 - Nextcloud Teams (Circles) app — included with Nextcloud, must be enabled
 - PostgreSQL or MySQL/MariaDB
 
-Optional integrations (TeamHub auto-detects what is installed):
+Optional integrations (auto-detected):
 - Nextcloud Talk
 - Nextcloud Calendar
 - Nextcloud Deck
@@ -58,20 +60,7 @@ Optional integrations (TeamHub auto-detects what is installed):
 
 ## Installation
 
-### From a release zip
-
-1. Download the latest release zip from the [Releases](../../releases) page
-2. Extract into your Nextcloud apps directory:
-   ```bash
-   cd /path/to/nextcloud/apps
-   unzip teamhub-x.y.z.zip
-   ```
-3. Enable the app:
-   ```bash
-   sudo -u www-data php occ app:enable teamhub
-   ```
-
-The release zip contains pre-compiled JavaScript. You do not need npm.
+See [INSTALL.md](INSTALL.md).
 
 ## License
 

@@ -39,6 +39,8 @@ export default new Vuex.Store({
         teamMenuItems: [],      // enabled menu_item integrations for the current team
         intravoxAvailable: false,
         intravoxParentPath: 'en/teamhub',
+        presenceConfig: { presence_enabled: false, hide_reasons: false },
+        presenceModuleEnabled: false,
         loading: {
             teams: false,
             messages: false,
@@ -203,6 +205,8 @@ export default new Vuex.Store({
         SET_TEAM_TASKS(state, tasks) { state.teamTasks = tasks },
         SET_TEAM_WIDGETS(state, widgets) { state.teamWidgets = widgets },
         SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
+        SET_PRESENCE_CONFIG(state, config) { state.presenceConfig = config },
+        SET_PRESENCE_MODULE_ENABLED(state, val) { state.presenceModuleEnabled = val },
         SET_LOADING(state, { key, value }) { Vue.set(state.loading, key, value) },
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },

@@ -443,6 +443,44 @@
                         </NcCheckboxRadioSwitch>
                     </div>
 
+                    <!-- ── Presence module toggles (B3) ──────────────────── -->
+                    <div v-if="isTeamAdmin && presenceModuleEnabled" class="team-app-item">
+                        <div class="team-app-icon">
+                            <OfficeBuildingManageIcon :size="22" />
+                        </div>
+                        <div class="team-app-info">
+                            <span class="team-app-name">{{ t('teamhub', 'Presence tab') }}</span>
+                            <span class="team-app-desc">{{ t('teamhub', 'Show a Presence tab on the team home so members can see each other\'s schedules.') }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            :checked="presenceEnabled"
+                            :disabled="savingPresenceConfig"
+                            type="switch"
+                            :aria-label="t('teamhub', 'Enable Presence tab for this team')"
+                            @update:checked="setPresenceEnabled($event)">
+                            {{ presenceEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+
+                    <!-- Sub-option: only shown when presence is enabled -->
+                    <div v-if="isTeamAdmin && presenceModuleEnabled && presenceEnabled" class="team-app-item team-app-item--sub">
+                        <div class="team-app-icon team-app-icon--sub">
+                            <EyeOffOutlineIcon :size="18" />
+                        </div>
+                        <div class="team-app-info">
+                            <span class="team-app-name">{{ t('teamhub', 'Hide status details') }}</span>
+                            <span class="team-app-desc">{{ t('teamhub', 'Members see busy / free / off only — not the specific status or location.') }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            :checked="presenceHideReasons"
+                            :disabled="savingPresenceConfig"
+                            type="switch"
+                            :aria-label="t('teamhub', 'Hide status details from team members')"
+                            @update:checked="setPresenceHideReasons($event)">
+                            {{ presenceHideReasons ? t('teamhub', 'Hidden') : t('teamhub', 'Visible') }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+
                 </div>
             </div>
 
@@ -1212,6 +1250,8 @@ import ArchiveTeamModal from './ArchiveTeamModal.vue'
 import ResourcePicker from './ResourcePicker.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
+import OfficeBuildingManageIcon from 'vue-material-design-icons/OfficeBuilding.vue'
+import EyeOffOutlineIcon from 'vue-material-design-icons/EyeOffOutline.vue'
 
 // Circles config bitmask constants — canonical values from circlesConfig.js.
 // These MUST match OCA\Circles\Model\Circle::CFG_* in the Circles app.
@@ -1239,6 +1279,7 @@ export default {
         ResourcePicker,
         InviteMemberModal,
         AccountPlusIcon,
+        OfficeBuildingManageIcon, EyeOffOutlineIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -1324,12 +1365,21 @@ export default {
             // Archive status (fetched when danger tab opens)
             archiveStatusRow: null,
             archiveStatusLoading: false,
+            // Presence config (B3) — loaded when settings tab opens
+            presenceEnabled:     false,
+            presenceHideReasons: false,
+            savingPresenceConfig: false,
         }
     },
     computed: {
-        ...mapState(['intravoxAvailable', 'resourceWarningFocus']),
+        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled']),
 
-        /** Active rows for a specific app — used by the per-app resource list. */
+        /** True when the current user holds admin or owner level on this team. */
+        isTeamAdmin() {
+            // ManageTeamView is only rendered for admins/owners; this is an
+            // extra guard for the presence toggles which are admin-only.
+            return true
+        },
         activeResourcesByApp() {
             return (appId) => this.pendingResourceRows.filter(r => r.appId === appId && r.status === 'active')
         },
@@ -1597,6 +1647,9 @@ export default {
             if (tab === 'messages') {
                 this.loadMessageSettings()
             }
+            if (tab === 'settings') {
+                this.loadPresenceConfig()
+            }
             // If the warning block sent us here with focus flag set, scroll to at-risk section.
             if (tab === 'settings' && this.resourceWarningFocus) {
                 this.$nextTick(() => {
@@ -1618,7 +1671,7 @@ export default {
     methods: {
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS']),
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG']),
 
         loadAll() {
             this.loadMembers()
@@ -1627,6 +1680,7 @@ export default {
             this.loadTeamApps()
             this.loadIntegrationRegistry()
             this.loadMeetingSettings()
+            this.loadPresenceConfig()
         },
 
         getMemberRoleLabel(level) {
@@ -2229,6 +2283,67 @@ export default {
             return labels[appId] || appId
         },
 
+        // ── Presence config (B3) ────────────────────────────────────
+
+        async loadPresenceConfig() {
+            if (!this.team?.id) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/presence/config`)
+                )
+                this.presenceEnabled     = !!data.presence_enabled
+                this.presenceHideReasons = !!data.hide_reasons
+                // Sync to store so TeamView's tab list stays in sync.
+                this.SET_PRESENCE_CONFIG(data)
+            } catch (err) {
+                // Non-fatal — defaults stay at false.
+            }
+        },
+
+        async setPresenceEnabled(val) {
+            this.savingPresenceConfig = true
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/presence/config`),
+                    { presence_enabled: val ? 1 : 0 }
+                )
+                this.presenceEnabled = val
+                // Commit to store → TeamView watcher rebuilds tabs immediately.
+                this.SET_PRESENCE_CONFIG({
+                    presence_enabled: val,
+                    hide_reasons: this.presenceHideReasons,
+                })
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingPresenceConfig = false
+            }
+        },
+
+        async setPresenceHideReasons(val) {
+            this.savingPresenceConfig = true
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/presence/config`),
+                    { hide_reasons: val ? 1 : 0 }
+                )
+                this.presenceHideReasons = val
+                // Commit to store → TeamPresenceView re-reads hide_reasons.
+                this.SET_PRESENCE_CONFIG({
+                    presence_enabled: this.presenceEnabled,
+                    hide_reasons: val,
+                })
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingPresenceConfig = false
+            }
+        },
+
         async toggleApp(app, enabled) {
             if (!app.installed) return
             if (!enabled) {
@@ -2759,6 +2874,27 @@ export default {
     padding: 10px 12px;
     border-radius: var(--border-radius-large);
     background: var(--color-background-dark);
+}
+.team-app-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-maxcontrast);
+    margin: 16px 0 6px;
+    padding: 0 4px;
+}
+/* Sub-option: indented beneath its parent toggle */
+.team-app-item--sub {
+    margin-left: 20px;
+    background: var(--color-background-hover);
+    border: 1px solid var(--color-border);
+}
+.team-app-icon--sub {
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    color: var(--color-text-maxcontrast);
 }
 .team-app-icon {
     display: flex;

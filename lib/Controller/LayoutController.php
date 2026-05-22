@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
+use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\LayoutMapper;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\PresenceTeamService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -154,7 +156,7 @@ class LayoutController extends Controller {
     ];
 
     // Allowed built-in tab keys.
-    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck'];
+    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'presence'];
 
     public function __construct(
         string $appName,
@@ -165,6 +167,7 @@ class LayoutController extends Controller {
         private IConfig $config,
         private LoggerInterface $logger,
         private MemberService $memberService,
+        private PresenceTeamService $presenceTeamService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -213,12 +216,14 @@ class LayoutController extends Controller {
                 'itemsBefore' => count($userDefault['layout']),
                 'itemsAfter'  => count($mergedDefault),
             ]);
-            return new JSONResponse([
-                'layout'      => $mergedDefault,
-                'tabOrder'    => $userDefault['tabOrder'],
-                'isDefault'   => true,
-                'userDefault' => $mergedDefault,
-            ]);
+        return new JSONResponse([
+            'layout'                => $mergedDefault,
+            'tabOrder'              => $userDefault['tabOrder'],
+            'isDefault'             => true,
+            'userDefault'           => $mergedDefault,
+            'presenceConfig'        => $this->presenceTeamService->getConfig($teamId),
+            'presenceModuleEnabled' => $this->isPresenceModuleEnabled(),
+        ]);
         }
 
         $layout   = json_decode($row['layout_json'],    true) ?? self::DEFAULT_LAYOUT;
@@ -233,10 +238,12 @@ class LayoutController extends Controller {
         ]);
 
         return new JSONResponse([
-            'layout'      => $layout,
-            'tabOrder'    => $tabOrder,
-            'isDefault'   => false,
-            'userDefault' => $userDefault['layout'],
+            'layout'                => $layout,
+            'tabOrder'              => $tabOrder,
+            'isDefault'             => false,
+            'userDefault'           => $userDefault['layout'],
+            'presenceConfig'        => $this->presenceTeamService->getConfig($teamId),
+            'presenceModuleEnabled' => $this->isPresenceModuleEnabled(),
         ]);
     }
 
@@ -504,6 +511,14 @@ class LayoutController extends Controller {
         }
 
         return $layout;
+    }
+
+    // ----------------------------------------------------------------
+    // Helpers
+    // ----------------------------------------------------------------
+
+    private function isPresenceModuleEnabled(): bool {
+        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
     }
 
     private function currentUserId(): ?string {

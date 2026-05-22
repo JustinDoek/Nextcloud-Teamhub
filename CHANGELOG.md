@@ -3,6 +3,264 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.48.0] — 2026-05-20 — Presence admin tab visibility + warning alignment + docs
+
+### Fixed
+- **Presence module admin tab still visible when module is disabled** — `tabs()` computed in `AdminSettings.vue` now conditionally includes the Presence module tab only when `form.presenceModuleEnabled` is true. When the toggle is turned off, the tab is removed immediately and the active tab switches to Integrations if needed.
+- **Team Info warning strip height and chevron** — replaced "Open settings →" text with a `ChevronRightIcon` icon (consistent with DeckWidget unassigned-card nudge). Updated CSS to use `line-height: 1.3` and icon-only button layout so the strip height matches the DeckWidget row exactly.
+
+### Added
+- `docs/USER_GUIDE.md` — comprehensive user guide covering: team navigation, tab bar, presence tab (team view), My Presence personal settings (weekly template + date overrides + calendar integration), team admin actions (members, settings, presence toggles, links, danger tab), and FAQ.
+
+### Changed
+- `README.md` — updated to include Presence module, Members widget presence dots, and updated admin settings section.
+- `INSTALL.md` — rewritten as a full NC Admin guide: installation, all admin settings tabs (including Presence module on/off, status types, locations, holidays), optional integrations table, background jobs table.
+- `src/components/AdminSettings.vue` — `tabs()` gates presence tab on `presenceModuleEnabled`; toggle redirects away from presence tab when disabled.
+- `src/components/TeamWidgetGrid.vue` — warning button uses `ChevronRightIcon`; CSS tightened to match DeckWidget strip height.
+
+## [3.47.9] — 2026-05-20 — Presence module global toggle + warning widget alignment
+
+### Added
+- **Presence module on/off toggle in NC Admin Settings → TeamHub → Integrations**. Default: off. When disabled: personal settings panel (My Presence) renders nothing; Manage Team → Settings presence toggles are hidden; the Presence tab never appears in the team tab bar. NC admin switches it on to enable for the whole app; team admins then activate it per team as before.
+- `presenceModuleEnabled` in `GET /api/v1/admin/settings` response and `POST /api/v1/admin/settings` body.
+- `presenceModuleEnabled` in `GET /teams/{teamId}/layout` response (alongside `presenceConfig`).
+- `SET_PRESENCE_MODULE_ENABLED` Vuex mutation + `presenceModuleEnabled` state.
+
+### Changed
+- `lib/Service/TeamService.php` — `getAdminSettings` returns `presenceModuleEnabled`; `saveAdminSettings` writes `presence_module_enabled` IConfig key.
+- `lib/Controller/LayoutController.php` — `getLayout` returns `presenceModuleEnabled` from IConfig; `isPresenceModuleEnabled()` helper added.
+- `lib/Settings/PersonalSettings.php` — passes `presenceModuleEnabled` to template.
+- `templates/personal.php` — exposes flag as `data-presence-module-enabled` attribute.
+- `src/personal.js` — reads flag; only mounts `MyPresencePanel` when enabled.
+- `src/store/index.js` — `presenceModuleEnabled` state + `SET_PRESENCE_MODULE_ENABLED` mutation.
+- `src/components/TeamView.vue` — `loadLayout` commits `presenceModuleEnabled`; `buildAllTabDescriptors` gates presence tab on both module flag AND per-team flag; `mapState`/`mapMutations` updated.
+- `src/components/ManageTeamView.vue` — presence toggles gated on `presenceModuleEnabled`.
+- `src/components/AdminSettings.vue` — `presenceModuleEnabled` in `form` data, loaded, saved; toggle switch in integrations tab.
+- **Widget warning alignment** — `teamhub-resource-warning` (Team Info widget) moved from inside the content body to directly under the widget header, matching the DeckWidget unassigned-card strip: amber soft background, bottom border only, no surrounding border. `NcButton` replaced with a plain `<button>` for layout control. CSS rewritten to match DeckWidget's `.th-unassigned__row` pattern.
+
+## [3.47.8] — 2026-05-20 — Fix: calendar events not updating (NC soft-delete URI bug)
+
+### Fixed
+- **Calendar events not updating on override or template save** — root cause identified via DB query: NC's CalDAV stack soft-deletes calendar objects by appending `-deleted` to the URI rather than removing the row. `findUriByUid` was finding these stale soft-deleted rows, seeing the URI didn't match the canonical target URI, calling `CalDavBackend::deleteCalendarObject` (which appended another `-deleted`), then trying to `createCalendarObject` — which failed with a UID unique-constraint error because the row was still in the table. The URI was growing with repeated `-deleted` suffixes on every sync.
+- **Fix:** `findUriByUid` now excludes rows whose URI contains `-deleted`. Additionally, `upsertByUid` calls new `purgeDeletedRowsForUid` before every upsert, which hard-deletes (direct DB `DELETE`) any stale soft-deleted rows for that UID so they cannot block `createCalendarObject`.
+
+### Changed
+- `lib/Service/PresenceCalendarService.php` — `findUriByUid` adds `NOT LIKE '%-deleted%'` filter; `upsertByUid` calls `purgeDeletedRowsForUid` first; new `purgeDeletedRowsForUid` private method.
+
+### Manual DB cleanup required for existing installs
+Run this once to remove already-accumulated stale rows:
+```sql
+DELETE FROM oc_calendarobjects 
+WHERE uid LIKE '%teamhub-presence%' 
+AND uri LIKE '%-deleted%';
+```
+
+## [3.47.7] — 2026-05-20 — Presence fixes VIII + Members widget presence
+
+### Fixed
+- **Holiday delete 404** — `DELETE /api/v1/admin/presence/holidays/{id}` route was simply missing from `routes.php`. Added.
+- **Calendar not updating on override** — added `debug` logging to `findDefaultCalendarId`, `syncSlotsForDate`, and `upsertByUid` to expose exactly where the write fails. Check Nextcloud log (level=debug) after doing an override to see the trace.
+
+### Added
+- **Members widget presence status** — `TeamWidgetGrid` now fetches today's team presence grid on mount and team switch. Members are sorted: home/office first, then others. Each avatar shows a coloured dot (bottom-right) reflecting their current half-day presence status. Members with no presence data show no dot.
+
+### Changed
+- `appinfo/routes.php` — added `presenceAdmin#deleteHoliday` route.
+- `lib/Service/PresenceCalendarService.php` — debug logging added to `findDefaultCalendarId`, `syncSlotsForDate`, `upsertByUid`.
+- `src/components/TeamWidgetGrid.vue` — `presenceSlots` data field, `currentTeamId` watcher calling `loadTodayPresence`, `membersWithPresence` computed, `loadTodayPresence` method, `teamhub-stacked-avatar-wrap` + `teamhub-presence-dot` CSS.
+
+## [3.47.6] — 2026-05-20 — Presence fixes VII
+
+### Fixed
+- **Override not updating calendar** — `overrideSlot` now calls `syncSlotsForDate($userId, $date)` synchronously (inline, non-fatal) after saving the slot. This syncs only the 2 slots for the affected date, handling the all-day merge/split logic immediately. The background job queue is no longer used for overrides.
+- **Holidays not appearing in calendar / date override view** — `addHoliday` now calls `createMissingHolidaySlots` after the bulk overwrite. This inserts `source='holiday'` AM+PM rows for every user who has template cells but no slot on the holiday date, ensuring the date shows as locked in the calendar view immediately (without waiting for the nightly cron).
+- **Holiday dates overridable by user** — `overrideSlot` now checks `teamhub_holidays` table first (via `HolidayMapper::findByDate`), rejecting with 409 even when no slot row exists for the user yet. The existing slot-source check is kept as a belt-and-suspenders guard.
+
+### Added
+- `PresenceCalendarService::syncSlotsForDate(string $userId, string $isoDate)` — targeted sync of one date's AM+PM calendar events.
+- `PresenceTemplateMapper::getAllUserIds()` — returns distinct user IDs of all users with at least one template cell.
+- `PresenceHolidayService::createMissingHolidaySlots()` — private method that inserts holiday slot rows for active users with no slot on a holiday date.
+
+### Changed
+- `lib/Service/PresenceSlotService.php` — `HolidayMapper` and `PresenceCalendarService` re-injected; `overrideSlot` rewritten with holiday table check and inline `syncSlotsForDate` call.
+- `lib/Service/PresenceHolidayService.php` — `PresenceSlotMapper` and `PresenceTemplateMapper` injected; `addHoliday` calls `createMissingHolidaySlots`.
+
+## [3.47.5] — 2026-05-20 — Presence fixes VI
+
+### Fixed
+- **Presence tab reload race (definitive fix)** — `presenceConfig` is now returned directly from `GET /teams/{teamId}/layout` (embedded in the response). `loadLayout` commits it to the Vuex store before calling `buildOrderedTabs`, so the tab is always present or absent correctly with zero race conditions. The separate `loadPresenceConfig` HTTP request on team switch is eliminated. The `presenceConfig` watcher in `TeamView` still handles the ManageTeamView toggle case.
+- **"Presence" section heading in Manage Team Settings** — removed the unnecessary section title. Presence tab toggle and hide-details sub-item now appear inline with other team app toggles without a header, consistent with other feature toggles.
+- **Override shows old state until reload** — `saveOverride` in `MyPresencePanel` now applies an optimistic UI update immediately (before the API call returns), then reloads slots silently in the background. On PHP side, `overrideSlot` queues `PresenceCalendarSyncJob` and returns immediately without blocking on calendar writes.
+
+### Changed
+- `lib/Controller/LayoutController.php` — injected `PresenceTeamService`; `getLayout` now returns `presenceConfig` in both response paths. `ALLOWED_TAB_KEYS` extended to include `'presence'`.
+- `src/components/TeamView.vue` — `loadLayout` reads `data.presenceConfig` and commits it before `buildOrderedTabs`. `currentTeamId` watcher simplified to call only `loadLayout`. All debug `console.log` calls removed.
+- `src/components/ManageTeamView.vue` — removed `team-app-section-title` for Presence.
+- `src/components/MyPresencePanel.vue` — `saveOverride` does optimistic update, queues background reload.
+- `lib/Service/PresenceSlotService.php` — removed inline `syncAllSlotsForUser` call; queues `PresenceCalendarSyncJob` instead. Removed unused `PresenceCalendarService` dependency.
+
+## [3.47.4] — 2026-05-20 — Presence fixes V
+
+### Fixed
+- **Calendar duplicate-key on override** — `syncAllSlotsForUser` now looks up existing calendar events by UID in `oc_calendarobjects` directly (via `findUriByUid`) instead of by URI via `CalDavBackend::getCalendarObject`. This prevents the `calobjects_by_uid_index` constraint violation that occurred when an existing event had a different URI than the one being derived (e.g. after a code change or failed previous sync). New private methods: `upsertByUid`, `deleteByUid`, `findUriByUid`.
+- **Team grid blocks missing colour/status** — `dayBlockStyle` was checking `slot.presence_type_color` but the team grid API returns `slot.color`. Fixed field name in `dayBlockStyle`, `blockTitle`, `sameTypeDay`, and all three template label spans.
+- **Presence tab: async watcher not awaited in Vue 2** — Vue 2 watchers do not await async functions; the `await loadPresenceConfig` in the `currentTeamId` watcher was silently ignored, so `loadLayout` ran before config arrived. Changed to `.then()` chain which correctly sequences the two async calls.
+- **Date overrides calendar: only 2 months shown** — expanded to 4 months (2×2 grid). `loadSlots` now fetches 4 months forward. If all slots are empty on load (e.g. cron hasn't run yet), `triggerMaterialise` is called automatically.
+
+### Added
+- `POST /api/v1/presence/slots/materialise` — triggers immediate `rematerialiseForUser` for the current user. Called by `MyPresencePanel` when the slot list is empty on first load.
+- `PresenceCalendarService::upsertByUid`, `deleteByUid`, `findUriByUid` — UID-based calendar object management.
+
+## [3.47.3] — 2026-05-19 — Presence fixes IV
+
+### Fixed
+- **Team presence tab disappearing on reload** — added `console.log` tracing to `buildOrderedTabs`, `loadPresenceConfig`, `presenceConfig` watcher, and `syncExtTabs` to expose the exact call sequence causing the tab to be dropped. Open browser devtools console and reload to see the trace.
+- **Team presence grid: restored week view** — re-added `weekDays` computed (Mon–Sun for current week), week grid template (members × 7 day columns), stacked 30px/60px blocks per day cell. Navigation moves by week. Previous/next aria-labels updated.
+- **My Presence save: single bulk request** — new `PUT /api/v1/presence/template/bulk` endpoint saves all cells in one DB transaction then materialises once. Frontend calls this instead of 14 sequential requests. Calendar sync queued via `PresenceCalendarSyncJob` as before.
+- **Override not updating calendar for both halves** — `PresenceSlotService::overrideSlot` now calls `syncAllSlotsForUser` inline after the override, which handles the full-day merge/split logic (e.g. all-day event split into two half-day events when AM ≠ PM). The background job is no longer queued from override — full sync handles it.
+
+### Added
+- `PUT /api/v1/presence/template/bulk` route + `PresenceUserController::saveTemplateBulk` + `PresenceTemplateService::setBulk`.
+
+## [3.47.2] — 2026-05-19 — Presence fixes III
+
+### Fixed
+- **Duplicate key error on template save** — `saveTemplate` sent all 14 cells concurrently via `Promise.all`, causing multiple simultaneous `rematerialiseForUser` calls that raced on `teamhub_presence_slots`. Changed to sequential `for`/`await` loop; `rematerialiseForUser` runs once per cell, never concurrently.
+- **Presence tab not consistently visible** — `loadPresenceConfig` now runs before `loadLayout` (awaited) in the `currentTeamId` watcher. This ensures `presenceConfig.presence_enabled` is correct when `buildAllTabDescriptors` first runs, eliminating the race that caused the tab to appear/disappear on team switches.
+- **Override not updating calendar** — `PresenceSlotService::overrideSlot` now calls `syncSlot` directly and inline for the single affected slot, in addition to queuing the full `PresenceCalendarSyncJob`. One slot write is fast; it no longer waits for cron.
+- **Team presence grid: week mode removed** — The crowded 14-column week grid is removed. The view is now day-only (same date navigation, one day at a time). Stacked half-day blocks are now 30px/60px (up from 25px/50px).
+
+## [3.47.1] — 2026-05-19 — Hotfix: migration boot crash
+
+### Fixed
+- **`occ app:enable teamhub` crash** — `Version000346000::postSchemaChange` called `$this->db->getPrefix()` which does not exist on `IDBConnection`. Fixed to use `$this->config->getSystemValue('dbtableprefix', 'oc_')`, matching the established pattern in `Version000336200` and `Version000300901`. No other changes.
+
+## [3.47.0] — 2026-05-19 — Presence UI overhaul + day_of_week fix
+
+### Fixed
+- **Monday morning/afternoon still failing (day_of_week DEFAULT)** — `Version000346000` uses direct `ALTER TABLE ... MODIFY COLUMN` SQL (instead of the unreliable DBAL `setDefault` approach) to reliably add `DEFAULT 0` to `day_of_week` and `half_day` on MySQL/MariaDB. PostgreSQL is skipped (not affected). The migration is new so it runs on every install that hasn't seen it yet, regardless of previous repair attempts.
+
+### Added
+- **`PresenceCalendarView.vue`** — new sub-component: two-month calendar (current + next) showing materialised presence slots as coloured AM/PM blocks per day. Holidays shown with diagonal stripe and lock icon. Clickable for today+future non-holiday dates; past dates and holiday slots are display-only.
+- **`lib/Migration/Version000346000Date20260519000000.php`** — direct SQL migration to fix MySQL column defaults reliably.
+
+### Changed
+- **`MyPresencePanel.vue`** — redesigned with draft/save model and calendar override section:
+  - Week template grid now uses draft state (`draft` object). Cells update locally; a **Save** button commits all 14 cells at once via parallel PUT requests. Dirty cells are highlighted with an amber outline. Discard button resets to server state.
+  - Below the grid: 2-month `PresenceCalendarView` showing materialised slots. Clicking a future date cell opens the picker to set a per-date override (source='override'), saved immediately. Holidays remain locked.
+- **`PresenceCell.vue`** — added `dirty` prop; when true, shows amber outline indicating an unsaved draft change.
+- **`TeamPresenceView.vue`** — day mode redesigned:
+  - Two half-day blocks stacked vertically (25px each) per member row instead of two side-by-side columns.
+  - When Morning and Afternoon share the same presence type, they merge into a single 50px block.
+  - Added `sameTypeDay`, `dayBlockStyle`, `slotTitle`, `dayBlocksAriaLabel` computed/methods.
+
+## [3.46.0] — 2026-05-19 — Presence bugfixes II
+
+### Fixed
+- **Monday morning/afternoon fails to save** — `day_of_week` column on `teamhub_presence_template` lacked `DEFAULT 0`, causing MySQL 1364 when day=0 (Monday). Fixed in base migration and added to `Version000344001` repair migration (also runs on existing installs via `occ upgrade`).
+- **Presence tab not appearing after enabling** — race condition in `loadPresenceConfig`: the `if (this.layoutLoaded)` guard blocked the tab rebuild when presence config arrived before layout finished loading. Also: presence config is now stored in Vuex (`presenceConfig` state + `SET_PRESENCE_CONFIG` mutation) so toggling the switch in Manage Team → Settings immediately shows/hides the tab in the tab bar without a reload.
+- **Calendar sync blocking HTTP response** — `syncSlot` and `syncAllSlotsForUser` are no longer called inline during slot saves. Instead a `PresenceCalendarSyncJob` (one-shot `QueuedJob`) is queued via `IJobList`. The slot write returns immediately; calendar propagation happens on the next cron run (typically within a minute).
+- **AM + PM same status creates two calendar events** — `syncAllSlotsForUser` now detects when both halves of a date share the same `presence_type_id` and writes a single all-day `VEVENT` (`DTSTART;VALUE=DATE`) instead of two timed half-day events. Existing half-day events for that date are deleted. If they differ, two half-day events are written as before.
+- **"Hide status details" appears as a peer item instead of a sub-item** — the toggle is now visually nested under "Presence tab" with left-indent, smaller icon, and a bordered background to communicate the parent–child relationship.
+
+### Added
+- **`PresenceCalendarSyncJob`** — new `QueuedJob` that calls `PresenceCalendarService::syncAllSlotsForUser` for a given user. Queued by `PresenceSlotService` and `PresenceMaterialisationService` instead of synchronous inline calls.
+- **`presenceConfig` Vuex state + `SET_PRESENCE_CONFIG` mutation** — presence config is now shared state; both `TeamView` and `ManageTeamView` read and write through the store.
+
+### Changed
+- `lib/Migration/Version000342000Date20260518000000.php` — added `'default' => 0` to `day_of_week` column (fresh installs).
+- `lib/Migration/Version000344001Date20260519000000.php` — extended to also add `DEFAULT 0` to `day_of_week` (existing installs).
+
+## [3.45.0] — 2026-05-19 — Session B4 (Calendar propagation)
+
+### Added
+- **`PresenceCalendarService`** — one-way presence → calendar propagation. Writes, updates, and deletes VEVENTs in the user's default calendar when slots change.
+  - Stable UID scheme: `teamhub-presence-{userId}-{date}-{AM|PM}@teamhub-presence`. Derived from slot data — no extra storage needed. Also persisted in `slot.calendar_event_uid` for re-pointing on holiday overwrite.
+  - Custom property `X-TEAMHUB-PRESENCE:1` on every written VEVENT — secondary marker so we never touch events we didn't create.
+  - `TRANSP:OPAQUE` (busy) when `is_busy=1`, `TRANSP:TRANSPARENT` (free) when 0. Drives NC 28+ calendar-status integration.
+  - `STATUS:CONFIRMED` when busy, `TENTATIVE` when free.
+  - Floating-time DTSTART/DTEND (no TZID, no Z) — Morning 00:00–12:00, Afternoon 12:00–00:00 next day. Sits at the correct local slot regardless of user timezone.
+  - Calendar lookup: user's oldest calendar by id, excluding `contact_birthdays` and soft-deleted calendars.
+  - Three public methods: `syncSlot(PresenceSlot)`, `deleteSlotEvent(PresenceSlot)`, `syncAllSlotsForUser(string)`.
+  - All CalDAV failures are non-fatal (logged as warnings). Slot writes always succeed regardless of calendar availability.
+  - Uses `ContainerInterface` injection for `CalDavBackend` — consistent with `CalendarService` and `MeetingService`. No `\OC::$server`.
+
+- **`PresenceSlotService`** — wired `syncSlot()` after every slot write (`overrideSlot`). No API changes.
+- **`PresenceMaterialisationService`** — wired `syncSlot()` per new slot in the nightly cron inner loop; `syncAllSlotsForUser()` after `rematerialiseForUser()` (on-save, one bulk pass per user).
+- **`PresenceTemplateService`** — wired `syncSlot()` on holiday-slot revert; `deleteSlotEvent()` before holiday-slot deletion in `recomputeSlotsForDate()`.
+
+### Changed
+- `appinfo/info.xml` — version 3.44.2 → 3.45.0.
+
+## [3.44.2] — 2026-05-19 — Bugfix: built-in type flags + half_day SQL error
+
+### Fixed
+- **`office` presence type was incorrectly marked `is_busy=1`** (busy). Office means you are reachable — corrected to `is_busy=0` (free). Migration `Version000344001` updates existing rows.
+- **`non_working_day` presence type was incorrectly marked `is_busy=0`** (free). A non-working day means you are unavailable — corrected to `is_busy=1` (busy). Migration `Version000344001` updates existing rows.
+- **MySQL error 1364 "Field 'half_day' doesn't have a default value"** when saving a Morning (half_day=0) template cell. The `half_day` column on `teamhub_presence_template` and `teamhub_presence_slots` lacked a `DEFAULT 0`, causing MySQL to reject INSERT statements where QBMapper omitted the column (which it does when the PHP-level property matches the entity zero-default). Fixed by adding `DEFAULT 0` to both columns in both the base migration (for fresh installs) and a new repair migration `Version000344001` (for existing installs via `ALTER COLUMN`).
+
+### Changed
+- `lib/Migration/RepairSteps/SeedPresenceTypes.php` — corrected `is_busy` values in the BUILTINS array.
+- `lib/Migration/Version000342000Date20260518000000.php` — added `'default' => 0` to both `half_day` column definitions.
+
+## [3.44.0] — 2026-05-19 — Session B3 (Presence team view)
+
+### Added
+- **Schema migration `Version000344000`** — adds `presence_enabled SMALLINT DEFAULT 0` column to `teamhub_presence_team`. Idempotent (hasColumn guard).
+- **`PresenceTeamConfig` entity + `PresenceTeamConfigMapper`** — per-team presence config row (presence_enabled, hide_reasons). Absence of a row = all defaults.
+- **`PresenceTeamService`** — team grid payload (`getTeamGrid`) and per-team config read/write (`getConfig`, `saveConfig`). Privacy filter applied server-side: when `hide_reasons=1`, slot cells are replaced with a 3-tone palette (busy `#EF5350` / free `#66BB6A` / off `#BDBDBD`); status type, icon, and location are withheld.
+- **`PresenceTeamController`** — 3 team-member-gated endpoints: `GET /teams/{teamId}/presence`, `GET /teams/{teamId}/presence/config`, `PUT /teams/{teamId}/presence/config` (admin-only write).
+- **`TeamPresenceView.vue`** — team presence grid. Week mode (all members × 7 days × AM/PM, 14 columns, horizontally scrollable) and Day mode (all members × Morning + Afternoon for a single date). Navigation by week/day. Anchored to today on open. Lazy-loads via `v-if="currentView === 'presence'"`.
+- **`PresenceGridCell.vue`** — read-only display cell for the team grid. Colour-blocked with luminance-based text colour for WCAG contrast. Diagonal stripe overlay for holiday-locked slots.
+- **Presence tab in `TeamTabBar.vue`** — `OfficeBuildingIcon`, appears only when `presence_enabled=true` for the team. Draggable/reorderable.
+- **Presence wiring in `TeamView.vue`** — imports + registers `TeamPresenceView`, adds `presenceConfig` data field, loads config on team switch, adds `presence` to `buildAllTabDescriptors()` (gated on `presence_enabled`), adds to `syncExtTabs` builtinKeys set.
+- **Presence config toggles in `ManageTeamView.vue`** — "Presence tab" (enable/disable) and "Hide status details" (hide_reasons) switches in Manage Team → Settings, visible to team admins only. Loaded on mount and on settings tab open.
+
+### Changed
+- `appinfo/info.xml` — version 3.43.0 → 3.44.0.
+- `appinfo/routes.php` — 3 new presence team routes added.
+
+## [3.43.0] — 2026-05-19 — Session B2 (Presence user-side foundation)
+
+### Added
+- **`PresenceTemplate` entity + `PresenceTemplateMapper`** — full CRUD for `teamhub_presence_template`. Includes `findByUser`, `findCell`, `deleteByUser`.
+- **`PresenceSlot` entity + `PresenceSlotMapper`** — full CRUD for `teamhub_presence_slots`. Includes range queries, `findHolidaySlotsOnDate`, `findExistingDatesForUser`, `deleteTemplateSlotsByUserFromDate`.
+- **`PresenceTemplateService`** (real implementation, replacing B1 stub) — 14-cell week template CRUD. `setCell` upserts one cell and triggers immediate re-materialisation. `recomputeSlotsForDate` is the real holiday-revert implementation: for each `source='holiday'` slot on the given date, reverts to template values if a template row exists, otherwise deletes the slot.
+- **`PresenceMaterialisationService`** — rolling slot materialisation. `materialiseAll()` (cron) ensures every user with template rows has slots through end of next year. `rematerialiseForUser()` (on-save) wipes `source='template'` slots from today onward and rebuilds, preserving `source='override'` and `source='holiday'` slots.
+- **`PresenceSlotService`** — user slot reads (enriched with type metadata) and single-slot overrides. Enforces holiday lock: slots with `source='holiday'` reject edits with 409.
+- **`PresenceMaterialisationJob`** — nightly `TimedJob` calling `materialiseAll()`. Registered in `info.xml`.
+- **`PresenceUserController`** — 4 authenticated user endpoints: `GET /presence/template`, `PUT /presence/template/cell`, `GET /presence/slots`, `PUT /presence/slots/override`.
+- **`PersonalSection` + `PersonalSettings`** — NC personal settings page (Settings → Personal → TeamHub). Registered in `info.xml`.
+- **`templates/personal.php`** — renders `#teamhub-personal-settings` div, loads `personal.js`.
+- **`src/personal.js`** — new webpack entry point mounting `MyPresencePanel.vue`.
+- **`MyPresencePanel.vue`** — user-facing 7×2 half-day template grid. Loads template, type catalogue, and location tree on mount. Clicking a cell opens a type picker. Selecting a type triggers optimistic save with revert on failure. Supports location picker for types with `requires_location=true`.
+- **`PresenceCell.vue`** — stateless single-cell component. Displays type colour + label, empty placeholder, or saving spinner. Luminance-based text-colour calculation for WCAG contrast on coloured backgrounds.
+- **`webpack.config.js`** — added `personal` entry point.
+
+### Changed
+- `PresenceTemplateService` — was a no-op stub in 3.42.0. Now fully implemented.
+- `appinfo/info.xml` — registered `PresenceMaterialisationJob`, `PersonalSettings`, `PersonalSection`.
+
+## [3.42.0] — 2026-05-19 — Session B1 / L (Presence module foundation)
+
+This release lays the admin-only foundation for the Presence module: schema, catalogues, and admin sub-panels. There is no user-facing presence UI yet — that lands in Session B2 (v3.43.0). Fresh installs and upgrades both get the new schema and the five built-in status types seeded on first run.
+
+### Added
+- **Presence module schema (8 tables).** `teamhub_presence_types`, `teamhub_buildings`, `teamhub_floors`, `teamhub_rooms`, `teamhub_holidays`, `teamhub_presence_template`, `teamhub_presence_slots`, `teamhub_presence_team`. All cross-DB safe (SMALLINT for booleans, VARCHAR(10) ISO strings for dates, BIGINT unix for timestamps). Every PK has an explicit ≤30-char name per the v3.36.2 PostgreSQL constraint-name lesson. Table-name non-prefix portions all ≤27 chars per the DBAL limit.
+- **Idempotent built-in seed.** New `SeedPresenceTypes` repair step (`<post-migration>` in `info.xml`) seeds five canonical built-in presence types on every NC update: Office, Home, Vacation, Holiday, Non-working day. Slug-keyed upsert preserves admin label/icon/color customisations across upgrades.
+- **`PresenceAdminController`** — 18 new admin endpoints under `/api/v1/admin/presence/*`, all gated by `#[AuthorizedAdminSetting]`. Status types, buildings, floors, rooms, holidays — full CRUD where appropriate. Two-step holiday-add flow (preview → confirm) with destructive-overwrite count surfaced in the response payload.
+- **Admin sub-panel: Status types** (`PresenceTypesManager.vue`) — sortable catalogue with built-in lock badges, keyboard-accessible reorder via chevron buttons, swatch preview, create/edit dialog with structural flags locked for built-ins, delete-with-confirm dialog. Server-side 409 surfaces `affectedCount`.
+- **Admin sub-panel: Locations** (`PresenceLocationsManager.vue`) — building → floor → room tree, expanded by default, inline per-level add/edit/delete buttons, subtree-count warning on delete, 409 affectedCount surfaced via plural `n()`.
+- **Admin sub-panel: Holidays** (`PresenceHolidaysManager.vue`) — year-selector list (current-2 to current+5), two-step add flow showing "N entries will be overwritten" before commit, delete dialog mentions revert-to-template semantics.
+- **'Presence module' tab** added to `AdminSettings.vue` between Maintenance and Audit, with the `OfficeBuildingIcon`.
+- **`PresenceConflictException`** — dedicated 409 exception carrying an optional `affectedCount` so admin UI can render "in use by N entries" rather than a bare conflict message.
+
+### Changed
+- `appinfo/info.xml` — added `<repair-steps><post-migration>` block registering `SeedPresenceTypes`.
+
+### Notes for B2 (v3.43.0)
+The `teamhub_presence_template`, `teamhub_presence_slots`, and `teamhub_presence_team` tables are created with their final schema but remain empty in B1. `PresenceTemplateService::recomputeSlotsForDate()` is a stub (logs only); the real implementation lands in B2 alongside the user-side week-template editor and the slot-materialisation cron. The narrow `PresenceSlotQueryMapper` and `PresenceTemplateQueryMapper` helpers exist so the holiday-delete reference-integrity gates work unmodified once B2 starts populating those tables.
+
 ## [3.41.0] — 2026-05-18 — Session K
 
 ### Added

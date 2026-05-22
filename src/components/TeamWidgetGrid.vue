@@ -128,6 +128,27 @@
                             <ChevronDown v-else :size="16" />
                         </button>
                     </div>
+
+                    <!-- Resource warning strip — directly under header, matches DeckWidget unassigned pattern -->
+                    <div
+                        v-if="isTeamAdmin && resourceWarningTotal > 0"
+                        class="teamhub-resource-warning"
+                        role="alert"
+                        aria-live="polite">
+                        <AlertCircle :size="15" class="teamhub-resource-warning__icon" aria-hidden="true" />
+                        <span class="teamhub-resource-warning__text">
+                            <!-- TRANSLATORS: N is the number of connected resources that need review -->
+                            {{ n('teamhub', '%n resource needs review.', '%n resources need review.', resourceWarningTotal, { n: resourceWarningTotal }) }}
+                        </span>
+                        <button
+                            type="button"
+                            class="teamhub-resource-warning__link"
+                            :aria-label="t('teamhub', 'Open team settings to review resources')"
+                            @click="openSettingsAtRisk">
+                            <ChevronRightIcon :size="16" aria-hidden="true" />
+                        </button>
+                    </div>
+
                     <div v-show="!isCollapsed('widget-teaminfo')" class="teamhub-widget-content teamhub-widget-content--teaminfo">
                         <div class="teamhub-teaminfo-body">
                             <img
@@ -159,28 +180,8 @@
                                 <span class="teamhub-owner-name">{{ teamOwner.displayName }}</span>
                             </div>
                         </div>
-
-                        <!-- Resource warning block — visible to team admins only -->
-                        <div
-                            v-if="isTeamAdmin && resourceWarningTotal > 0"
-                            class="teamhub-resource-warning"
-                            role="alert"
-                            aria-live="polite">
-                            <span class="teamhub-resource-warning__icon" aria-hidden="true">⚠</span>
-                            <span class="teamhub-resource-warning__text">
-                                <!-- TRANSLATORS: N is the number of connected resources that need review (pending acceptance or at risk due to owner issues) -->
-                                {{ n('teamhub', '%n resource needs review.', '%n resources need review.', resourceWarningTotal, { n: resourceWarningTotal }) }}
-                            </span>
-                            <NcButton
-                                type="tertiary"
-                                class="teamhub-resource-warning__link"
-                                :aria-label="t('teamhub', 'Open team settings to review resources')"
-                                @click="openSettingsAtRisk">
-                                {{ t('teamhub', 'Open settings →') }}
-                            </NcButton>
-                        </div>
-                    </div>
-                </div>
+                    </div><!-- end teamhub-widget-content -->
+                </div><!-- end teamhub-widget-card -->
             </grid-item>
 
             <!-- Members -->
@@ -222,18 +223,30 @@
                         </button>
                     </div>
                     <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content">
-                        <!-- Direct user avatars (up to 16, sorted by activity) -->
+                        <!-- Direct user avatars sorted by presence: home/office first -->
                         <div v-if="members.length" class="teamhub-avatar-stack">
-                            <NcAvatar
-                                v-for="member in members"
+                            <div
+                                v-for="member in membersWithPresence"
                                 v-if="member.userId"
                                 :key="member.userId"
-                                :user="member.userId"
-                                :display-name="member.displayName"
-                                :show-user-status="false"
-                                :disable-menu="false"
-                                :size="32"
-                                class="teamhub-stacked-avatar" />
+                                class="teamhub-stacked-avatar-wrap"
+                                :title="member.displayName + (member.presenceLabel ? ' — ' + member.presenceLabel : '')">
+                                <NcAvatar
+                                    :user="member.userId"
+                                    :display-name="member.displayName"
+                                    :show-user-status="false"
+                                    :disable-menu="false"
+                                    :size="32"
+                                    class="teamhub-stacked-avatar" />
+                                <!-- Presence dot: coloured circle in bottom-right of avatar -->
+                                <span
+                                    v-if="member.presenceColor"
+                                    class="teamhub-presence-dot"
+                                    :style="{ backgroundColor: member.presenceColor }"
+                                    :aria-label="member.presenceLabel"
+                                    aria-hidden="false">
+                                </span>
+                            </div>
                         </div>
 
                         <!-- Flat list of group/team memberships with pills -->
@@ -1011,6 +1024,7 @@ import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import FileDocument from 'vue-material-design-icons/FileDocument.vue'
 import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
+import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import AlertCircle from 'vue-material-design-icons/AlertCircle.vue'
 import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
@@ -1048,7 +1062,7 @@ export default {
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus,
         Cog, VideoIcon, Puzzle, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
-        ChevronUp, ChevronDown, Delete, AlertCircle, ArrowRight, LocationExit,
+        ChevronUp, ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         ContentSaveAll, Restore,
         StarOutlineIcon, ClockOutlineIcon, ClipboardPlusOutline, ShareVariantIcon,
@@ -1093,7 +1107,19 @@ export default {
             allMembersList:      [],
             allMembersLoading:   false,
             allMembersSearch:    '',
+            // Today's presence slots for the team — used by members widget
+            presenceSlots:       {},   // { userId: { 0: slot, 1: slot } }
+            presenceSlotsTeamId: null, // Which team the slots are for
         }
+    },
+
+    watch: {
+        currentTeamId: {
+            immediate: true,
+            handler(newId) {
+                if (newId) this.loadTodayPresence(newId)
+            },
+        },
     },
 
     computed: {
@@ -1106,6 +1132,34 @@ export default {
         ...mapGetters(['currentTeam']),
 
         team() { return this.currentTeam || {} },
+
+        /**
+         * Members sorted by today's presence: home/office first, then others.
+         * Each member gets a presenceSlug and presenceColor for the widget dot.
+         */
+        membersWithPresence() {
+            const FREE_SLUGS = ['home', 'office']
+            const today = new Date().toISOString().slice(0, 10)
+            const half  = new Date().getHours() < 12 ? 0 : 1
+            return (this.members || []).map(m => {
+                const userSlots = this.presenceSlots[m.userId] || {}
+                // Key format from team presence API: "YYYY-MM-DD_0" or "YYYY-MM-DD_1"
+                const slot = userSlots[`${today}_${half}`]
+                    || userSlots[`${today}_${half === 0 ? 1 : 0}`]
+                    || null
+                return {
+                    ...m,
+                    presenceSlug:  slot?.slug  || null,
+                    presenceColor: slot?.color || null,
+                    presenceLabel: slot?.label || null,
+                    presenceFree:  slot ? FREE_SLUGS.includes(slot.slug) : false,
+                }
+            }).sort((a, b) => {
+                if (a.presenceFree && !b.presenceFree) return -1
+                if (!a.presenceFree && b.presenceFree) return 1
+                return 0
+            })
+        },
 
         /**
          * Show the Upcoming Tasks widget when Deck is active for the team
@@ -1257,6 +1311,25 @@ export default {
         t, n,
 
         ...mapMutations(['SET_RESOURCE_WARNING_FOCUS']),
+
+        // ── Today's presence for members widget ──────────────────────
+
+        async loadTodayPresence(teamId) {
+            if (!teamId) return
+            try {
+                const today = new Date().toISOString().slice(0, 10)
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/presence`),
+                    { params: { from: today, to: today } },
+                )
+                if (data?.slots) {
+                    this.presenceSlots = data.slots
+                    this.presenceSlotsTeamId = teamId
+                }
+            } catch (err) {
+                // Non-fatal — members widget shows without presence data.
+            }
+        },
 
         /**
          * Called from the warning block "Open settings →" button.
@@ -1713,34 +1786,43 @@ export default {
 
 .teamhub-owner-name { font-size: 13px; color: var(--color-main-text); }
 
-/* Resource warning block — Teaminfo widget */
+/* Resource warning strip — directly under widget header, matches DeckWidget unassigned pattern */
 .teamhub-resource-warning {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 12px;
-    padding: 8px 10px;
-    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
-    border: 1px solid var(--color-warning);
-    border-radius: var(--border-radius);
+    gap: 7px;
+    padding: 7px 14px;
+    background: var(--color-warning-soft, rgba(245, 158, 11, 0.08));
+    border-bottom: 1px solid var(--color-warning-element-light, rgba(245, 158, 11, 0.18));
     font-size: 13px;
+    color: var(--color-warning-text, #92400e);
+    line-height: 1.3;
 }
 .teamhub-resource-warning__icon {
-    font-size: 15px;
     flex-shrink: 0;
+    color: var(--color-warning, #d97706);
 }
 .teamhub-resource-warning__text {
     flex: 1;
     min-width: 0;
-    color: var(--color-main-text);
 }
 .teamhub-resource-warning__link {
-    /* NcButton tertiary — keep it compact inside the warning strip */
-    min-height: unset !important;
-    height: auto !important;
-    padding: 2px 6px !important;
-    font-size: 12px !important;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    color: var(--color-warning-text, #92400e);
+    cursor: pointer;
+    opacity: 0.75;
+    flex-shrink: 0;
+}
+.teamhub-resource-warning__link:hover { opacity: 1; }
+.teamhub-resource-warning__link:focus-visible {
+    outline: 2px solid var(--color-warning);
+    outline-offset: 2px;
+    border-radius: 2px;
 }
 
 .teamhub-avatar-stack {
@@ -1752,6 +1834,24 @@ export default {
 }
 
 .teamhub-stacked-avatar { border: 2px solid var(--color-main-background); }
+
+/* Presence dot wrapper — positions the dot relative to the avatar */
+.teamhub-stacked-avatar-wrap {
+    position: relative;
+    display: inline-flex;
+}
+/* Coloured dot in the bottom-right corner of the avatar */
+.teamhub-presence-dot {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--color-main-background);
+    display: block;
+    pointer-events: none;
+}
 .teamhub-more-members { font-size: 12px; color: var(--color-text-maxcontrast); }
 
 /* ── Members widget — flat memberships list with pills ──────────── */
