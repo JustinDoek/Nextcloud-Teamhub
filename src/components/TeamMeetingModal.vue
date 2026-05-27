@@ -98,7 +98,7 @@
                 <!-- Talk room -->
                 <div class="team-meeting-modal__field">
                     <NcCheckboxRadioSwitch
-                        :checked.sync="form.includeTalk"
+                        v-model="form.includeTalk"
                         type="checkbox">
                         {{ t('teamhub', 'Schedule in Talk') }}
                     </NcCheckboxRadioSwitch>
@@ -114,7 +114,7 @@
                             </div>
                             <!-- Ask for agenda items -->
                             <NcCheckboxRadioSwitch
-                                :checked.sync="form.askAgenda"
+                                v-model="form.askAgenda"
                                 type="checkbox"
                                 class="team-meeting-modal__agenda-check">
                                 {{ t('teamhub', 'Ask team for agenda items') }}
@@ -153,7 +153,7 @@
             <div class="team-meeting-modal__actions">
                 <template v-if="!result">
                     <NcButton
-                        type="primary"
+                        variant="primary"
                         :disabled="saving"
                         @click="submit">
                         <template #icon>
@@ -162,12 +162,12 @@
                         </template>
                         {{ saving ? t('teamhub', 'Creating…') : t('teamhub', 'Create team meeting') }}
                     </NcButton>
-                    <NcButton type="tertiary" :disabled="saving" @click="$emit('close')">
+                    <NcButton variant="tertiary" :disabled="saving" @click="$emit('close')">
                         {{ t('teamhub', 'Cancel') }}
                     </NcButton>
                 </template>
                 <template v-else>
-                    <NcButton type="primary" @click="$emit('close')">
+                    <NcButton variant="primary" @click="$emit('close')">
                         {{ t('teamhub', 'Done') }}
                     </NcButton>
                 </template>

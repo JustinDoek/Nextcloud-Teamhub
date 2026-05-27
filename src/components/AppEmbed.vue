@@ -24,7 +24,7 @@
                 <NcButton
                     v-for="action in embedActions"
                     :key="action.id"
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="action.label"
                     :title="action.label"
                     @click="$emit('action', action.id)">
@@ -34,7 +34,7 @@
                     {{ action.label }}
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Reload')"
                     :title="t('teamhub', 'Reload')"
                     :disabled="!iframeSrc"
@@ -43,7 +43,7 @@
                 </NcButton>
                 <NcButton
                     v-if="url"
-                    type="tertiary"
+                    variant="tertiary"
                     tag="a"
                     :href="url"
                     target="_blank"

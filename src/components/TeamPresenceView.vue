@@ -5,7 +5,7 @@
         <div class="presence-toolbar" role="toolbar" :aria-label="t('teamhub', 'Presence controls')">
             <div class="presence-toolbar__nav" role="group" :aria-label="t('teamhub', 'Date navigation')">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Previous week')"
                     @click="navigateBack">
                     <template #icon><ChevronLeftIcon :size="20" /></template>
@@ -16,7 +16,7 @@
                 </span>
 
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Next week')"
                     @click="navigateForward">
                     <template #icon><ChevronRightIcon :size="20" /></template>
@@ -24,7 +24,7 @@
 
                 <NcButton
                     v-if="!isCurrentPeriod"
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Back to today')"
                     @click="goToToday">
                     {{ t('teamhub', 'Today') }}

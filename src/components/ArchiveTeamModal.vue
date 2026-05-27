@@ -50,14 +50,14 @@
             <div class="archive-modal__actions">
                 <NcButton
                     :disabled="loading"
-                    type="secondary"
+                    variant="secondary"
                     @click="$emit('close')">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
                     :disabled="loading"
                     :aria-label="t('teamhub', 'Confirm archiving and deleting this team')"
-                    type="error"
+                    variant="error"
                     @click="confirm">
                     <template v-if="loading" #icon>
                         <NcLoadingIcon :size="20" />
@@ -74,9 +74,7 @@
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import NcModal from '@nextcloud/vue/dist/Components/NcModal.js'
-import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
-import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
+import { NcModal, NcButton, NcLoadingIcon } from '@nextcloud/vue'
 
 export default {
     name: 'ArchiveTeamModal',

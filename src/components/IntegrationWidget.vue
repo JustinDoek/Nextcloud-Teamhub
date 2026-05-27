@@ -99,7 +99,7 @@
                             {{ t('teamhub', 'Cancel') }}
                         </NcButton>
                         <NcButton
-                            type="primary"
+                            variant="primary"
                             :disabled="actionSubmitting"
                             @click="submitAction">
                             <template v-if="actionSubmitting" #icon>

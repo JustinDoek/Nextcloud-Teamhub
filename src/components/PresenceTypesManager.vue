@@ -13,7 +13,7 @@
             <template v-else>
                 <!-- TRANSLATORS: button to open the dialog that creates a new presence status type -->
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     class="presence-add-btn"
                     @click="openCreate">
                     <template #icon><PlusIcon :size="18" /></template>
@@ -29,14 +29,14 @@
                         <!-- Sort handle -->
                         <div class="presence-type-row__sort">
                             <NcButton
-                                type="tertiary-no-background"
+                                variant="tertiary-no-background"
                                 :aria-label="t('teamhub', 'Move up')"
                                 :disabled="index === 0"
                                 @click="moveUp(index)">
                                 <template #icon><ChevronUpIcon :size="16" /></template>
                             </NcButton>
                             <NcButton
-                                type="tertiary-no-background"
+                                variant="tertiary-no-background"
                                 :aria-label="t('teamhub', 'Move down')"
                                 :disabled="index === types.length - 1"
                                 @click="moveDown(index)">
@@ -75,13 +75,13 @@
                         <!-- Actions -->
                         <div class="presence-type-row__actions">
                             <NcButton
-                                type="tertiary"
+                                variant="tertiary"
                                 :aria-label="t('teamhub', 'Edit status type')"
                                 @click="openEdit(type)">
                                 <template #icon><PencilIcon :size="16" /></template>
                             </NcButton>
                             <NcButton
-                                type="tertiary"
+                                variant="tertiary"
                                 :aria-label="t('teamhub', 'Delete status type')"
                                 :disabled="type.is_builtin"
                                 :title="type.is_builtin ? t('teamhub', 'Built-in status types cannot be deleted') : ''"
@@ -105,35 +105,35 @@
             <template #default>
                 <div class="presence-form">
                     <NcTextField
-                        :value.sync="dialog.label"
+                        v-model="dialog.label"
                         :label="t('teamhub', 'Label')"
                         :placeholder="t('teamhub', 'e.g. Client site')"
                         :maxlength="128" />
                     <NcTextField
-                        :value.sync="dialog.icon"
+                        v-model="dialog.icon"
                         :label="t('teamhub', 'Material Design icon name')"
                         placeholder="OfficeBuilding"
                         :maxlength="64" />
                     <NcTextField
-                        :value.sync="dialog.color"
+                        v-model="dialog.color"
                         :label="t('teamhub', 'Colour (hex, e.g. #1976D2)')"
                         placeholder="#1976D2"
                         :maxlength="7" />
 
                     <NcCheckboxRadioSwitch
-                        :checked.sync="dialog.requiresLocation"
+                        v-model="dialog.requiresLocation"
                         type="switch"
                         :disabled="dialog.builtin">
                         {{ t('teamhub', 'Requires a location') }}
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
-                        :checked.sync="dialog.isBusy"
+                        v-model="dialog.isBusy"
                         type="switch"
                         :disabled="dialog.builtin">
                         {{ t('teamhub', 'Counts as busy on the calendar') }}
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
-                        :checked.sync="dialog.selectableByUser"
+                        v-model="dialog.selectableByUser"
                         type="switch"
                         :disabled="dialog.builtin">
                         {{ t('teamhub', 'Users can pick this themselves') }}
@@ -149,7 +149,7 @@
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="!dialog.label.trim() || saving"
                     @click="save">
                     <template #icon>
@@ -178,7 +178,7 @@
                 <NcButton @click="closeDeleteDialog">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="error" @click="executeDelete">
+                <NcButton variant="error" @click="executeDelete">
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
             </template>

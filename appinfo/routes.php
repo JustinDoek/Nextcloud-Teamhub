@@ -265,6 +265,8 @@ return [
         // Presence module — user (v3.43.0, Session B2)
         // Authenticated users only; no admin required; data scoped to current user.
         ['name' => 'presenceUser#getTemplate',       'url' => '/api/v1/presence/template',          'verb' => 'GET'],
+        ['name' => 'presenceUser#getTypes',          'url' => '/api/v1/presence/types',             'verb' => 'GET'],
+        ['name' => 'presenceUser#getLocations',      'url' => '/api/v1/presence/locations',         'verb' => 'GET'],
         ['name' => 'presenceUser#setTemplateCell',   'url' => '/api/v1/presence/template/cell',    'verb' => 'PUT'],
         ['name' => 'presenceUser#saveTemplateBulk',  'url' => '/api/v1/presence/template/bulk',    'verb' => 'PUT'],
         ['name' => 'presenceUser#materialiseNow',    'url' => '/api/v1/presence/slots/materialise','verb' => 'POST'],

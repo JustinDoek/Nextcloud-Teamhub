@@ -22,18 +22,22 @@
             <!-- Step 1: Name, description, type -->
             <div v-if="step === 1" class="ctm__body">
                 <div class="ctm__field">
-                    <label class="ctm__label">{{ t('teamhub', 'Team name') }} <span class="ctm__required">*</span></label>
+                    <label class="ctm__label" for="ctm-team-name">{{ t('teamhub', 'Team name') }} <span class="ctm__required">*</span></label>
                     <NcTextField
+                        id="ctm-team-name"
                         v-model="form.name"
+                        label-outside
                         :placeholder="t('teamhub', 'e.g. Marketing Team')"
                         :error="!!nameError"
                         :helper-text="nameError || ''" />
                 </div>
 
                 <div class="ctm__field">
-                    <label class="ctm__label">{{ t('teamhub', 'Description') }}</label>
+                    <label class="ctm__label" for="ctm-team-description">{{ t('teamhub', 'Description') }}</label>
                     <NcTextArea
+                        id="ctm-team-description"
                         v-model="form.description"
+                        label-outside
                         :placeholder="t('teamhub', 'What is this team about?')"
                         :rows="3" />
                 </div>
@@ -57,10 +61,12 @@
             <!-- Step 2: Members + apps -->
             <div v-if="step === 2" class="ctm__body">
                 <div class="ctm__field">
-                    <label class="ctm__label">{{ t('teamhub', 'Add members') }}</label>
+                    <label class="ctm__label" for="ctm-member-search">{{ t('teamhub', 'Add members') }}</label>
                     <div class="ctm__member-search">
                         <NcTextField
+                            id="ctm-member-search"
                             v-model="memberSearch"
+                            label-outside
                             :placeholder="t('teamhub', 'Search by name or username...')"
                             @input="onMemberSearch" />
                         <div v-if="userResults.length > 0" class="ctm__user-results">
@@ -78,8 +84,11 @@
                         <div v-for="m in form.members" :key="m.id" class="ctm__chip">
                             <NcAvatar :user="m.id" :display-name="m.displayName" :size="22" :show-user-status="false" />
                             <span>{{ m.displayName }}</span>
-                            <button class="ctm__chip-remove" @click="removeMember(m.id)">
-                                <Close :size="14" />
+                            <button class="ctm__chip-remove"
+                                :aria-label="t('teamhub', 'Remove {name}', { name: m.displayName })"
+                                :title="t('teamhub', 'Remove {name}', { name: m.displayName })"
+                                @click="removeMember(m.id)">
+                                <Close :size="14" aria-hidden="true" />
                             </button>
                         </div>
                     </div>
@@ -103,13 +112,13 @@
         </div>
 
         <template #actions>
-            <NcButton v-if="step > 1" type="tertiary" :disabled="creating" @click="step--">
+            <NcButton v-if="step > 1" variant="tertiary" :disabled="creating" @click="step--">
                 {{ t('teamhub', 'Back') }}
             </NcButton>
-            <NcButton v-if="step < 2" type="primary" @click="goToStep2">
+            <NcButton v-if="step < 2" variant="primary" @click="goToStep2">
                 {{ t('teamhub', 'Next') }}
             </NcButton>
-            <NcButton v-if="step === 2" type="primary" :disabled="creating" @click="submit">
+            <NcButton v-if="step === 2" variant="primary" :disabled="creating" @click="submit">
                 <template #icon>
                     <NcLoadingIcon v-if="creating" :size="20" />
                     <Check v-else :size="20" />

@@ -75,8 +75,7 @@
                 <!-- Direct user avatars -->
                 <div v-if="members.length" class="teamhub-mobile-avatar-stack">
                     <NcAvatar
-                        v-for="member in members"
-                        v-if="member.userId"
+                        v-for="member in visibleMembers"
                         :key="member.userId"
                         :user="member.userId"
                         :display-name="member.displayName"
@@ -113,7 +112,7 @@
                 <!-- TRANSLATORS: button label showing total member count, e.g. "Show all 1 member" or "Show all 12 members" -->
                 <NcButton
                     v-if="effectiveMemberCount > members.length"
-                    type="secondary"
+                    variant="secondary"
                     wide
                     class="teamhub-mobile-members-action"
                     @click="$emit('show-all-members')">
@@ -355,6 +354,12 @@ export default {
         ...mapGetters(['currentTeam']),
 
         team() { return this.currentTeam || {} },
+
+        // Members that are real users (have a userId), for the avatar stack.
+        // Computed so the template v-for doesn't re-filter every render (perf pass V6).
+        visibleMembers() {
+            return (this.members || []).filter(mm => mm.userId)
+        },
 
         /**
          * The full list of widgets the current user has access to.

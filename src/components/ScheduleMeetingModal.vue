@@ -64,14 +64,14 @@
             <p v-if="errors.general" class="schedule-modal__error">{{ errors.general }}</p>
 
             <div class="schedule-modal__actions">
-                <NcButton type="primary" :disabled="saving" @click="submit">
+                <NcButton variant="primary" :disabled="saving" @click="submit">
                     <template #icon>
                         <NcLoadingIcon v-if="saving" :size="18" />
                         <CalendarPlus v-else :size="18" />
                     </template>
                     {{ saving ? t('teamhub', 'Scheduling…') : t('teamhub', 'Schedule meeting') }}
                 </NcButton>
-                <NcButton type="tertiary" @click="$emit('close')">
+                <NcButton variant="tertiary" @click="$emit('close')">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
             </div>

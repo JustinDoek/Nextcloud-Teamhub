@@ -14,7 +14,7 @@
                 <p class="feedback-modal__success-text">
                     {{ t('teamhub', 'Thank you! Your feedback has been sent.') }}
                 </p>
-                <NcButton type="primary" @click="close">
+                <NcButton variant="primary" @click="close">
                     {{ t('teamhub', 'Close') }}
                 </NcButton>
             </div>
@@ -30,7 +30,7 @@
                         <NcButton
                             v-for="option in typeOptions"
                             :key="option.value"
-                            :type="form.type === option.value ? 'primary' : 'secondary'"
+                            :variant="form.type === option.value ? 'primary' : 'secondary'"
                             :aria-pressed="form.type === option.value ? 'true' : 'false'"
                             @click="form.type = option.value">
                             {{ option.label }}
@@ -95,10 +95,10 @@
 
                 <!-- Actions -->
                 <div class="feedback-modal__actions">
-                    <NcButton type="tertiary" :disabled="sending" @click="close">
+                    <NcButton variant="tertiary" :disabled="sending" @click="close">
                         {{ t('teamhub', 'Cancel') }}
                     </NcButton>
-                    <NcButton type="primary" :disabled="sending" @click="submit">
+                    <NcButton variant="primary" :disabled="sending" @click="submit">
                         <template v-if="sending">
                             {{ t('teamhub', 'Sending…') }}
                         </template>

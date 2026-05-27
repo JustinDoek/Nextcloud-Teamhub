@@ -31,7 +31,7 @@
 
         <grid-layout
             v-if="!isMobile && !isTablet && layoutLoaded && gridLayout.length > 0"
-            :layout.sync="gridLayout"
+            :layout="gridLayout"
             :col-num="12"
             :row-height="80"
             :is-draggable="editMode"
@@ -39,7 +39,7 @@
             :margin="[12, 12]"
             :use-css-transforms="true"
             :responsive="false"
-            @layout-updated="onLayoutUpdated">
+            @update:layout="onLayoutUpdated">
 
             <!-- Message stream -->
             <grid-item
@@ -223,11 +223,10 @@
                         </button>
                     </div>
                     <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content">
-                        <!-- Direct user avatars sorted by presence: home/office first -->
+                        <!-- Direct user avatars sorted by merged presence status: online first, off/free last -->
                         <div v-if="members.length" class="teamhub-avatar-stack">
                             <div
-                                v-for="member in membersWithPresence"
-                                v-if="member.userId"
+                                v-for="member in visibleMembersWithPresence"
                                 :key="member.userId"
                                 class="teamhub-stacked-avatar-wrap"
                                 :title="member.displayName + (member.presenceLabel ? ' — ' + member.presenceLabel : '')">
@@ -726,8 +725,7 @@
                         <div class="teamhub-tablet-members">
                             <div class="teamhub-tablet-members__avatars">
                                 <NcAvatar
-                                    v-for="m in members.slice(0, 16)"
-                                    v-if="m.userId"
+                                    v-for="m in tabletAvatarMembers"
                                     :key="m.userId"
                                     :user="m.userId"
                                     :display-name="m.displayName"
@@ -736,7 +734,7 @@
                             </div>
                             <NcButton
                                 v-if="effectiveMemberCount > members.length"
-                                type="secondary"
+                                variant="secondary"
                                 @click="openAllMembersModal">
                                 {{ n('teamhub', 'Show all {n} member', 'Show all {n} members', effectiveMemberCount, { n: effectiveMemberCount }) }}
                             </NcButton>
@@ -946,7 +944,7 @@
 
                 <NcTextField
                     v-if="!allMembersLoading && allMembersList.length > 0"
-                    :value.sync="allMembersSearch"
+                    v-model="allMembersSearch"
                     :label="t('teamhub', 'Search members')"
                     :placeholder="t('teamhub', 'Search by name…')"
                     class="teamhub-all-members-modal__search" />
@@ -988,7 +986,7 @@ import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
 import { mapState, mapGetters, mapMutations } from 'vuex'
 import { NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton } from '@nextcloud/vue'
-import { GridLayout, GridItem } from 'vue-grid-layout'
+import { GridLayout, GridItem } from 'grid-layout-plus'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
@@ -1110,6 +1108,7 @@ export default {
             // Today's presence slots for the team — used by members widget
             presenceSlots:       {},   // { userId: { 0: slot, 1: slot } }
             presenceSlotsTeamId: null, // Which team the slots are for
+            ncStatusByUser:      {},   // { userId: { status, overrides } } live NC status
         }
     },
 
@@ -1134,11 +1133,24 @@ export default {
         team() { return this.currentTeam || {} },
 
         /**
-         * Members sorted by today's presence: home/office first, then others.
+         * Members sorted by their current merged presence status, then by name.
          * Each member gets a presenceSlug and presenceColor for the widget dot.
+         *
+         * Ranking (lower sorts first), confirmed with the team:
+         *   0  NC online           — live, actively available
+         *   1  schedule "busy" type — scheduled-but-reachable work state
+         *   2  NC dnd / busy        — live, do-not-disturb
+         *   3  NC away              — live, stepped away
+         *   4  schedule "free" type — scheduled home/office (lowest priority)
+         *   5  no status            — no schedule, no live status
+         *
+         * The NC live status only participates in the ranking when it actually
+         * overrides the schedule (backend sets `overrides`), matching what the
+         * merged dot shows. When it does not override, we rank on the schedule's
+         * busy/free flag (`slot.is_busy`, supplied by the backend per type — works
+         * for custom types and survives hide-reasons mode, unlike a slug guess).
          */
         membersWithPresence() {
-            const FREE_SLUGS = ['home', 'office']
             const today = new Date().toISOString().slice(0, 10)
             const half  = new Date().getHours() < 12 ? 0 : 1
             return (this.members || []).map(m => {
@@ -1147,18 +1159,54 @@ export default {
                 const slot = userSlots[`${today}_${half}`]
                     || userSlots[`${today}_${half === 0 ? 1 : 0}`]
                     || null
+
+                // Presence schedule is the baseline dot.
+                const scheduleColor = slot?.color || null
+                const scheduleLabel = slot?.label || null
+                const scheduleBusy  = !!(slot && slot.is_busy)
+
+                // NC live status may override the schedule (single merged dot).
+                // The backend already classified whether this status overrides
+                // (dnd/busy/online, or a user-set away); we only pick the colour
+                // and label here. When it overrides, the NC dot replaces the
+                // schedule dot; otherwise the schedule shows through.
+                const nc = this.ncStatusByUser[m.userId] || null
+                const ncOverrides = !!(nc && nc.overrides)
+
+                const dotColor = ncOverrides
+                    ? this.ncStatusColor(nc.status)
+                    : scheduleColor
+                const dotLabel = ncOverrides
+                    ? this.ncStatusLabel(nc.status)
+                    : scheduleLabel
+
                 return {
                     ...m,
                     presenceSlug:  slot?.slug  || null,
-                    presenceColor: slot?.color || null,
-                    presenceLabel: slot?.label || null,
-                    presenceFree:  slot ? FREE_SLUGS.includes(slot.slug) : false,
+                    // presenceColor/Label now hold the *merged* dot result.
+                    presenceColor: dotColor,
+                    presenceLabel: dotLabel,
+                    // Sort key derived from whichever source drives the merged dot.
+                    presenceRank:  this.presenceSortRank(ncOverrides ? nc.status : null, slot, scheduleBusy),
                 }
             }).sort((a, b) => {
-                if (a.presenceFree && !b.presenceFree) return -1
-                if (!a.presenceFree && b.presenceFree) return 1
-                return 0
+                if (a.presenceRank !== b.presenceRank) return a.presenceRank - b.presenceRank
+                // Stable, predictable tie-break within a rank: by display name.
+                return (a.displayName || '').localeCompare(b.displayName || '')
             })
+        },
+
+        // Presence-sorted members that are real users (have a userId), used by
+        // the avatar stack. Computed so the template v-for doesn't re-filter on
+        // every render (perf pass V6).
+        visibleMembersWithPresence() {
+            return this.membersWithPresence.filter(mm => mm.userId)
+        },
+
+        // First 16 real-user members for the tablet avatar row. Computed for the
+        // same reason as above (perf pass V6).
+        tabletAvatarMembers() {
+            return (this.members || []).slice(0, 16).filter(mm => mm.userId)
         },
 
         /**
@@ -1314,6 +1362,60 @@ export default {
 
         // ── Today's presence for members widget ──────────────────────
 
+        /**
+         * NC user-status → dot colour, following NC's own status palette
+         * (online green, away amber, dnd/busy red). Offline/unknown → null so
+         * the merged dot falls back to the presence schedule.
+         */
+        ncStatusColor(status) {
+            // Hard, saturated colours for visibility on small avatar dots — the
+            // soft theme vars (--color-success/warning/error) wash out at 10px.
+            switch (status) {
+                case 'online': return '#00c853' // hard green
+                case 'away':   return '#ffab00' // hard amber
+                case 'dnd':
+                case 'busy':   return '#d50000' // hard red
+                default:       return null
+            }
+        },
+
+        /**
+         * Rank a member for the members-widget presence sort. Lower sorts first.
+         * See the ranking table on the membersWithPresence computed for rationale.
+         *
+         * @param {string|null} ncStatus  live NC status, only when it overrides the schedule
+         * @param {object|null} slot      today's schedule slot (may be null)
+         * @param {boolean} scheduleBusy  whether the schedule slot is a "busy" type
+         * @returns {number} rank 0..5
+         */
+        presenceSortRank(ncStatus, slot, scheduleBusy) {
+            // Live NC status wins the dot when it overrides — rank on it directly.
+            if (ncStatus === 'online') return 0
+            if (ncStatus === 'dnd' || ncStatus === 'busy') return 2
+            if (ncStatus === 'away') return 3
+            // Otherwise rank on the schedule.
+            if (slot) return scheduleBusy ? 1 : 4
+            // No schedule and no overriding live status.
+            return 5
+        },
+
+        /**
+         * NC user-status → human label for the dot's title/aria text.
+         */
+        ncStatusLabel(status) {
+            switch (status) {
+                // TRANSLATORS: NC user status — user is online/active
+                case 'online': return t('teamhub', 'Online')
+                // TRANSLATORS: NC user status — user is away
+                case 'away':   return t('teamhub', 'Away')
+                // TRANSLATORS: NC user status — do not disturb
+                case 'dnd':    return t('teamhub', 'Do not disturb')
+                // TRANSLATORS: NC user status — busy
+                case 'busy':   return t('teamhub', 'Busy')
+                default:       return null
+            }
+        },
+
         async loadTodayPresence(teamId) {
             if (!teamId) return
             try {
@@ -1326,6 +1428,11 @@ export default {
                     this.presenceSlots = data.slots
                     this.presenceSlotsTeamId = teamId
                 }
+                // NC live user status per member, used to override the presence
+                // schedule on the merged avatar dot (see memberPresenceDot).
+                this.ncStatusByUser = (data && data.nc_status && typeof data.nc_status === 'object')
+                    ? data.nc_status
+                    : {}
             } catch (err) {
                 // Non-fatal — members widget shows without presence data.
             }
@@ -1415,7 +1522,7 @@ export default {
                 item.h = 1
                 item.collapsed = true
             }
-            this.$set(this.gridLayout, this.gridLayout.indexOf(item), { ...item })
+            this.gridLayout[this.gridLayout.indexOf(item)] = { ...item } // Vue 3: direct assignment
             this.$emit('layout-updated', this.gridLayout)
         },
 
@@ -1439,11 +1546,11 @@ export default {
             if (direction === 'left') {
                 // Horizontal nudge — not affected by vertical compaction
                 if (item.x <= 0) return
-                this.$set(this.gridLayout, idx, { ...item, x: Math.max(0, item.x - 1) })
+                this.gridLayout[idx] = { ...item, x: Math.max(0, item.x - 1) } // Vue 3
 
             } else if (direction === 'right') {
                 if (item.x + item.w >= cols) return
-                this.$set(this.gridLayout, idx, { ...item, x: Math.min(cols - item.w, item.x + 1) })
+                this.gridLayout[idx] = { ...item, x: Math.min(cols - item.w, item.x + 1) } // Vue 3
 
             } else {
                 // Up / down: simple y nudge is cancelled by vue-grid-layout's vertical
@@ -1461,8 +1568,8 @@ export default {
                 const neighbourIdx = this.gridLayout.findIndex(g => g.i === neighbour.i)
 
                 // Swap both x and y so the two widgets exchange grid positions exactly
-                this.$set(this.gridLayout, idx, { ...item, x: neighbour.x, y: neighbour.y })
-                this.$set(this.gridLayout, neighbourIdx, { ...neighbour, x: item.x, y: item.y })
+                this.gridLayout[idx] = { ...item, x: neighbour.x, y: neighbour.y } // Vue 3
+                this.gridLayout[neighbourIdx] = { ...neighbour, x: item.x, y: item.y } // Vue 3
             }
 
             this.$emit('layout-updated', this.gridLayout)
@@ -1852,6 +1959,19 @@ export default {
     display: block;
     pointer-events: none;
 }
+
+/*
+ * Belt-and-braces: we render our own merged presence/status dot (above) and
+ * pass :show-user-status="false" to NcAvatar in the stack. Should NcAvatar
+ * still render its native user-status indicator (prop behaviour has varied
+ * across @nextcloud/vue versions), hide it so the two dots cannot overlap.
+ * Scoped to the members avatar stack only — the "Show all" modal keeps NC's
+ * native status intentionally.
+ */
+.teamhub-avatar-stack .teamhub-stacked-avatar :deep(.avatar__status),
+.teamhub-avatar-stack .teamhub-stacked-avatar :deep(.user-status-icon) {
+    display: none !important;
+}
 .teamhub-more-members { font-size: 12px; color: var(--color-text-maxcontrast); }
 
 /* ── Members widget — flat memberships list with pills ──────────── */
@@ -2044,10 +2164,16 @@ export default {
     flex-shrink: 0;
 }
 
-:deep(.vue-resizable-handle) { display: none; }
+:deep(.vgl-item__resizer) { display: none; }
+
+/* grid-layout-plus draws a default corner triangle via ::before — hide it,
+   we render our own diagonal-arrows icon via ::after below. */
+.teamhub-home-view--editing :deep(.vgl-item__resizer)::before {
+    display: none;
+}
 
 /* Resize handle — small corner icon, bottom-right of each widget card. */
-.teamhub-home-view--editing :deep(.vue-resizable-handle) {
+.teamhub-home-view--editing :deep(.vgl-item__resizer) {
     display: block;
     position: absolute;
     width: 28px;
@@ -2064,12 +2190,12 @@ export default {
     transition: background 0.15s;
 }
 
-.teamhub-home-view--editing :deep(.vue-resizable-handle:hover) {
+.teamhub-home-view--editing :deep(.vgl-item__resizer:hover) {
     background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
 }
 
 /* The diagonal-arrows icon rendered as an inline SVG via ::after. */
-.teamhub-home-view--editing :deep(.vue-resizable-handle)::after {
+.teamhub-home-view--editing :deep(.vgl-item__resizer)::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -2083,12 +2209,12 @@ export default {
     pointer-events: none;
 }
 
-.teamhub-home-view--editing :deep(.vue-resizable-handle:hover)::after {
+.teamhub-home-view--editing :deep(.vgl-item__resizer:hover)::after {
     opacity: 1;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230082c9' d='M5 3h4V1H3a2 2 0 0 0-2 2v6h2V5.4l5.3 5.3 1.4-1.4L4.4 4H5V3zm14 16h-.6l-5.3-5.3-1.4 1.4 5.3 5.3V19h2v-6h-2v4zM19 3h-.6l-5.3 5.3 1.4 1.4L19.6 4H21V3h-4V1h6v6h-2V3zM5 19v-4H3v6h6v-2H5.4l5.3-5.3-1.4-1.4L4 19.6V19H5z'/%3E%3C/svg%3E");
 }
 
-:deep(.vue-grid-placeholder) {
+:deep(.vgl-item--placeholder) {
     background: var(--color-primary-element-light, var(--color-background-hover));
     border: 2px dashed var(--color-primary-element);
     border-radius: var(--border-radius-large);

@@ -1203,6 +1203,12 @@ Upsert one template cell. Pass `presence_type_id=null` to clear the cell. Trigge
 
 **Response 200:** The saved cell in the same shape as the GET above.
 
+### GET `/presence/types`
+**(v3.55.5)** Read-only list of presence types for the personal presence picker. Non-admin mirror of `GET /admin/presence/types` — `#[NoAdminRequired]`, requires an authenticated session. No mutation; type management stays admin-only. Same response shape as the admin endpoint.
+
+### GET `/presence/locations`
+**(v3.55.5)** Read-only location tree (buildings → floors → rooms) for the personal presence picker. Non-admin mirror of `GET /admin/presence/locations` — `#[NoAdminRequired]`, requires an authenticated session. No mutation; location management stays admin-only. Same response shape as the admin endpoint.
+
 ### GET `/presence/slots?from=YYYY-MM-DD&to=YYYY-MM-DD`
 Return the current user's materialised slots in the given date range. Enriched with type metadata.
 
@@ -1267,6 +1273,8 @@ Privacy filter (`hide_reasons`) is applied **server-side**. Members never see ra
 ```
 
 When `hide_reasons=true`, each cell is `{ color: "#EF5350"|"#66BB6A"|"#BDBDBD", label: null, icon: null, slug: null, requires_location: false, location_room_id: null, source: null, is_locked: false }`. Absent keys in `slots[userId]` mean no slot on that date/half.
+
+**(v3.55.4)** The response also includes `nc_status`: a map keyed by userId of the member's live NC user status, used by the members widget to merge a single presence dot. Each value is `{ "status": "online"|"away"|"dnd"|"busy"|"offline", "overrides": bool }` where `overrides` indicates whether the NC status should take precedence over the scheduled presence (dnd/busy/online, or a user-set away). Users with no status row are omitted. No personal content is exposed — only the status enum and the override flag.
 
 ### GET `/teams/{teamId}/presence/config`
 Return per-team presence config.

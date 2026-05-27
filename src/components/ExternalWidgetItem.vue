@@ -1,6 +1,6 @@
 <template>
     <NcAppNavigationItem
-        :name="widget.title"
+        :name="widgetName"
         :allow-collapse="true"
         :open="true"
         class="teamhub-widget-item teamhub-external-widget">
@@ -74,6 +74,18 @@ export default {
     },
 
     computed: {
+        /**
+         * Display name for the navigation item.
+         * `name` is a required prop on NcAppNavigationItem in @nextcloud/vue 9;
+         * a blank value renders but is non-conformant, so fall back to a generic
+         * label if a registered widget has an empty title.
+         */
+        widgetName() {
+            const title = (this.widget.title || '').trim()
+            // TRANSLATORS: generic fallback label for an external widget that registered without a title
+            return title || t('teamhub', 'Widget')
+        },
+
         /**
          * Append ?teamId=<id> to the registered iframe_url.
          * The external app uses this to scope its content to the correct team.

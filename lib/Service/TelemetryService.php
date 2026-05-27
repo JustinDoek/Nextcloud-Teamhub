@@ -35,6 +35,7 @@ use Psr\Log\LoggerInterface;
  *   "message_count":        904,
  *   "integrations":         ["teamhublists", "otherapp"],
  *   "builtin_integrations": {"files": 30, "calendar": 20, "deck": 12, "talk": 8},
+ *   "presence_module":      true,
  *   "link_domains":         {"github.com": 12, "trello.com": 5, "notion.so": 3},
  *   "event":                "daily_report" | "installed" | "uninstalled"
  * }
@@ -142,6 +143,7 @@ class TelemetryService {
             'message_count'        => $this->countMessages(),
             'integrations'         => $this->getRegisteredIntegrations(),
             'builtin_integrations' => $this->getBuiltinIntegrationUsage(),
+            'presence_module'      => $this->isPresenceModuleEnabled(),
             'link_domains'         => $this->getLinkDomains(),
         ];
         return $stats;
@@ -189,6 +191,17 @@ class TelemetryService {
         } catch (\Throwable $e) {
             return 0;
         }
+    }
+
+    /**
+     * Whether the TeamHub Presence module is enabled instance-wide. This is the
+     * same app value the LayoutController exposes to the frontend
+     * (presence_module_enabled, '1' = on). Reported in telemetry so we can see
+     * how widely the Presence internal integration is adopted. No content, no
+     * per-team or per-user data — just the on/off state of the module.
+     */
+    private function isPresenceModuleEnabled(): bool {
+        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
     }
 
     private function getRegisteredIntegrations(): array {

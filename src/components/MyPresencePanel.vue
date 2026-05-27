@@ -73,7 +73,7 @@
 
                 <div class="presence-grid__actions">
                     <NcButton
-                        type="primary"
+                        variant="primary"
                         :disabled="!hasDirty || savingTemplate"
                         @click="saveTemplate">
                         <template #icon>
@@ -84,7 +84,7 @@
                     </NcButton>
                     <NcButton
                         v-if="hasDirty"
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="savingTemplate"
                         @click="discardDraft">
                         {{ t('teamhub', 'Discard changes') }}
@@ -180,7 +180,7 @@
             </template>
             <template #actions>
                 <NcButton @click="closePicker">{{ t('teamhub', 'Cancel') }}</NcButton>
-                <NcButton type="primary" :disabled="picker.justOpened" @click="confirmPicker">
+                <NcButton variant="primary" :disabled="picker.justOpened" @click="confirmPicker">
                     {{ t('teamhub', 'Apply') }}
                 </NcButton>
             </template>
@@ -273,8 +273,8 @@ export default {
             try {
                 const [tmplRes, typesRes, locRes] = await Promise.all([
                     axios.get(generateUrl('/apps/teamhub/api/v1/presence/template')),
-                    axios.get(generateUrl('/apps/teamhub/api/v1/admin/presence/types')),
-                    axios.get(generateUrl('/apps/teamhub/api/v1/admin/presence/locations')),
+                    axios.get(generateUrl('/apps/teamhub/api/v1/presence/types')),
+                    axios.get(generateUrl('/apps/teamhub/api/v1/presence/locations')),
                 ])
                 this.types        = typesRes.data || []
                 this.locationTree = locRes.data   || []
@@ -412,11 +412,11 @@ export default {
             if (this.picker.justOpened) return
             if (this.picker.mode === 'template') {
                 const { day, half, currentTypeId, roomId } = this.picker
-                this.$set(this.draft, `${day}_${half}`, {
+                this.draft[`${day}_${half}`] = {
                     day_of_week: day, half_day: half,
                     presence_type_id: currentTypeId,
                     location_room_id: currentTypeId !== null ? roomId : null,
-                })
+                }
                 this.closePicker()
             } else {
                 const { iso, overrideHalf, currentTypeId, roomId } = this.picker
@@ -447,7 +447,7 @@ export default {
             )
             if (optimisticSlot) {
                 if (idx >= 0) {
-                    this.$set(this.calendarSlots, idx, optimisticSlot)
+                    this.calendarSlots[idx] = optimisticSlot
                 } else {
                     this.calendarSlots.push(optimisticSlot)
                 }

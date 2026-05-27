@@ -26,7 +26,7 @@
             <!-- Unpin button — shown on the pinned slot to users with pin rights -->
             <NcButton
                 v-if="canPin && isPinnedSlot"
-                type="tertiary"
+                variant="tertiary"
                 :aria-label="t('teamhub', 'Unpin message')"
                 :title="t('teamhub', 'Unpin message')"
                 @click="doUnpin">
@@ -35,7 +35,7 @@
             <!-- Pin button — shown on regular messages to users with pin rights -->
             <NcButton
                 v-else-if="canPin && !isPinnedSlot"
-                type="tertiary"
+                variant="tertiary"
                 :aria-label="t('teamhub', 'Pin message')"
                 :title="t('teamhub', 'Pin message')"
                 @click="doPin">
@@ -43,14 +43,14 @@
             </NcButton>
             <NcButton
                 v-if="isAuthor"
-                type="tertiary"
+                variant="tertiary"
                 :aria-label="t('teamhub', 'Edit message')"
                 @click="startEdit">
                 <template #icon><Pencil :size="16" /></template>
             </NcButton>
             <NcButton
                 v-if="isAuthor"
-                type="tertiary"
+                variant="tertiary"
                 :aria-label="t('teamhub', 'Delete message')"
                 @click="confirmDelete">
                 <template #icon><Delete :size="16" /></template>
@@ -86,7 +86,7 @@
                  the button click is processed. -->
             <div class="message-card__edit-md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Bold (Ctrl+B)')"
                     :aria-label="t('teamhub', 'Bold')"
                     @mousedown.prevent
@@ -94,7 +94,7 @@
                     <template #icon><FormatBold :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Italic (Ctrl+I)')"
                     :aria-label="t('teamhub', 'Italic')"
                     @mousedown.prevent
@@ -102,7 +102,7 @@
                     <template #icon><FormatItalic :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Inline code')"
                     :aria-label="t('teamhub', 'Inline code')"
                     @mousedown.prevent
@@ -110,7 +110,7 @@
                     <template #icon><CodeTags :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Code block')"
                     :aria-label="t('teamhub', 'Code block')"
                     @mousedown.prevent
@@ -118,7 +118,7 @@
                     <template #icon><CodeBraces :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Heading')"
                     :aria-label="t('teamhub', 'Heading')"
                     @mousedown.prevent
@@ -126,7 +126,7 @@
                     <template #icon><FormatHeader2 :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Bullet list')"
                     :aria-label="t('teamhub', 'Bullet list')"
                     @mousedown.prevent
@@ -134,7 +134,7 @@
                     <template #icon><FormatListBulleted :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Link')"
                     :aria-label="t('teamhub', 'Insert link')"
                     @mousedown.prevent
@@ -143,11 +143,11 @@
                 </NcButton>
             </div>
             <div class="message-card__edit-actions">
-                <NcButton type="primary" :disabled="saving" @click="saveEdit">
+                <NcButton variant="primary" :disabled="saving" @click="saveEdit">
                     <template #icon><NcLoadingIcon v-if="saving" :size="16" /></template>
                     {{ t('teamhub', 'Save') }}
                 </NcButton>
-                <NcButton type="tertiary" @click="cancelEdit">{{ t('teamhub', 'Cancel') }}</NcButton>
+                <NcButton variant="tertiary" @click="cancelEdit">{{ t('teamhub', 'Cancel') }}</NcButton>
             </div>
         </div>
 
@@ -273,7 +273,7 @@
                 </span>
                 <NcButton
                     v-if="isAuthor && !isPollClosed"
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Close poll')"
                     @click="closePoll">
                     <template #icon><Lock :size="16" /></template>
@@ -290,7 +290,7 @@
 
         <!-- Footer: comment toggle -->
         <div class="message-card__footer">
-            <NcButton type="tertiary" @click="toggleComments">
+            <NcButton variant="tertiary" @click="toggleComments">
                 <template #icon><CommentOutline :size="16" /></template>
                 {{ commentLabel }}
             </NcButton>
@@ -967,7 +967,8 @@ export default {
         },
         getPollVotes(index) {
             const votes = this.pollResults.votes[index] || 0
-            return votes === 1 ? '1 vote' : `${votes} votes`
+            // TRANSLATORS: vote count for a single poll option, e.g. "1 vote" / "5 votes"
+            return n('teamhub', '{n} vote', '{n} votes', votes, { n: votes })
         },
     },
 }

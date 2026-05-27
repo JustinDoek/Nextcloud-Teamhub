@@ -73,7 +73,7 @@
             <!-- Actions -->
             <div class="invite-modal__actions">
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="!staged.length || sending"
                     @click="sendInvites">
                     <template #icon>
@@ -82,7 +82,7 @@
                     </template>
                     {{ t('teamhub', 'Invite {n}', { n: staged.length }) }}
                 </NcButton>
-                <NcButton type="tertiary" @click="$emit('close')">
+                <NcButton variant="tertiary" @click="$emit('close')">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
             </div>

@@ -1,7 +1,7 @@
 <template>
     <div class="message-stream" :class="{ 'message-stream--no-header': hideHeader }">
         <div v-if="!hideHeader" class="message-stream__header">
-            <NcButton v-if="canPost" type="primary" @click="showPostForm = true">
+            <NcButton v-if="canPost" variant="primary" @click="showPostForm = true">
                 <template #icon><Plus :size="20" /></template>
                 {{ t('teamhub', 'Post Message') }}
             </NcButton>
@@ -49,7 +49,7 @@
             <!-- Pagination -->
             <div v-if="totalPages > 1" class="message-stream__pagination" role="navigation" :aria-label="t('teamhub', 'Message pages')">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :disabled="messagesPage <= 1"
                     :aria-label="t('teamhub', 'Previous page')"
                     @click="goToPage(messagesPage - 1)">
@@ -61,7 +61,7 @@
                 </span>
 
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :disabled="messagesPage >= totalPages"
                     :aria-label="t('teamhub', 'Next page')"
                     @click="goToPage(messagesPage + 1)">

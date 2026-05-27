@@ -6,7 +6,7 @@
 
             <div class="presence-holidays-toolbar">
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     @click="openCreate">
                     <template #icon><PlusIcon :size="18" /></template>
                     {{ t('teamhub', 'Add holiday') }}
@@ -49,7 +49,7 @@
                         <div class="presence-holiday-row__name">{{ h.name }}</div>
                     </div>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :aria-label="t('teamhub', 'Delete holiday')"
                         @click="confirmDelete(h)">
                         <template #icon><DeleteIcon :size="16" /></template>
@@ -77,7 +77,7 @@
                             :aria-label="t('teamhub', 'Holiday date')" />
                     </label>
                     <NcTextField
-                        :value.sync="addDialog.name"
+                        v-model="addDialog.name"
                         :label="t('teamhub', 'Name')"
                         :placeholder="t('teamhub', 'e.g. King\'s Day')"
                         :maxlength="128" />
@@ -88,7 +88,7 @@
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="!canSubmit || previewing"
                     @click="requestPreview">
                     <template #icon>
@@ -131,7 +131,7 @@
                     {{ t('teamhub', 'Back') }}
                 </NcButton>
                 <NcButton
-                    :type="confirmDialog.affectedSlots > 0 ? 'error' : 'primary'"
+                    :variant="confirmDialog.affectedSlots > 0 ? 'error' : 'primary'"
                     :disabled="committing"
                     @click="commit">
                     <template #icon>
@@ -163,7 +163,7 @@
                 <NcButton @click="closeDeleteDialog">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="error" @click="executeDelete">
+                <NcButton variant="error" @click="executeDelete">
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
             </template>

@@ -3,9 +3,172 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Presence module
-This release adds a presence module which is optional and needs to be activated by the NC admin in admin settings - teamhub - integrations first. 
-More info on this module will be in the documentation at https://tldr.host/teamhub/docs soon. 
+## [3.57.2] — 2026-05-26 — Admin tab-bar active-tab fix + maintenance date fix
+
+### Fixed
+- **Admin settings: clicked tab no longer shows white-on-white.** The active tab matched both the active-state override and the inactive-focus rule at equal CSS specificity; being later in source order, the inactive rule's white background won while the active rule's `!important` white text stayed — rendering an empty white box until focus moved elsewhere. The inactive-focus rule now excludes the active tab via `:not(.teamhub-admin-tab--active)`.
+- **Admin settings → Maintenance: team "Created" date no longer shows "Invalid Date".** Two methods named `formatDate` existed in `AdminSettings.vue`; the second (expecting a Unix timestamp) silently overrode the first (for datetime strings), so the teams table's datetime-string `creation` value was multiplied as a number → `NaN` → "Invalid Date". Split into `formatDate` (datetime string, hardened to also accept ISO and numeric input) and `formatUnixDate` (Unix timestamp, used by the archive table).
+
+## [3.57.1] — 2026-05-26 — Translation catalog sync (nl/de/fr/da) + admin tab-bar hover removal
+
+### Added
+- **Full translation catalog sync.** 489 previously-untranslated strings added to each of the four supported languages (Dutch, German, French, Danish). Recent sessions had wrapped new strings in `t()`/`n()` but not added them to the `l10n` catalogs, leaving large parts of the UI English-only — Permissions tab, Integrations tab, Personal settings (My Presence), Admin settings (Create team / Group Folders, Integrations, Maintenance, Presence module, Archive), and more. German uses formal register (Sie/Ihr) to match the existing catalog; French `pluralForm` (`n > 1`) preserved. All plural strings stored as NC `[singular, plural]` arrays; `.js` and `.json` regenerated in sync for all four languages. Placeholder parity validated across every entry.
+
+### Changed
+- **Admin tab bar: removed all hover styling.** Hovering off the active tab caused a transient z-index/seam repaint that looked wrong. The `:hover` rules on the admin settings tab bar were removed entirely; tabs stay plain until active. Keyboard focus states (`:focus-visible`, `:active`) retained for accessibility.
+
+## [3.57.0] — 2026-05-26 — Members presence sort, Presence as internal integration, presence-module telemetry (app + receiver)
+
+Three minor items plus the telemetry back-end. Intermediate minors 3.56.1–3.56.3 were the in-session iterations.
+
+### Added
+- **Members widget sorts by presence status.** Direct-member avatars now sort by their current merged presence: NC online → schedule-busy → NC dnd/busy → NC away → schedule-free → no status, with a stable display-name tie-break within each rank. The schedule busy/free distinction is now driven by a backend `is_busy` flag on each presence slot (correct for custom presence types and in hide-reasons mode), replacing the previous hardcoded `home`/`office` slug guess. (3.56.1)
+- **Presence-module telemetry.** The anonymous telemetry payload now includes `presence_module` (boolean) — whether the Presence internal integration is enabled instance-wide. No content, no per-team or per-user data; reads the same `presence_module_enabled` app value the frontend uses. (3.56.3)
+- **Telemetry receiver + dashboard (tldr.host, outside the app repo).** The receiver validates and persists `presence_module` to the `installations` and `daily_snapshots` tables; the dashboard surfaces a "Presence module" adoption panel (enabled count, % of active installs, bar) under App integrations. Ships with a one-time `ALTER TABLE` migration adding `presence_module TINYINT(1) NOT NULL DEFAULT 0` to both tables.
+
+### Changed
+- **Presence module presented as an internal integration.** The "Presence tab" and "Hide status details" toggles moved out of *Manage team → Settings → Team apps* into *Manage team → Integrations*, under a dedicated **Internal integrations** subsection (with a "Built-in" badge), separated from the **Third-party integrations** list. The integrations-tab description was updated to cover both internal and third-party integrations. Behaviour and endpoints unchanged — markup relocation only. (3.56.2)
+
+### Security
+- No new endpoints. The `is_busy` slot field is returned by the existing membership-gated `/teams/{id}/presence` endpoint and exposes nothing beyond what the slot colour already conveys (busy/free), with the reason/label/slug still suppressed in hide-reasons mode. The presence toggles keep their existing admin gate. Telemetry remains anonymous and aggregated.
+
+## [3.56.0] — 2026-05-26 — Admin settings visual pass, CSS delivery fix, presence/status merge, bug fixes
+
+Session covering admin-settings presentation, a build-system CSS-delivery fix, the presence/NC-status merge, and several bug fixes. The intermediate minor versions (3.55.2–3.55.8) were the in-session iterations; this is the shipped roll-up.
+
+### Fixed
+- **CSS not delivered to admin & personal settings pages.** `@nextcloud/vite-config`'s `inlineCSS` only attached component styles to the main entry, so `admin.mjs`/`personal.mjs` shipped with no CSS — the admin and personal settings rendered as unstyled HTML (broken tab bar, grids/tables collapsing to stacked text). Switched to per-entry CSS extraction into the app `css/` directory, loaded explicitly from each template via `Util::addStyle`. Build now roots at the app dir (`outDir: '.'`, `emptyOutDir: false`) routing JS→`js/` and CSS→`css/`. (3.55.2)
+- **Post Message form showed an empty grey box.** A stray directiveless `<template>` wrapper in `PostMessageForm.vue` was swallowed as an empty fragment under Vue 3, hiding the entire form body. Removed the wrapper. (3.55.3)
+- **New (non-admin) users could not open "My Presence".** `MyPresencePanel` called two admin-only endpoints (`/admin/presence/types`, `/admin/presence/locations`) → 403 → "Failed to load presence settings". Added non-admin read-only mirrors (`/presence/types`, `/presence/locations`) and repointed the panel. (3.55.5)
+- **Admin tab bar active tab flickered to a soft colour on mouse-leave.** The clicked tab retained `:focus`, and NC's global focus background repainted the active tab light green until focus moved away. Active tab now holds its hard-green fill across hover/focus/focus-visible/active. (3.55.8)
+
+### Added
+- **Presence ↔ NC user-status merge in the members widget.** Each member avatar now shows a single merged presence dot. The TeamHub scheduled presence is the baseline; live NC status overrides it when it is `dnd`/`busy`/`online` or a user-set `away` (automatic idle-away reverts to the schedule, classified via the concrete status object's `getIsUserDefined()`, falling back to the `availability` message id). Backend fetches statuses via `IUserStatusManager` and returns `nc_status` on the team-grid response. (3.55.4)
+- **Open files from widgets inside the app.** Clicking a file in the shared/favourites/recent files widgets now opens it in TeamHub's files-view iframe instead of a new browser tab. Modified clicks (ctrl/cmd/shift/middle) keep the native new-tab. New store action `openFileInEmbed`; the files view also renders for a file override even when the team has no team folder. (3.55.7)
+
+### Changed
+- **Admin settings visual pass.** Tab bar reworked to a classic folder-tab style (butted tabs, hard-coloured active tab with the baseline broken beneath it); removed the soft hover background; removed the redundant "Wizard introduction text" label; fixed the floating group-chip icon under Creation permissions; defensive CSS so the broken admin grids/tables render correctly once CSS loads. (3.55.2, 3.55.6, 3.55.8)
+- **Hard-contrast presence status colours** (online `#00c853`, away `#ffab00`, dnd/busy `#d50000`) replacing soft theme vars that washed out at dot size. (3.55.6)
+
+### Security
+- New `/presence/types` and `/presence/locations` endpoints are `#[NoAdminRequired]` read-only and require an authenticated session; all mutation stays admin-gated. The team-grid `nc_status` addition exposes only the status enum and an override boolean — no personal content — and remains behind the existing team-membership gate.
+
+## [3.55.1] — 2026-05-25 — Reconciliation: close out upload-race + activity/poll translation fixes
+
+The upload-race fix and the activity/poll-string translations described below were
+already present in the working tree but had not been version-stamped, recorded in the
+CHANGELOG, or removed from HANDOFF's open-issues list. This release verifies them,
+strips a leftover debug log, and brings the records back in sync with the code.
+
+### Fixed
+- **`PostMessageForm.vue` — attachment upload write-to-wrong-row race.** `uploadFile` previously captured a positional `idx` before its `await`s and wrote the result back with `this.attachments[idx] = …`. If a concurrent upload (`Promise.all`) reordered the list, or the user removed an earlier attachment mid-upload (`removeAttachment` splices the array), that index went stale and the result landed on the wrong row. Writes now resolve the row by stable id (`findIndex(a => a.id === att.id)`) at write time via a `writeAttachment(patch)` helper, and silently drop the result if the row was removed while the upload was in flight. The API payload is unchanged.
+
+### Changed
+- **`MessageCard.vue` — poll vote count now pluralised via `n()`.** `getPollVotes` returned a hardcoded `'1 vote'` / `'{n} votes'`; now uses `n('teamhub', '{n} vote', '{n} votes', votes, { n: votes })` with a `TRANSLATORS:` hint.
+- **`ActivityFeedView.vue` / `ActivityWidget.vue` — activity subject lines fully translatable.** Every branch of `formatSubject` (Circles, Files, Deck, Calendar/DAV, Talk, and the fallback) now returns a `t('teamhub', …)` string with named placeholders (`{user}`, `{file}`, `{detail}`) instead of interpolated template literals, so translators control word order. Deck's optional decorated fragments are passed as `{card}` / `{board}` named placeholders for repositioning. Per-line `TRANSLATORS:` hints added, including disambiguation ("list" = Deck column/stack; "board" = a Deck board). No concatenated returns remain. **Translators: nl/de/fr/da should review word order and the trailing `{card}{board}` fragment placement, which is English-order in the source strings.**
+
+### Removed
+- Leftover development `console.log` in `PostMessageForm.uploadFile`'s row-gone guard.
+
+## [3.55.0] — 2026-05-25 — V6 performance pass (render-cost reduction)
+
+### Changed
+- **`CommentsSection.vue` — memoized comment-body rendering.** The template called `renderMarkdown(c.comment)` inside the comments `v-for`, so the full markdown regex pipeline plus DOMPurify ran for every comment on every re-render (including while typing a new comment). Replaced with a memoized `renderedComments` computed (comment id → sanitized HTML); the template now reads `renderedComments[c.id]`. Rendering runs once per comment and only re-runs when the comment list changes. Sanitization (DOMPurify with the same `ALLOWED_TAGS`/`ALLOWED_ATTR` allowlists) is unchanged. Mirrors the existing `renderedMessage` computed in `MessageCard.vue`.
+- **`ActivityFeedView.vue` / `ActivityWidget.vue` — memoized subject formatting.** `{{ formatSubject(item) }}` ran a long branch ladder of string operations for every activity item on every render. Folded into the `grouped` / `visibleActivities` computeds respectively; each item now carries a precomputed `subjectText`. Runs once per item, only when `activities` changes.
+- **`PostMessageForm.vue` — stable keys for poll options and attachments.** Poll options were plain strings keyed by array index with `v-model="pollOptions[index]"`; removing an option from the middle made Vue reuse the wrong input DOM node. Options are now `{ id, text }` objects keyed on a stable `id` (from a `pollOptionSeq` counter), with `v-model="option.text"`. The submitted API payload is unchanged (still an array of trimmed strings). The attachments list's `:key="i"` (same index-as-key anti-pattern) is now `:key="att.id"` via an `attachmentSeq` counter.
+- **Inline `v-for` filters moved to computed properties (5 sites)** to stop re-allocating a filtered array on every render: `inviteConfigOptions` / `privacyConfigOptions` (`CreateTeamView.vue`), `visibleMembersWithPresence` / `tabletAvatarMembers` (`TeamWidgetGrid.vue`), `visibleMembers` (`MobileWidgetView.vue`).
+
+## [3.54.0] — 2026-05-25 — V6 hardening tail (WCAG + translation) and @nextcloud/logger adoption
+
+### Fixed
+- **`TeamTabBar.vue` unbound `aria-label`:** the calendar count badge used a static `aria-label="t('teamhub', '{n} calendars', ...)"` (missing the `:` binding), so screen readers announced the literal source code and the string was never translated. Now correctly bound, matching the already-correct boards-count sibling. This was the last remaining `attr="t('teamhub'` instance in the app.
+- **Accessible names on three icon-only buttons** (WCAG 2.2 SC 4.1.2 / 1.1.1): `ActivityFeedView.vue` refresh button (now "Refresh activity"), and the chip-remove buttons in `CreateTeamModal.vue` and `CreateTeamView.vue` (now per-member "Remove {name}"). Each gained an `aria-label` + `title`, and its icon now carries `aria-hidden="true"`.
+
+### Changed
+- **Adopted `@nextcloud/logger` for frontend logging.** New shared `src/logger.js` exposes a single `getLoggerBuilder().setApp('teamhub').detectUser().build()` instance for the whole app. The 2 `console.error` catch-block calls in `FolderMigrationModal.vue` now use `logger.error('...', { error: e })`. The app is free of raw `console.*`.
+
+### Added
+- **`@nextcloud/logger` (`^3.0.3`) as a direct dependency** in `package.json` (previously present only transitively).
+
+### Removed
+- Stale repo-root `info.xml` (orphaned, pinned at `3.28.1`; the canonical manifest is `appinfo/info.xml`) and orphaned `HANDOFF-3.51.0.md`. Both were dead files and desync traps; removed so the repo and the delivered package carry a single source of truth.
+
+
+
+### Fixed
+- **All component styling restored after the Vue 3 / Vite migration.** Since 3.49.0, the entire scoped-style layer was silently absent (broken tab bar, overlapping/un-gridded widgets, missing card and panel styling) because `@nextcloud/vite-config` **extracts** SFC `<style scoped>` blocks and third-party library CSS into `js/css/*.css` files that nothing loaded — no `Util::addStyle()` and no JS-entry `import`. The previous webpack build used `vue-style-loader`, which injected those same styles through the JS bundle at runtime, so no explicit loading was ever needed. Fixed by setting `inlineCSS: true` in `vite.config.mjs`, which (verified against `@nextcloud/vite-config@2.5.2`) routes all CSS through `vite-plugin-css-injected-by-js`, restoring the webpack-era injection behaviour. Also set `build.cssCodeSplit: false` for version robustness. Single-file change; fixes scoped component styles and the `grid-layout-plus` widget-grid library CSS together. Confirmed on a running instance.
+
+## [3.52.0] — 2026-05-25 — Vue 3 migration V4 + V5 (component-API completion & verification) + V6 first slice
+
+### Fixed
+- **Input-field labels (`NcTextField` / `NcTextArea`) for `@nextcloud/vue` 9:** v9's `NcInputField` base no longer uses `label` as a placeholder fallback and produces an input with no accessible name (plus a runtime warning) when neither `label` nor `labelOutside` is set. The 3 affected sites — all in `CreateTeamModal.vue` (team name, description, member search) — now use `label-outside` with an explicit `id` per input and `for="<id>"` on the existing visible label, both silencing the warning and establishing a programmatic label association that was previously absent. Verified against `@nextcloud/vue` 9.8.0 source. (41 of 44 input sites were already conformant.)
+- **`FolderMigrationModal.vue` unbound `aria-label`:** the space-check table's `aria-label` was a static string literal (`aria-label="t('teamhub', 'Space check')"`, missing the `:` binding) — screen readers announced the literal code and the string was never translated. Now correctly bound and translatable.
+
+### Added
+- **`ExternalWidgetItem.vue` widget-name fallback:** since `NcAppNavigationItem.name` is required in v9, a registered external widget with an empty title now falls back to a generic translated "Widget" label instead of rendering a blank required prop.
+- **`role="status"` on `FolderMigrationModal.vue` dynamic screens** (preflight loading + migrating) so screen-reader users are announced when those states change.
+
+### Removed
+- 4 leftover debug `console.log` statements in `FolderMigrationModal.vue` (standing cleanup item from the V3 handoff). The 2 `console.error` calls in `catch` blocks are retained as production error handling.
+
+### Verified (no change)
+- **`@nextcloud/vue` 9 component-API migration is complete.** All 18 NC components used by the app were audited against 9.8.0: `NcAppNavigationItem`/`NcAppNavigationCaption` (`name` required), `NcEmptyContent`/`NcModal`/`NcDialog` (`title`→`name`), `NcRichContenteditable` (`modelValue` required), and the remainder — all already conformant. No code change required for V5.
+
+## [3.51.0] — 2026-05-24 — Vue 3 migration V3 (component-API: model props + NcButton variant)
+
+### Fixed
+- **Model-prop migration to `@nextcloud/vue` 9 (`modelValue`):** `NcCheckboxRadioSwitch`, `NcTextField`, and `NcTextArea` switched from the v8 `checked`/`value` props to v9 `modelValue`. This restores two-way binding on every toggle/input the V2 `.sync` syntax conversion left rendering-but-inert — including the confirmed-broken Presence module toggle in *Admin settings → Integrations*. Verified against `@nextcloud/vue` 9.8.0 source. Sites: 9 `v-model:checked`→`v-model` + 8 `:checked`→`:model-value` + 11 `@update:checked`→`@update:model-value` (handler logic preserved); 9 `v-model:value`→`v-model` + 1 `NcTextArea :value`/`@input`→`v-model`.
+- **`NcAppNavigation` open binding:** v9 removed the `open` prop (open state is now internal). The dead V2 `v-model:open="navOpen"` is removed and the mobile sidebar auto-close rewired to v9's `toggle-navigation` event bus. Added the now-required `aria-label`.
+
+### Changed
+- **`NcButton` `type` → `variant` (214 sites):** v9 split the single `type` prop into `type` (native button type) and `variant` (visual style). All button-style values (`primary`, `secondary`, `tertiary`, `tertiary-no-background`, `error`, `warning`) renamed to `variant`; 5 dynamic `:type` ternaries → `:variant`. Scoped structurally to `NcButton` opening tags only — `NcCheckboxRadioSwitch` (`type="switch/checkbox/radio"`), `NcCounterBubble` (`type="highlighted"`), `NcTextField` (`:type="field.type"`), and all native element types verified untouched.
+- **`ResourcePicker` (custom component)** migrated to the Vue 3 `modelValue`/`update:modelValue` convention; both call sites (`CreateTeamView`, `ManageTeamView`) updated to `v-model`.
+- Removed one redundant dead `@update:checked` handler on an already-`v-model`'d switch (`AdminSettings`).
+
+### Added
+- `@nextcloud/event-bus` `^3.3.3` promoted from transitive to direct dependency (used for the nav toggle). **Run `npm install` to formalize in the lock.**
+
+## [3.50.0] — 2026-05-24 — Vue 3 migration V2 (mechanical sweep)
+
+### Fixed
+- **`this.$set` / `this.$delete` removed (34 sites, 8 components):** converted to direct property/index assignment. Vue 3's proxy reactivity makes these reactive without `$set`. Resolves the `TeamView.vue` render crash (`this.$set is not a function`) flagged in V1. Affected: `TeamView`, `BrowseTeamsView`, `AdminSettings`, `PostMessageForm`, `MyPresencePanel`, `CreateTeamView`, `TeamTabBar`, `PresenceLocationsManager`.
+
+### Changed
+- **`.sync` modifier → `v-model:prop` (19 sites, 9 files):** `:checked.sync` → `v-model:checked`, `:value.sync` → `v-model:value`, `:open.sync` → `v-model:open`. Pure Vue 3 syntax migration. NOTE: these bind to the v8-era `checked`/`value` props; on the installed `@nextcloud/vue` 9.8.0 they render but do not two-way bind until the prop names are migrated to `modelValue` in V3. Affected: `PresenceTypesManager`, `ManageTeamView`, `TeamMeetingModal`, `CreateTeamView`, `PresenceLocationsManager`, `TeamWidgetGrid`, `AdminSettings`, `PresenceHolidaysManager`, `App.vue`.
+
+### Removed
+- **5 dead duplicate `.vue` files** at `src/` root (`TeamTabBar`, `PostMessageForm`, `TeamWidgetGrid`, `MobileWidgetView`, `ArchiveTeamModal`) — byte-identical to the `src/components/` copies and imported by nothing.
+
+### Verified (no change)
+- `v-for` + `v-if` same-element: 0 found. `:deep()` selectors: 14, all modern, 0 legacy. No `$listeners`/`$children`/`.native`/`$scopedSlots`/`$on`/`new Vue()`/template-filters anywhere. CSS auto-injection present in build output.
+
+## [3.49.0] — 2026-05-24 — Vue 3 migration V1 (foundation)
+
+### Changed
+- **Build system:** migrated from hand-rolled webpack to `@nextcloud/vite-config` v2 (Vite). Three-entrypoint setup via `vite.config.mjs`. Output as `.mjs` files; NC auto-adds `type="module"`.
+- **Vue runtime:** upgraded from Vue 2.7 to Vue 3.5. Entrypoints rewritten (`createApp`, `globalProperties`).
+- **Vuex:** upgraded from 3 to 4 (`createStore`, `app.use(store)`). All `Vue.set` calls in store converted to direct proxy assignment.
+- **Grid layout library:** replaced `vue-grid-layout` (Vue 2, unmaintained) with `grid-layout-plus` (Vue 3 port, identical API). `:layout.sync` → `:layout` + `@update:layout`.
+- **Draggable library:** upgraded `vuedraggable` from 2 to 4. `v-for` template → `#item` slot with `item-key`.
+- **NC component library:** upgraded `@nextcloud/vue` from 8 to 9, `@nextcloud/dialogs` from 5 to 7.
+- **Minimum NC version:** raised from 31 to 32.
+- **CSS loading:** `Util::addStyle` removed — Vite auto-injects CSS via the JS entry point.
+- **Bundle sizes:** teamhub.js 5.1MB → 619KB, admin.js 3.8MB → 113KB, personal.js 3.4MB → 20KB.
+
+### Fixed
+- **`v-for` + `v-if` priority crash:** fixed 3 instances where Vue 3's reversed priority (v-if before v-for) caused `Cannot read properties of undefined` render crashes.
+- **`v-model` on props:** `gridLayout` is a read-only prop; replaced illegal `v-model:layout` with one-way bind + event forwarding.
+- **Tab bar resource gating:** moved resource-existence checks from slot `v-if` to `renderableTabs` computed — vuedraggable v4 requires exactly one rendered node per item.
+- **Grid CSS class names:** remapped `.vue-resizable-handle` → `.vgl-item__resizer`, `.vue-grid-placeholder` → `.vgl-item--placeholder` for grid-layout-plus.
+- **`@nextcloud/vue` import paths:** fixed 4 old `/dist/Components/` paths that don't exist in v9.
+
+### Removed
+- `vue-grid-layout` dependency (replaced by `grid-layout-plus`)
+- `webpack.config.js` (replaced by `vite.config.mjs`)
+- `src/store_index.js` (dead code, never imported)
+- Webpack/Babel devDependencies: `babel-loader`, `@babel/core`, `@babel/preset-env`, `webpack`, `webpack-cli`, `vue-loader`, `vue-style-loader`, `vue-template-compiler`, `css-loader`, `style-loader`, `loader-utils`
+- Stale `window.appVersion = '3.15.0'` hardcode in main.js
+
 
 ## [3.48.0] — 2026-05-20 — Presence admin tab visibility + warning alignment + docs
 

@@ -42,7 +42,7 @@
                     <div class="team-image-actions">
                         <!-- Upload button — triggers hidden file input -->
                         <NcButton
-                            type="secondary"
+                            variant="secondary"
                             :disabled="imageUploading || imageRemoving"
                             @click="$refs.teamImageInput.click()">
                             <template #icon>
@@ -55,7 +55,7 @@
                         <!-- Remove button — only shown when an image exists -->
                         <NcButton
                             v-if="imagePreviewUrl"
-                            type="error"
+                            variant="error"
                             :disabled="imageUploading || imageRemoving"
                             @click="removeTeamImage">
                             <template #icon>
@@ -86,7 +86,7 @@
                         :rows="4" />
                     <div class="manage-description-actions">
                         <NcButton
-                            type="primary"
+                            variant="primary"
                             :disabled="(editedDescription === (team.description || '')) || saving"
                             @click="saveDescription">
                             <template #icon>
@@ -118,9 +118,9 @@
                         <NcCheckboxRadioSwitch
                             v-for="opt in invitationOptions"
                             :key="opt.key"
-                            :checked.sync="circleConfig[opt.key]"
+                            v-model="circleConfig[opt.key]"
                             type="checkbox"
-                            @update:checked="saveConfig">
+                            @update:model-value="saveConfig">
                             {{ opt.label }}
                         </NcCheckboxRadioSwitch>
                     </div>
@@ -129,9 +129,9 @@
                         <!-- CFG_ROOT (8192): same bit Contacts uses for "Prevent teams from being
                              a member of another team". Checked = prevention is active (CFG_ROOT set). -->
                         <NcCheckboxRadioSwitch
-                            :checked.sync="circleConfig.preventSubMembership"
+                            v-model="circleConfig.preventSubMembership"
                             type="checkbox"
-                            @update:checked="saveConfig">
+                            @update:model-value="saveConfig">
                             {{ t('teamhub', 'Prevent this team from being a member of another team') }}
                         </NcCheckboxRadioSwitch>
                     </div>
@@ -140,9 +140,9 @@
                         <NcCheckboxRadioSwitch
                             v-for="opt in privacyOptions"
                             :key="opt.key"
-                            :checked.sync="circleConfig[opt.key]"
+                            v-model="circleConfig[opt.key]"
                             type="checkbox"
-                            @update:checked="saveConfig">
+                            @update:model-value="saveConfig">
                             {{ opt.label }}
                         </NcCheckboxRadioSwitch>
                     </div>
@@ -237,14 +237,14 @@
                                 </div>
                                 <div class="pending-resource-actions">
                                     <NcButton
-                                        type="primary"
+                                        variant="primary"
                                         :disabled="resource._loading"
                                         :aria-label="t('teamhub', 'Accept resource {id}', { id: resource.resourceId })"
                                         @click="acceptResource(resource)">
                                         {{ t('teamhub', 'Accept') }}
                                     </NcButton>
                                     <NcButton
-                                        type="tertiary"
+                                        variant="tertiary"
                                         :disabled="resource._loading"
                                         :aria-label="t('teamhub', 'Ignore resource {id}', { id: resource.resourceId })"
                                         @click="ignoreResource(resource)">
@@ -287,7 +287,7 @@
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
                             <div class="resource-row__actions">
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :aria-label="t('teamhub', 'Disconnect Talk room')"
                                     @click="removeResource(row)">
                                     {{ t('teamhub', 'Disconnect') }}
@@ -298,10 +298,10 @@
                             <span class="resource-row__empty-label">{{ t('teamhub', 'No Talk room connected') }}</span>
                         </div>
                         <div v-if="activeResourcesByApp('talk').length === 0" class="resource-row resource-row--actions">
-                            <NcButton type="tertiary" @click="openConnectPicker('talk')">
+                            <NcButton variant="tertiary" @click="openConnectPicker('talk')">
                                 {{ t('teamhub', '+ Connect existing') }}
                             </NcButton>
-                            <NcButton type="tertiary" @click="createResource('talk')">
+                            <NcButton variant="tertiary" @click="createResource('talk')">
                                 {{ t('teamhub', '+ Create new') }}
                             </NcButton>
                         </div>
@@ -323,7 +323,7 @@
                             </span>
                             <div class="resource-row__actions">
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :aria-label="t('teamhub', 'Disconnect Files folder')"
                                     @click="removeResource(row)">
                                     {{ t('teamhub', 'Disconnect') }}
@@ -337,14 +337,14 @@
                              When a shared folder is active, these trigger the migration flow.
                              When a GF is active, no buttons shown (already on the best option). -->
                         <div v-if="!activeFilesIsGf" class="resource-row resource-row--actions">
-                            <NcButton type="tertiary" @click="openConnectPicker('files')">
+                            <NcButton variant="tertiary" @click="openConnectPicker('files')">
                                 {{ activeFilesIsShared
                                     ? t('teamhub', '+ Connect group folder')
                                     : t('teamhub', '+ Connect existing') }}
                             </NcButton>
                             <NcButton
                                 v-if="installedApps.groupfolders"
-                                type="tertiary"
+                                variant="tertiary"
                                 @click="createResource('files')">
                                 {{ t('teamhub', '+ Create new group folder') }}
                             </NcButton>
@@ -361,14 +361,14 @@
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
                             <div class="resource-row__actions">
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :disabled="row._loading"
                                     :aria-label="t('teamhub', 'Disconnect calendar — removes team access, calendar is preserved')"
                                     @click="removeResource(row)">
                                     {{ t('teamhub', 'Disconnect') }}
                                 </NcButton>
                                 <NcButton
-                                    type="error"
+                                    variant="error"
                                     :disabled="row._loading"
                                     :aria-label="t('teamhub', 'Delete calendar permanently')"
                                     @click="confirmDeleteResource(row)">
@@ -377,10 +377,10 @@
                             </div>
                         </div>
                         <div class="resource-row resource-row--actions">
-                            <NcButton type="tertiary" @click="openConnectPicker('calendar')">
+                            <NcButton variant="tertiary" @click="openConnectPicker('calendar')">
                                 {{ t('teamhub', '+ Connect existing') }}
                             </NcButton>
-                            <NcButton type="tertiary" @click="createResource('calendar')">
+                            <NcButton variant="tertiary" @click="createResource('calendar')">
                                 {{ t('teamhub', '+ Create new') }}
                             </NcButton>
                         </div>
@@ -396,14 +396,14 @@
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
                             <div class="resource-row__actions">
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :disabled="row._loading"
                                     :aria-label="t('teamhub', 'Disconnect board — removes team access, board is preserved')"
                                     @click="removeResource(row)">
                                     {{ t('teamhub', 'Disconnect') }}
                                 </NcButton>
                                 <NcButton
-                                    type="error"
+                                    variant="error"
                                     :disabled="row._loading"
                                     :aria-label="t('teamhub', 'Delete board permanently')"
                                     @click="confirmDeleteResource(row)">
@@ -412,10 +412,10 @@
                             </div>
                         </div>
                         <div class="resource-row resource-row--actions">
-                            <NcButton type="tertiary" @click="openConnectPicker('deck')">
+                            <NcButton variant="tertiary" @click="openConnectPicker('deck')">
                                 {{ t('teamhub', '+ Connect existing') }}
                             </NcButton>
-                            <NcButton type="tertiary" @click="createResource('deck')">
+                            <NcButton variant="tertiary" @click="createResource('deck')">
                                 {{ t('teamhub', '+ Create new') }}
                             </NcButton>
                         </div>
@@ -434,50 +434,12 @@
                             <span class="team-app-desc">{{ app.description }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
-                            :checked="app.enabled"
+                            :model-value="app.enabled"
                             :disabled="togglingApp === app.id || !app.installed"
                             type="switch"
                             :aria-label="t('teamhub', 'Enable {name}', { name: app.label })"
-                            @update:checked="toggleApp(app, $event)">
+                            @update:model-value="toggleApp(app, $event)">
                             {{ app.installed ? (app.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled')) : t('teamhub', 'Not installed') }}
-                        </NcCheckboxRadioSwitch>
-                    </div>
-
-                    <!-- ── Presence module toggles (B3) ──────────────────── -->
-                    <div v-if="isTeamAdmin && presenceModuleEnabled" class="team-app-item">
-                        <div class="team-app-icon">
-                            <OfficeBuildingManageIcon :size="22" />
-                        </div>
-                        <div class="team-app-info">
-                            <span class="team-app-name">{{ t('teamhub', 'Presence tab') }}</span>
-                            <span class="team-app-desc">{{ t('teamhub', 'Show a Presence tab on the team home so members can see each other\'s schedules.') }}</span>
-                        </div>
-                        <NcCheckboxRadioSwitch
-                            :checked="presenceEnabled"
-                            :disabled="savingPresenceConfig"
-                            type="switch"
-                            :aria-label="t('teamhub', 'Enable Presence tab for this team')"
-                            @update:checked="setPresenceEnabled($event)">
-                            {{ presenceEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                        </NcCheckboxRadioSwitch>
-                    </div>
-
-                    <!-- Sub-option: only shown when presence is enabled -->
-                    <div v-if="isTeamAdmin && presenceModuleEnabled && presenceEnabled" class="team-app-item team-app-item--sub">
-                        <div class="team-app-icon team-app-icon--sub">
-                            <EyeOffOutlineIcon :size="18" />
-                        </div>
-                        <div class="team-app-info">
-                            <span class="team-app-name">{{ t('teamhub', 'Hide status details') }}</span>
-                            <span class="team-app-desc">{{ t('teamhub', 'Members see busy / free / off only — not the specific status or location.') }}</span>
-                        </div>
-                        <NcCheckboxRadioSwitch
-                            :checked="presenceHideReasons"
-                            :disabled="savingPresenceConfig"
-                            type="switch"
-                            :aria-label="t('teamhub', 'Hide status details from team members')"
-                            @update:checked="setPresenceHideReasons($event)">
-                            {{ presenceHideReasons ? t('teamhub', 'Hidden') : t('teamhub', 'Visible') }}
                         </NcCheckboxRadioSwitch>
                     </div>
 
@@ -528,22 +490,21 @@
                 @update:open="createResourceApp = null">
                 <div class="create-resource-form">
                     <NcTextArea
-                        :value="createResourceName"
+                        v-model="createResourceName"
                         :label="t('teamhub', 'Name')"
                         :placeholder="createResourceNamePlaceholder"
                         :rows="1"
                         :disabled="creatingResource"
-                        @input="createResourceName = $event.target.value"
                         @keydown.enter.prevent="confirmCreateResource" />
                     <div class="create-resource-form__actions">
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :disabled="creatingResource"
                             @click="createResourceApp = null">
                             {{ t('teamhub', 'Cancel') }}
                         </NcButton>
                         <NcButton
-                            type="primary"
+                            variant="primary"
                             :disabled="!createResourceName.trim() || creatingResource"
                             :aria-label="t('teamhub', 'Create {name}', { name: createResourceName })"
                             @click="confirmCreateResource">
@@ -568,11 +529,11 @@
                         }) }}
                     </p>
                     <div class="delete-resource-confirm__actions">
-                        <NcButton type="tertiary" @click="pendingDeleteResource = null">
+                        <NcButton variant="tertiary" @click="pendingDeleteResource = null">
                             {{ t('teamhub', 'Cancel') }}
                         </NcButton>
                         <NcButton
-                            type="error"
+                            variant="error"
                             :disabled="deletingResource"
                             @click="executeDeleteResource">
                             <NcLoadingIcon v-if="deletingResource" :size="16" />
@@ -608,7 +569,7 @@
                             </span>
                         </div>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :disabled="resource._loading"
                             :aria-label="t('teamhub', 'Un-ignore resource {id}', { id: resource.resourceId })"
                             @click="unignoreResource(resource)">
@@ -692,7 +653,7 @@
                 <!-- Save -->
                 <div class="manage-section">
                     <NcButton
-                        type="primary"
+                        variant="primary"
                         :disabled="savingMessageSettings"
                         @click="saveMessageSettings">
                         <template #icon>
@@ -717,7 +678,7 @@
                     <h3>{{ t('teamhub', 'Direct Members') }} ({{ manageMembers.direct.length }})</h3>
                     <NcButton
                         v-if="isAdminOrOwner"
-                        type="secondary"
+                        variant="secondary"
                         :aria-label="t('teamhub', 'Invite members to this team')"
                         @click="showInviteModal = true">
                         <template #icon><AccountPlusIcon :size="18" /></template>
@@ -761,7 +722,7 @@
                         <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
                         <NcButton
                             v-if="canRemoveMember(member)"
-                            type="error"
+                            variant="error"
                             :aria-label="t('teamhub', 'Remove member')"
                             @click="removeMember(member.userId, 'user')">
                             <template #icon><AccountRemove :size="20" /></template>
@@ -798,7 +759,7 @@
                             </span>
                         </div>
                         <NcButton
-                            type="error"
+                            variant="error"
                             :aria-label="t('teamhub', 'Remove group {name}', { name: group.displayName })"
                             @click="removeMember(group.singleId, group.userType === 16 ? 'circle' : 'group')">
                             <template #icon><AccountRemove :size="20" /></template>
@@ -827,7 +788,7 @@
                             </span>
                         </div>
                         <NcButton
-                            type="error"
+                            variant="error"
                             :aria-label="t('teamhub', 'Remove team {name}', { name: circle.displayName })"
                             @click="removeMember(circle.singleId, 'circle')">
                             <template #icon><AccountRemove :size="20" /></template>
@@ -870,11 +831,11 @@
                             <span class="pending-date">{{ req.userId }}</span>
                         </div>
                         <div class="pending-actions">
-                            <NcButton type="primary" @click="approve(req)">
+                            <NcButton variant="primary" @click="approve(req)">
                                 <template #icon><Check :size="20" /></template>
                                 {{ t('teamhub', 'Approve') }}
                             </NcButton>
-                            <NcButton type="error" @click="reject(req)">
+                            <NcButton variant="error" @click="reject(req)">
                                 <template #icon><Close :size="20" /></template>
                                 {{ t('teamhub', 'Reject') }}
                             </NcButton>
@@ -896,8 +857,62 @@
             <div class="manage-section">
                 <h3>{{ t('teamhub', 'Integrations') }}</h3>
                 <p class="manage-section-desc">
-                    {{ t('teamhub', 'Enable or disable third-party integrations registered by other Nextcloud apps. Widgets appear on the Home view. Tab integrations add a tab to the tab bar.') }}
+                    {{ t('teamhub', 'Enable or disable integrations for this team. Internal integrations are built into TeamHub; third-party integrations are registered by other Nextcloud apps. Widgets appear on the Home view; tab integrations add a tab to the tab bar.') }}
                 </p>
+
+                <!-- ── Internal integrations (built into TeamHub) ──────────── -->
+                <div v-if="isTeamAdmin && presenceModuleEnabled" class="integrations-subsection">
+                    <h4 class="integrations-subsection__title">{{ t('teamhub', 'Internal integrations') }}</h4>
+                    <div class="widgets-list">
+                        <div
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': presenceEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    {{ t('teamhub', 'Presence') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Show a Presence tab on the team home so members can see each other\'s schedules.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="presenceEnabled"
+                                :disabled="savingPresenceConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Presence tab for this team')"
+                                @update:model-value="setPresenceEnabled($event)">
+                                {{ presenceEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Sub-option: only shown when presence is enabled -->
+                        <div
+                            v-if="presenceEnabled"
+                            class="widget-item widget-item--internal widget-item--sub">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">{{ t('teamhub', 'Hide status details') }}</span>
+                                <span class="widget-description">{{ t('teamhub', 'Members see busy / free / off only — not the specific status or location.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="presenceHideReasons"
+                                :disabled="savingPresenceConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Hide status details from team members')"
+                                @update:model-value="setPresenceHideReasons($event)">
+                                {{ presenceHideReasons ? t('teamhub', 'Hidden') : t('teamhub', 'Visible') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Third-party integrations (registered by other apps) ── -->
+                <h4 v-if="isTeamAdmin && presenceModuleEnabled" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
                 <div v-if="loadingWidgets" class="section-loading">
                     <NcLoadingIcon :size="32" />
                 </div>
@@ -942,11 +957,11 @@
                                 <span v-if="integration.app_id" class="widget-app-id">{{ integration.app_id }}</span>
                             </div>
                             <NcCheckboxRadioSwitch
-                                :checked="integration.enabled"
+                                :model-value="integration.enabled"
                                 :disabled="togglingWidget === integration.registry_id"
                                 type="switch"
                                 :aria-label="t('teamhub', 'Enable {title}', { title: integration.title })"
-                                @update:checked="toggleIntegration(integration, $event)">
+                                @update:model-value="toggleIntegration(integration, $event)">
                                 {{ integration.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
                             </NcCheckboxRadioSwitch>
                         </div>
@@ -994,7 +1009,7 @@
                     <NcAvatar :user="selectedOwner.id" :display-name="selectedOwner.displayName" :size="28" :show-user-status="false" :disable-menu="true" />
                     <span class="manage-owner-selected__name">{{ selectedOwner.displayName }}</span>
                     <NcButton
-                        type="warning"
+                        variant="warning"
                         :disabled="transferringOwner"
                         @click="confirmTransferOwner">
                         <template #icon>
@@ -1004,7 +1019,7 @@
                         {{ t('teamhub', 'Set as owner') }}
                     </NcButton>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :aria-label="t('teamhub', 'Clear selection')"
                         @click="clearOwnerSelection">
                         <template #icon><Close :size="20" /></template>
@@ -1053,7 +1068,7 @@
                         </span>
                     </div>
                     <NcButton
-                        type="error"
+                        variant="error"
                         :disabled="archiving || deleting || archiveStatusLoading || (archiveStatusRow && archiveStatusRow.status === 'pending')"
                         :aria-label="t('teamhub', 'Delete this team')"
                         @click="onDeleteTeamClicked">
@@ -1089,10 +1104,10 @@
                     </p>
                 </template>
                 <template #actions>
-                    <NcButton type="tertiary" @click="cancelNoArchiveDelete">
+                    <NcButton variant="tertiary" @click="cancelNoArchiveDelete">
                         {{ t('teamhub', 'Cancel') }}
                     </NcButton>
-                    <NcButton type="error" :disabled="deleting" @click="confirmNoArchiveDelete">
+                    <NcButton variant="error" :disabled="deleting" @click="confirmNoArchiveDelete">
                         <template #icon>
                             <NcLoadingIcon v-if="deleting" :size="20" />
                             <Delete v-else :size="20" />
@@ -1117,10 +1132,10 @@
                     </p>
                 </template>
                 <template #actions>
-                    <NcButton type="tertiary" @click="pendingOwnerTransfer = null">
+                    <NcButton variant="tertiary" @click="pendingOwnerTransfer = null">
                         {{ t('teamhub', 'Cancel') }}
                     </NcButton>
-                    <NcButton type="warning" @click="executeTransferOwner">
+                    <NcButton variant="warning" @click="executeTransferOwner">
                         <template #icon>
                             <AccountArrowRight :size="20" />
                         </template>
@@ -1152,10 +1167,10 @@
                 </p>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="cancelDisableApp">
+                <NcButton variant="tertiary" @click="cancelDisableApp">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="error" @click="confirmDisableApp">
+                <NcButton variant="error" @click="confirmDisableApp">
                     {{ t('teamhub', 'Yes, permanently delete') }}
                 </NcButton>
             </template>
@@ -1191,8 +1206,7 @@
                     <div v-if="enableAppMode === 'connect'" class="enable-app-picker">
                         <ResourcePicker
                             :app="pendingEnableApp.id === 'spreed' ? 'talk' : pendingEnableApp.id"
-                            :value="enableAppResourceId"
-                            @input="enableAppResourceId = $event" />
+                            v-model="enableAppResourceId" />
                     </div>
                 </div>
                 <p style="margin: 12px 0 0; font-size: 12px; color: var(--color-text-maxcontrast);">
@@ -1200,11 +1214,11 @@
                 </p>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="cancelEnableApp">
+                <NcButton variant="tertiary" @click="cancelEnableApp">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="enableAppMode === 'connect' && !enableAppResourceId"
                     @click="confirmEnableApp">
                     {{ enableAppMode === 'connect' ? t('teamhub', 'Connect') : t('teamhub', 'Create') }}
@@ -1250,8 +1264,6 @@ import ArchiveTeamModal from './ArchiveTeamModal.vue'
 import ResourcePicker from './ResourcePicker.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
-import OfficeBuildingManageIcon from 'vue-material-design-icons/OfficeBuilding.vue'
-import EyeOffOutlineIcon from 'vue-material-design-icons/EyeOffOutline.vue'
 
 // Circles config bitmask constants — canonical values from circlesConfig.js.
 // These MUST match OCA\Circles\Model\Circle::CFG_* in the Circles app.
@@ -1279,7 +1291,6 @@ export default {
         ResourcePicker,
         InviteMemberModal,
         AccountPlusIcon,
-        OfficeBuildingManageIcon, EyeOffOutlineIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -1647,7 +1658,7 @@ export default {
             if (tab === 'messages') {
                 this.loadMessageSettings()
             }
-            if (tab === 'settings') {
+            if (tab === 'integrations') {
                 this.loadPresenceConfig()
             }
             // If the warning block sent us here with focus flag set, scroll to at-risk section.
@@ -2884,18 +2895,6 @@ export default {
     margin: 16px 0 6px;
     padding: 0 4px;
 }
-/* Sub-option: indented beneath its parent toggle */
-.team-app-item--sub {
-    margin-left: 20px;
-    background: var(--color-background-hover);
-    border: 1px solid var(--color-border);
-}
-.team-app-icon--sub {
-    width: 28px;
-    height: 28px;
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-}
 .team-app-icon {
     display: flex;
     align-items: center;
@@ -3451,6 +3450,30 @@ export default {
 .widget-badge--tab {
     background: color-mix(in srgb, var(--color-success) 15%, transparent);
     color: var(--color-success-text);
+}
+.widget-badge--internal {
+    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    color: var(--color-warning-text);
+}
+
+/* Integrations tab — internal vs third-party subsections */
+.integrations-subsection {
+    margin-bottom: 16px;
+}
+.integrations-subsection__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 12px 0 8px;
+}
+.widget-item--internal {
+    border: 1px solid var(--color-border);
+}
+.widget-item--sub {
+    margin-left: 24px;
+    background: var(--color-background-hover);
 }
 
 /* Danger zone */

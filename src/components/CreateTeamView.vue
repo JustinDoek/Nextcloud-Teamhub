@@ -61,9 +61,9 @@
                         <div class="ctv__settings-group">
                             <span class="ctv__settings-group-label">{{ t('teamhub', 'Invitations') }}</span>
                             <NcCheckboxRadioSwitch
-                                v-for="opt in configOptions.filter(o => o.group === 'invite')"
+                                v-for="opt in inviteConfigOptions"
                                 :key="opt.key"
-                                :checked.sync="form.config[opt.key]"
+                                v-model="form.config[opt.key]"
                                 type="checkbox">
                                 <span class="ctv__setting-name">{{ opt.label }}</span>
                                 <span class="ctv__setting-desc">{{ opt.description }}</span>
@@ -72,9 +72,9 @@
                         <div class="ctv__settings-group">
                             <span class="ctv__settings-group-label">{{ t('teamhub', 'Privacy') }}</span>
                             <NcCheckboxRadioSwitch
-                                v-for="opt in configOptions.filter(o => o.group === 'privacy')"
+                                v-for="opt in privacyConfigOptions"
                                 :key="opt.key"
-                                :checked.sync="form.config[opt.key]"
+                                v-model="form.config[opt.key]"
                                 type="checkbox">
                                 <span class="ctv__setting-name">{{ opt.label }}</span>
                                 <span class="ctv__setting-desc">{{ opt.description }}</span>
@@ -118,8 +118,11 @@
                             </div>
                             <NcAvatar v-else :user="m.id" :display-name="m.displayName" :size="24" :show-user-status="false" />
                             <span>{{ m.displayName }}</span>
-                            <button class="ctv__chip-remove" @click="removeMember(m.id, m.type)">
-                                <Close :size="14" />
+                            <button class="ctv__chip-remove"
+                                :aria-label="t('teamhub', 'Remove {name}', { name: m.displayName })"
+                                :title="t('teamhub', 'Remove {name}', { name: m.displayName })"
+                                @click="removeMember(m.id, m.type)">
+                                <Close :size="14" aria-hidden="true" />
                             </button>
                         </div>
                     </div>
@@ -167,8 +170,7 @@
                                 <div v-if="form.apps[app.id].mode === 'connect'" class="ctv__app-picker">
                                     <ResourcePicker
                                         :app="app.id"
-                                        :value="form.apps[app.id].resourceId"
-                                        @input="form.apps[app.id].resourceId = $event"
+                                        v-model="form.apps[app.id].resourceId"
                                         @selected-name="form.apps[app.id].name = $event" />
                                 </div>
                             </div>
@@ -193,22 +195,22 @@
 
         <!-- Footer — always at bottom -->
         <div v-if="step < 5 || creationDone" class="ctv__footer">
-            <NcButton v-if="step < 5" type="tertiary" @click="$emit('cancel')">
+            <NcButton v-if="step < 5" variant="tertiary" @click="$emit('cancel')">
                 {{ t('teamhub', 'Cancel') }}
             </NcButton>
             <div v-else></div>
             <div class="ctv__footer-right">
-                <NcButton v-if="step > 1 && step < 5" type="secondary" @click="step--">
+                <NcButton v-if="step > 1 && step < 5" variant="secondary" @click="step--">
                     {{ t('teamhub', 'Back') }}
                 </NcButton>
-                <NcButton v-if="step < 4" type="primary" @click="nextStep">
+                <NcButton v-if="step < 4" variant="primary" @click="nextStep">
                     {{ t('teamhub', 'Next') }}
                 </NcButton>
-                <NcButton v-if="step === 4" type="primary" @click="submit">
+                <NcButton v-if="step === 4" variant="primary" @click="submit">
                     <template #icon><Check :size="20" /></template>
                     {{ t('teamhub', 'Create team') }}
                 </NcButton>
-                <NcButton v-if="creationDone" type="primary" @click="$emit('created', createdTeam)">
+                <NcButton v-if="creationDone" variant="primary" @click="$emit('created', createdTeam)">
                     <template #icon><Check :size="20" /></template>
                     {{ t('teamhub', 'Open team') }}
                 </NcButton>
@@ -311,6 +313,14 @@ export default {
             ]
             return all.filter(a => a.available)
         },
+        // Pre-grouped views of configOptions so the template's two v-for loops
+        // don't re-allocate a filtered array on every render (perf pass V6).
+        inviteConfigOptions() {
+            return this.configOptions.filter(o => o.group === 'invite')
+        },
+        privacyConfigOptions() {
+            return this.configOptions.filter(o => o.group === 'privacy')
+        },
         configOptions() {
             return [
                 { key: 'open',         group: 'invite', label: t('teamhub', 'Anyone can join'),               description: t('teamhub', 'No invitation needed — anyone can become a member') },
@@ -380,7 +390,7 @@ export default {
 
         setTask(index, status) {
             if (this.progressTasks[index]) {
-                this.$set(this.progressTasks, index, { ...this.progressTasks[index], status })
+                this.progressTasks[index] = { ...this.progressTasks[index], status }
             }
         },
 

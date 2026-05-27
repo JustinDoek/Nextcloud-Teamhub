@@ -1,16 +1,21 @@
-import Vue from 'vue'
-import Vuex from 'vuex'
+// Vue import removed — not needed in Vuex 4 store
+import { createStore } from 'vuex'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { getCurrentUser } from '@nextcloud/auth'
 
-Vue.use(Vuex)
+// Vue.use(Vuex) removed — Vuex 4 uses app.use(store) in the entrypoint
 
-export default new Vuex.Store({
+export default createStore({
     state: {
         teams: [],
         currentTeamId: null,
         currentView: 'msgstream',
+        // When set, the files view embeds this specific file URL instead of the
+        // team folder. Set by file widgets (shared/favourites/recent) so files
+        // open inside TeamHub's iframe rather than a new browser tab. Cleared
+        // when the user navigates away from the files view.
+        filesEmbedFileUrl: null,
         currentUser: getCurrentUser(),
         messages: [],
         pinnedMessage: null,   // single pinned message for the current team, or null
@@ -114,7 +119,7 @@ export default new Vuex.Store({
             const map = {}
             teams.forEach(t => { map[t.id] = t.unread || 0 })
             state.teams.forEach(t => {
-                Vue.set(t, 'unread', map[t.id] ?? t.unread ?? 0)
+                t.unread = map[t.id] ?? t.unread ?? 0 // Vue 3: proxy reactivity — Vue.set not needed
             })
         },
         UPDATE_TEAM_IMAGE(state, { teamId, imageUrl }) {
@@ -125,7 +130,15 @@ export default new Vuex.Store({
             }
         },
         SET_CURRENT_TEAM(state, id) { state.currentTeamId = id },
-        SET_VIEW(state, view) { state.currentView = view },
+        SET_VIEW(state, view) {
+            // Leaving the files view discards any one-off file override so the
+            // files tab reverts to the team folder next time it is opened.
+            if (view !== 'files') {
+                state.filesEmbedFileUrl = null
+            }
+            state.currentView = view
+        },
+        SET_FILES_EMBED_FILE_URL(state, url) { state.filesEmbedFileUrl = url },
         SET_MESSAGES(state, messages) { state.messages = messages },
         SET_PINNED_MESSAGE(state, message) { state.pinnedMessage = message },
         SET_PIN_MIN_LEVEL(state, level) { state.pinMinLevel = level },
@@ -142,7 +155,7 @@ export default new Vuex.Store({
         UPDATE_MESSAGE(state, message) {
             // Update in the regular list
             const idx = state.messages.findIndex(m => m.id === message.id)
-            if (idx !== -1) Vue.set(state.messages, idx, { ...state.messages[idx], ...message })
+            if (idx !== -1) state.messages[idx] = { ...state.messages[idx], ...message } // Vue 3: direct index assignment is reactive
             // Also sync the pinned slot if it's the same message
             if (state.pinnedMessage && state.pinnedMessage.id === message.id) {
                 state.pinnedMessage = { ...state.pinnedMessage, ...message }
@@ -167,19 +180,19 @@ export default new Vuex.Store({
         // Mark a team as read in the sidebar list (optimistic update)
         MARK_TEAM_SEEN(state, teamId) {
             const team = state.teams.find(t => t.id === teamId)
-            if (team) Vue.set(team, 'unread', 0)
+            if (team) team.unread = 0 // Vue 3: proxy reactivity — Vue.set not needed
         },
         UPDATE_COMMENT(state, { messageId, comment }) {
             const list = state.comments[messageId]
             if (!list) return
             const idx = list.findIndex(c => c.id === comment.id)
-            if (idx !== -1) Vue.set(list, idx, { ...list[idx], ...comment })
+            if (idx !== -1) list[idx] = { ...list[idx], ...comment } // Vue 3: direct index assignment is reactive
         },
         SET_COMMENTS(state, { messageId, comments }) {
-            Vue.set(state.comments, messageId, comments)
+            state.comments[messageId] = comments // Vue 3: proxy reactivity — Vue.set not needed
         },
         ADD_COMMENT(state, { messageId, comment }) {
-            if (!state.comments[messageId]) Vue.set(state.comments, messageId, [])
+            if (!state.comments[messageId]) state.comments[messageId] = [] // Vue 3: proxy reactivity — Vue.set not needed
             state.comments[messageId].push(comment)
         },
         SET_MEMBERS(state, members) { state.members = members },
@@ -207,13 +220,25 @@ export default new Vuex.Store({
         SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
         SET_PRESENCE_CONFIG(state, config) { state.presenceConfig = config },
         SET_PRESENCE_MODULE_ENABLED(state, val) { state.presenceModuleEnabled = val },
-        SET_LOADING(state, { key, value }) { Vue.set(state.loading, key, value) },
+        SET_LOADING(state, { key, value }) { state.loading[key] = value }, // Vue 3: direct assignment is reactive
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },
         SET_INTRAVOX_PARENT_PATH(state, value) { state.intravoxParentPath = value },
     },
 
     actions: {
+        /**
+         * Open a file inside TeamHub's files-view iframe instead of a new tab.
+         * Sets the override URL first, then switches to the files view (order
+         * matters: the view's iframe reads filesEmbedFileUrl on render).
+         * `fileUrl` is the in-Files app URL the widget already builds (/f/{id}).
+         */
+        openFileInEmbed({ commit }, fileUrl) {
+            if (!fileUrl) { return }
+            commit('SET_FILES_EMBED_FILE_URL', fileUrl)
+            commit('SET_VIEW', 'files')
+        },
+
         async checkIntravox({ commit }) {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/apps/check'))

@@ -20,17 +20,18 @@
             Keyboard: Tab/Shift+Tab to focus a tab, then Left/Right arrow to reorder.
         -->
         <draggable
-            v-model="orderedTabs"
+            v-model="renderableTabs"
             :animation="150"
             ghost-class="teamhub-tab-ghost"
             drag-class="teamhub-tab-dragging"
             handle=".teamhub-tab-drag-handle"
             class="teamhub-tab-draggable"
+            item-key="key"
             @end="$emit('tab-reorder', orderedTabs)">
-            <template v-for="(tab, tabIndex) in orderedTabs">
+            <template #item="{ element: tab, index: tabIndex }">
                 <!-- Built-in: Talk -->
                 <button
-                    v-if="tab.key === 'talk' && resources.talk && resources.talk.token"
+                    v-if="tab.key === 'talk'"
                     id="tab-talk"
                     :key="'tab-talk'"
                     role="tab"
@@ -39,8 +40,8 @@
                     :aria-selected="currentView === 'talk' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="setView('talk')"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Chat :size="16" />
                     {{ t('teamhub', 'Chat') }}
@@ -48,7 +49,7 @@
 
                 <!-- Built-in: Files -->
                 <button
-                    v-else-if="tab.key === 'files' && resources.files && resources.files.path"
+                    v-else-if="tab.key === 'files'"
                     id="tab-files"
                     :key="'tab-files'"
                     role="tab"
@@ -57,8 +58,8 @@
                     :aria-selected="currentView === 'files' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="setView('files')"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Folder :size="16" />
                     {{ t('teamhub', 'Files') }}
@@ -66,7 +67,7 @@
 
                 <!-- Built-in: Calendar -->
                 <button
-                    v-else-if="tab.key === 'calendar' && resources.calendar && resources.calendar.length > 0"
+                    v-else-if="tab.key === 'calendar'"
                     id="tab-calendar"
                     :key="'tab-calendar'"
                     role="tab"
@@ -75,17 +76,17 @@
                     :aria-selected="currentView === 'calendar' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="onCalendarTabClick"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Calendar :size="16" />
                     {{ t('teamhub', 'Calendar') }}
-                    <span v-if="resources.calendar.length > 1" class="teamhub-tab-count" aria-label="t('teamhub', '{n} calendars', { n: resources.calendar.length })">{{ resources.calendar.length }}</span>
+                    <span v-if="resources.calendar.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} calendars', { n: resources.calendar.length })">{{ resources.calendar.length }}</span>
                 </button>
 
                 <!-- Built-in: Deck -->
                 <button
-                    v-else-if="tab.key === 'deck' && resources.deck && resources.deck.length > 0"
+                    v-else-if="tab.key === 'deck'"
                     id="tab-deck"
                     :key="'tab-deck'"
                     role="tab"
@@ -94,8 +95,8 @@
                     :aria-selected="currentView === 'deck' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="onDeckTabClick"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <CardText :size="16" />
                     {{ t('teamhub', 'Deck') }}
@@ -113,8 +114,8 @@
                     :aria-selected="currentView === 'presence' ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="setView('presence')"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <OfficeBuildingIcon :size="16" />
                     {{ t('teamhub', 'Presence') }}
@@ -131,8 +132,8 @@
                     :aria-selected="currentView === tab.key ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="setView(tab.key)"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <img
                         v-if="tab.appId"
@@ -155,8 +156,8 @@
                     :aria-selected="currentView === tab.key ? 'true' : 'false'"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @click="setView(tab.key)"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <Web :size="14" />
                     {{ tab.label }}
@@ -172,8 +173,8 @@
                     rel="noopener noreferrer"
                     class="teamhub-tab teamhub-tab--link"
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
-                    @keydown.left.prevent="moveTabLeft(tabIndex)"
-                    @keydown.right.prevent="moveTabRight(tabIndex)">
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
                     <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
                     <OpenInNew :size="14" />
                     {{ tab.label }}
@@ -184,7 +185,7 @@
         <NcButton
             v-if="canManageLinks"
             class="teamhub-tab-add"
-            type="tertiary"
+            variant="tertiary"
             :aria-label="t('teamhub', 'Manage links')"
             @click="$emit('manage-links')">
             <template #icon><Plus :size="18" /></template>
@@ -197,7 +198,7 @@
         <NcButton
             v-if="currentView === 'msgstream' && !isMobile && !isTablet"
             class="teamhub-edit-layout-btn"
-            :type="editMode ? 'primary' : 'tertiary'"
+            :variant="editMode ? 'primary' : 'tertiary'"
             :aria-label="editMode ? t('teamhub', 'Done editing layout') : t('teamhub', 'Edit layout')"
             @click="$emit('toggle-edit-mode')">
             <template #icon><ViewDashboardEdit :size="18" /></template>
@@ -236,7 +237,7 @@ export default {
     },
 
     props: {
-        value: { type: Array, required: true },
+        modelValue: { type: Array, required: true },
         editMode: { type: Boolean, default: false },
         // True when the viewport ≤ 768px or tablet portrait — hides Edit layout button.
         isMobile: { type: Boolean, default: false },
@@ -247,21 +248,85 @@ export default {
         canManageLinks: { type: Boolean, default: false },
     },
 
-    emits: ['input', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker'],
+    emits: ['update:modelValue', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker'],
 
     computed: {
         ...mapState(['currentView', 'resources']),
 
         orderedTabs: {
-            get() { return this.value },
-            set(val) { this.$emit('input', val) },
+            get() { return this.modelValue },
+            set(val) { this.$emit('update:modelValue', val) },
+        },
+
+        /**
+         * The subset of orderedTabs that can actually render, in order.
+         * vuedraggable v4's #item slot must produce exactly one node per
+         * item, so resource-gated tabs (Talk without a token, Files without
+         * a path, empty Calendar/Deck) are filtered out here rather than via
+         * v-if inside the slot. The getter applies the same conditions the
+         * template chain used in Vue 2; the setter maps a drag-reordered
+         * renderable list back onto the full orderedTabs (preserving the
+         * relative position of any hidden tabs).
+         */
+        renderableTabs: {
+            get() {
+                return this.modelValue.filter(tab => this.isTabRenderable(tab))
+            },
+            set(reordered) {
+                // Rebuild the full list: keep non-renderable tabs in place,
+                // apply the new order to the renderable ones.
+                const renderableKeys = new Set(reordered.map(t => t.key))
+                const result = []
+                let ri = 0
+                for (const tab of this.modelValue) {
+                    if (renderableKeys.has(tab.key)) {
+                        result.push(reordered[ri++])
+                    } else {
+                        result.push(tab)
+                    }
+                }
+                this.$emit('update:modelValue', result)
+            },
         },
     },
 
     methods: {
         t,
 
+        /**
+         * Whether a tab can render, mirroring the resource conditions the
+         * Vue 2 template chain checked inline. Built-in tabs are gated on
+         * their backing resource; presence, external app tabs and link tabs
+         * always render.
+         * @param {object} tab - a tab descriptor from orderedTabs
+         * @returns {boolean}
+         */
+        isTabRenderable(tab) {
+            switch (tab.key) {
+            case 'talk':
+                return !!(this.resources.talk && this.resources.talk.token)
+            case 'files':
+                return !!(this.resources.files && this.resources.files.path)
+            case 'calendar':
+                return !!(this.resources.calendar && this.resources.calendar.length > 0)
+            case 'deck':
+                return !!(this.resources.deck && this.resources.deck.length > 0)
+            case 'presence':
+                return true
+            default:
+                // ext-* and link-* tabs always render
+                return tab.key.startsWith('ext-') || tab.key.startsWith('link-')
+            }
+        },
+
         setView(view) {
+            // Clicking the Files tab always returns to the team folder, even if
+            // a file widget had embedded a specific file. (SET_VIEW only clears
+            // the override when switching to a *different* view, so clicking the
+            // already-active Files tab would otherwise keep showing the file.)
+            if (view === 'files') {
+                this.$store.commit('SET_FILES_EMBED_FILE_URL', null)
+            }
             this.$store.commit('SET_VIEW', view)
         },
 
@@ -285,34 +350,26 @@ export default {
          * Move focused tab one position left.
          * Triggered by Left arrow keydown (WCAG 2.5.7).
          */
-        moveTabLeft(index) {
-            if (index === 0) return
-            const movedKey = this.orderedTabs[index].key
-            const tabs = [...this.orderedTabs]
-            ;[tabs[index - 1], tabs[index]] = [tabs[index], tabs[index - 1]]
-            this.orderedTabs = tabs
-            this.$emit('tab-reorder', tabs)
-            // Restore focus to the moved tab after Vue re-renders the list
-            this.$nextTick(() => {
-                const el = document.getElementById('tab-' + movedKey)
-                if (el) el.focus()
-            })
-        },
-
         /**
-         * Move focused tab one position right.
-         * Triggered by Right arrow keydown (WCAG 2.5.7).
+         * Move a tab one position left (dir=-1) or right (dir=+1) within the
+         * visible (renderable) tab order. WCAG 2.5.7 keyboard alternative to
+         * drag reordering. Operates by key on renderableTabs so the index
+         * always matches what the user sees, then writes back via the
+         * renderableTabs setter (which maps onto the full orderedTabs).
+         * @param {object} tab - the focused tab descriptor
+         * @param {number} dir - -1 for left, +1 for right
          */
-        moveTabRight(index) {
-            if (index >= this.orderedTabs.length - 1) return
-            const movedKey = this.orderedTabs[index].key
-            const tabs = [...this.orderedTabs]
-            ;[tabs[index], tabs[index + 1]] = [tabs[index + 1], tabs[index]]
-            this.orderedTabs = tabs
-            this.$emit('tab-reorder', tabs)
+        moveTab(tab, dir) {
+            const list = [...this.renderableTabs]
+            const index = list.findIndex(t => t.key === tab.key)
+            const target = index + dir
+            if (index === -1 || target < 0 || target >= list.length) return
+            ;[list[index], list[target]] = [list[target], list[index]]
+            this.renderableTabs = list
+            this.$emit('tab-reorder', this.orderedTabs)
             // Restore focus to the moved tab after Vue re-renders the list
             this.$nextTick(() => {
-                const el = document.getElementById('tab-' + movedKey)
+                const el = document.getElementById('tab-' + tab.key)
                 if (el) el.focus()
             })
         },
@@ -327,7 +384,7 @@ export default {
                 img.src = img.src.replace('.svg', '.png')
             } else {
                 img.style.display = 'none'
-                this.$set(tab, 'appId', null)
+                tab.appId = null
             }
         },
     },

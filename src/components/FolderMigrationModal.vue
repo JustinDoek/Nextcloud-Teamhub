@@ -25,13 +25,13 @@
 
             <div class="fmm-actions">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'I will move the files manually')"
                     @click="chooseManual">
                     {{ t('teamhub', 'Migrate manually') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :aria-label="t('teamhub', 'Let TeamHub move the files automatically')"
                     @click="chooseAuto">
                     {{ t('teamhub', 'Migrate automatically') }}
@@ -41,14 +41,14 @@
 
         <!-- ── Screen 2: Auto preflight + confirmation ── -->
         <div v-else-if="screen === 'auto-preflight'" class="fmm-screen">
-            <div v-if="loadingPreflight" class="fmm-loading">
+            <div v-if="loadingPreflight" class="fmm-loading" role="status">
                 <NcLoadingIcon :size="32" />
                 <span>{{ t('teamhub', 'Checking available space…') }}</span>
             </div>
             <template v-else>
                 <h3 class="fmm-heading">{{ t('teamhub', 'Automatic migration') }}</h3>
 
-                <table class="fmm-space-table" aria-label="t('teamhub', 'Space check')">
+                <table class="fmm-space-table" :aria-label="t('teamhub', 'Space check')">
                     <tbody>
                         <tr>
                             <th scope="row">{{ t('teamhub', 'Files to move') }}</th>
@@ -73,19 +73,19 @@
                 </p>
 
                 <div class="fmm-actions">
-                    <NcButton type="tertiary" @click="screen = 'intro'">
+                    <NcButton variant="tertiary" @click="screen = 'intro'">
                         {{ t('teamhub', 'Back') }}
                     </NcButton>
                     <NcButton
                         v-if="preflight.canAutoMigrate"
-                        type="primary"
+                        variant="primary"
                         :aria-label="t('teamhub', 'Start automatic file migration')"
                         @click="runAutoMigrate">
                         {{ t('teamhub', 'Start migration') }}
                     </NcButton>
                     <NcButton
                         v-else
-                        type="secondary"
+                        variant="secondary"
                         @click="chooseManual">
                         {{ t('teamhub', 'Migrate manually instead') }}
                     </NcButton>
@@ -94,7 +94,7 @@
         </div>
 
         <!-- ── Screen 3: Migration in progress ── -->
-        <div v-else-if="screen === 'migrating'" class="fmm-screen fmm-screen--centered">
+        <div v-else-if="screen === 'migrating'" class="fmm-screen fmm-screen--centered" role="status">
             <NcLoadingIcon :size="48" />
             <p class="fmm-body fmm-body--loading">
                 {{ t('teamhub', 'Migrating files… This may take a moment. Please do not close this window.') }}
@@ -112,7 +112,7 @@
                 {{ t('teamhub', 'The group folder is now the team\'s primary folder. Please move your files from the shared folder into the group folder manually.') }}
             </p>
             <div class="fmm-actions fmm-actions--centered">
-                <NcButton type="primary" @click="$emit('done')">
+                <NcButton variant="primary" @click="$emit('done')">
                     {{ t('teamhub', 'Done') }}
                 </NcButton>
             </div>
@@ -131,7 +131,7 @@
                 {{ t('teamhub', 'The group folder is now connected as the team\'s primary folder. The shared folder is no longer connected to the team, but the owner can still access it and move the files manually.') }}
             </p>
             <div class="fmm-actions fmm-actions--centered">
-                <NcButton type="primary" @click="$emit('done')">
+                <NcButton variant="primary" @click="$emit('done')">
                     {{ t('teamhub', 'OK') }}
                 </NcButton>
             </div>
@@ -144,6 +144,7 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
+import logger from '../logger.js'
 import { NcButton, NcDialog, NcLoadingIcon } from '@nextcloud/vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import CheckCircleIcon from 'vue-material-design-icons/CheckCircle.vue'
@@ -190,17 +191,13 @@ export default {
             this.loadingPreflight = true
             this.preflight        = null
             try {
-                console.log('[TeamHub][FolderMigrationModal] fetching preflight', {
-                    teamId: this.teamId, shared: this.sharedResourceId, gf: this.groupResourceId,
-                })
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/resources/files/migration-preflight`),
                     { params: { sharedResourceId: this.sharedResourceId, groupResourceId: this.groupResourceId } }
                 )
                 this.preflight = data
-                console.log('[TeamHub][FolderMigrationModal] preflight result', data)
             } catch (e) {
-                console.error('[TeamHub][FolderMigrationModal] preflight failed', e)
+                logger.error('Folder migration preflight failed', { error: e })
                 // Fall back to manual if preflight fails
                 this.chooseManual()
             } finally {
@@ -221,7 +218,6 @@ export default {
             this.screen    = 'migrating'
 
             try {
-                console.log('[TeamHub][FolderMigrationModal] migrate start', { mode })
                 const { data } = await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/resources/files/migrate`),
                     {
@@ -230,7 +226,6 @@ export default {
                         groupResourceId:  this.groupResourceId,
                     }
                 )
-                console.log('[TeamHub][FolderMigrationModal] migrate response', data)
 
                 if (data.success) {
                     this.resultMode = mode
@@ -241,7 +236,7 @@ export default {
                     this.screen         = 'partial-failure'
                 }
             } catch (e) {
-                console.error('[TeamHub][FolderMigrationModal] migrate request failed', e)
+                logger.error('Folder migration request failed', { error: e })
                 this.migrationError = e?.response?.data?.error || t('teamhub', 'Request failed')
                 this.screen         = 'partial-failure'
             } finally {

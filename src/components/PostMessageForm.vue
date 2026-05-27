@@ -1,6 +1,5 @@
 <template>
     <div class="post-form">
-        <template>
         <!-- Message type selector -->
         <div class="post-form__type">
             <label class="post-form__type-option" :class="{ active: messageType === 'normal' }">
@@ -44,7 +43,7 @@
                  manually before inserting. -->
             <div class="post-form__md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Bold (Ctrl+B)')"
                     :aria-label="t('teamhub', 'Bold')"
                     @mousedown.prevent
@@ -52,7 +51,7 @@
                     <template #icon><FormatBold :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Italic (Ctrl+I)')"
                     :aria-label="t('teamhub', 'Italic')"
                     @mousedown.prevent
@@ -60,7 +59,7 @@
                     <template #icon><FormatItalic :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Inline code')"
                     :aria-label="t('teamhub', 'Inline code')"
                     @mousedown.prevent
@@ -68,7 +67,7 @@
                     <template #icon><CodeTags :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Code block')"
                     :aria-label="t('teamhub', 'Code block')"
                     @mousedown.prevent
@@ -76,7 +75,7 @@
                     <template #icon><CodeBraces :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Heading')"
                     :aria-label="t('teamhub', 'Heading')"
                     @mousedown.prevent
@@ -84,7 +83,7 @@
                     <template #icon><FormatHeader2 :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Bullet list')"
                     :aria-label="t('teamhub', 'Bullet list')"
                     @mousedown.prevent
@@ -92,7 +91,7 @@
                     <template #icon><FormatListBulleted :size="16" /></template>
                 </NcButton>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Link')"
                     :aria-label="t('teamhub', 'Insert link')"
                     @mousedown.prevent
@@ -105,7 +104,7 @@
             <div class="post-form__toolbar">
                 <!-- Smart Picker button -->
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Insert link from Smart Picker')"
                     :title="t('teamhub', 'Smart Picker — type / in the editor, or click here')"
                     @click="openSmartPicker">
@@ -114,7 +113,7 @@
 
                 <!-- Attach file -->
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :disabled="uploading"
                     :aria-label="t('teamhub', 'Attach a file')"
                     :title="t('teamhub', 'Attach file — uploads to your Files and inserts a link')"
@@ -146,7 +145,7 @@
                 aria-atomic="false">
                 <div
                     v-for="(att, i) in attachments"
-                    :key="i"
+                    :key="att.id"
                     class="post-form__attachment"
                     :class="{ 'post-form__attachment--error': att.error }">
                     <Paperclip :size="14" class="post-form__attachment-icon" />
@@ -163,7 +162,7 @@
                         <span :aria-label="t('teamhub', 'Upload complete')">✓</span>
                     </span>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :aria-label="t('teamhub', 'Remove attachment')"
                         @click="removeAttachment(i)">
                         <template #icon><Close :size="14" /></template>
@@ -175,14 +174,14 @@
         <!-- Poll options -->
         <div v-if="messageType === 'poll'" class="post-form__poll-options">
             <label class="post-form__label">{{ t('teamhub', 'Poll Options') }}</label>
-            <div v-for="(option, index) in pollOptions" :key="index" class="poll-option-row">
+            <div v-for="(option, index) in pollOptions" :key="option.id" class="poll-option-row">
                 <NcTextField
-                    v-model="pollOptions[index]"
+                    v-model="option.text"
                     :label="t('teamhub', 'Option {n}', { n: index + 1 })"
                     :placeholder="t('teamhub', 'Enter option text')" />
                 <NcButton
                     v-if="pollOptions.length > 2"
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Remove option')"
                     @click="removePollOption(index)">
                     <template #icon><Close :size="20" /></template>
@@ -190,7 +189,7 @@
             </div>
             <NcButton
                 v-if="pollOptions.length < 10"
-                type="tertiary"
+                variant="tertiary"
                 @click="addPollOption">
                 <template #icon><Plus :size="20" /></template>
                 {{ t('teamhub', 'Add option') }}
@@ -200,7 +199,7 @@
         <!-- Actions -->
         <div class="post-form__actions">
             <NcButton
-                type="primary"
+                variant="primary"
                 :disabled="!canSubmit || submitting || uploading"
                 @click="submit">
                 <template #icon>
@@ -209,11 +208,10 @@
                 </template>
                 {{ submitButtonText }}
             </NcButton>
-            <NcButton type="tertiary" @click="$emit('cancel')">
+            <NcButton variant="tertiary" @click="$emit('cancel')">
                 {{ t('teamhub', 'Cancel') }}
             </NcButton>
         </div>
-        </template>
     </div>
 </template>
 
@@ -264,10 +262,19 @@ export default {
             subject: '',
             body: '',
             messageType: 'normal',
-            pollOptions: ['', ''],
+            // Poll options carry a stable `id` so the v-for can key on identity
+            // rather than array index (perf pass V6). Index-as-key on inputs
+            // bound with v-model causes Vue to reuse the wrong DOM node when an
+            // option is removed from the middle of the list. `pollOptionSeq` is
+            // a monotonic counter that hands out those ids.
+            pollOptionSeq: 2,
+            pollOptions: [{ id: 0, text: '' }, { id: 1, text: '' }],
             submitting: false,
             uploading: false,
-            // Each entry: { name, uploading, error, shareUrl }
+            // Monotonic counter handing out stable ids for attachment rows so
+            // the v-for keys on identity, not array index (perf pass V6).
+            attachmentSeq: 0,
+            // Each entry: { id, name, uploading, error, shareUrl }
             attachments: [],
         }
     },
@@ -321,7 +328,7 @@ export default {
         canSubmit() {
             if (!this.subject.trim()) return false
             if (this.messageType === 'poll') {
-                return this.pollOptions.filter(o => o.trim()).length >= 2
+                return this.pollOptions.filter(o => o.text.trim()).length >= 2
             }
             if (this.messageType === 'normal' && !this.body.trim() && this.attachments.filter(a => a.shareUrl).length === 0) return false
             return true
@@ -519,7 +526,7 @@ export default {
             try {
                 // getLinkWithPicker opens the NC Smart Picker modal and resolves with
                 // the picked URL/text. null = show provider selection first.
-                const { getLinkWithPicker } = await import('@nextcloud/vue/dist/Components/NcRichText.js')
+                const { getLinkWithPicker } = await import('@nextcloud/vue/components/NcRichText') // v9: /dist/ path removed
                 const result = await getLinkWithPicker(null)
                 if (result) {
                     // Append the picked link to the body
@@ -554,9 +561,21 @@ export default {
                 return
             }
 
-            const att = { name: file.name, uploading: true, error: null, filePath: null }
+            const att = { id: this.attachmentSeq++, name: file.name, uploading: true, error: null, filePath: null }
             this.attachments.push(att)
-            const idx = this.attachments.length - 1
+            // Resolve the row by identity at write time, never by a captured index.
+            // Concurrent uploads (Promise.all) and removeAttachment() splicing the
+            // array mid-upload both invalidate any index captured before an await,
+            // which previously caused the upload result to land on the wrong row.
+            const writeAttachment = (patch) => {
+                const at = this.attachments.findIndex(a => a.id === att.id)
+                // Row may have been removed by the user while the upload was in
+                // flight — if so, silently drop the result.
+                if (at === -1) {
+                    return
+                }
+                this.attachments[at] = { ...this.attachments[at], ...patch }
+            }
 
             try {
                 // Determine upload folder:
@@ -637,11 +656,11 @@ export default {
                 const linkText = `[📎 ${fileName}](${fileViewUrl})`
                 this.body = this.body + (this.body && !this.body.endsWith('\n') ? '\n' : '') + linkText
 
-                this.$set(this.attachments, idx, { ...att, uploading: false, filePath: ncFilePath })
+                writeAttachment({ uploading: false, filePath: ncFilePath })
 
             } catch (e) {
                 const msg = e.response?.data?.ocs?.meta?.message || e.response?.statusText || e.message || 'Upload failed'
-                this.$set(this.attachments, idx, { ...att, uploading: false, error: msg })
+                writeAttachment({ uploading: false, error: msg })
                 showError(t('teamhub', 'Failed to upload {name}: {error}', { name: file.name, error: msg }))
             }
         },
@@ -657,7 +676,7 @@ export default {
         },
 
         // ── Poll ────────────────────────────────────────────────────────────
-        addPollOption() { this.pollOptions.push('') },
+        addPollOption() { this.pollOptions.push({ id: this.pollOptionSeq++, text: '' }) },
         removePollOption(index) { this.pollOptions.splice(index, 1) },
 
         // ── Submit ──────────────────────────────────────────────────────────
@@ -673,7 +692,7 @@ export default {
                     pollOptions: null,
                 }
                 if (this.messageType === 'poll') {
-                    messageData.pollOptions = this.pollOptions.map(o => o.trim()).filter(Boolean)
+                    messageData.pollOptions = this.pollOptions.map(o => o.text.trim()).filter(Boolean)
                 }
 
                 await this.postMessage(messageData)
@@ -689,7 +708,7 @@ export default {
                 this.subject = ''
                 this.body = ''
                 this.messageType = 'normal'
-                this.pollOptions = ['', '']
+                this.pollOptions = [{ id: this.pollOptionSeq++, text: '' }, { id: this.pollOptionSeq++, text: '' }]
                 this.attachments = []
             } catch (e) {
                 const status = e?.response?.status

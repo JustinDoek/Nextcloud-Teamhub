@@ -22,8 +22,7 @@ class PageController extends Controller {
     #[NoCSRFRequired]
     public function index(): TemplateResponse {
         Util::addScript('teamhub', 'teamhub');
-        Util::addStyle('teamhub', 'main');
-        
+
         return new TemplateResponse('teamhub', 'main');
     }
 }

@@ -1,6 +1,6 @@
 <template>
     <NcContent app-name="teamhub">
-        <NcAppNavigation :open.sync="navOpen">
+        <NcAppNavigation :aria-label="t('teamhub', 'Teams navigation')">
             <template #list>
                 <!-- Spacer to clear the show/hide sidebar toggle button -->
                 <div style="height: 44px; flex-shrink: 0;" />
@@ -102,6 +102,7 @@
 <script>
 import { mapState, mapActions, mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { emit } from '@nextcloud/event-bus'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble } from '@nextcloud/vue'
@@ -131,7 +132,6 @@ export default {
             // auto-close on selection: phone portrait (≤768px) OR tablet
             // portrait (≤1024px and orientation:portrait).
             isMobileSidebar: false,
-            navOpen: true, // NcAppNavigation open state — set to false to close on mobile
             _mobileSidebarMql: null,
             _mobileSidebarMqlHandler: null,
         }
@@ -222,11 +222,12 @@ export default {
 
         /**
          * Close NC's sidebar when it is in overlay mode (phone / tablet portrait).
-         * Uses the official NcAppNavigation :open.sync prop — no DOM touching.
+         * v9 NcAppNavigation has no `open` prop — its open state is internal and
+         * controlled via the `toggle-navigation` event bus event.
          */
         closeSidebarIfOverlay() {
             if (this.isMobileSidebar) {
-                this.navOpen = false
+                emit('toggle-navigation', { open: false })
             }
         },
 

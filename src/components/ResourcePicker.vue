@@ -41,7 +41,7 @@ import axios from '@nextcloud/axios'
  * /api/v1/pickers/{app}. For files, the endpoint returns group folders
  * (type=group_folder) first, then shared folders (type=shared_folder).
  *
- * Emits 'input' (v-model) with the selected resource ID (string or int).
+ * Emits 'update:modelValue' (v-model) with the selected resource ID (string or int).
  */
 export default {
     name: 'ResourcePicker',
@@ -56,7 +56,7 @@ export default {
             type: String,
             default: '',
         },
-        value: {
+        modelValue: {
             type: [Number, String, null],
             default: null,
         },
@@ -65,13 +65,13 @@ export default {
             default: false,
         },
     },
-    emits: ['input', 'selected-name'],
+    emits: ['update:modelValue', 'selected-name'],
     data() {
         return {
             resources: [],
             loading: false,
             loadError: '',
-            selectedId: this.value,
+            selectedId: this.modelValue,
         }
     },
     computed: {
@@ -95,7 +95,7 @@ export default {
         },
     },
     watch: {
-        value(newVal) {
+        modelValue(newVal) {
             this.selectedId = newVal
         },
     },
@@ -140,7 +140,7 @@ export default {
 
         onSelectChange() {
             const val = this.selectedId
-            this.$emit('input', val)
+            this.$emit('update:modelValue', val)
             const found = this.resources.find(r => String(r.id) === String(val))
             this.$emit('selected-name', found ? (found.name || '') : '')
         },

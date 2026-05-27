@@ -30,7 +30,7 @@
                             <!-- Mark as solved button (only visible to question author) -->
                             <NcButton
                                 v-if="messageType === 'question' && isAuthor && !questionSolved"
-                                type="tertiary"
+                                variant="tertiary"
                                 :aria-label="t('teamhub', 'Mark as answer')"
                                 @click="$emit('mark-solved', c.id)">
                                 <template #icon><CheckCircle :size="14" /></template>
@@ -38,7 +38,7 @@
                             <!-- Edit button (own comments only) -->
                             <NcButton
                                 v-if="c.author_id === currentUser && editingCommentId !== c.id"
-                                type="tertiary"
+                                variant="tertiary"
                                 :aria-label="t('teamhub', 'Edit comment')"
                                 @click="startEditComment(c)">
                                 <template #icon><Pencil :size="14" /></template>
@@ -46,7 +46,7 @@
                             <!-- Delete button — author or team admin, hidden during edit -->
                             <NcButton
                                 v-if="canDeleteComment(c) && editingCommentId !== c.id"
-                                type="tertiary"
+                                variant="tertiary"
                                 :aria-label="t('teamhub', 'Delete comment')"
                                 @click="askDeleteComment(c)">
                                 <template #icon><Delete :size="14" /></template>
@@ -61,16 +61,16 @@
                                 rows="3"
                                 @keydown.ctrl.enter="saveCommentEdit(c)" />
                             <div class="comment__edit-actions">
-                                <NcButton type="primary" :disabled="savingComment" @click="saveCommentEdit(c)">
+                                <NcButton variant="primary" :disabled="savingComment" @click="saveCommentEdit(c)">
                                     {{ t('teamhub', 'Save') }}
                                 </NcButton>
-                                <NcButton type="tertiary" @click="cancelCommentEdit">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                <NcButton variant="tertiary" @click="cancelCommentEdit">{{ t('teamhub', 'Cancel') }}</NcButton>
                             </div>
                         </div>
 
                         <!-- View mode -->
                         <!-- eslint-disable-next-line vue/no-v-html -->
-                        <div v-else class="comment__body" v-html="renderMarkdown(c.comment)" />
+                        <div v-else class="comment__body" v-html="renderedComments[c.id]" />
                     </div>
                 </div>
             </div>
@@ -78,7 +78,7 @@
             <!-- Unmark solved button (only for question author when solved) -->
             <div v-if="messageType === 'question' && isAuthor && questionSolved" class="comments-section__unmark">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     @click="$emit('unmark-solved')">
                     <template #icon><Close :size="16" /></template>
                     {{ t('teamhub', 'Unmark as solved') }}
@@ -99,7 +99,7 @@
                     <!-- Markdown formatting toolbar for comments -->
                     <div class="comments-section__md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Bold')"
                             :aria-label="t('teamhub', 'Bold')"
                             :disabled="questionSolved"
@@ -108,7 +108,7 @@
                             <template #icon><FormatBold :size="14" /></template>
                         </NcButton>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Italic')"
                             :aria-label="t('teamhub', 'Italic')"
                             :disabled="questionSolved"
@@ -117,7 +117,7 @@
                             <template #icon><FormatItalic :size="14" /></template>
                         </NcButton>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Inline code')"
                             :aria-label="t('teamhub', 'Inline code')"
                             :disabled="questionSolved"
@@ -126,7 +126,7 @@
                             <template #icon><CodeTags :size="14" /></template>
                         </NcButton>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Code block')"
                             :aria-label="t('teamhub', 'Code block')"
                             :disabled="questionSolved"
@@ -135,7 +135,7 @@
                             <template #icon><CodeBraces :size="14" /></template>
                         </NcButton>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Heading')"
                             :aria-label="t('teamhub', 'Heading')"
                             :disabled="questionSolved"
@@ -144,7 +144,7 @@
                             <template #icon><FormatHeader2 :size="14" /></template>
                         </NcButton>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Bullet list')"
                             :aria-label="t('teamhub', 'Bullet list')"
                             :disabled="questionSolved"
@@ -153,7 +153,7 @@
                             <template #icon><FormatListBulleted :size="14" /></template>
                         </NcButton>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :title="t('teamhub', 'Link')"
                             :aria-label="t('teamhub', 'Insert link')"
                             :disabled="questionSolved"
@@ -163,7 +163,7 @@
                         </NcButton>
                     </div>
                     <NcButton
-                        type="primary"
+                        variant="primary"
                         :disabled="!newComment.trim() || questionSolved"
                         @click="submit">
                         {{ t('teamhub', 'Send') }}
@@ -183,10 +183,10 @@
             size="small"
             @closing="cancelDeleteComment">
             <template #actions>
-                <NcButton type="tertiary" :disabled="deletingComment" @click="cancelDeleteComment">
+                <NcButton variant="tertiary" :disabled="deletingComment" @click="cancelDeleteComment">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="error" :disabled="deletingComment" @click="executeDeleteComment">
+                <NcButton variant="error" :disabled="deletingComment" @click="executeDeleteComment">
                     <template v-if="deletingComment" #icon>
                         <NcLoadingIcon :size="18" />
                     </template>
@@ -310,6 +310,23 @@ export default {
     computed: {
         ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin']),
         comments() { return this.commentsForMessage(this.messageId) },
+        /**
+         * Memoized map of comment id → sanitized HTML body (perf pass V6).
+         *
+         * Previously the template called `renderMarkdown(c.comment)` inside the
+         * v-for, so the full regex pipeline + DOMPurify ran for every comment on
+         * every re-render of the section (e.g. while typing a new comment).
+         * Computing the map here means each body is rendered once and only
+         * re-rendered when the `comments` list itself changes. Mirrors the
+         * `renderedMessage` computed in MessageCard.vue.
+         */
+        renderedComments() {
+            const map = {}
+            for (const c of this.comments) {
+                map[c.id] = renderMarkdown(c.comment)
+            }
+            return map
+        },
         currentUser() { return getCurrentUser()?.uid || '' },
         commentPlaceholder() {
             if (this.questionSolved) {
@@ -337,7 +354,6 @@ export default {
     },
     methods: {
         t,
-        renderMarkdown,
         formatDate(ts) { return new Date(ts * 1000).toLocaleString() },
         startEditComment(comment) {
             this.editingCommentId = comment.id

@@ -4,9 +4,11 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Exception\PresenceConflictException;
+use OCA\TeamHub\Service\PresenceLocationService;
 use OCA\TeamHub\Service\PresenceMaterialisationService;
 use OCA\TeamHub\Service\PresenceSlotService;
 use OCA\TeamHub\Service\PresenceTemplateService;
+use OCA\TeamHub\Service\PresenceTypeService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Http;
@@ -38,6 +40,8 @@ class PresenceUserController extends Controller {
         private PresenceTemplateService        $templateService,
         private PresenceSlotService            $slotService,
         private PresenceMaterialisationService $materialisationService,
+        private PresenceTypeService            $typeService,
+        private PresenceLocationService        $locationService,
         private LoggerInterface                $logger,
     ) {
         parent::__construct($appName, $request);
@@ -60,6 +64,45 @@ class PresenceUserController extends Controller {
             return new JSONResponse($this->templateService->getTemplate($userId));
         } catch (\Throwable $e) {
             return $this->mapError($e, 'getTemplate');
+        }
+    }
+
+    /**
+     * GET /api/v1/presence/types
+     * Read-only list of presence types for the personal presence picker.
+     *
+     * The same data is exposed by the admin endpoint, but that one is gated by
+     * #[AuthorizedAdminSetting] — regular users must not call it. The personal
+     * "My Presence" page needs the type vocabulary to render the picker, so this
+     * non-admin read-only mirror exists. No mutation routes are exposed here;
+     * creating/editing/deleting types stays admin-only.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTypes(): JSONResponse {
+        try {
+            $this->requireUserId();
+            return new JSONResponse($this->typeService->getTypes());
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'getTypes');
+        }
+    }
+
+    /**
+     * GET /api/v1/presence/locations
+     * Read-only location tree (buildings → floors → rooms) for the personal
+     * presence picker. Non-admin mirror of the admin location endpoint, for the
+     * same reason as getTypes(). Read-only; building/floor/room management stays
+     * admin-only.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getLocations(): JSONResponse {
+        try {
+            $this->requireUserId();
+            return new JSONResponse($this->locationService->getBuildings());
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'getLocations');
         }
     }
 

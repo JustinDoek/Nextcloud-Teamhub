@@ -11,14 +11,14 @@
             <!-- Week navigation -->
             <div class="delete-events-modal__week-nav" role="group" :aria-label="t('teamhub', 'Select week')">
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Previous week')"
                     @click="shiftWeek(-1)">
                     <template #icon><ChevronLeft :size="20" /></template>
                 </NcButton>
                 <span class="delete-events-modal__week-label">{{ weekLabel }}</span>
                 <NcButton
-                    type="tertiary"
+                    variant="tertiary"
                     :aria-label="t('teamhub', 'Next week')"
                     @click="shiftWeek(1)">
                     <template #icon><ChevronRight :size="20" /></template>
@@ -88,7 +88,7 @@
 
             <div class="delete-events-modal__actions">
                 <NcButton
-                    type="error"
+                    variant="error"
                     :disabled="checkedEvents.length === 0 || deleting"
                     @click="confirmDelete">
                     <template #icon>
@@ -100,7 +100,7 @@
                         : n('teamhub', 'Delete {n} event', 'Delete {n} events', checkedEvents.length, { n: checkedEvents.length || 0 })
                     }}
                 </NcButton>
-                <NcButton type="tertiary" @click="$emit('close')">
+                <NcButton variant="tertiary" @click="$emit('close')">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
             </div>

@@ -37,7 +37,8 @@
                             target="_blank"
                             rel="noopener noreferrer"
                             class="th-widget__title th-widget__title--link"
-                            :title="file.name">
+                            :title="file.name"
+                            @click="onOpen($event, file)">
                             {{ file.name }}
                         </a>
                         <StarIcon :size="13" class="th-widget__star-badge" />
@@ -126,6 +127,18 @@ export default {
          */
         fileUrl(file) {
             return generateUrl(`/f/${file.id}`)
+        },
+
+        /**
+         * Open the file inside TeamHub's files-view iframe instead of a new tab.
+         * Modified clicks (ctrl/cmd/shift/middle) keep the native new-tab open.
+         */
+        onOpen(event, file) {
+            if (event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1) {
+                return
+            }
+            event.preventDefault()
+            this.$store.dispatch('openFileInEmbed', this.fileUrl(file))
         },
 
         /**

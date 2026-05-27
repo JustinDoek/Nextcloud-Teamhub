@@ -29,7 +29,6 @@
                 :description="t('teamhub', 'This text is shown at the top of the Create new team dialog. Leave empty to show no description.')">
                 <NcTextArea
                     v-model="form.wizardDescription"
-                    :label="t('teamhub', 'Wizard introduction text')"
                     :placeholder="t('teamhub', 'e.g. Fill in the details below to create a new team.')"
                     :rows="3" />
             </NcSettingsSection>
@@ -148,7 +147,7 @@
                 :description="t('teamhub', 'Choose which types of accounts team admins can invite to a team.')">
                 <div class="admin-checks">
                     <NcCheckboxRadioSwitch
-                        :checked="true"
+                        :model-value="true"
                         :disabled="true"
                         type="checkbox">
                         {{ t('teamhub', 'Local users') }}
@@ -193,10 +192,10 @@
                 :name="t('teamhub', 'Presence module')"
                 :description="t('teamhub', 'When enabled, team admins can activate a Presence tab for their team and members can set their weekly schedule. When disabled, all presence UI is hidden across the app.')">
                 <NcCheckboxRadioSwitch
-                    :checked="form.presenceModuleEnabled"
+                    :model-value="form.presenceModuleEnabled"
                     type="switch"
                     :aria-label="t('teamhub', 'Enable presence module for all teams')"
-                    @update:checked="form.presenceModuleEnabled = $event; if (!$event && activeTab === 'presence') { activeTab = 'integrations' } save()">
+                    @update:model-value="form.presenceModuleEnabled = $event; if (!$event && activeTab === 'presence') { activeTab = 'integrations' } save()">
                     {{ form.presenceModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
                 </NcCheckboxRadioSwitch>
             </NcSettingsSection>
@@ -294,9 +293,9 @@
                 </div>
                 <template v-else>
                     <NcCheckboxRadioSwitch
-                        :checked="telemetry.enabled"
+                        :model-value="telemetry.enabled"
                         type="switch"
-                        @update:checked="toggleTelemetry">
+                        @update:model-value="toggleTelemetry">
                         {{ t('teamhub', 'Send daily anonymous usage report') }}
                     </NcCheckboxRadioSwitch>
 
@@ -340,10 +339,10 @@
                     @input="onTeamsSearchInput" />
 
                 <NcCheckboxRadioSwitch
-                    :checked="teamsOrphansOnly"
+                    :model-value="teamsOrphansOnly"
                     type="switch"
                     class="maint-orphan-toggle"
-                    @update:checked="onOrphansToggle">
+                    @update:model-value="onOrphansToggle">
                     {{ t('teamhub', 'Show only teams without an owner') }}
                 </NcCheckboxRadioSwitch>
 
@@ -451,7 +450,7 @@
                                 <p v-else-if="ownerSearching" class="admin-section-hint">
                                     <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
                                 </p>
-                                <NcButton type="tertiary" @click="cancelAssign">
+                                <NcButton variant="tertiary" @click="cancelAssign">
                                     {{ t('teamhub', 'Cancel') }}
                                 </NcButton>
                             </div>
@@ -459,7 +458,7 @@
                             <!-- Icon-only action buttons -->
                             <div v-else class="maint-row-actions">
                                 <NcButton
-                                    type="secondary"
+                                    variant="secondary"
                                     :disabled="assigningOwner"
                                     :aria-label="t('teamhub', 'Set owner for {name}', { name: team.name })"
                                     :title="t('teamhub', 'Set owner')"
@@ -467,7 +466,7 @@
                                     <template #icon><AccountEditIcon :size="18" /></template>
                                 </NcButton>
                                 <NcButton
-                                    type="secondary"
+                                    variant="secondary"
                                     :disabled="resettingConfigTeamId === team.id"
                                     :aria-label="t('teamhub', 'Reset config bitmask for {name}', { name: team.name })"
                                     :title="t('teamhub', 'Reset config to clean defaults — clears any corrupted bits set on this team')"
@@ -478,7 +477,7 @@
                                     </template>
                                 </NcButton>
                                 <NcButton
-                                    type="error"
+                                    variant="error"
                                     :disabled="deletingTeam === team.id"
                                     :aria-label="t('teamhub', 'Delete {name}', { name: team.name })"
                                     :title="t('teamhub', 'Delete team')"
@@ -496,13 +495,13 @@
                 <!-- ── Pagination ──────────────────────────────────── -->
                 <div class="maint-pagination" role="navigation" :aria-label="t('teamhub', 'Pagination')">
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="teamsPage_current <= 1"
                         @click="goToPage(1)">
                         «
                     </NcButton>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="teamsPage_current <= 1"
                         @click="goToPage(teamsPage_current - 1)">
                         ‹
@@ -515,20 +514,20 @@
                     </span>
 
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="teamsPage_current >= teamsTotalPages"
                         @click="goToPage(teamsPage_current + 1)">
                         ›
                     </NcButton>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="teamsPage_current >= teamsTotalPages"
                         @click="goToPage(teamsTotalPages)">
                         »
                     </NcButton>
 
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="teamsLoading"
                         @click="reloadTeams">
                         {{ t('teamhub', 'Refresh') }}
@@ -547,7 +546,7 @@
 
             <div class="maint-integrity-actions">
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="membershipCheckLoading"
                     @click="runMembershipCheck">
                     <template #icon>
@@ -599,7 +598,7 @@
                                 </span>
                             </div>
                             <NcButton
-                                type="error"
+                                variant="error"
                                 :disabled="!!membershipRepairing[issue.id + '_nested']"
                                 @click="removeNestedTeam(issue)">
                                 <template #icon>
@@ -621,7 +620,7 @@
                                 </span>
                             </div>
                             <NcButton
-                                type="secondary"
+                                variant="secondary"
                                 :disabled="!!membershipRepairing[issue.id + '_dn']"
                                 @click="fixDisplayName(issue)">
                                 <template #icon>
@@ -648,7 +647,7 @@
                                 </span>
                             </div>
                             <NcButton
-                                type="secondary"
+                                variant="secondary"
                                 :disabled="!!membershipRepairing[issue.id + '_noowner']"
                                 @click="assignOwner(issue)">
                                 <template #icon>
@@ -670,7 +669,7 @@
                                 </span>
                             </div>
                             <NcButton
-                                type="secondary"
+                                variant="secondary"
                                 :disabled="!!membershipRepairing[issue.id + '_' + issue.duplicate_uid]"
                                 @click="repairDuplicateMember(issue)">
                                 <template #icon>
@@ -692,7 +691,7 @@
                                 </span>
                             </div>
                             <NcButton
-                                type="warning"
+                                variant="warning"
                                 :disabled="!!membershipRepairing[issue.id + '_cfgsingle']"
                                 @click="clearCfgSingle(issue)">
                                 <template #icon>
@@ -717,7 +716,7 @@
                                 </span>
                             </div>
                             <NcButton
-                                type="secondary"
+                                variant="secondary"
                                 :disabled="!!membershipRepairing[issue.id]"
                                 @click="repairMembership(issue.id)">
                                 <template #icon>
@@ -744,7 +743,7 @@
 
             <div class="maint-integrity-actions">
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="configCheckLoading"
                     @click="runConfigCheck">
                     <template #icon>
@@ -793,7 +792,7 @@
                             </span>
                         </div>
                         <NcButton
-                            type="primary"
+                            variant="primary"
                             :disabled="resettingConfigTeamId === issue.id"
                             @click="repairConfigIssue(issue)">
                             <template #icon>
@@ -824,7 +823,7 @@
                     class="maint-search"
                     @input="onGhostSearchInput" />
                 <NcButton
-                    type="secondary"
+                    variant="secondary"
                     :disabled="ghostLoading"
                     :aria-label="t('teamhub', 'Scan for deleted users')"
                     @click="loadGhostMembers">
@@ -872,7 +871,7 @@
                                 <li v-for="team in ghost.teams" :key="team.teamId" class="ghost-team-item">
                                     <span class="ghost-team-name">{{ team.teamName }}</span>
                                     <NcButton
-                                        type="tertiary"
+                                        variant="tertiary"
                                         :aria-label="removeFromTeamLabel(ghost.userId, team.teamName)"
                                         :disabled="ghostRemoving[ghost.userId + ':' + team.teamId]"
                                         @click="removeGhostFromTeam(ghost, team)">
@@ -887,7 +886,7 @@
                         </div>
                         <div class="ghost-grid__cell ghost-grid__cell--actions" role="cell">
                             <NcButton
-                                type="error"
+                                variant="error"
                                 :aria-label="removeFromAllLabel(ghost.userId)"
                                 :disabled="ghostRemoving[ghost.userId + ':all']"
                                 @click="removeGhostFromAll(ghost)">
@@ -954,7 +953,7 @@
                 </label>
                 <div class="audit-retention__controls">
                     <NcTextField
-                        :value.sync="auditRetentionInput"
+                        v-model="auditRetentionInput"
                         type="number"
                         :min="auditRetention.min"
                         :max="auditRetention.max"
@@ -964,7 +963,7 @@
                         @input="auditRetentionInput = $event.target.value" />
                     <span class="audit-retention__suffix">{{ t('teamhub', 'days') }}</span>
                     <NcButton
-                        type="primary"
+                        variant="primary"
                         :disabled="auditRetentionSaving || !canSaveRetention"
                         @click="saveAuditRetention">
                         <template #icon>
@@ -997,7 +996,7 @@
                         </option>
                     </select>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="auditTeamsLoading"
                         :aria-label="t('teamhub', 'Reload teams')"
                         @click="loadAuditTeams">
@@ -1049,7 +1048,7 @@
                         class="audit-controls__date"
                         @change="resetAndLoadAuditEvents">
                     <NcButton
-                        type="secondary"
+                        variant="secondary"
                         :disabled="auditExporting || !auditSelectedTeamId"
                         @click="exportAuditTeam">
                         <template #icon>
@@ -1106,7 +1105,7 @@
                 <!-- Pagination -->
                 <div v-if="auditEvents.length > 0" class="maint-pagination">
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="auditEventsPage <= 1 || auditEventsLoading"
                         @click="changeAuditPage(auditEventsPage - 1)">
                         ← {{ t('teamhub', 'Previous') }}
@@ -1119,7 +1118,7 @@
                         }) }}
                     </span>
                     <NcButton
-                        type="tertiary"
+                        variant="tertiary"
                         :disabled="auditEventsPage >= auditEventsTotalPages || auditEventsLoading"
                         @click="changeAuditPage(auditEventsPage + 1)">
                         {{ t('teamhub', 'Next') }} →
@@ -1224,8 +1223,7 @@
                     <NcCheckboxRadioSwitch
                         v-model="archiveSettings.anonymizeData"
                         type="checkbox"
-                        :disabled="!archiveSettings.archiveBeforeDelete"
-                        @update:checked="archiveSettings.anonymizeData = $event">
+                        :disabled="!archiveSettings.archiveBeforeDelete">
                         {{ t('teamhub', 'Pseudonymize personal identifiers') }}
                     </NcCheckboxRadioSwitch>
                     <p class="archive-admin__help">
@@ -1236,7 +1234,7 @@
                 <!-- Save button for archive settings -->
                 <div class="archive-admin__actions">
                     <NcButton
-                        type="primary"
+                        variant="primary"
                         :disabled="archiveSettingsSaving"
                         @click="saveArchiveSettings">
                         <template #icon>
@@ -1260,7 +1258,7 @@
 
                 <div class="archive-admin__toolbar">
                     <NcButton
-                        type="secondary"
+                        variant="secondary"
                         :disabled="pendingDelsLoading"
                         :aria-label="t('teamhub', 'Refresh archived teams list')"
                         @click="loadPendingDeletions">
@@ -1295,7 +1293,7 @@
                         <tr>
                             <td>{{ row.teamName }}</td>
                             <td>{{ row.archivedBy }}</td>
-                            <td>{{ formatDate(row.archivedAt) }}</td>
+                            <td>{{ formatUnixDate(row.archivedAt) }}</td>
                             <td>
                                 <span v-if="row.status === 'pending'">
                                     <!-- TRANSLATORS: {n} is the number of days remaining before deletion -->
@@ -1313,14 +1311,14 @@
                                 <!-- pending: Restore + Force delete -->
                                 <template v-if="row.status === 'pending'">
                                     <NcButton
-                                        type="tertiary"
+                                        variant="tertiary"
                                         size="small"
                                         :aria-label="t('teamhub', 'Restore team {name}', { name: row.teamName })"
                                         @click="restorePendingDeletion(row.id)">
                                         {{ t('teamhub', 'Restore') }}
                                     </NcButton>
                                     <NcButton
-                                        type="error"
+                                        variant="error"
                                         size="small"
                                         :aria-label="t('teamhub', 'Force delete team {name} immediately', { name: row.teamName })"
                                         @click="purgePendingDeletion(row.id)">
@@ -1330,7 +1328,7 @@
                                 <!-- failed: View error button toggles inline error panel -->
                                 <template v-else-if="row.status === 'failed'">
                                     <NcButton
-                                        type="tertiary"
+                                        variant="tertiary"
                                         size="small"
                                         :aria-label="t('teamhub', 'View error for team {name}', { name: row.teamName })"
                                         @click="toggleFailedDetail(row.id)">
@@ -1347,14 +1345,14 @@
                                     <code v-if="row.failureReason" class="archive-admin__error-reason">{{ row.failureReason }}</code>
                                     <div class="archive-admin__error-actions">
                                         <NcButton
-                                            type="primary"
+                                            variant="primary"
                                             size="small"
                                             :aria-label="t('teamhub', 'Retry archive for team {name}', { name: row.teamName })"
                                             @click="retryArchive(row.id)">
                                             {{ t('teamhub', 'Retry') }}
                                         </NcButton>
                                         <NcButton
-                                            type="secondary"
+                                            variant="secondary"
                                             size="small"
                                             :aria-label="t('teamhub', 'Cancel failed archive for team {name} and make team usable again', { name: row.teamName })"
                                             @click="discardFailedArchive(row.id)">
@@ -1374,7 +1372,7 @@
         <!-- ── Save row — only for settings tabs, not statistics/maintenance/audit/archive ─ -->
         <div v-show="!(['statistics','maintenance','audit','archive'].includes(activeTab))" class="admin-save-row">
             <NcButton
-                type="primary"
+                variant="primary"
                 :disabled="saving"
                 @click="save">
                 <template #icon>
@@ -1399,11 +1397,11 @@
                 </p>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="cancelDeleteOrphan">
+                <NcButton variant="tertiary" @click="cancelDeleteOrphan">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="error"
+                    variant="error"
                     :disabled="deletingTeam === confirmDeleteTeam.id"
                     @click="executeDeleteOrphan">
                     <template #icon>
@@ -1430,11 +1428,11 @@
                 </p>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="cancelResetTeamConfig">
+                <NcButton variant="tertiary" @click="cancelResetTeamConfig">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="resettingConfigTeamId === confirmResetConfigTeam.id"
                     @click="executeResetTeamConfig">
                     <template #icon>
@@ -1963,17 +1961,25 @@ export default {
         },
 
         /**
-         * Format a MySQL datetime string (e.g. "2024-03-15 14:22:00") as a
-         * localised short date. Returns '—' when value is null/empty.
+         * Format a MySQL datetime string (e.g. "2024-03-15 14:22:00") or ISO
+         * string as a localised short date. Also tolerates a numeric Unix
+         * timestamp (seconds) as a fallback. Returns '—' when value is empty.
          */
         formatDate(value) {
-            if (!value) return '—'
+            if (!value && value !== 0) return '—'
             try {
-                const d = new Date(value.replace(' ', 'T'))
-                if (isNaN(d.getTime())) return value
+                let d
+                if (typeof value === 'number' || /^\d+$/.test(String(value))) {
+                    // Unix timestamp in seconds
+                    d = new Date(Number(value) * 1000)
+                } else {
+                    // "YYYY-MM-DD HH:MM:SS" → make it ISO-parseable
+                    d = new Date(String(value).replace(' ', 'T'))
+                }
+                if (isNaN(d.getTime())) return '—'
                 return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
             } catch (e) {
-                return value
+                return '—'
             }
         },
 
@@ -2164,7 +2170,7 @@ export default {
 
         async removeNestedTeam(issue) {
             const key = issue.id + '_nested'
-            this.$set(this.membershipRepairing, key, true)
+            this.membershipRepairing[key] = true
             try {
                 await axios.delete(
                     generateUrl('/apps/teamhub/api/v1/admin/maintenance/nested-team'),
@@ -2180,13 +2186,13 @@ export default {
                     error: e?.response?.data?.error || e.message,
                 }))
             } finally {
-                this.$set(this.membershipRepairing, key, false)
+                this.membershipRepairing[key] = false
             }
         },
 
         async fixDisplayName(issue) {
             const key = issue.id + '_dn'
-            this.$set(this.membershipRepairing, key, true)
+            this.membershipRepairing[key] = true
             try {
                 const { data } = await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/fix-display-name/${issue.id}`)
@@ -2201,13 +2207,13 @@ export default {
                     error: e?.response?.data?.error || e.message,
                 }))
             } finally {
-                this.$set(this.membershipRepairing, key, false)
+                this.membershipRepairing[key] = false
             }
         },
 
         async assignOwner(issue) {
             const key = issue.id + '_noowner'
-            this.$set(this.membershipRepairing, key, true)
+            this.membershipRepairing[key] = true
             try {
                 const { data } = await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/assign-owner/${issue.id}`)
@@ -2222,13 +2228,13 @@ export default {
                     error: e?.response?.data?.error || e.message,
                 }))
             } finally {
-                this.$set(this.membershipRepairing, key, false)
+                this.membershipRepairing[key] = false
             }
         },
 
         async repairDuplicateMember(issue) {
             const key = issue.id + '_' + issue.duplicate_uid
-            this.$set(this.membershipRepairing, key, true)
+            this.membershipRepairing[key] = true
             try {
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/repair-duplicate-member/${issue.id}`),
@@ -2244,13 +2250,13 @@ export default {
                     error: e?.response?.data?.error || e.message,
                 }))
             } finally {
-                this.$set(this.membershipRepairing, key, false)
+                this.membershipRepairing[key] = false
             }
         },
 
         async clearCfgSingle(issue) {
             const key = issue.id + '_cfgsingle'
-            this.$set(this.membershipRepairing, key, true)
+            this.membershipRepairing[key] = true
             try {
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/clear-cfg-single/${issue.id}`)
@@ -2265,7 +2271,7 @@ export default {
                     error: e?.response?.data?.error || e.message,
                 }))
             } finally {
-                this.$set(this.membershipRepairing, key, false)
+                this.membershipRepairing[key] = false
             }
         },
 
@@ -2281,7 +2287,7 @@ export default {
                 const msg = e?.response?.data?.error || ''
                 showError(msg ? this.t('teamhub', 'Repair failed: {error}', { error: msg }) : this.t('teamhub', 'Repair failed'))
             } finally {
-                this.$set(this.membershipRepairing, teamId, false)
+                this.membershipRepairing[teamId] = false
             }
         },
 
@@ -2311,7 +2317,7 @@ export default {
 
         async removeGhostFromTeam(ghost, team) {
             const key = ghost.userId + ':' + team.teamId
-            this.$set(this.ghostRemoving, key, true)
+            this.ghostRemoving[key] = true
             try {
                 await axios.delete(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/ghost-members/${encodeURIComponent(ghost.userId)}`),
@@ -2327,13 +2333,13 @@ export default {
                 const msg = e?.response?.data?.error || ''
                 showError(msg ? this.t('teamhub', 'Remove failed: {error}', { error: msg }) : this.t('teamhub', 'Remove failed'))
             } finally {
-                this.$set(this.ghostRemoving, key, false)
+                this.ghostRemoving[key] = false
             }
         },
 
         async removeGhostFromAll(ghost) {
             const key = ghost.userId + ':all'
-            this.$set(this.ghostRemoving, key, true)
+            this.ghostRemoving[key] = true
             try {
                 await axios.delete(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/ghost-members/${encodeURIComponent(ghost.userId)}`)
@@ -2344,7 +2350,7 @@ export default {
                 const msg = e?.response?.data?.error || ''
                 showError(msg ? this.t('teamhub', 'Remove failed: {error}', { error: msg }) : this.t('teamhub', 'Remove failed'))
             } finally {
-                this.$set(this.ghostRemoving, key, false)
+                this.ghostRemoving[key] = false
             }
         },
 
@@ -2621,9 +2627,15 @@ export default {
             return (bytes / 1073741824).toFixed(2) + ' GB'
         },
 
-        formatDate(unixTs) {
+        /**
+         * Format a Unix timestamp (seconds) as a localised short date.
+         * Used by the archive table (archivedAt is a Unix timestamp integer).
+         */
+        formatUnixDate(unixTs) {
             if (!unixTs) return '—'
-            return new Date(unixTs * 1000).toLocaleDateString(undefined, {
+            const d = new Date(unixTs * 1000)
+            if (isNaN(d.getTime())) return '—'
+            return d.toLocaleDateString(undefined, {
                 year: 'numeric', month: 'short', day: 'numeric',
             })
         },
@@ -2638,14 +2650,18 @@ export default {
     flex-direction: column;
 }
 
-/* ── Tab bar ─────────────────────────────────────────────────────────────── */
+/* ── Tab bar ─────────────────────────────────────────────────────────────────
+   Classic folder-tab style: tabs butt together (no gap) and sit on a shared
+   baseline. Inactive tabs read as a flat white strip; the active tab is filled
+   in the primary tint and "breaks" the baseline beneath it (its own background
+   covers the bar's bottom border) so it visually connects to the panel below. */
 .teamhub-admin-tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    padding: 0 16px 0;
-    border-bottom: 2px solid var(--color-border);
-    margin-bottom: 8px;
+    gap: 0;                                  /* tabs butt directly together */
+    padding: 0 16px;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 16px;
 }
 
 .teamhub-admin-tab {
@@ -2656,25 +2672,78 @@ export default {
     font-size: 14px;
     font-weight: 500;
     color: var(--color-text-maxcontrast);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;       /* overlaps the tab bar border-bottom */
+    background: var(--color-main-background); /* all tabs white by default */
+    border: 1px solid var(--color-border);
+    border-bottom: none;                      /* baseline is owned by the bar */
+    margin-bottom: -1px;                      /* overlap the bar's 1px border  */
+    margin-right: -1px;                       /* collapse the shared side border */
     cursor: pointer;
     border-radius: var(--border-radius) var(--border-radius) 0 0;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    transition: color 0.15s, background 0.15s;
     white-space: nowrap;
+    position: relative;
 }
 
-.teamhub-admin-tab:hover {
-    color: var(--color-main-text);
-    background: var(--color-background-hover);
+.teamhub-admin-tab:first-child {
+    border-top-left-radius: var(--border-radius);
 }
+
+/* No hover styling on the tab bar at all — hover added a transient z-index/seam
+   repaint that looked wrong when moving the pointer off the active tab. Tabs
+   stay plain white until active; only the active tab gets the hard primary fill. */
 
 .teamhub-admin-tab--active {
-    color: var(--color-primary-element);
-    border-bottom-color: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    background: var(--color-primary-element); /* filled active tab            */
+    border-color: var(--color-primary-element);
     font-weight: 600;
+    z-index: 2;                               /* sit above neighbours + baseline */
+}
+
+/* Break the baseline directly under the active tab so it reads as connected
+   to the panel below (folder-tab look). The active tab's own background sits
+   over the bar's bottom border via the negative margin + z-index above; this
+   pseudo-element guarantees the seam is covered cleanly at any zoom. */
+.teamhub-admin-tab--active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--color-primary-element);
+}
+
+/* The active tab must stay hard-green in every interaction state. NC's global
+   button styles paint a background on :focus, which (because the clicked tab
+   keeps focus until you click elsewhere) was repainting the active tab light
+   green until focus moved away. Re-assert the active colours for focus/
+   focus-visible/active and override the global focus background with
+   !important. Keep the visible focus ring via box-shadow for keyboard a11y. */
+.teamhub-admin-tab--active:focus,
+.teamhub-admin-tab--active:focus-visible,
+.teamhub-admin-tab--active:active {
+    background: var(--color-primary-element) !important;
+    color: var(--color-primary-element-text) !important;
+    border-color: var(--color-primary-element);
+}
+
+/* Inactive tabs: don't pick up NC's soft focus background — stay white. Keep a
+   keyboard focus ring (focus-visible only) so tab-navigation remains visible.
+   MUST exclude the active tab: it matches both this selector and the active
+   override above at equal specificity, and being later in source order this
+   white background was winning — producing white text (from the active rule's
+   !important colour) on a white background until focus moved away. */
+.teamhub-admin-tab:not(.teamhub-admin-tab--active):focus,
+.teamhub-admin-tab:not(.teamhub-admin-tab--active):focus-visible,
+.teamhub-admin-tab:not(.teamhub-admin-tab--active):active {
+    background: var(--color-main-background) !important;
+    color: var(--color-main-text);
+}
+
+.teamhub-admin-tab:not(.teamhub-admin-tab--active):focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: -2px;
 }
 
 /* ── Tab panels ──────────────────────────────────────────────────────────── */
@@ -2700,6 +2769,16 @@ export default {
     border-radius: var(--border-radius-pill);
     font-size: 13px;
     font-weight: 500;
+}
+
+/* Keep the leading group icon inline with the label. The material-design-icon
+   wrapper can render as a block when the library's own icon CSS isn't present,
+   which floats the glyph onto its own line above the chip; pin it to an inline
+   flex box so it always sits beside the text. */
+.admin-group-chip .material-design-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 .admin-group-chip__remove {

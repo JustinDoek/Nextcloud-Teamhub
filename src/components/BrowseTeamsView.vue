@@ -19,13 +19,13 @@
 
             <div class="browse-teams-view-toggle">
                 <NcButton
-                    :type="viewMode === 'grid' ? 'primary' : 'tertiary'"
+                    :variant="viewMode === 'grid' ? 'primary' : 'tertiary'"
                     :aria-label="t('teamhub', 'Grid view')"
                     @click="viewMode = 'grid'">
                     <template #icon><ViewGrid :size="20" /></template>
                 </NcButton>
                 <NcButton
-                    :type="viewMode === 'list' ? 'primary' : 'tertiary'"
+                    :variant="viewMode === 'list' ? 'primary' : 'tertiary'"
                     :aria-label="t('teamhub', 'List view')"
                     @click="viewMode = 'list'">
                     <template #icon><ViewList :size="20" /></template>
@@ -73,7 +73,7 @@
                     <!-- Direct member: can leave -->
                     <NcButton
                         v-if="team.isMember && team.isDirectMember"
-                        type="error"
+                        variant="error"
                         :disabled="actionInProgress[team.id]"
                         @click="leaveTeam(team)">
                         <template #icon>
@@ -91,7 +91,7 @@
                         v-else-if="team.isMember && !team.isDirectMember"
                         class="team-card__indirect-label"
                         :title="t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.')">
-                        <NcButton type="tertiary" :disabled="true">
+                        <NcButton variant="tertiary" :disabled="true">
                             <template #icon><ExitToApp :size="20" /></template>
                             {{
                                 // TRANSLATORS: disabled button label; user cannot leave because they were added via a group
@@ -104,7 +104,7 @@
                     <!-- Non-member open circle: Join immediately -->
                     <NcButton
                         v-else-if="!team.requiresApproval"
-                        type="primary"
+                        variant="primary"
                         :disabled="actionInProgress[team.id]"
                         @click="joinTeam(team)">
                         <template #icon>
@@ -120,7 +120,7 @@
                     <!-- Non-member closed circle: Request access -->
                     <NcButton
                         v-else
-                        type="secondary"
+                        variant="secondary"
                         :disabled="actionInProgress[team.id]"
                         @click="requestAccess(team)">
                         <template #icon>
@@ -205,22 +205,22 @@ export default {
         },
 
         async joinTeam(team) {
-            this.$set(this.actionInProgress, team.id, true)
+            this.actionInProgress[team.id] = true
             try {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/join`), {})
                 showSuccess(t('teamhub', 'You have joined {team}', { team: team.name }))
-                this.$set(team, 'isMember', true)
-                this.$set(team, 'isDirectMember', true)
+                team.isMember = true
+                team.isDirectMember = true
                 this.$emit('team-joined', team.id)
             } catch (error) {
                 showError(t('teamhub', 'Failed to join team'))
             } finally {
-                this.$set(this.actionInProgress, team.id, false)
+                this.actionInProgress[team.id] = false
             }
         },
 
         async requestAccess(team) {
-            this.$set(this.actionInProgress, team.id, true)
+            this.actionInProgress[team.id] = true
             try {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/join`), {})
                 showSuccess(t('teamhub', 'Access requested for {team}', { team: team.name }))
@@ -228,22 +228,22 @@ export default {
             } catch (error) {
                 showError(t('teamhub', 'Failed to request access'))
             } finally {
-                this.$set(this.actionInProgress, team.id, false)
+                this.actionInProgress[team.id] = false
             }
         },
 
         async leaveTeam(team) {
-            this.$set(this.actionInProgress, team.id, true)
+            this.actionInProgress[team.id] = true
             try {
                 await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/leave`), {})
                 showSuccess(t('teamhub', 'You have left {team}', { team: team.name }))
-                this.$set(team, 'isMember', false)
+                team.isMember = false
                 this.$emit('team-left', team.id)
             } catch (error) {
                 const msg = error.response?.data?.error || ''
                 showError(msg || t('teamhub', 'Failed to leave team'))
             } finally {
-                this.$set(this.actionInProgress, team.id, false)
+                this.actionInProgress[team.id] = false
             }
         },
     },

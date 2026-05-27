@@ -31,7 +31,7 @@
                             :show-user-status="false"
                             :disable-menu="true"
                             class="activity-widget__avatar" />
-                        <span class="activity-widget__subject">{{ formatSubject(item) }}</span>
+                        <span class="activity-widget__subject">{{ item.subjectText }}</span>
                     </div>
                     <div class="activity-widget__meta">
                         <span class="activity-widget__app-label">{{ appLabel(item.app) }}</span>
@@ -126,7 +126,10 @@ export default {
     computed: {
         ...mapState(['currentTeamId']),
         visibleActivities() {
-            return this.activities.slice(0, 5)
+            // Precompute the formatted subject once per visible item (perf pass
+            // V6) instead of calling {{ formatSubject(item) }} in the template,
+            // which re-ran the branch ladder on every render.
+            return this.activities.slice(0, 5).map(item => ({ ...item, subjectText: this.formatSubject(item) }))
         },
     },
     watch: {
@@ -172,71 +175,112 @@ export default {
          */
         formatSubject(item) {
             const s = item.subject || ''
-            const u = item.user || ''
-            const filename = item.file ? item.file.split('/').pop() : (item.object_id || '')
+            const user = item.user || ''
+            const file = item.file ? item.file.split('/').pop() : (item.object_id || '')
+            const detail = s.replace(/_/g, ' ')
+            // TRANSLATORS: fallback activity line, e.g. "alice · card moved". {user} is a name, {detail} is a machine-generated description.
+            const fallback = user ? t('teamhub', '{user} · {detail}', { user, detail }) : detail
 
             // Circles — member events
             if (item.app === 'circles') {
-                if (s === 'circle_member_joined' || s.includes('member_join') || s.includes('joined')) return `${u} joined the team`
-                if (s === 'circle_member_left'   || s.includes('member_left') || s.includes('left'))   return `${u} left the team`
-                if (s === 'circle_member_added'  || s.includes('member_add'))                          return `${u} was added to the team`
-                if (s === 'circle_member_removed'|| s.includes('member_remove'))                       return `${u} was removed from the team`
-                return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'circle_member_joined' || s.includes('member_join') || s.includes('joined')) return t('teamhub', '{user} joined the team', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'circle_member_left'   || s.includes('member_left') || s.includes('left'))   return t('teamhub', '{user} left the team', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'circle_member_added'  || s.includes('member_add'))                          return t('teamhub', '{user} was added to the team', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'circle_member_removed'|| s.includes('member_remove'))                       return t('teamhub', '{user} was removed from the team', { user })
+                return fallback
             }
 
             // Files
             if (item.app === 'files' || item.app === 'files_sharing') {
-                if (s.includes('created'))  return `${u} uploaded ${filename}`
-                if (s.includes('changed'))  return `${u} edited ${filename}`
-                if (s.includes('deleted'))  return `${u} deleted ${filename}`
-                if (s.includes('restored')) return `${u} restored ${filename}`
-                if (s.includes('shared'))   return `${u} shared ${filename}`
-                return u ? `${u} · ${filename}` : filename
+                // TRANSLATORS: activity line — {user} is a display name, {file} is a filename
+                if (s.includes('created'))  return t('teamhub', '{user} uploaded {file}', { user, file })
+                // TRANSLATORS: activity line — {user} is a display name, {file} is a filename
+                if (s.includes('changed'))  return t('teamhub', '{user} edited {file}', { user, file })
+                // TRANSLATORS: activity line — {user} is a display name, {file} is a filename
+                if (s.includes('deleted'))  return t('teamhub', '{user} deleted {file}', { user, file })
+                // TRANSLATORS: activity line — {user} is a display name, {file} is a filename
+                if (s.includes('restored')) return t('teamhub', '{user} restored {file}', { user, file })
+                // TRANSLATORS: activity line — {user} is a display name, {file} is a filename
+                if (s.includes('shared'))   return t('teamhub', '{user} shared {file}', { user, file })
+                return user ? t('teamhub', '{user} · {detail}', { user, detail: file }) : file
             }
 
-            // Deck — exact subject strings from oc_activity
+            // Deck — exact subject strings from oc_activity.
+            // {card} and {board} are optional decorated fragments (e.g. ' "Title"',
+            // ' — Board'); they are empty strings when absent. Kept as named
+            // placeholders so translators can reposition them within the sentence.
             if (item.app === 'deck') {
                 const board = item.board_name ? ` — ${item.board_name}` : ''
                 const card  = item.card_title  ? ` "${item.card_title}"` : ''
-                if (s === 'card_create')             return `${u} created card${card}${board}`
-                if (s === 'card_update_title')       return `${u} renamed a card${board}`
-                if (s === 'card_update_description') return `${u} updated card description${card}${board}`
-                if (s === 'card_update_duedate')     return `${u} set due date on${card}${board}`
-                if (s === 'card_update_archive')     return `${u} archived${card}${board}`
-                if (s === 'card_delete')             return `${u} deleted a card${board}`
-                if (s === 'card_user_assign')        return `${u} assigned${card}${board}`
-                if (s === 'card_user_unassign')      return `${u} unassigned${card}${board}`
-                if (s === 'stack_create')            return `${u} created a list${board}`
-                if (s === 'stack_update')            return `${u} renamed a list${board}`
-                if (s === 'stack_delete')            return `${u} deleted a list${board}`
-                if (s === 'board_create')            return `${u} created the board${board}`
-                if (s === 'board_update')            return `${u} updated the board${board}`
-                if (s === 'board_delete')            return `${u} deleted the board${board}`
-                if (s === 'board_share')             return `${u} shared the board${board}`
-                if (s === 'label_assign')            return `${u} added a label${card}${board}`
-                if (s === 'label_unassign')          return `${u} removed a label${card}${board}`
-                return u ? `${u} · ${s.replace(/_/g, ' ')}${board}` : s.replace(/_/g, ' ')
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'card_create')             return t('teamhub', '{user} created card{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; {board} optional ' — board name'
+                if (s === 'card_update_title')       return t('teamhub', '{user} renamed a card{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'card_update_description') return t('teamhub', '{user} updated card description{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'card_update_duedate')     return t('teamhub', '{user} set due date on{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'card_update_archive')     return t('teamhub', '{user} archived{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; {board} optional ' — board name'
+                if (s === 'card_delete')             return t('teamhub', '{user} deleted a card{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'card_user_assign')        return t('teamhub', '{user} assigned{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'card_user_unassign')      return t('teamhub', '{user} unassigned{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; "list" = a Deck column/stack; {board} optional ' — board name'
+                if (s === 'stack_create')            return t('teamhub', '{user} created a list{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; "list" = a Deck column/stack; {board} optional ' — board name'
+                if (s === 'stack_update')            return t('teamhub', '{user} renamed a list{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; "list" = a Deck column/stack; {board} optional ' — board name'
+                if (s === 'stack_delete')            return t('teamhub', '{user} deleted a list{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; "board" = a Deck board; {board} optional ' — board name'
+                if (s === 'board_create')            return t('teamhub', '{user} created the board{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; "board" = a Deck board; {board} optional ' — board name'
+                if (s === 'board_update')            return t('teamhub', '{user} updated the board{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; "board" = a Deck board; {board} optional ' — board name'
+                if (s === 'board_delete')            return t('teamhub', '{user} deleted the board{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; "board" = a Deck board; {board} optional ' — board name'
+                if (s === 'board_share')             return t('teamhub', '{user} shared the board{board}', { user, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'label_assign')            return t('teamhub', '{user} added a label{card}{board}', { user, card, board })
+                // TRANSLATORS: activity line — {user} a name; {card} optional ' "card title"'; {board} optional ' — board name'
+                if (s === 'label_unassign')          return t('teamhub', '{user} removed a label{card}{board}', { user, card, board })
+                return user ? t('teamhub', '{user} · {detail}{board}', { user, detail, board }) : detail
             }
 
             // Calendar / DAV — real subject strings from oc_activity
             if (item.app === 'calendar' || item.app === 'dav') {
-                if (s.includes('add_event') || s.includes('created')) return `${u} created an event`
-                if (s.includes('update_event') || s.includes('updated')) return `${u} updated an event`
-                if (s.includes('delete_event') || s.includes('deleted')) return `${u} deleted an event`
-                if (s === 'calendar_add_self' || s.includes('calendar_add')) return `${u} added a calendar`
-                if (s === 'calendar_update_self' || s.includes('calendar_update')) return `${u} updated a calendar`
-                if (s === 'calendar_delete_self' || s.includes('calendar_delete')) return `${u} deleted a calendar`
-                return u ? `${u} · ${s.replace(/_self$|_by$/g, '').replace(/_/g, ' ')}` : s.replace(/_self$|_by$/g, '').replace(/_/g, ' ')
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s.includes('add_event') || s.includes('created')) return t('teamhub', '{user} created an event', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s.includes('update_event') || s.includes('updated')) return t('teamhub', '{user} updated an event', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s.includes('delete_event') || s.includes('deleted')) return t('teamhub', '{user} deleted an event', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'calendar_add_self' || s.includes('calendar_add')) return t('teamhub', '{user} added a calendar', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'calendar_update_self' || s.includes('calendar_update')) return t('teamhub', '{user} updated a calendar', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'calendar_delete_self' || s.includes('calendar_delete')) return t('teamhub', '{user} deleted a calendar', { user })
+                const calDetail = s.replace(/_self$|_by$/g, '').replace(/_/g, ' ')
+                return user ? t('teamhub', '{user} · {detail}', { user, detail: calDetail }) : calDetail
             }
 
             // Talk
             if (item.app === 'spreed') {
-                if (s.includes('call'))    return `${u} started a call`
-                if (s.includes('message')) return `${u} sent a message`
-                return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s.includes('call'))    return t('teamhub', '{user} started a call', { user })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s.includes('message')) return t('teamhub', '{user} sent a message', { user })
+                return fallback
             }
 
-            return u ? `${u} · ${s.replace(/_/g, ' ')}` : s.replace(/_/g, ' ')
+            return fallback
         },
 
         formatRelativeTime(datetime) {

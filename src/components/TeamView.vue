@@ -60,7 +60,7 @@
                 :url="talkUrl"
                 :label="t('teamhub', 'Chat')" />
             <AppEmbed
-                v-if="(preloadedViews.has('files') || currentView === 'files') && resources.files"
+                v-if="((preloadedViews.has('files') || currentView === 'files') && resources.files) || filesEmbedFileUrl"
                 v-show="currentView === 'files'"
                 :url="filesUrl"
                 :label="t('teamhub', 'Files')" />
@@ -165,10 +165,10 @@
                     @keyup.enter="submitCreatePage" />
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="showCreatePage = false">
+                <NcButton variant="tertiary" @click="showCreatePage = false">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="primary" :disabled="!newPageTitle.trim() || creatingPage" @click="submitCreatePage">
+                <NcButton variant="primary" :disabled="!newPageTitle.trim() || creatingPage" @click="submitCreatePage">
                     <template #icon><NcLoadingIcon v-if="creatingPage" :size="20" /></template>
                     {{ t('teamhub', 'Create') }}
                 </NcButton>
@@ -200,8 +200,8 @@
                 </div>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="showDeletePage = false">{{ t('teamhub', 'Cancel') }}</NcButton>
-                <NcButton type="error" :disabled="!deletePageTarget || deletingPage" @click="submitDeletePage">
+                <NcButton variant="tertiary" @click="showDeletePage = false">{{ t('teamhub', 'Cancel') }}</NcButton>
+                <NcButton variant="error" :disabled="!deletePageTarget || deletingPage" @click="submitDeletePage">
                     <template #icon><NcLoadingIcon v-if="deletingPage" :size="20" /></template>
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
@@ -340,7 +340,7 @@ export default {
 
     computed: {
         ...mapState([
-            'currentTeamId', 'currentView', 'resources', 'webLinks',
+            'currentTeamId', 'currentView', 'resources', 'webLinks', 'filesEmbedFileUrl',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
         ]),
@@ -351,6 +351,12 @@ export default {
             return token ? generateUrl('/call/' + token) : generateUrl('/apps/spreed')
         },
         filesUrl() {
+            // A file widget may have requested a specific file be embedded
+            // (opened in-app rather than a new tab). When set, that wins; it is
+            // cleared by SET_VIEW when the user leaves the files view.
+            if (this.filesEmbedFileUrl) {
+                return this.filesEmbedFileUrl
+            }
             const path = this.resources.files?.path || '/'
             return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
         },
@@ -833,7 +839,7 @@ export default {
         // ── Widget / team actions ───────────────────────────────────
 
         onWidgetActionsLoaded({ registryId, actions }) {
-            this.$set(this.widgetDynamicActions, registryId, actions || [])
+            this.widgetDynamicActions[registryId] = actions || []
         },
 
         openManageTeam() { this.$emit('show-manage-team') },
@@ -911,10 +917,10 @@ export default {
         },
 
         onPagesLoaded(data) {
-            this.$set(this.pagesData, 'teamPage',    data.teamPage    || null)
-            this.$set(this.pagesData, 'subPages',    data.subPages    || [])
-            this.$set(this.pagesData, 'teamhubRoot', data.teamhubRoot || null)
-            this.$set(this.pagesData, 'allPages',    data.allPages    || [])
+            this.pagesData.teamPage    = data.teamPage    || null
+            this.pagesData.subPages    = data.subPages    || []
+            this.pagesData.teamhubRoot = data.teamhubRoot || null
+            this.pagesData.allPages    = data.allPages    || []
         },
 
         openCreatePage() { this.newPageTitle = ''; this.showCreatePage = true },

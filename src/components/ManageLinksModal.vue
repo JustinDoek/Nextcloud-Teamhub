@@ -20,7 +20,7 @@
                             <a v-else :href="link.url" target="_blank" class="links-list__url">{{ link.url }}</a>
                         </div>
                         <NcButton
-                            type="tertiary"
+                            variant="tertiary"
                             :aria-label="t('teamhub', 'Delete link')"
                             @click="remove(link.id)">
                             <template #icon><Delete :size="18" /></template>
@@ -53,7 +53,7 @@
                         @input="validateUrl" />
                 </div>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="!newTitle.trim() || !!urlError || !newUrl.trim() || saving"
                     @click="save">
                     <template #icon>

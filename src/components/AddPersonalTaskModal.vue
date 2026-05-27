@@ -51,14 +51,14 @@
             <p v-if="errors.general" class="addtask-modal__error">{{ errors.general }}</p>
 
             <div class="addtask-modal__actions">
-                <NcButton type="primary" :disabled="saving" @click="submit">
+                <NcButton variant="primary" :disabled="saving" @click="submit">
                     <template #icon>
                         <NcLoadingIcon v-if="saving" :size="18" />
                         <ClipboardPlusOutline v-else :size="18" />
                     </template>
                     {{ saving ? t('teamhub', 'Adding…') : t('teamhub', 'Add task') }}
                 </NcButton>
-                <NcButton type="tertiary" @click="$emit('close')">
+                <NcButton variant="tertiary" @click="$emit('close')">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
             </div>

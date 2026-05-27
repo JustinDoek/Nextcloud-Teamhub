@@ -7,6 +7,8 @@ use OCA\TeamHub\Db\PresenceSlotMapper;
 use OCA\TeamHub\Db\PresenceTeamConfig;
 use OCA\TeamHub\Db\PresenceTeamConfigMapper;
 use OCA\TeamHub\Db\PresenceTypeMapper;
+use OCP\UserStatus\IManager as IUserStatusManager;
+use OCP\UserStatus\IUserStatus;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -42,6 +44,7 @@ class PresenceTeamService {
         private PresenceSlotMapper       $slotMapper,
         private PresenceTypeMapper       $typeMapper,
         private MemberService            $memberService,
+        private IUserStatusManager       $userStatusManager,
         private LoggerInterface          $logger,
     ) {}
 
@@ -159,6 +162,7 @@ class PresenceTeamService {
             return [
                 'members'      => [],
                 'slots'        => (object)[],
+                'nc_status'    => (object)[],
                 'hide_reasons' => $hideReasons,
                 'from'         => $fromDate,
                 'to'           => $toDate,
@@ -186,13 +190,139 @@ class PresenceTeamService {
             }
         }
 
+        // Fetch live NC user status for the same members. The members widget
+        // merges this with the presence schedule into a single dot (the schedule
+        // is the baseline; an overriding NC status wins). See mapNcStatus() for
+        // the override classification.
+        $ncStatusByUser = $this->fetchNcStatuses($userIds);
+
         return [
             'members'      => $members,
             'slots'        => $slotsByUser,
+            'nc_status'    => $ncStatusByUser ?: (object)[],
             'hide_reasons' => $hideReasons,
             'from'         => $fromDate,
             'to'           => $toDate,
         ];
+    }
+
+    /**
+     * Fetch and classify NC user statuses for a set of users.
+     *
+     * Returns a map keyed by userId. Each value:
+     *   [ 'status' => string, 'overrides' => bool ]
+     * where `status` is one of the IUserStatus constants (online/away/dnd/busy/
+     * offline — invisible is reported by NC as offline) and `overrides` says
+     * whether this status should take precedence over the TeamHub presence
+     * schedule, per the agreed rule:
+     *
+     *   - dnd / busy / online  → overrides (explicit, or logged-in-online)
+     *   - away:
+     *       automatic (idle/availability automation) → does NOT override
+     *       manual (no `availability` message id)     → overrides
+     *   - offline / invisible / none → does NOT override
+     *
+     * Auto-vs-manual away is inferred from getMessageId() === MESSAGE_AVAILABILITY,
+     * the signal NC's own automation sets. This is a heuristic: a hand-picked
+     * "Away" preset may also carry it and would then be treated as automatic.
+     * The public IUserStatus interface exposes no explicit manual/automatic flag.
+     *
+     * Users with no status row are omitted from the map (frontend falls back to
+     * the presence schedule).
+     *
+     * @param string[] $userIds
+     * @return array<string, array{status: string, overrides: bool}>
+     */
+    private function fetchNcStatuses(array $userIds): array {
+        if (count($userIds) === 0) {
+            return [];
+        }
+
+        try {
+            $statuses = $this->userStatusManager->getUserStatuses($userIds);
+        } catch (\Throwable $e) {
+            // Status is non-essential — on failure the widget shows the schedule.
+            $this->logger->warning('[TeamHub][PresenceTeamService] getUserStatuses failed', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+
+        $out = [];
+        foreach ($statuses as $uid => $status) {
+            if (!($status instanceof IUserStatus)) {
+                continue;
+            }
+            $out[$uid] = [
+                'status'    => $status->getStatus(),
+                'overrides' => $this->ncStatusOverrides($status),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Decide whether an NC status overrides the TeamHub presence schedule.
+     * See fetchNcStatuses() for the full rule.
+     */
+    private function ncStatusOverrides(IUserStatus $status): bool {
+        $value = $status->getStatus();
+
+        switch ($value) {
+            case IUserStatus::DND:
+            case IUserStatus::BUSY:
+            case IUserStatus::ONLINE:
+                return true;
+
+            case IUserStatus::AWAY:
+                // Distinguish a deliberate user-set away (overrides) from the
+                // idle/availability automation (revert to schedule).
+                //
+                // Preferred signal: getIsUserDefined() on the concrete status
+                // object — NC's own CalDAV automation uses it to tell user-set
+                // apart from automatic. If a status is user-defined, it overrides.
+                $isUserDefined = $this->getIsUserDefined($status);
+                if ($isUserDefined !== null) {
+                    return $isUserDefined;
+                }
+                // Fallback when the method is unavailable: automatic away carries
+                // the `availability` predefined message id; anything else is
+                // treated as a deliberate away and overrides.
+                return $this->getMessageId($status) !== IUserStatus::MESSAGE_AVAILABILITY;
+
+            // OFFLINE / INVISIBLE (reported as offline) / anything else.
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Read whether the status was set by the user (vs. automation), if the
+     * concrete implementation exposes getIsUserDefined(). Not part of the public
+     * IUserStatus interface; guard with method_exists. Returns null when the
+     * signal is unavailable so the caller can fall back to the message-id check.
+     */
+    private function getIsUserDefined(IUserStatus $status): ?bool {
+        if (method_exists($status, 'getIsUserDefined')) {
+            /** @psalm-suppress UndefinedInterfaceMethod */
+            $v = $status->getIsUserDefined();
+            return $v === null ? null : (bool)$v;
+        }
+        return null;
+    }
+
+    /**
+     * Read the predefined message id from a status if the implementation exposes
+     * it. The public IUserStatus interface (getMessage/getIcon/getClearAt) does
+     * not declare getMessageId(), but the concrete server implementation does.
+     * Guard with method_exists so we degrade gracefully if it is absent.
+     */
+    private function getMessageId(IUserStatus $status): ?string {
+        if (method_exists($status, 'getMessageId')) {
+            /** @psalm-suppress UndefinedInterfaceMethod */
+            return $status->getMessageId();
+        }
+        return null;
     }
 
     // -------------------------------------------------------------------------
@@ -227,6 +357,11 @@ class PresenceTeamService {
                 'label'             => null,
                 'icon'              => null,
                 'slug'              => null,
+                // is_busy is the busy/free distinction the 3-tone palette already
+                // reveals via colour, so exposing it here leaks nothing further. It
+                // lets the members-widget presence sort rank schedule-busy vs
+                // schedule-free even when reasons are hidden.
+                'is_busy'           => $isBusy,
                 'requires_location' => false,
                 'location_room_id'  => null,
                 'source'            => null,
@@ -239,6 +374,9 @@ class PresenceTeamService {
             'label'             => $typeRow?->getLabel(),
             'icon'              => $typeRow?->getIcon(),
             'slug'              => $typeRow?->getSlug(),
+            // Used by the members-widget presence sort to rank schedule-busy
+            // types ahead of schedule-free types.
+            'is_busy'           => $isBusy,
             'requires_location' => $typeRow !== null && $typeRow->getRequiresLocation() === 1,
             'location_room_id'  => $slot->getLocationRoomId(),
             'source'            => $slot->getSource(),

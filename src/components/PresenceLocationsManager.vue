@@ -12,7 +12,7 @@
             </div>
             <template v-else>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     class="presence-add-btn"
                     @click="openCreate('building')">
                     <template #icon><PlusIcon :size="18" /></template>
@@ -35,7 +35,7 @@
 
                         <div class="presence-node__row">
                             <NcButton
-                                type="tertiary-no-background"
+                                variant="tertiary-no-background"
                                 :aria-label="expanded['b'+b.id] !== false
                                     ? t('teamhub', 'Collapse')
                                     : t('teamhub', 'Expand')"
@@ -52,19 +52,19 @@
                             </div>
                             <div class="presence-node__actions">
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :aria-label="t('teamhub', 'Add floor')"
                                     @click="openCreate('floor', { building_id: b.id })">
                                     <template #icon><PlusIcon :size="16" /></template>
                                 </NcButton>
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :aria-label="t('teamhub', 'Edit building')"
                                     @click="openEdit('building', b)">
                                     <template #icon><PencilIcon :size="16" /></template>
                                 </NcButton>
                                 <NcButton
-                                    type="tertiary"
+                                    variant="tertiary"
                                     :aria-label="t('teamhub', 'Delete building')"
                                     @click="confirmDelete('building', b)">
                                     <template #icon><DeleteIcon :size="16" /></template>
@@ -85,7 +85,7 @@
 
                                 <div class="presence-node__row">
                                     <NcButton
-                                        type="tertiary-no-background"
+                                        variant="tertiary-no-background"
                                         :aria-label="expanded['f'+f.id] !== false
                                             ? t('teamhub', 'Collapse')
                                             : t('teamhub', 'Expand')"
@@ -101,19 +101,19 @@
                                     </div>
                                     <div class="presence-node__actions">
                                         <NcButton
-                                            type="tertiary"
+                                            variant="tertiary"
                                             :aria-label="t('teamhub', 'Add room')"
                                             @click="openCreate('room', { floor_id: f.id })">
                                             <template #icon><PlusIcon :size="16" /></template>
                                         </NcButton>
                                         <NcButton
-                                            type="tertiary"
+                                            variant="tertiary"
                                             :aria-label="t('teamhub', 'Edit floor')"
                                             @click="openEdit('floor', f)">
                                             <template #icon><PencilIcon :size="16" /></template>
                                         </NcButton>
                                         <NcButton
-                                            type="tertiary"
+                                            variant="tertiary"
                                             :aria-label="t('teamhub', 'Delete floor')"
                                             @click="confirmDelete('floor', f)">
                                             <template #icon><DeleteIcon :size="16" /></template>
@@ -139,13 +139,13 @@
                                             </div>
                                             <div class="presence-node__actions">
                                                 <NcButton
-                                                    type="tertiary"
+                                                    variant="tertiary"
                                                     :aria-label="t('teamhub', 'Edit room')"
                                                     @click="openEdit('room', r)">
                                                     <template #icon><PencilIcon :size="16" /></template>
                                                 </NcButton>
                                                 <NcButton
-                                                    type="tertiary"
+                                                    variant="tertiary"
                                                     :aria-label="t('teamhub', 'Delete room')"
                                                     @click="confirmDelete('room', r)">
                                                     <template #icon><DeleteIcon :size="16" /></template>
@@ -183,13 +183,13 @@
             <template #default>
                 <div class="presence-form">
                     <NcTextField
-                        :value.sync="dialog.name"
+                        v-model="dialog.name"
                         :label="t('teamhub', 'Name')"
                         :maxlength="255"
                         :placeholder="namePlaceholder" />
                     <NcTextField
                         v-if="dialog.kind === 'building'"
-                        :value.sync="dialog.address"
+                        v-model="dialog.address"
                         :label="t('teamhub', 'Address (optional)')"
                         :maxlength="255" />
                 </div>
@@ -199,7 +199,7 @@
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="!dialog.name.trim() || saving"
                     @click="save">
                     <template #icon>
@@ -232,7 +232,7 @@
                 <NcButton @click="closeDeleteDialog">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="error" @click="executeDelete">
+                <NcButton variant="error" @click="executeDelete">
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
             </template>
@@ -349,7 +349,7 @@ export default {
         },
 
         toggle(key) {
-            this.$set(this.expanded, key, !(this.expanded[key] !== false))
+            this.expanded[key] = !(this.expanded[key] !== false)
         },
 
         async load() {
