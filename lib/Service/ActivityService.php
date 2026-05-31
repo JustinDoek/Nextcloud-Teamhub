@@ -473,7 +473,13 @@ class ActivityService {
         string $end,
         string $location = '',
         string $description = '',
-        ?int   $calendarId = null
+        ?int   $calendarId = null,
+        bool   $includeTalk = true,
+        string $categories = '',
+        string $roomEmail = '',
+        string $roomName = '',
+        string $roomId = '',
+        array  $attendeeUids = []
     ): void {
 
         $user = $this->userSession->getUser();
@@ -521,8 +527,11 @@ class ActivityService {
 
         // Resolve team Talk room URL — write to LOCATION so Talk's scheduled
         // meetings panel picks it up (Talk reads the LOCATION field, not DESCRIPTION).
+        // Honour the caller's $includeTalk choice: when false, no Talk URL is
+        // embedded even if a room exists. Default true preserves the prior
+        // behaviour for existing callers that don't pass the flag.
         $talkUrl = null;
-        if ($this->appManager->isInstalled('spreed')) {
+        if ($includeTalk && $this->appManager->isInstalled('spreed')) {
             try {
                 $talkQb  = $db->getQueryBuilder();
                 $talkRes = $talkQb->select('a.room_id')
@@ -566,35 +575,313 @@ class ActivityService {
         $ical  = "BEGIN:VCALENDAR\r\n";
         $ical .= "VERSION:2.0\r\n";
         $ical .= "PRODID:-//TeamHub//TeamHub//EN\r\n";
+        // When a room is being booked we need iTIP scheduling to fire so
+        // the resource backend (e.g. RoomVox) receives the invite and can
+        // accept/decline. iTIP requires ORGANIZER + at least one ATTENDEE
+        // on the event. METHOD is NOT included in stored data — that
+        // belongs to iTIP transport (the email body), not to the stored
+        // calendar object. NC Calendar's own emit omits METHOD here and
+        // the scheduling plugin attaches it itself during delivery.
+        // Including METHOD in stored data confuses RoomVox's processor
+        // (3.59.x symptom: room shows "checking availability" forever).
+        $bookingRoom = $roomEmail !== '';
+        // Organiser email is needed for ANY scheduled event (room booking or
+        // per-attendee invitations), not just room bookings.
+        $organiserEmail = (string)($user->getEMailAddress() ?? '');
+        if ($bookingRoom && $organiserEmail === '') {
+            // No organiser email = no iTIP = no actual booking. Degrade
+            // gracefully to "room name in LOCATION text only". Logged so
+            // an admin can fix the user's profile if booking was expected.
+            $this->logger->warning('[TeamHub][ActivityService] room picked but organiser has no email — degrading to LOCATION-only', [
+                'teamId' => $teamId, 'uid' => $user->getUID(), 'app' => Application::APP_ID,
+            ]);
+            $bookingRoom = false;
+        }
+
+        // Resolve the invitee list — uids passed in from the wizard's
+        // "selected members" step. Each becomes a CalDAV ATTENDEE on the
+        // event so Sabre's scheduling plugin delivers the event into the
+        // attendee's personal calendar.
+        //
+        // Rules:
+        //   - Dedupe by lowercased email (the organiser may have selected
+        //     themselves in step 1; they're already ROLE=CHAIR below, so
+        //     no second line for them).
+        //   - Users with no email get a synthetic mailto:{uid}@{server}
+        //     address. NC's internal scheduling plugin pattern-matches on
+        //     mailto: → uid for local delivery; the synthetic address keeps
+        //     internal delivery working when the user simply hasn't set an
+        //     email in their profile. External-mail invitations will not
+        //     work for those users (no real address to send to) — that's
+        //     a profile issue, not a TeamHub bug.
+        //
+        // We also need the per-user display name for the CN parameter.
+        $userManager = $this->container->get(\OCP\IUserManager::class);
+        $organiserEmailLc = strtolower($organiserEmail);
+        $emailSeen = $organiserEmailLc !== '' ? [$organiserEmailLc => true] : [];
+        $invitees = []; // [ { email: string, cn: string } ]
+        if (!empty($attendeeUids)) {
+            // Synthetic-mailto host — same shape NC uses internally.
+            try {
+                $urlGenerator = $this->container->get(\OCP\IURLGenerator::class);
+                $host = parse_url($urlGenerator->getAbsoluteURL('/'), PHP_URL_HOST) ?: 'localhost';
+            } catch (\Throwable $e) {
+                $host = 'localhost';
+            }
+            // Loop variable name MUST NOT be $uid: at the top of this
+            // function we generated the event's UID as $uid (line ~567).
+            // PHP foreach doesn't scope its iterator, so reassigning $uid
+            // inside the loop corrupts the event UID for the write that
+            // follows. The last attendee's id ended up in $uid → the
+            // event was written as `<attendee_name>.ics` with UID
+            // <ATTENDEE_NAME>@teamhub, deterministic across calls →
+            // every subsequent meeting with the same last-attendee
+            // collided on UID. Three sessions of "Sabre is doing
+            // something weird" turned out to be a variable-shadowing
+            // bug introduced when I added invitee resolution.
+            foreach ($attendeeUids as $attendeeUid) {
+                $attendeeUid = trim((string)$attendeeUid);
+                if ($attendeeUid === '') {
+                    continue;
+                }
+                // Case-insensitive uid match: NC's IUser::getUID() returns
+                // canonical casing from the users table, but the wizard's
+                // selectedIds come from circles_member which has been seen
+                // (rarely) to differ in casing on LDAP-backed installs. A
+                // case-mismatch slips a "self-invite" past this check.
+                if (strcasecmp($attendeeUid, $user->getUID()) === 0) {
+                    // Organiser appears once, as CHAIR — see below.
+                    continue;
+                }
+                $u = $userManager->get($attendeeUid);
+                if ($u === null) {
+                    continue; // Unknown user; skip silently.
+                }
+                $email = (string)($u->getEMailAddress() ?? '');
+                if ($email === '') {
+                    $email = $attendeeUid . '@' . $host;
+                    // Note: we DO log the uid here, deliberately — an
+                    // attendee with no email is an actionable admin issue
+                    // (profile needs an email so iMIP delivery works).
+                    // Severity is info because it's not an error, just a
+                    // signal the admin should clean up the user record.
+                    $this->logger->info('[TeamHub][ActivityService] attendee has no email — using synthetic address', [
+                        'uid' => $attendeeUid, 'app' => Application::APP_ID,
+                    ]);
+                }
+                $emailLc = strtolower($email);
+                if (isset($emailSeen[$emailLc])) {
+                    continue; // Duplicate of organiser or earlier invitee.
+                }
+                $emailSeen[$emailLc] = true;
+                $invitees[] = [
+                    'email' => $email,
+                    'cn'    => $u->getDisplayName() ?: $attendeeUid,
+                ];
+            }
+        }
+
+        // The event needs full iTIP shape (ORGANIZER + organiser-as-attendee
+        // + SEQUENCE + STATUS) whenever ANY external party will receive it.
+        // That's true if we booked a room (room is on the attendee list) OR
+        // if we have one or more invitees.
+        $useScheduling = $bookingRoom || !empty($invitees);
+        if ($useScheduling && $organiserEmail === '') {
+            // We can't emit an iTIP event without an organiser email — and
+            // we just established there isn't one. Log and degrade the
+            // invitee path the same way the room path already degrades:
+            // event still gets written, just without per-attendee delivery.
+            $this->logger->warning('[TeamHub][ActivityService] cannot schedule (no organiser email) — invitees will not receive the event', [
+                'teamId' => $teamId, 'uid' => $user->getUID(),
+                'inviteeCount' => count($invitees),
+                'app' => Application::APP_ID,
+            ]);
+            $useScheduling = false;
+            $invitees = [];
+        }
+
+        // Book RoomVox via its public API BEFORE writing the calendar event.
+        // If booking fails, we abort the whole operation per Justin's
+        // session-9 decision (option A — surface, don't degrade). This is
+        // the actual booking that propagates through to RoomVox's admin
+        // overview; the calendar event we write afterward is a record of
+        // the same booking, not an iTIP request.
+        //
+        // We store the resulting booking UID as an X- property on the
+        // VEVENT so the delete-time hook (CalendarObjectDeletedListener)
+        // can cancel the corresponding RoomVox reservation.
+        $roomvoxBookingUid = null;
+        if ($bookingRoom && $roomId !== '') {
+            try {
+                $roomvox = $this->container->get(\OCA\TeamHub\Service\RoomVoxClient::class);
+                $bookingResult = $roomvox->createBooking(
+                    $roomId,
+                    $title,
+                    // RoomVox documents ISO 8601 with timezone offset. We
+                    // pass the input as the caller provided it (the wizard
+                    // sends startDt.toISOString() which is UTC Z-suffixed —
+                    // valid ISO 8601, accepted by RoomVox per its docs).
+                    $startDt->format(\DateTimeInterface::ATOM),
+                    $endDt->format(\DateTimeInterface::ATOM),
+                    $organiserEmail,
+                    $description,
+                );
+                $roomvoxBookingUid = $bookingResult['uid'];
+                $this->logger->info('[TeamHub][ActivityService] RoomVox booking accepted', [
+                    'roomId' => $roomId,
+                    'uid'    => $roomvoxBookingUid,
+                    'status' => $bookingResult['status'],
+                    'app'    => Application::APP_ID,
+                ]);
+            } catch (\OCA\TeamHub\Service\RoomVoxClientException $e) {
+                // Abort: do NOT write a calendar event we know to be unbacked
+                // by a real reservation. Surface RoomVox's message verbatim.
+                throw new \Exception($e->getMessage());
+            } catch (\Throwable $e) {
+                // Unexpected client failure — same abort policy.
+                $this->logger->warning('[TeamHub][ActivityService] RoomVox client error', [
+                    'roomId' => $roomId, 'err' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                throw new \Exception('RoomVox booking failed: ' . $e->getMessage());
+            }
+        } elseif ($bookingRoom && $roomId === '') {
+            // We have a room email but no room id — caller bug. Log and
+            // refuse the booking. (UI is wired to send both; this is
+            // defensive against future regressions.)
+            $this->logger->warning('[TeamHub][ActivityService] room email present but room id missing — cannot call RoomVox', [
+                'teamId' => $teamId, 'roomEmail' => $roomEmail, 'app' => Application::APP_ID,
+            ]);
+            throw new \Exception('Cannot book room: room identifier missing.');
+        }
+
         $ical .= "BEGIN:VEVENT\r\n";
         $ical .= "UID:{$uid}@teamhub\r\n";
         $ical .= "DTSTAMP:{$dtStamp}\r\n";
         $ical .= "DTSTART:{$dtStart}\r\n";
         $ical .= "DTEND:{$dtEnd}\r\n";
         $ical .= "SUMMARY:" . $this->escapeIcalText($title) . "\r\n";
+        if ($useScheduling) {
+            // Two required compliance lines for any scheduled iTIP event:
+            //   SEQUENCE:0 — RFC 5546 §3.1.4 makes this mandatory; consumers
+            //     that compare revisions (which RoomVox does) reject events
+            //     without it.
+            //   STATUS:CONFIRMED — explicitly marks the event as live (vs.
+            //     TENTATIVE / CANCELLED). RoomVox's auto-accept policy is
+            //     keyed off seeing CONFIRMED. Without STATUS, behaviour is
+            //     implementation-defined and RoomVox stays NEEDS-ACTION.
+            $ical .= "SEQUENCE:0\r\n";
+            $ical .= "STATUS:CONFIRMED\r\n";
+            // Organiser line — required for the scheduling plugin to know
+            // where iMIP replies should be addressed.
+            $organiserCn = $this->escapeIcalParamText($user->getDisplayName() ?: $user->getUID());
+            $ical .= "ORGANIZER;CN={$organiserCn}:mailto:{$organiserEmail}\r\n";
+            // Organiser ALSO as an ATTENDEE. RFC 5546 §3.2.1 requires the
+            // organiser to appear in the ATTENDEE list of any REQUEST.
+            // NC Calendar's own emit always includes this line. Sabre's
+            // scheduling plugin treats events without an organiser-attendee
+            // as malformed and can refuse to deliver the iTIP message.
+            //
+            // SCHEDULE-AGENT=CLIENT on the organiser's line (RFC 6638 §7.1):
+            // tells Sabre "the client handles scheduling delivery for this
+            // attendee, don't do anything for them yourself." Without this,
+            // when a non-organiser team member creates the event, Sabre
+            // attempts to materialise the event a SECOND time into the
+            // calendar we just wrote to (as scheduling delivery to the
+            // organiser-as-attendee), and Sabre rejects with "Calendar
+            // object with uid already exists in this calendar collection".
+            // Per-attendee parameter: invitees DON'T get this — we want
+            // Sabre to deliver to their personal calendars.
+            $ical .= "ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;ROLE=CHAIR;SCHEDULE-AGENT=CLIENT;CN={$organiserCn}:mailto:{$organiserEmail}\r\n";
+            // Per-invitee attendees. Standard iTIP shape: NEEDS-ACTION
+            // PARTSTAT (each invitee gets to accept/decline in their own
+            // calendar), RSVP=TRUE so reply emails are expected, ROLE=
+            // REQ-PARTICIPANT (active participant, not optional).
+            foreach ($invitees as $inv) {
+                $cn = $this->escapeIcalParamText($inv['cn']);
+                $ical .= "ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE;CN={$cn}:mailto:{$inv['email']}\r\n";
+            }
+            if ($bookingRoom) {
+                // Room attendee — CUTYPE=ROOM is the canonical resource type.
+                // Because we already booked the room via RoomVox's public API
+                // above (and aborted if that failed), the booking is already
+                // confirmed; PARTSTAT=ACCEPTED is the truthful state. RSVP=FALSE
+                // because no further reply is expected — RoomVox has us in its
+                // overview already.
+                $roomCn = $this->escapeIcalParamText($roomName !== '' ? $roomName : $roomEmail);
+                $partstat = $roomvoxBookingUid !== null ? 'ACCEPTED' : 'NEEDS-ACTION';
+                $rsvp     = $roomvoxBookingUid !== null ? 'FALSE'    : 'TRUE';
+                $ical .= "ATTENDEE;CUTYPE=ROOM;PARTSTAT={$partstat};ROLE=REQ-PARTICIPANT;RSVP={$rsvp};CN={$roomCn}:mailto:{$roomEmail}\r\n";
+                // Tracking X- properties — the CalendarObjectDeletedListener
+                // reads these to know which RoomVox booking (and on which room)
+                // to cancel when this calendar event is deleted. RFC 5545
+                // explicitly permits experimental X- properties; consumers
+                // that don't understand them ignore silently.
+                if ($roomvoxBookingUid !== null) {
+                    $ical .= "X-TEAMHUB-ROOMVOX-BOOKING-UID:" . $this->escapeIcalText($roomvoxBookingUid) . "\r\n";
+                    $ical .= "X-TEAMHUB-ROOMVOX-ROOM-ID:" . $this->escapeIcalText($roomId) . "\r\n";
+                }
+            }
+        }
+        // LOCATION precedence:
+        //   1. If a room was picked, its display name is the location.
+        //      Combined with the Talk URL when present (Talk reads the
+        //      LOCATION field to surface the meeting in its panel).
+        //   2. Otherwise the free-text location field (with Talk URL).
+        //   3. Otherwise just the Talk URL.
+        //   4. Otherwise nothing.
+        $effectiveLocation = $bookingRoom ? ($roomName !== '' ? $roomName : $location) : $location;
         if ($talkUrl !== null) {
-            // Talk reads LOCATION to detect scheduled meetings and show them in the room panel.
-            // Combine with any user-supplied physical location if present.
-            if ($location !== '') {
-                $ical .= "LOCATION:" . $this->escapeIcalText($location . ' | ' . $talkUrl) . "\r\n";
+            if ($effectiveLocation !== '') {
+                $ical .= "LOCATION:" . $this->escapeIcalText($effectiveLocation . ' | ' . $talkUrl) . "\r\n";
             } else {
                 $ical .= "LOCATION:" . $this->escapeIcalText($talkUrl) . "\r\n";
             }
             // URL field for calendar clients that render a dedicated Join button
             $ical .= "URL:{$talkUrl}\r\n";
-        } elseif ($location !== '') {
-            $ical .= "LOCATION:" . $this->escapeIcalText($location) . "\r\n";
+        } elseif ($effectiveLocation !== '') {
+            $ical .= "LOCATION:" . $this->escapeIcalText($effectiveLocation) . "\r\n";
         }
         if ($description !== '') {
             $ical .= "DESCRIPTION:" . $this->escapeIcalText($description) . "\r\n";
         }
+        // CATEGORIES is a comma-separated tag list per RFC 5545 §3.8.1.2.
+        // We accept either a single category or a comma-separated string —
+        // either is valid for the ical line. NC Calendar surfaces these as
+        // "Categories" on the event detail panel.
+        if ($categories !== '') {
+            $ical .= "CATEGORIES:" . $this->escapeIcalText($categories) . "\r\n";
+        }
+        // 15-minute pop-up reminder. ACTION:DISPLAY is the in-calendar
+        // notification type — matches NC's own default. RFC 5545 §3.6.6
+        // requires a DESCRIPTION on DISPLAY alarms; we use the event title
+        // so the notification has something meaningful to render.
+        $ical .= "BEGIN:VALARM\r\n";
+        $ical .= "ACTION:DISPLAY\r\n";
+        $ical .= "TRIGGER:-PT15M\r\n";
+        $ical .= "DESCRIPTION:" . $this->escapeIcalText($title) . "\r\n";
+        $ical .= "END:VALARM\r\n";
         $ical .= "END:VEVENT\r\n";
         $ical .= "END:VCALENDAR\r\n";
 
         $caldav = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
         $objUri = strtolower($uid) . '.ics';
 
-        $caldav->createCalendarObject($calendarId, $objUri, $ical);
+        try {
+            $caldav->createCalendarObject($calendarId, $objUri, $ical);
+        } catch (\Throwable $e) {
+            // Surface the exception class alongside its message so admins
+            // triaging a CalDAV write failure can distinguish e.g. Sabre's
+            // BadRequest (UID conflict) from a permission or backend error.
+            // No PII logged.
+            $this->logger->warning('[TeamHub][ActivityService] createCalendarObject failed', [
+                'teamId'     => $teamId,
+                'calendarId' => $calendarId,
+                'exception'  => get_class($e),
+                'message'    => $e->getMessage(),
+                'app'        => Application::APP_ID,
+            ]);
+            throw $e;
+        }
     }
 
     /** Escape special characters in iCalendar text property values. */
@@ -604,6 +891,25 @@ class ActivityService {
             ['\\n',  '\\n', '\\n', '\\,', '\\;', '\\\\'],
             $text
         );
+    }
+
+    /**
+     * Escape an iCalendar PARAM-VALUE per RFC 5545 §3.1. The param-value
+     * grammar forbids ":", ";", and "," in unquoted values; if any are
+     * present the value must be wrapped in double quotes and any embedded
+     * double quotes stripped (no escape mechanism exists for them in
+     * params). Used for CN= values where a room or person's display name
+     * might contain punctuation.
+     */
+    private function escapeIcalParamText(string $text): string {
+        // Strip control chars and CR/LF outright — params are single-line.
+        $text = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $text) ?? $text;
+        // No escape exists for " inside a param-value — strip them.
+        $text = str_replace('"', '', $text);
+        if (preg_match('/[:;,]/', $text)) {
+            return '"' . $text . '"';
+        }
+        return $text;
     }
 
     // -------------------------------------------------------------------------

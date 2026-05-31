@@ -36,6 +36,7 @@ class TeamController extends Controller {
         private FilesService $filesService,
         private MaintenanceService $maintenanceService,
         private TaskService $taskService,
+        private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
         private LoggerInterface $logger,
@@ -676,6 +677,14 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     public function createCalendarEvent(string $teamId): JSONResponse {
         try {
+            // Gate: caller must be a team member. Without this, any logged-in
+            // NC user could POST to this endpoint and write events into a
+            // team's calendar (and now, after the RoomVox integration, also
+            // book physical meeting rooms via that team's API token). The
+            // gate was missing prior to v3.59.23; this restores parity with
+            // every other team-scoped endpoint in TeamHub.
+            $this->memberService->requireMemberLevel($teamId);
+
             $body        = $this->request->getParams();
             $title       = trim($body['title']       ?? '');
             $start       = trim($body['start']        ?? '');
@@ -683,15 +692,85 @@ class TeamController extends Controller {
             $location    = trim($body['location']    ?? '');
             $description = trim($body['description'] ?? '');
             $calendarId  = isset($body['calendarId']) ? (int)$body['calendarId'] : null;
+            // Optional fields surfaced for the meeting wizard. Defaults
+            // preserve the prior behaviour for other callers (AddEventModal,
+            // ScheduleMeetingModal) that don't send these:
+            //   includeTalk: bool — when false, no Talk URL is embedded even
+            //     if the team has a room. Default true (= prior behaviour).
+            //   categories: string — comma-separated CATEGORIES for the ical.
+            $includeTalk = !array_key_exists('includeTalk', $body)
+                ? true
+                : !($body['includeTalk'] === false || $body['includeTalk'] === 0 || $body['includeTalk'] === '0' || $body['includeTalk'] === '');
+            $categories  = trim((string)($body['categories'] ?? ''));
+            $roomEmail   = trim((string)($body['roomEmail'] ?? ''));
+            $roomName    = trim((string)($body['roomName']  ?? ''));
+            $roomId      = trim((string)($body['roomId']    ?? ''));
+
+            // Attendee uids — comma-separated string from the wizard, or
+            // an array if a future caller sends it that way. Empty means
+            // no per-attendee invitations (event lands only in the team
+            // calendar).
+            $attendeeUids = [];
+            if (isset($body['attendees'])) {
+                $raw = $body['attendees'];
+                if (is_array($raw)) {
+                    foreach ($raw as $a) {
+                        $a = trim((string)$a);
+                        if ($a !== '') {
+                            $attendeeUids[] = $a;
+                        }
+                    }
+                } elseif (is_string($raw)) {
+                    foreach (explode(',', $raw) as $a) {
+                        $a = trim($a);
+                        if ($a !== '') {
+                            $attendeeUids[] = $a;
+                        }
+                    }
+                }
+            }
 
             if ($title === '' || $start === '' || $end === '') {
                 return new JSONResponse(['error' => 'title, start and end are required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $this->activityService->createCalendarEvent($teamId, $title, $start, $end, $location, $description, $calendarId ?: null);
+            $this->activityService->createCalendarEvent(
+                $teamId, $title, $start, $end, $location, $description,
+                $calendarId ?: null, $includeTalk, $categories,
+                $roomEmail, $roomName, $roomId, $attendeeUids
+            );
             return new JSONResponse(['success' => true], Http::STATUS_CREATED);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/rooms
+     *
+     * Returns the list of bookable rooms visible to the current user, used
+     * by the meeting wizard's room picker. Returns [] when RoomVox is not
+     * installed (= "if roomvox is enabled" gate per session brief) or when
+     * no rooms are discoverable.
+     *
+     * SEC: team-membership required. We do not surface rooms a user can't
+     * already see in NC Calendar — IResourceManager applies its own
+     * permission model.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function listRooms(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $rooms = $this->roomDiscovery->listAvailableRooms();
+            return new JSONResponse(['rooms' => $rooms]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Failed to list rooms', [
+                'teamId'    => $teamId,
+                'exception' => $e->getMessage(),
+                'app'       => Application::APP_ID,
+            ]);
+            return new JSONResponse(['rooms' => []]);
         }
     }
 

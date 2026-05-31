@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCP\AppFramework\Controller;
@@ -12,6 +13,7 @@ use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
+use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 class MessageController extends Controller {
@@ -20,6 +22,8 @@ class MessageController extends Controller {
         IRequest $request,
         private MessageService $messageService,
         private MemberService $memberService,
+        private FilesService $filesService,
+        private IUserSession $userSession,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -211,6 +215,114 @@ class MessageController extends Controller {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Message image cache
+    // -------------------------------------------------------------------------
+
+    /**
+     * POST /api/v1/teams/{teamId}/messages/cache-image
+     *
+     * Copies a file from the requesting user's personal Files into the team
+     * folder's hidden image cache (.teamhub-cache). Returns the fileId of the
+     * cached copy so the frontend can build a /core/preview URL that is
+     * accessible to all team members (the team folder is circle-shared).
+     *
+     * Body JSON: { teamFolderId: int, sourcePath: string }
+     *   teamFolderId — numeric NC fileId of the team folder root
+     *   sourcePath   — path inside the user's DAV root, e.g. /Photos/cat.png
+     *
+     * SEC: membership enforced. sourcePath is resolved via the user's own
+     * folder — the user cannot cache a file they do not have access to.
+     */
+    #[NoAdminRequired]
+    public function cacheImage(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            $uid = $this->userSession->getUser()?->getUID();
+            if ($uid === null) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+
+            $body         = $this->request->getParams();
+            $teamFolderId = isset($body['teamFolderId']) ? (int) $body['teamFolderId'] : 0;
+            $sourcePath   = trim((string) ($body['sourcePath'] ?? ''));
+
+            if ($teamFolderId <= 0 || $sourcePath === '') {
+                return new JSONResponse(['error' => 'teamFolderId and sourcePath are required'], Http::STATUS_BAD_REQUEST);
+            }
+
+            // Reject obvious path traversal attempts
+            if (str_contains($sourcePath, '..')) {
+                return new JSONResponse(['error' => 'Invalid sourcePath'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $this->logger->debug('[TeamHub][MessageController] cacheImage', [
+                'teamId'       => $teamId,
+                'teamFolderId' => $teamFolderId,
+                'sourcePath'   => $sourcePath,
+                'uid'          => $uid,
+                'app'          => Application::APP_ID,
+            ]);
+
+            $result = $this->filesService->cacheImageInTeamFolder($teamFolderId, $sourcePath, $uid);
+
+            return new JSONResponse([
+                'fileId'    => $result['fileId'],
+                'cachePath' => $result['cachePath'],
+            ]);
+        } catch (\RuntimeException $e) {
+            $this->logger->warning('[TeamHub][MessageController] cacheImage failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * DELETE /api/v1/teams/{teamId}/messages/image-cache
+     *
+     * Deletes all files inside the .teamhub-cache folder in the team folder,
+     * without removing the folder itself. Requires team admin level.
+     *
+     * Body JSON: { teamFolderId: int }
+     */
+    #[NoAdminRequired]
+    public function clearImageCache(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            $body         = $this->request->getParams();
+            $teamFolderId = isset($body['teamFolderId']) ? (int) $body['teamFolderId'] : 0;
+
+            if ($teamFolderId <= 0) {
+                return new JSONResponse(['error' => 'teamFolderId is required'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $this->logger->debug('[TeamHub][MessageController] clearImageCache', [
+                'teamId'       => $teamId,
+                'teamFolderId' => $teamFolderId,
+                'app'          => Application::APP_ID,
+            ]);
+
+            $deleted = $this->filesService->clearImageCache($teamFolderId);
+
+            return new JSONResponse(['deleted' => $deleted]);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Message settings
+    // -------------------------------------------------------------------------
 
     /**
      * GET /api/v1/teams/{teamId}/messages/settings

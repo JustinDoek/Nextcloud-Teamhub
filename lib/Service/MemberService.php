@@ -384,9 +384,19 @@ class MemberService {
                     continue;
                 }
                 $seen[$uid] = true;
+                // Prefer IUserManager's resolved display name (handles LDAP /
+                // user-backend overrides + the preferences table where NC
+                // actually stores user-set display names). Fall back to the
+                // users-table column (which is often NULL on real installs)
+                // and finally to the bare uid. This was the source of the
+                // wizard showing account names instead of display names.
+                $resolvedName = $this->userManager->get($uid)?->getDisplayName();
+                $displayName  = $resolvedName !== null && $resolvedName !== ''
+                    ? $resolvedName
+                    : (!empty($r['displayname']) ? $r['displayname'] : $uid);
                 $list[] = [
                     'userId'      => $uid,
-                    'displayName' => !empty($r['displayname']) ? $r['displayname'] : $uid,
+                    'displayName' => $displayName,
                 ];
             }
             $uRes->closeCursor();
@@ -411,9 +421,16 @@ class MemberService {
                 continue;
             }
             $seen[$uid] = true;
+            // Same display-name resolution as the membership-cache branch
+            // above — see comment there for why we go through IUserManager
+            // before falling back to the users-table column.
+            $resolvedName = $this->userManager->get($uid)?->getDisplayName();
+            $displayName  = $resolvedName !== null && $resolvedName !== ''
+                ? $resolvedName
+                : (!empty($r['displayname']) ? $r['displayname'] : $uid);
             $list[] = [
                 'userId'      => $uid,
-                'displayName' => !empty($r['displayname']) ? $r['displayname'] : $uid,
+                'displayName' => $displayName,
             ];
         }
         $dRes->closeCursor();

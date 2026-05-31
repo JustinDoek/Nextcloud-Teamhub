@@ -317,9 +317,11 @@
                                 <template #icon><CalendarPlus :size="20" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('schedule-meeting')">
-                                <template #icon><VideoIcon :size="20" /></template>
-                                {{ t('teamhub', 'Schedule meeting') }}
+                            <NcActionButton
+                                v-if="presenceModuleEnabled && presenceConfig.presence_enabled"
+                                @click="$emit('suggest-meeting')">
+                                <template #icon><CalendarClock :size="20" /></template>
+                                {{ t('teamhub', 'Meeting wizard') }}
                             </NcActionButton>
                             <NcActionButton @click="$emit('team-meeting')">
                                 <template #icon><AccountGroup :size="20" /></template>
@@ -755,9 +757,11 @@
                                 <template #icon><CalendarPlus :size="20" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('schedule-meeting')">
-                                <template #icon><VideoIcon :size="20" /></template>
-                                {{ t('teamhub', 'Schedule meeting') }}
+                            <NcActionButton
+                                v-if="presenceModuleEnabled && presenceConfig.presence_enabled"
+                                @click="$emit('suggest-meeting')">
+                                <template #icon><CalendarClock :size="20" /></template>
+                                {{ t('teamhub', 'Meeting wizard') }}
                             </NcActionButton>
                             <NcActionButton @click="$emit('team-meeting')">
                                 <template #icon><AccountGroup :size="20" /></template>
@@ -992,6 +996,7 @@ import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
+import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -1011,7 +1016,6 @@ import {
     CFG_PROTECTED,
 } from '../constants/circlesConfig.js'
 import Cog from 'vue-material-design-icons/Cog.vue'
-import VideoIcon from 'vue-material-design-icons/Video.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import DragVariant from 'vue-material-design-icons/DragVariant.vue'
@@ -1055,10 +1059,10 @@ export default {
     components: {
         NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton,
         GridLayout, GridItem,
-        MessageOutline, Folder, Calendar, CalendarPlus, CardText,
+        MessageOutline, Folder, Calendar, CalendarPlus, CalendarClock, CardText,
         CheckboxMarkedOutline, InformationOutline, AccountGroup, AccountMultipleIcon,
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus,
-        Cog, VideoIcon, Puzzle, ViewDashboardEdit, DragVariant,
+        Cog, Puzzle, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
         ChevronUp, ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
@@ -1091,7 +1095,7 @@ export default {
 
     emits: [
         'layout-updated', 'manage-team', 'copy-link', 'invite',
-        'schedule-meeting', 'add-event', 'team-meeting', 'add-deck-task', 'add-personal-task',
+        'schedule-meeting', 'add-event', 'suggest-meeting', 'team-meeting', 'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded', 'set-view',
         'widget-actions-loaded',
         'set-as-default',
@@ -1127,6 +1131,7 @@ export default {
             'effectiveMemberCount',
             'intravoxAvailable', 'teamWidgets', 'isCurrentUserDirectMember',
             'resourceWarnings',
+            'presenceModuleEnabled', 'presenceConfig',
         ]),
         ...mapGetters(['currentTeam']),
 

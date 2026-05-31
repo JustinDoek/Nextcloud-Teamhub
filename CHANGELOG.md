@@ -3,6 +3,136 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+### Added inline images in messages. 
+### Added more options to the add event modal.
+### Added a meeting planner that works with presence and calendar info.
+
+
+## [3.61.0] — 2026-05-31 — Image cache, consolidated event modal, widget cleanup
+
+### Added
+- **Message image cache.** When a user inserts an image from their personal files, the new `POST /api/v1/teams/{teamId}/messages/cache-image` endpoint copies the file into `.teamhub-cache/` inside the team folder. The cached copy is accessible to all team members via `/core/preview` (team folder is circle-shared). Survives if the posting user leaves the team.
+- **Clear image cache.** New `DELETE /api/v1/teams/{teamId}/messages/image-cache` endpoint (admin level). Exposed as a button in Manage Team → Messages tab with a count of files removed.
+- **Attendees in AddEventModal.** Team members can now be selected as attendees directly from the add-event modal. Server sends iTIP invitations identically to the meeting wizard. Self is excluded from the picker.
+- **RoomVox room picker in AddEventModal.** When RoomVox is installed and configured, the location field becomes a room picker; free-text fallback when no rooms are available.
+- **Category field in AddEventModal.** Comma-separated category tags, passed through to the calendar event.
+- **Talk meeting toggle in AddEventModal.**
+
+### Changed
+- **`AddEventModal` consolidates `ScheduleMeetingModal`.** Both modals used the same backend endpoint with minor field differences. Single modal now covers all simple event creation. `ScheduleMeetingModal.vue` is unused and can be removed.
+- **`@schedule-meeting` event** in `TeamView` now routes to `showAddEvent` (same consolidated modal).
+- **Schedule Meeting action removed** from the upcoming events calendar widget (desktop and tablet layouts).
+
+### Fixed
+- **Images inserted from personal files were invisible to other team members.** `/core/preview?fileId=...` enforces per-user ACL — other members got 404. Fixed by caching the file in the circle-shared team folder and using that copy's fileId.
+- **Uploaded/attached images were invisible to other team members.** Circle share was created correctly but the URL still used `/core/preview`. Fixed by using `/apps/files_sharing/publicpreview?token=...` (share-token-based, no per-user ACL check).
+- **Pluralisation of "files removed" in cache clear confirmation** now uses `n()` instead of a conditional string.
+
+## [3.60.0] — 2026-05-30 — Meeting wizard: RoomVox booking, personal-calendar availability, recurring events
+
+A major iteration on the meeting wizard introduced in 3.59. Real room booking via RoomVox's public API; availability checks that span every calendar an attendee can attend; recurring events expanded properly; 15-minute reminder on every created event; attendees materialised into invitee calendars via iTIP; ironed out a deterministic UID collision that was masquerading as several other bugs.
+
+### Added
+- **RoomVox integration.** The wizard's step-5 location field becomes a room picker when RoomVox is installed and an admin has configured an API token in TeamHub admin settings. Picking a room books it via RoomVox's public REST API (`POST /api/v1/rooms/{id}/bookings`) BEFORE the calendar event is written; booking failure aborts the whole creation with RoomVox's own error message surfaced to the user. New service `RoomVoxClient` (typed exception, Bearer token from admin config). New `RoomDiscoveryService` reads bookable rooms via both `OCP\Calendar\Room\IManager` and `OCP\Calendar\Resource\IManager`.
+- **RoomVox token admin setting.** New "RoomVox integration" section in admin settings: write-only token field (password-type, never echoed back), `__CLEAR__` sentinel to remove, format validation (`rvx_…`). Picker is hidden when no token is configured (avoids dead-end UX).
+- **Booking cancellation hook.** `CalendarObjectDeletedListener` listens for `CalendarObjectDeletedEvent` and `CalendarObjectMovedToTrashEvent` (both classes guarded with `class_exists`). On delete, extracts `X-TEAMHUB-ROOMVOX-BOOKING-UID` / `X-TEAMHUB-ROOMVOX-ROOM-ID` from the deleted ical and calls `DELETE /api/v1/rooms/{id}/bookings/{uid}` to free the RoomVox reservation.
+- **Per-attendee invitations.** Selected wizard members are emitted as `CUTYPE=INDIVIDUAL` ATTENDEEs on the event with `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`. Sabre's scheduling plugin delivers the event into each invitee's personal calendar (and email via iMIP when configured at the dav app level).
+- **15-min DISPLAY VALARM** on every event created through `createCalendarEvent`. RFC 5545 compliant: `ACTION:DISPLAY`, `TRIGGER:-PT15M`, `DESCRIPTION:<event title>`.
+- **`PersonalAndTeamBusyProvider`.** New busy-provider implementation that walks each attendee's personal calendars (`principals/users/{uid}/…`) AND every calendar of every team they're a member of (`principals/circles/{teamId}/…`). Solves cross-team scheduling: when user X is in team Y and team Z, a wizard run from team Z sees X as busy at any time X is committed on team Y.
+- **RRULE expansion in both busy paths.** `PersonalAndTeamBusyProvider` and `TimeslotSuggestionService::readPersonalBusy` now expand recurring events via `\Sabre\VObject\Recur\EventIterator` with `fastForward()` to the window start. A weekly meeting whose master DTSTART is months in the past is now correctly reported busy on every recurrence inside the search window. Safety cap at 1000 iterations protects against malformed `FREQ=MINUTELY` events.
+- New endpoint `GET /api/v1/teams/{teamId}/rooms` — returns the bookable room list for the wizard's picker. Member-auth.
+- New endpoint `GET /api/v1/teams/{teamId}/presence/suggest-timeslots` — within a half-day, returns top-3 free 15-minute-grid windows that fit a requested duration, accounting for every attendee's personal+team-membership calendar conflicts. Member-auth.
+- New optional fields on `POST /api/v1/teams/{teamId}/calendar/events`: `attendees` (comma-separated uids or array), `roomEmail`, `roomName`, `roomId`, `includeTalk`, `categories`. Defaults preserve prior behaviour for non-wizard callers (AddEventModal, ScheduleMeetingModal, TeamMeetingModal).
+- Default-resource selectors for the wizard: duration (30/45/60/90/120 min), Talk meeting toggle (auto-on and disabled for online meetings), category (free-text comma-separated CATEGORIES).
+- Anonymous telemetry: room picks per team (count only, no room identifiers).
+
+### Changed
+- **Wizard label.** "Suggest meeting times" → "Meeting wizard" in both widget headers (calendar widget and presence widget).
+- **"In office" → "Office"** in the meeting-type radio.
+- **Stage 1 (half-day scorer) is now presence-only.** Calendar consultation moves entirely to stage 2 (timeslot picker), where the precise free-window search happens. A 30-min team meeting at 09:00 no longer eliminates the whole morning from suggestions. `MeetingSuggestionService` is wired with an empty providers array in `Application.php`; `TeamCalendarBusyProvider` and `PersonalAndTeamBusyProvider` remain registered for stage-2 consumers.
+- **Office-meeting score formula.** Was `bestBuildingCount` (gated on at least one attendee assigning a specific room); now `inOfficeCount` (anyone whose presence type has `requiresLocation=true`, regardless of room assignment). Eliminates the "everyone's at the office but nobody set a room → half-day scored 0" failure pattern. Best-building name still surfaced for descriptive purposes when known.
+- **Timeslot descriptions include the most-suitable building** for office meetings: "2 of 2 available · most suitable location: HQ". Pass-through from the picked half-day; no recomputation per timeslot.
+- **Wizard picker hides the organiser.** The current user is filtered out of the team-member list — they're on the meeting by definition. Case-insensitive match (LDAP backends can return inconsistent casing). The organiser is still counted in suggestion scoring and "N of M available" denominators.
+- **`TimeslotSuggestionService::readPersonalBusy`** now reads from every calendar the user can attend events on (personal-principal-owned + team-membership), matching `PersonalAndTeamBusyProvider`'s scope. Old `personal`-only behaviour caused availability checks to lie when an attendee's only conflict was on a different team's calendar.
+- **All form fields in wizard step 5** unified to a single label-on-top pattern; replaces `NcTextField`/`NcTextArea` mix that rendered with inconsistent label styles.
+- **iCalendar emission** for any event with attendees: emits `ORGANIZER` (with organiser email), `SEQUENCE:0`, `STATUS:CONFIRMED`, organiser as `ROLE=CHAIR` ATTENDEE with `SCHEDULE-AGENT=CLIENT`, per-invitee ATTENDEEs, room ATTENDEE as `CUTYPE=ROOM` when applicable. RFC 5546 §3.2.1 compliant. `METHOD:REQUEST` is no longer included in stored data (that property belongs to iTIP transport, not stored events) — fixes RoomVox "checking availability" forever.
+
+### Fixed
+- **Calendar object with uid already exists in this calendar collection.** A foreach loop that re-used `$uid` as its iterator was shadowing the random event UID we'd generated 60 lines earlier. After the loop, `$uid` held the last attendee's name, and `$objUri` became `<last_attendee>.ics` — deterministic across calls. Second meeting with the same final attendee collided on UID. Loop variable renamed to `$attendeeUid`. (This single bug masqueraded as Sabre scheduling weirdness for three sessions worth of attempted fixes.)
+- **NC's IClient SSRF guard blocked localhost RoomVox calls.** The flag is `$options['nextcloud']['allow_local_address']` — a nested array, not a flat `nextcloud-allow-local-address` key. NC silently ignored the flat form. Fixed in both booking and cancellation paths.
+- **Missing membership gate on `POST /calendar/events`.** Pre-existing endpoint that lacked `requireMemberLevel()` — any logged-in NC user could write events into any team's calendar, and (after this session's wiring) book RoomVox rooms via any team's token. Fixed; matches every other team-scoped endpoint.
+- **PHP errors when picker re-rendered with no rooms** — defensive null-fallbacks in `slotAriaLabel` / `slotTitle` in `PresenceCalendarView.vue`.
+
+### Security
+- RoomVox API token is **write-only** in the admin API. The load endpoint returns a boolean `roomvoxTokenConfigured` indicator only; the token itself is never echoed back to the browser. Same pattern NC uses for SMTP passwords.
+- New `requireMemberLevel` gate on `createCalendarEvent` (see Fixed).
+- All new endpoints (`listRooms`, `suggestTimeslots`) gated on team membership before any data is read.
+- Diagnostic logging that captured user emails / uids during this session has been stripped before ship. Remaining info-level logs in `RoomVoxClient` (booking created/cancelled) log only `roomId` and the RoomVox booking UID — no user data. The synthetic-mailto log in `ActivityService` logs the uid (an actionable admin signal: user needs an email on their profile) but not the synthetic address.
+
+### Notes
+- Loopback HTTP to RoomVox's documented public API v1 is a deliberate architectural exception, recorded in `DESIGN.md`. `IClient` allow-local-address flag is per-request; SSRF protection remains in force for every other outbound HTTP call.
+- Cross-team busy visibility is by design: a wizard run from team Z that sees user X as conflicting at 10:00 Thursday — because of an event on team Y — surfaces only the conflict count, never the event details. Time commitments are a coordination signal, not a secret.
+- The half-day scorer assumes that finding zero free timeslots inside an accepted half-day is rare; we do not pre-filter half-days against "can a meeting actually fit." If real-world misses surface, we'd add a "at-least-N-free-minutes" check at stage 1 as a follow-up.
+
+## [3.59.0] — 2026-05-28 — Suggest meeting times (presence-powered)
+
+### Added
+- **"Suggest meeting times" wizard.** A presence-powered planning tool that proposes the best half-days (AM/PM) for an online or in-office meeting, scored on who is working, where (home/office), and which office most attendees share. Multi-step wizard: pick attendees (checklist with "Select all"), choose online vs in-office, pick a target date, review the top three scored half-days, then set a title/time/details and create the event directly.
+- New endpoint `GET /api/v1/teams/{teamId}/presence/suggest-times` returning ranked suggestions. Member-auth, and gated server-side on the presence module being enabled **both** globally and per-team (403 if either is off).
+- Two entry points, both shown only when the presence module is enabled globally and for the team: a button on the calendar-view toolbar, and an action in the upcoming-events widget header (desktop and tablet layouts).
+- Pluggable busy-provider interface (`BusyProviderInterface`); v1 ships `TeamCalendarBusyProvider` (team-calendar conflicts). Personal-calendar free/busy can be added later as another provider with no scorer change.
+- Anonymous telemetry counter `suggest_wizard_uses`.
+
+### Notes
+- Scoring is half-day granular and timezone-aware: each member's presence slots are floating local time, so a candidate instant is mapped into each attendee's own NC timezone before lookup. Suggestions are anchored/displayed in the organiser's timezone.
+- The existing AddEventModal is untouched — the wizard creates events via the existing `/calendar/events` endpoint.
+
+## [3.58.3] — 2026-05-27 — Files picker: missing confirm button
+
+### Fixed
+- **FilePicker had no "Choose" button.** `@nextcloud/dialogs` v7 requires `.addButton(...)` to be called explicitly on the builder, otherwise the picker mounts with no confirm action (highlight works, nothing happens on selection). Added a primary "Choose" button to both insertion paths (Post Message dialog and message edit dialog).
+
+## [3.58.2] — 2026-05-27 — Inline images: internal preview URLs, Files picker, lightbox above widgets, no redundant preview cards
+
+Four fixes for issues that surfaced when testing 3.58.1 on a live install.
+
+### Added
+- **"Browse Files…" in the insert-image dialog.** A new button next to the URL field opens NC's FilePicker filtered to image MIME types. The chosen file's numeric id is resolved via PROPFIND and the dialog's URL field is pre-filled with the NC core preview URL — same flow in both the Post Message dialog and the message edit dialog.
+
+### Changed
+- **Image uploads now insert the NC core preview URL.** The dav PUT response's `OC-FileId` header is captured to build `/index.php/core/preview?fileId=<id>&x=1024&y=1024&a=true` for image content types. This is the URL form an `<img>` element can actually render (the previous share landing URL served HTML, and the dav download URL needed WebDAV auth that browsers don't attach for `<img>` requests).
+- **Image-proxy content-type sniffing.** When upstream returns no Content-Type or one that isn't `image/*` (some CDNs return `application/octet-stream`), the body is sniffed with `finfo`. If it's actually an image, we serve it with the sniffed type; otherwise we still reject. Fixes "not all external images load" without weakening the not-an-image guard.
+
+### Fixed
+- **Lightbox opened behind NC widgets.** The lightbox lived inside `MessageCard.vue`'s subtree, which sits inside the widget grid's stacking context, so a `z-index` alone couldn't lift it above sibling widgets. Now teleported to `<body>` (Vue 3 `<Teleport>`), so it escapes every parent stacking context. z-index bumped to 100000 defensively.
+- **Redundant link-preview card under inline images.** `extractUrlObjects` now strips `![alt](url)` spans before scanning for preview targets — the image is the content, a card under it was just noise.
+
+## [3.58.1] — 2026-05-27 — Inline images: fix disabled Insert button + corrupted render
+
+Two bugs in the 3.58.0 inline-images feature, reported from a live test install.
+
+### Fixed
+- **Insert-image dialog "Insert" button stayed disabled and fields didn't bind.** The dialog used Vue 2 `:value.sync` / `:open.sync` on `NcTextField` / `NcDialog`, but the app is on `@nextcloud/vue 9.x` (Vue 3) where these are `v-model`-based. Typed text never reached `imageDialogUrl`, so the button's `:disabled` guard never cleared. Switched to `v-model` on the fields and `:open="true"` + `@closing` on the dialog (matching `CreateTeamModal.vue`).
+- **`![alt](https://…)` rendered a broken image followed by raw text.** The image rule emitted the `<img>` tag inline, then the step-5 bare-URL autolinker matched the `https://` *inside* the emitted `src="…"` attribute (its negative lookbehind only guarded `href="`, not `src="`), splitting the tag. The image rule now stashes its output behind a placeholder (like fenced code blocks) and restores it after all link/text passes, so no later regex can touch it.
+
+## [3.58.0] — 2026-05-27 — Inline images in messages (URL + upload), proxied & sanitised
+
+User-requested feature: insert images into messages via URL and via file upload, with a frame that scales to fit without cropping. Security-sensitive (touches the message renderer/sanitizer and elevates the image proxy to per-message user input) — built as a single feature this session.
+
+### Added
+- **Inline images in message bodies.** `![alt](url)` markdown now renders as an inline `<img>` where it is typed, in both new messages and edits. Optional width: `![alt|320](url)` (clamped to 1–2000 px; non-numeric dropped).
+- **Insert-image-by-URL dialog** on the Post Message toolbar and the edit toolbar (URL + alt text + optional width; alt requested for accessibility).
+- **Image uploads render inline.** The existing attachment flow now emits `![name](shareUrl)` for image content types (rendered inline) while non-image attachments keep the `📎` link behaviour.
+- **Click-to-zoom lightbox.** Clicking (or keyboard-activating) an inline image opens a full-size, focus-trapped, Escape-closable overlay reusing the already-sanitised src.
+
+### Changed
+- **Smart frame for inline images.** `max-width: 100%; height: auto; max-height: 400px; object-fit: contain;` so images scale to the message column without cropping or distortion.
+
+### Security
+- **Renderer/sanitizer hardening (`MessageCard.vue`).** `img` added to the DOMPurify allowlist behind a new `afterSanitizeAttributes` hook that rewrites every image `src`: remote `https://` → backend image proxy; same-origin NC paths → pass through; **everything else (`data:`, `http:`, `javascript:`, protocol-relative, cross-origin) is dropped**. Alt/URL are attribute-escaped at the markdown layer; inline images carry `referrerpolicy="no-referrer"`.
+- **SSRF hardening of the image proxy (`LinkPreviewService::isAllowedUrl`).** The allowlist now resolves the host to its IP addresses and rejects any private/loopback/link-local target — including the cloud metadata IP `169.254.169.254` (and its IPv4-mapped IPv6 form), IPv6 unique-local `fc00::/7`, IPv6 loopback/unspecified, and decimal/octal/hex-encoded IPv4 forms (e.g. `http://2130706433`). Fails closed when a host does not resolve.
+- **Per-redirect re-validation (`LinkPreviewController::proxyImage`).** The proxy no longer lets the HTTP client follow redirects blindly; it walks up to 3 hops manually and re-resolves and re-checks each hop's IP before fetching it, defeating redirect-to-internal SSRF after the initial allowlist pass.
+
 ## [3.57.2] — 2026-05-26 — Admin tab-bar active-tab fix + maintenance date fix
 
 ### Fixed

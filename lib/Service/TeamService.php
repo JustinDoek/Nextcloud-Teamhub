@@ -914,6 +914,11 @@ class TeamService {
             'groupFoldersDelegation' => $this->safeGetDelegationStatus(),
             // Presence module — default off. NC admin must explicitly enable.
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1',
+            // RoomVox API token: never return the token value itself, only a
+            // boolean indicating whether one is configured. The admin can
+            // overwrite it (write field) but can't read it back (read field).
+            // This matches NC's pattern for SMTP passwords and other secrets.
+            'roomvoxTokenConfigured' => $config->getAppValue(Application::APP_ID, 'roomvox_api_token', '') !== '',
         ];
     }
 
@@ -1012,6 +1017,29 @@ class TeamService {
                 'presence_module_enabled',
                 $settings['presenceModuleEnabled'] ? '1' : '0'
             );
+        }
+        if (array_key_exists('roomvoxApiToken', $settings)) {
+            // The admin UI sends:
+            //   '' (empty)       → leave value unchanged (token field was not touched)
+            //   '__CLEAR__'      → clear the stored token
+            //   anything else    → store as new token
+            // We never echo the token back to the UI (see getAdminSettings),
+            // so the empty-means-no-change semantic prevents the UI from
+            // accidentally wiping a configured token by re-saving the form
+            // without retyping the secret.
+            $raw = (string)$settings['roomvoxApiToken'];
+            if ($raw === '__CLEAR__') {
+                $config->deleteAppValue(Application::APP_ID, 'roomvox_api_token');
+            } elseif ($raw !== '') {
+                // Light validation: RoomVox tokens are documented as
+                // 'rvx_' + 40 alnum characters. Reject anything that
+                // doesn't match the prefix to catch typos / paste errors;
+                // not a security boundary, just a sanity check.
+                if (!preg_match('/^rvx_[A-Za-z0-9]{20,}$/', $raw)) {
+                    throw new \Exception('RoomVox token format looks wrong (expected rvx_… )');
+                }
+                $config->setAppValue(Application::APP_ID, 'roomvox_api_token', $raw);
+            }
         }
     }
 

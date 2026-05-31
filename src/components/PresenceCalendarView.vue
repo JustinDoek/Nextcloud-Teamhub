@@ -207,7 +207,10 @@ export default {
         slotTitle(iso, half, halfLabel) {
             const s = this.slotFor(iso, half)
             if (!s) return halfLabel
-            if (s.is_locked) return `${s.presence_type_label} (${t('teamhub', 'Holiday — locked')})`
+            // Defensive fallback if a locked slot somehow has a null label —
+            // shouldn't happen (holiday lock always carries a type) but a
+            // null here would interpolate as the literal string "null".
+            if (s.is_locked) return `${s.presence_type_label || halfLabel} (${t('teamhub', 'Holiday — locked')})`
             return s.presence_type_label || halfLabel
         },
 
@@ -217,7 +220,14 @@ export default {
             const dateStr = new Date(day.iso + 'T12:00:00').toLocaleDateString(undefined, {
                 weekday: 'long', month: 'short', day: 'numeric',
             })
-            if (!s) return t('teamhub', '{date} {half}: not set. Click to set.', { date: dateStr, half: halfLabel })
+            // A slot row exists even after the user clears it (presence_type_id=null);
+            // its presence_type_label comes through as null in that case. Treat a
+            // null label as "not set" — otherwise NC's t() runs String.replace with
+            // a null param and throws, which Vue then propagates and the entire
+            // calendar render fails. One bad slot must not blank the calendar.
+            if (!s || !s.presence_type_label) {
+                return t('teamhub', '{date} {half}: not set. Click to set.', { date: dateStr, half: halfLabel })
+            }
             if (s.is_locked) return t('teamhub', '{date} {half}: {type} (holiday, locked)', { date: dateStr, half: halfLabel, type: s.presence_type_label })
             return t('teamhub', '{date} {half}: {type}. Click to change.', { date: dateStr, half: halfLabel, type: s.presence_type_label })
         },

@@ -98,6 +98,14 @@
                     @click="applyLink">
                     <template #icon><LinkVariant :size="16" /></template>
                 </NcButton>
+                <NcButton
+                    variant="tertiary"
+                    :title="t('teamhub', 'Insert image by URL')"
+                    :aria-label="t('teamhub', 'Insert image')"
+                    @mousedown.prevent
+                    @click="openImageDialog">
+                    <template #icon><ImageIcon :size="16" /></template>
+                </NcButton>
             </div>
 
             <!-- Toolbar: Smart Picker + Attach file -->
@@ -212,6 +220,61 @@
                 {{ t('teamhub', 'Cancel') }}
             </NcButton>
         </div>
+
+        <!-- Insert image by URL dialog -->
+        <NcDialog
+            v-if="imageDialogOpen"
+            :name="t('teamhub', 'Insert image')"
+            :open="true"
+            size="normal"
+            @closing="imageDialogOpen = false">
+            <div class="post-form__image-dialog">
+                <NcButton
+                    variant="secondary"
+                    :disabled="imageDialogBrowsing"
+                    @click="browseImageFromFiles">
+                    <template #icon>
+                        <NcLoadingIcon v-if="imageDialogBrowsing" :size="16" />
+                        <FolderIcon v-else :size="16" />
+                    </template>
+                    {{ t('teamhub', 'Browse Files…') }}
+                </NcButton>
+                <p class="post-form__image-dialog-divider">
+                    {{ t('teamhub', 'or paste a URL') }}
+                </p>
+                <NcTextField
+                    ref="imageUrlField"
+                    v-model="imageDialogUrl"
+                    :label="t('teamhub', 'Image URL (https://…)')"
+                    :placeholder="t('teamhub', 'https://example.com/photo.jpg')"
+                    type="url"
+                    @keydown.enter="confirmImageDialog" />
+                <NcTextField
+                    v-model="imageDialogAlt"
+                    :label="t('teamhub', 'Alt text (describe the image)')"
+                    :placeholder="t('teamhub', 'A short description for accessibility')"
+                    @keydown.enter="confirmImageDialog" />
+                <NcTextField
+                    v-model="imageDialogWidth"
+                    :label="t('teamhub', 'Width in pixels (optional)')"
+                    type="number"
+                    @keydown.enter="confirmImageDialog" />
+                <p class="post-form__image-dialog-hint">
+                    {{ t('teamhub', 'Remote images are loaded through a privacy-preserving proxy and scaled to fit without cropping.') }}
+                </p>
+            </div>
+            <template #actions>
+                <NcButton variant="tertiary" @click="imageDialogOpen = false">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    variant="primary"
+                    :disabled="!imageDialogUrl.trim()"
+                    @click="confirmImageDialog">
+                    {{ t('teamhub', 'Insert') }}
+                </NcButton>
+            </template>
+        </NcDialog>
     </div>
 </template>
 
@@ -227,6 +290,7 @@ import {
     NcTextField,
     NcRichContenteditable,
     NcLoadingIcon,
+    NcDialog,
 } from '@nextcloud/vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
@@ -242,6 +306,8 @@ import CodeTags from 'vue-material-design-icons/CodeTags.vue'
 import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
 import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import ImageIcon from 'vue-material-design-icons/Image.vue'
+import FolderIcon from 'vue-material-design-icons/Folder.vue'
 
 // TeamHub attachment folder inside the user's Files
 const ATTACH_FOLDER = 'TeamHub Attachments'
@@ -249,11 +315,11 @@ const ATTACH_FOLDER = 'TeamHub Attachments'
 export default {
     name: 'PostMessageForm',
     components: {
-        NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon,
+        NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon, NcDialog,
         MessageOutline, HelpCircleOutline, PollIcon, Plus, Close, Send,
         Paperclip, LinkVariant,
         FormatBold, FormatItalic, CodeTags, CodeBraces,
-        FormatHeader2, FormatListBulleted,
+        FormatHeader2, FormatListBulleted, ImageIcon, FolderIcon,
     },
     emits: ['submitted', 'cancel'],
 
@@ -276,6 +342,17 @@ export default {
             attachmentSeq: 0,
             // Each entry: { id, name, uploading, error, shareUrl }
             attachments: [],
+            // Insert-image-by-URL dialog
+            imageDialogOpen: false,
+            imageDialogUrl: '',
+            imageDialogAlt: '',
+            imageDialogWidth: '',
+            imageDialogBrowsing: false,
+            // DAV path of the file chosen via browseImageFromFiles (e.g. /Photos/cat.jpg).
+            // Set during browse; cleared when the dialog is opened fresh or confirmed.
+            // Used by confirmImageDialog to share the file with the team circle
+            // before inserting the public-preview URL.
+            imageDialogFilePath: null,
         }
     },
 
@@ -521,6 +598,118 @@ export default {
             }
         },
 
+        // ── Insert image by URL ──────────────────────────────────────────────
+        /**
+         * Open the insert-image dialog. Source safety (https→proxy, same-origin
+         * passthrough, everything else dropped) is enforced at render time by the
+         * DOMPurify hook in MessageCard; this dialog only composes the
+         * `![alt|width](url)` markdown and appends it to the body.
+         */
+        openImageDialog() {
+            this.imageDialogUrl = ''
+            this.imageDialogAlt = ''
+            this.imageDialogWidth = ''
+            this.imageDialogFilePath = null
+            this.imageDialogOpen = true
+            this.$nextTick(() => this.$refs.imageUrlField?.$el?.querySelector('input')?.focus())
+        },
+
+        confirmImageDialog() {
+            const url = this.imageDialogUrl.trim()
+            if (!url) return
+            const alt = this.imageDialogAlt.trim()
+            const w = parseInt(this.imageDialogWidth, 10)
+            const widthSeg = (Number.isFinite(w) && w >= 1 && w <= 2000) ? `|${w}` : ''
+            // The URL is either a remote https URL (proxied at render time by
+            // MessageCard) or a /core/preview URL pointing to the .teamhub-cache
+            // copy in the team folder — accessible to all circle members.
+            const snippet = `![${alt}${widthSeg}](${url})`
+            this.body = this.body + (this.body && !this.body.endsWith('\n') ? '\n' : '') + snippet
+            this.imageDialogFilePath = null
+            this.imageDialogOpen = false
+        },
+
+        /**
+         * Open the NC FilePicker filtered to images, then copy the chosen file
+         * into the team folder's hidden image cache (.teamhub-cache) via the
+         * PHP endpoint. The cached copy lives in the circle-shared team folder
+         * so all members can load it via /core/preview without per-user ACL.
+         *
+         * Blocked with an error if the team has no Files folder connected.
+         */
+        async browseImageFromFiles() {
+            // Guard: team must have a Files folder for the cache to work.
+            const teamFiles = this.$store.state.resources?.files
+            if (!teamFiles?.folder_id) {
+                showError(t('teamhub', 'Connect a Files folder to this team first to insert images from your files.'))
+                return
+            }
+
+            this.imageDialogBrowsing = true
+            try {
+                const { getFilePickerBuilder } = await import('@nextcloud/dialogs')
+                const picker = getFilePickerBuilder(t('teamhub', 'Choose an image'))
+                    .setMimeTypeFilter(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif'])
+                    .setMultiSelect(false)
+                    .allowDirectories(false)
+                    .addButton({
+                        // @nextcloud/dialogs v7 requires at least one button — otherwise
+                        // the picker renders with no confirm action and selections cannot
+                        // be applied. The pick() promise resolves with the chosen path
+                        // when this button is clicked; the callback itself is a no-op.
+                        label: t('teamhub', 'Choose'),
+                        variant: 'primary',
+                        callback: () => {},
+                    })
+                    .build()
+                const result = await picker.pick()
+
+                // v6 returns string path, v7 returns Node[] or string[] depending
+                // on configuration. Normalise to a single path string.
+                let path = null
+                if (Array.isArray(result)) {
+                    const first = result[0]
+                    path = typeof first === 'string' ? first : (first?.path || null)
+                } else if (typeof result === 'string') {
+                    path = result
+                } else if (result && typeof result === 'object') {
+                    path = result.path || null
+                }
+                if (!path) return
+
+
+                // POST to the PHP endpoint — copies the file into .teamhub-cache
+                // inside the team folder and returns the cached file's numeric fileId.
+                const teamId = this.$store.state.currentTeamId
+                const resp = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages/cache-image`),
+                    { teamFolderId: teamFiles.folder_id, sourcePath: path },
+                )
+                const fileId = resp.data?.fileId
+                if (!fileId) {
+                    showError(t('teamhub', 'Could not cache the image in the team folder'))
+                    return
+                }
+
+
+                // Pre-fill the dialog with /core/preview for the CACHED copy.
+                // This URL is accessible to all team members because the cached
+                // file lives in the circle-shared team folder.
+                const basename = path.split('/').filter(Boolean).pop() || ''
+                this.imageDialogUrl = generateUrl('/core/preview') + `?fileId=${fileId}&x=1024&y=1024&a=true`
+                this.imageDialogFilePath = null  // no client-side sharing needed
+                if (!this.imageDialogAlt) {
+                    this.imageDialogAlt = basename
+                }
+            } catch (e) {
+                if (e?.response?.data?.error) {
+                    showError(t('teamhub', 'Failed to cache image: {error}', { error: e.response.data.error }))
+                }
+            } finally {
+                this.imageDialogBrowsing = false
+            }
+        },
+
         // ── Smart Picker ────────────────────────────────────────────────────
         async openSmartPicker() {
             try {
@@ -614,15 +803,23 @@ export default {
                     // 404 = file doesn't exist — good, use original name
                 }
 
-                await axios.put(fileDavUrl, file, {
+                const putResp = await axios.put(fileDavUrl, file, {
                     headers: { 'Content-Type': file.type || 'application/octet-stream' },
                 })
+
+                // NC returns the new numeric fileId in OC-FileId on a successful
+                // PUT — we need it to build the core preview URL for images.
+                // Header may be `<id>oc<instanceid>`; strip the suffix.
+                const fileIdRaw = putResp.headers?.['oc-fileid'] || ''
+                const fileIdMatch = String(fileIdRaw).match(/^(\d+)/)
+                const fileId = fileIdMatch ? fileIdMatch[1] : null
 
                 // 3. Share the file with the circle (internal share, not public link)
                 //    This lets all team members access it
                 const ncFilePath = `${uploadFolder}/${fileName}`
                 const circleId = this.$store.state.currentTeamId
                 let shareUrl = null
+                let shareToken = null
 
                 if (circleId) {
                     try {
@@ -637,23 +834,42 @@ export default {
                             { headers: { 'OCS-APIRequest': 'true', 'Accept': 'application/json' } }
                         )
                         shareUrl = shareResp.data?.ocs?.data?.url || null
+                        shareToken = shareResp.data?.ocs?.data?.token || null
                     } catch (shareErr) {
                         // Share with circle failed — file is uploaded but not shared
-                        // Just link to the file in the poster's Files
                     }
                 }
 
-                // 4. Build the file URL — link to NC Files viewer for the uploaded file
-                // Build the best available URL to open the file directly:
-                // 1. shareUrl (circle internal share) — opens the shared file view
-                // 2. WebDAV download URL — direct download (works for any file)
-                // We avoid /apps/files/?openfile= because that needs a numeric fileId
+                // 4. Build the file URL.
+                //    For images: use the public-preview endpoint keyed on the share
+                //    token — accessible to all circle members without per-user ACL.
+                //    /core/preview checks per-user ACL via session and returns 404
+                //    for other users even when the file is circle-shared.
+                //    For non-images: prefer share landing URL, fall back to dav URL.
                 const uid2 = getCurrentUser()?.uid
                 const davDownloadUrl = generateRemoteUrl(`dav/files/${uid2}${uploadFolder}/${fileName}`)
-                const fileViewUrl = shareUrl || davDownloadUrl
+                const isImage = (file.type || '').startsWith('image/')
+                let fileViewUrl
+                if (isImage && shareToken) {
+                    // Public-preview: served by files_sharing, honours share token,
+                    // no per-user ACL check — all circle members can render this URL.
+                    fileViewUrl = generateUrl('/apps/files_sharing/publicpreview')
+                        + `?token=${encodeURIComponent(shareToken)}&x=1024&y=1024&a=true`
+                } else if (isImage && fileId) {
+                    // Fallback: share failed — poster sees it, others may not
+                    fileViewUrl = generateUrl('/core/preview') + `?fileId=${fileId}&x=1024&y=1024&a=true`
+                } else {
+                    fileViewUrl = shareUrl || davDownloadUrl
+                }
 
-                // 5. Append markdown link
-                const linkText = `[📎 ${fileName}](${fileViewUrl})`
+                // 5. Append markdown link.
+                //    For image content types, emit inline-image markdown so it
+                //    renders in the body (the preview URL above is same-origin,
+                //    so it passes the sanitizer's same-origin check). Non-images
+                //    keep the 📎 link.
+                const linkText = isImage
+                    ? `![${fileName}](${fileViewUrl})`
+                    : `[📎 ${fileName}](${fileViewUrl})`
                 this.body = this.body + (this.body && !this.body.endsWith('\n') ? '\n' : '') + linkText
 
                 writeAttachment({ uploading: false, filePath: ncFilePath })
@@ -668,8 +884,10 @@ export default {
         removeAttachment(i) {
             const att = this.attachments[i]
             if (att.name) {
-                const linkText = `[📎 ${att.name}]`
-                const lineToRemove = new RegExp(`\\n?\\[📎 ${att.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\([^)]+\\)`, 'g')
+                // Match both the inline-image form ![name](url) and the 📎 link
+                // form [📎 name](url) — uploads emit one or the other by type.
+                const escName = att.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                const lineToRemove = new RegExp(`\\n?(?:!\\[${escName}\\]|\\[📎 ${escName}\\])\\([^)]+\\)`, 'g')
                 this.body = this.body.replace(lineToRemove, '')
             }
             this.attachments.splice(i, 1)
@@ -874,4 +1092,37 @@ export default {
 }
 
 .poll-option-row > :first-child { flex: 1; }
+
+.post-form__image-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 0;
+    min-width: 320px;
+}
+
+.post-form__image-dialog-hint {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    margin: 0;
+}
+
+.post-form__image-dialog-divider {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    text-align: center;
+    margin: 0;
+    position: relative;
+}
+.post-form__image-dialog-divider::before,
+.post-form__image-dialog-divider::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: calc(50% - 60px);
+    height: 1px;
+    background: var(--color-border);
+}
+.post-form__image-dialog-divider::before { left: 0; }
+.post-form__image-dialog-divider::after  { right: 0; }
 </style>

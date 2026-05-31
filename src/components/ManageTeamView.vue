@@ -666,6 +666,27 @@
                         {{ t('teamhub', 'Saved') }}
                     </span>
                 </div>
+
+                <!-- Image cache -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Message image cache') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Images inserted from your personal files are copied into a hidden cache folder (.teamhub-cache) inside the team folder so all members can view them. Clear this cache to free up storage — existing messages will show broken images.') }}
+                    </p>
+                    <NcButton
+                        variant="error"
+                        :disabled="clearingImageCache || !teamFilesFolderId"
+                        @click="clearImageCache">
+                        <template #icon>
+                            <NcLoadingIcon v-if="clearingImageCache" :size="18" />
+                            <TrashCan v-else :size="18" aria-hidden="true" />
+                        </template>
+                        {{ clearingImageCache ? t('teamhub', 'Clearing…') : t('teamhub', 'Clear image cache') }}
+                    </NcButton>
+                    <span v-if="!teamFilesFolderId" class="manage-section__hint">
+                        {{ t('teamhub', 'No Files folder connected — image cache is not available.') }}
+                    </span>
+                </div>
             </template>
         </div>
 
@@ -1258,6 +1279,7 @@ import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
 import AlertIcon from 'vue-material-design-icons/Alert.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
+import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import UploadIcon from 'vue-material-design-icons/Upload.vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
 import ArchiveTeamModal from './ArchiveTeamModal.vue'
@@ -1285,7 +1307,7 @@ export default {
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, FolderAccountIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
         ChevronRight, ChevronDown,
-        ImageIcon, TrashCanOutline, UploadIcon, AccountArrowRight,
+        ImageIcon, TrashCanOutline, TrashCan, UploadIcon, AccountArrowRight,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
         ArchiveTeamModal,
         ResourcePicker,
@@ -1330,6 +1352,7 @@ export default {
             loadingMessageSettings: false,
             savingMessageSettings: false,
             messageSettingsSaved: false,
+            clearingImageCache: false,
             dragSourceWidget: null,
             teamApps: [],
             installedApps: {},
@@ -1384,6 +1407,12 @@ export default {
     },
     computed: {
         ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled']),
+
+        /** Numeric fileId of the team folder root, or null if none connected.
+         *  Used by the image cache clear button. */
+        teamFilesFolderId() {
+            return this.$store.state.resources?.files?.folder_id || null
+        },
 
         /** True when the current user holds admin or owner level on this team. */
         isTeamAdmin() {
@@ -2091,6 +2120,23 @@ export default {
                 showError(t('teamhub', 'Failed to save message settings'))
             } finally {
                 this.savingMessageSettings = false
+            }
+        },
+
+        async clearImageCache() {
+            const folderId = this.teamFilesFolderId
+            if (!folderId) return
+            this.clearingImageCache = true
+            try {
+                const { data } = await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/image-cache`),
+                    { data: { teamFolderId: folderId } }
+                )
+                showSuccess(n('teamhub', 'Image cache cleared (%n file removed)', 'Image cache cleared (%n files removed)', n, { n }))
+            } catch (e) {
+                showError(t('teamhub', 'Failed to clear image cache'))
+            } finally {
+                this.clearingImageCache = false
             }
         },
 

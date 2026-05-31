@@ -185,6 +185,15 @@ class LinkPreviewService {
     /**
      * URL policy: only allow https:// (no http, no javascript:, no file://, no loopback).
      * Public so LinkPreviewController can reuse it for the image proxy endpoint.
+     *
+     * This is the FIRST gate. It validates scheme + host string and, critically,
+     * resolves the host to its IP addresses and rejects any that fall in a
+     * private / loopback / link-local / reserved range (DNS-rebinding defence).
+     *
+     * Because DNS can change between this check and the actual fetch, and because
+     * a server can redirect to an internal address after passing this gate, the
+     * controller MUST additionally re-validate each hop's resolved IP during the
+     * fetch (see LinkPreviewController::proxyImage and isResolvedIpSafe).
      */
     public function isUrlAllowed(string $url): bool {
         return $this->isAllowedUrl($url);
@@ -192,15 +201,157 @@ class LinkPreviewService {
 
     private function isAllowedUrl(string $url): bool {
         $parsed = parse_url($url);
-        if (!isset($parsed['scheme'], $parsed['host'])) return false;
-        if ($parsed['scheme'] !== 'https') return false;
+        if (!isset($parsed['scheme'], $parsed['host'])) {
+            return false;
+        }
+        if ($parsed['scheme'] !== 'https') {
+            return false;
+        }
 
         $host = strtolower($parsed['host']);
-        // Block loopback / private addresses
-        $blocked = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
-        if (in_array($host, $blocked, true)) return false;
-        // Block private IP ranges (basic check)
-        if (preg_match('/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/', $host)) return false;
+
+        // Reject obvious loopback / wildcard literals up front.
+        $blockedLiterals = ['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'];
+        if (in_array($host, $blockedLiterals, true)) {
+            return false;
+        }
+
+        // Strip IPv6 brackets if present (parse_url keeps them for the host).
+        $bare = trim($host, '[]');
+
+        // Reject decimal / octal / hex encoded IPv4 forms (e.g. http://2130706433,
+        // http://0x7f000001, http://017700000001). These are valid to the resolver
+        // but bypass naive dotted-quad string checks. We detect a "host" that is
+        // entirely numeric / hex but is NOT a normal dotted-quad, and reject it.
+        if ($this->isEncodedIpForm($bare)) {
+            return false;
+        }
+
+        // Resolve the host to every IP it points at, and reject if ANY of them is
+        // in a forbidden range. Resolving here (not just string-matching the host)
+        // is what defeats a hostname that points at 127.0.0.1 / 169.254.169.254 /
+        // a private LAN address. parse_url already gave us a hostname or a literal IP.
+        $ips = $this->resolveHostIps($bare);
+        if ($ips === []) {
+            // Could not resolve — fail closed.
+            return false;
+        }
+        foreach ($ips as $ip) {
+            if (!$this->isPublicIp($ip)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * True when the literal looks like an encoded (non-dotted-quad) IPv4:
+     * a single decimal integer, an 0x-hex form, or a leading-zero octal form.
+     * A normal dotted IPv4 (e.g. 93.184.216.34) and any real hostname return false.
+     */
+    private function isEncodedIpForm(string $host): bool {
+        // Pure decimal integer with no dots, e.g. "2130706433"
+        if (preg_match('/^\d+$/', $host) === 1) {
+            return true;
+        }
+        // 0x… hex (with or without dots), e.g. "0x7f000001" or "0x7f.0x0.0x0.0x1"
+        if (preg_match('/^(0x[0-9a-f]+)(\.0x[0-9a-f]+)*$/i', $host) === 1) {
+            return true;
+        }
+        // Octal dotted form with leading zeros, e.g. "0177.0.0.01"
+        if (preg_match('/^0\d+(\.\d+){0,3}$/', $host) === 1) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Resolve a host (or pass through a literal IP) to a list of IP strings.
+     * Returns [] when nothing resolves.
+     *
+     * @return string[]
+     */
+    private function resolveHostIps(string $host): array {
+        // Literal IP? Return as-is.
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return [$host];
+        }
+
+        $ips = [];
+
+        // IPv4 records
+        $a = @gethostbynamel($host);
+        if (is_array($a)) {
+            $ips = array_merge($ips, $a);
+        }
+
+        // IPv6 records (and any others) via dns_get_record
+        $records = @dns_get_record($host, DNS_AAAA);
+        if (is_array($records)) {
+            foreach ($records as $r) {
+                if (!empty($r['ipv6'])) {
+                    $ips[] = $r['ipv6'];
+                }
+            }
+        }
+
+        return array_values(array_unique($ips));
+    }
+
+    /**
+     * True only when $ip is a routable public address.
+     *
+     * Rejects: private ranges, loopback, link-local (incl. the cloud metadata
+     * IP 169.254.169.254), reserved ranges, IPv6 unique-local (fc00::/7),
+     * IPv6 loopback (::1), the unspecified address, and IPv4-mapped IPv6
+     * (::ffff:a.b.c.d) whose embedded v4 is itself non-public.
+     *
+     * Public so the controller can re-check each redirect hop.
+     */
+    public function isResolvedIpSafe(string $ip): bool {
+        return $this->isPublicIp($ip);
+    }
+
+    private function isPublicIp(string $ip): bool {
+        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+
+        // IPv4-mapped / -compatible IPv6 (e.g. ::ffff:169.254.169.254):
+        // extract the trailing dotted-quad and validate THAT as IPv4.
+        if (preg_match('/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i', $ip, $m) === 1
+            || preg_match('/^::(\d{1,3}(?:\.\d{1,3}){3})$/', $ip, $m) === 1) {
+            return $this->isPublicIp($m[1]);
+        }
+
+        // PHP's own filter rejects private + reserved ranges. For IPv4 this covers
+        // 10/8, 172.16/12, 192.168/16, 127/8, 169.254/16 (link-local, incl. the
+        // 169.254.169.254 metadata IP), 0/8, 240/4, etc. For IPv6 it covers ::1,
+        // ::, fe80::/10, and the documentation ranges.
+        $isPublicByFilter = filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        ) !== false;
+
+        if (!$isPublicByFilter) {
+            return false;
+        }
+
+        // Belt-and-suspenders: PHP's NO_RES_RANGE does not flag IPv6 unique-local
+        // (fc00::/7) on all versions. Reject it explicitly.
+        if (str_contains($ip, ':')) {
+            $packed = @inet_pton($ip);
+            if ($packed === false) {
+                return false;
+            }
+            // fc00::/7 — first byte is 0xFC or 0xFD.
+            $firstByte = ord($packed[0]);
+            if (($firstByte & 0xFE) === 0xFC) {
+                return false;
+            }
+        }
 
         return true;
     }

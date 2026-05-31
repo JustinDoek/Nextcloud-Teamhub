@@ -141,6 +141,14 @@
                     @click="applyEditLink">
                     <template #icon><LinkVariant :size="16" /></template>
                 </NcButton>
+                <NcButton
+                    variant="tertiary"
+                    :title="t('teamhub', 'Insert image by URL')"
+                    :aria-label="t('teamhub', 'Insert image')"
+                    @mousedown.prevent
+                    @click="openImageDialog">
+                    <template #icon><ImageIcon :size="16" /></template>
+                </NcButton>
             </div>
             <div class="message-card__edit-actions">
                 <NcButton variant="primary" :disabled="saving" @click="saveEdit">
@@ -158,7 +166,7 @@
 
             <!-- Body (markdown rendered) -->
             <!-- eslint-disable-next-line vue/no-v-html -->
-            <div class="message-card__body" v-html="renderedMessage" />
+            <div class="message-card__body" v-html="renderedMessage" @click="onBodyClick" @keydown="onBodyKeydown" />
         </template>
 
         <!-- Link / attachment previews -->
@@ -308,6 +316,92 @@
                 @mark-solved="markSolved"
                 @unmark-solved="unmarkSolved" />
         </Transition>
+
+        <!-- Insert image by URL dialog (edit toolbar) -->
+        <NcDialog
+            v-if="imageDialogOpen"
+            :name="t('teamhub', 'Insert image')"
+            :open="true"
+            size="normal"
+            @closing="imageDialogOpen = false">
+            <div class="teamhub-image-dialog">
+                <NcButton
+                    variant="secondary"
+                    :disabled="imageDialogBrowsing"
+                    @click="browseImageFromFiles">
+                    <template #icon>
+                        <NcLoadingIcon v-if="imageDialogBrowsing" :size="16" />
+                        <FolderIcon v-else :size="16" />
+                    </template>
+                    {{ t('teamhub', 'Browse Files…') }}
+                </NcButton>
+                <p class="teamhub-image-dialog__divider">
+                    {{ t('teamhub', 'or paste a URL') }}
+                </p>
+                <NcTextField
+                    ref="imageUrlField"
+                    v-model="imageDialogUrl"
+                    :label="t('teamhub', 'Image URL (https://…)')"
+                    :placeholder="t('teamhub', 'https://example.com/photo.jpg')"
+                    type="url"
+                    @keydown.enter="confirmImageDialog" />
+                <NcTextField
+                    v-model="imageDialogAlt"
+                    :label="t('teamhub', 'Alt text (describe the image)')"
+                    :placeholder="t('teamhub', 'A short description for accessibility')"
+                    @keydown.enter="confirmImageDialog" />
+                <NcTextField
+                    v-model="imageDialogWidth"
+                    :label="t('teamhub', 'Width in pixels (optional)')"
+                    type="number"
+                    @keydown.enter="confirmImageDialog" />
+                <p class="teamhub-image-dialog__hint">
+                    {{ t('teamhub', 'Remote images are loaded through a privacy-preserving proxy and scaled to fit without cropping.') }}
+                </p>
+            </div>
+            <template #actions>
+                <NcButton variant="tertiary" @click="imageDialogOpen = false">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    variant="primary"
+                    :disabled="!imageDialogUrl.trim()"
+                    @click="confirmImageDialog">
+                    {{ t('teamhub', 'Insert') }}
+                </NcButton>
+            </template>
+        </NcDialog>
+
+        <!-- Full-size image lightbox.
+             Teleported to <body> so it escapes any parent stacking context
+             (NC's widget cards and the team hero/background both create their
+             own, and an element only competes within its parent's context —
+             a z-index alone is not enough). -->
+        <Teleport to="body">
+            <div
+                v-if="lightboxSrc"
+                class="teamhub-lightbox"
+                role="dialog"
+                aria-modal="true"
+                :aria-label="t('teamhub', 'Image preview')"
+                tabindex="-1"
+                @click="closeLightbox"
+                @keydown.esc="closeLightbox">
+                <NcButton
+                    class="teamhub-lightbox__close"
+                    variant="tertiary"
+                    :aria-label="t('teamhub', 'Close image preview')"
+                    @click.stop="closeLightbox">
+                    <template #icon><Close :size="24" /></template>
+                </NcButton>
+                <img
+                    :src="lightboxSrc"
+                    :alt="lightboxAlt"
+                    class="teamhub-lightbox__img"
+                    referrerpolicy="no-referrer"
+                    @click.stop>
+            </div>
+        </Teleport>
     </div>
 </template>
 
@@ -316,7 +410,8 @@ import { mapState, mapGetters } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl, generateRemoteUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
-import { NcAvatar, NcButton, NcLoadingIcon, NcRichContenteditable } from '@nextcloud/vue'
+import { getCurrentUser } from '@nextcloud/auth'
+import { NcAvatar, NcButton, NcLoadingIcon, NcRichContenteditable, NcDialog, NcTextField } from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import CommentOutline from 'vue-material-design-icons/CommentOutline.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
@@ -335,6 +430,9 @@ import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
 import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
+import ImageIcon from 'vue-material-design-icons/Image.vue'
+import FolderIcon from 'vue-material-design-icons/Folder.vue'
+import Close from 'vue-material-design-icons/Close.vue'
 import CommentsSection from './CommentsSection.vue'
 import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 
@@ -373,10 +471,16 @@ function extractUrlObjects(text) {
     const results = []
     const seen = new Set()
 
+    // Strip image-markdown spans first so their URLs don't get picked up as
+    // preview targets. The image itself is the content — a preview card under
+    // it is redundant and ugly. Order matters: do this BEFORE the [..](..)
+    // link match below, otherwise the inner ](url) of ![..](..) leaks through.
+    const stripped = text.replace(/!\[[^\]]*\]\([^)\s]+\)/g, '')
+
     // Markdown links (includes 📎 attachment links from PostMessageForm)
     const mdRe = /\[([^\]]+)\]\(([^)]+)\)/g
     let m
-    while ((m = mdRe.exec(text)) !== null) {
+    while ((m = mdRe.exec(stripped)) !== null) {
         try {
             const href = new URL(m[2]).href
             if (seen.has(href)) continue
@@ -387,7 +491,7 @@ function extractUrlObjects(text) {
 
     // Bare URLs not inside markdown parentheses
     const bareRe = /(?<!\()https?:\/\/[^\s<>"'\)]+/g
-    while ((m = bareRe.exec(text)) !== null) {
+    while ((m = bareRe.exec(stripped)) !== null) {
         try {
             const href = new URL(m[0]).href
             if (seen.has(href)) continue
@@ -403,10 +507,112 @@ function extractUrlObjects(text) {
 import DOMPurify from 'dompurify'
 
 // Tags and attributes that our regex renderer intentionally produces.
+// (img is allowed; its src is constrained by the hook registered below.)
 // DOMPurify drops everything not on these lists — defence-in-depth even if
 // a future regex change accidentally widens the output.
-const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'span']
-const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'data-mention-user']
+const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'span', 'img']
+const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'data-mention-user', 'src', 'alt', 'width', 'loading', 'decoding', 'referrerpolicy', 'tabindex', 'role']
+
+// Path of the TeamHub backend image proxy. Every REMOTE image src is rewritten
+// to point here so the viewer's browser never hits the third-party host directly
+// (no IP leak / tracking-pixel surface; satisfies NC's img-src CSP).
+const IMAGE_PROXY_PATH = generateUrl('/apps/teamhub/api/v1/preview/image')
+
+/**
+ * Decide what an <img> src is allowed to become, or null to drop the image.
+ *
+ * Three outcomes:
+ *   - Remote https:// URL        → rewrite to the proxy path (?url=<encoded>)
+ *   - Same-origin NC path/URL     → pass through unchanged (uploads, previews)
+ *   - Anything else (data:, http:,
+ *     javascript:, other origins) → null  (image is removed by the sanitizer)
+ *
+ * The sanitizer hook (below) is the single point that enforces this — the
+ * markdown regex never emits a raw remote src, but we still re-derive the safe
+ * src here so a future regex change can't widen what actually renders.
+ */
+/**
+ * Escape a string for safe inclusion inside a double-quoted HTML attribute.
+ * DOMPurify is still the authoritative sanitizer; this just prevents the
+ * markdown layer from emitting attribute-breaking characters.
+ */
+function attrEscape(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+}
+
+function safeImageSrc(rawSrc) {
+    if (!rawSrc) return null
+
+    // Already proxied by us — accept as-is (avoids double-encoding on re-render/edit).
+    if (rawSrc.startsWith(IMAGE_PROXY_PATH)) {
+        return rawSrc
+    }
+
+    // Same-origin: relative path, or an absolute URL whose origin matches the page.
+    // These are NC-served (uploaded images, share previews) and need no proxy.
+    if (rawSrc.startsWith('/')) {
+        // Reject protocol-relative '//evil.com/x' (starts with '/' but is cross-origin).
+        if (rawSrc.startsWith('//')) return null
+        return rawSrc
+    }
+    try {
+        const u = new URL(rawSrc, window.location.origin)
+        if (u.origin === window.location.origin) {
+            return u.pathname + u.search
+        }
+        // Remote: only https is proxied. http/ftp/data/javascript are dropped.
+        if (u.protocol === 'https:') {
+            return IMAGE_PROXY_PATH + '?url=' + encodeURIComponent(u.href)
+        }
+    } catch (e) {
+        return null
+    }
+    return null
+}
+
+// One-time DOMPurify hook: enforce the image src policy and harden every <img>.
+// Runs after DOMPurify has parsed attributes, on every sanitize() call. Because
+// it is the only place that sets the final src, no raw remote/data/http URL can
+// reach the DOM even if the markdown layer is later changed.
+let imageHookRegistered = false
+function ensureImageHook() {
+    if (imageHookRegistered) return
+    imageHookRegistered = true
+    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+        if (node.nodeName !== 'IMG') return
+
+        const safe = safeImageSrc(node.getAttribute('src'))
+        if (safe === null) {
+            // Disallowed source — remove the element entirely.
+            node.remove()
+            return
+        }
+        node.setAttribute('src', safe)
+
+        // Clamp width to a sane integer (1–2000). Drop anything non-numeric.
+        const w = parseInt(node.getAttribute('width'), 10)
+        if (Number.isFinite(w) && w >= 1 && w <= 2000) {
+            node.setAttribute('width', String(w))
+        } else {
+            node.removeAttribute('width')
+        }
+
+        // Guarantee a frame class, lazy loading, and async decode.
+        node.setAttribute('class', 'teamhub-inline-image')
+        node.setAttribute('loading', 'lazy')
+        node.setAttribute('decoding', 'async')
+        // Never let an inline image carry a referrer to the (proxied) origin.
+        node.setAttribute('referrerpolicy', 'no-referrer')
+        // Keyboard-accessible: focusable and announced as an activatable control
+        // (Enter opens the lightbox, handled by the delegated body listener).
+        node.setAttribute('tabindex', '0')
+        node.setAttribute('role', 'button')
+    })
+}
 
 /**
  * Convert a subset of Markdown to sanitised HTML.
@@ -443,6 +649,33 @@ function renderMarkdown(text, membersMap = {}) {
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
         .replace(/_([^_]+)_/g, '<em>$1</em>')
 
+    // 4b. Inline images — ![alt](url) and ![alt|320](url) (optional width).
+    //     Emitted BEFORE the link rule so ![..](..) is not eaten by [..](..),
+    //     AND stashed behind a placeholder so the bare-URL autolinker in step 5
+    //     can't match the https:// inside the emitted src="..." attribute.
+    //     (That corruption is exactly what broke v3.58.0.) src/alt are
+    //     attribute-escaped; the final src policy + width clamp are enforced in
+    //     the DOMPurify hook (safeImageSrc) — a src the hook rejects (data:,
+    //     http:, cross-origin) is dropped entirely at sanitize time.
+    const imageTags = []
+    html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, altRaw, urlRaw) => {
+        let alt = altRaw
+        let widthAttr = ''
+        // Optional "|<width>" suffix inside the alt segment: ![alt|320](url)
+        const pipe = altRaw.lastIndexOf('|')
+        if (pipe !== -1) {
+            const maybeWidth = altRaw.slice(pipe + 1).trim()
+            if (/^\d{1,4}$/.test(maybeWidth)) {
+                alt = altRaw.slice(0, pipe)
+                widthAttr = ` width="${maybeWidth}"`
+            }
+        }
+        const safeAlt = attrEscape(alt.trim())
+        const safeUrl = attrEscape(urlRaw)
+        imageTags.push(`<img src="${safeUrl}" alt="${safeAlt}"${widthAttr} />`)
+        return `\u0002${imageTags.length - 1}\u0002`
+    })
+
     // 5. Links — explicit [text](url) then bare https?:// URLs
     html = html
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
@@ -465,12 +698,14 @@ function renderMarkdown(text, membersMap = {}) {
     // 7. Remaining newlines → <br>
     html = html.replace(/\n/g, '<br>')
 
-    // 8. Restore code placeholders
+    // 8. Restore code + image placeholders
     html = html
         .replace(/\u0000(\d+)\u0000/g, (_, i) => codeBlocks[+i])
         .replace(/\u0001(\d+)\u0001/g, (_, i) => inlineCodes[+i])
+        .replace(/\u0002(\d+)\u0002/g, (_, i) => imageTags[+i])
 
     // 9. Sanitize
+    ensureImageHook()
     return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR })
 }
 
@@ -481,6 +716,8 @@ export default {
         NcButton,
         NcLoadingIcon,
         NcRichContenteditable,
+        NcDialog,
+        NcTextField,
         CommentOutline,
         ClipboardCheckOutline,
         HelpCircleOutline,
@@ -500,6 +737,9 @@ export default {
         FormatHeader2,
         FormatListBulleted,
         LinkVariant,
+        ImageIcon,
+        FolderIcon,
+        Close,
     },
     props: {
         message:      { type: Object,  required: true },
@@ -516,6 +756,15 @@ export default {
             editSubject: '',
             editBody: '',
             saving: false,
+            // Insert-image-by-URL dialog (edit toolbar)
+            imageDialogOpen: false,
+            imageDialogUrl: '',
+            imageDialogAlt: '',
+            imageDialogWidth: '',
+            imageDialogBrowsing: false,
+            // Full-size image lightbox
+            lightboxSrc: '',
+            lightboxAlt: '',
         }
     },
     computed: {
@@ -869,7 +1118,146 @@ export default {
             })
         },
 
-        async saveEdit() {
+        // ── Insert image by URL (edit toolbar) ───────────────────────────────
+        /**
+         * Open the insert-image dialog. The actual src safety (https→proxy,
+         * same-origin passthrough, everything else dropped) is enforced at
+         * render time by the DOMPurify hook — this dialog only composes the
+         * `![alt|width](url)` markdown.
+         */
+        openImageDialog() {
+            this.imageDialogUrl = ''
+            this.imageDialogAlt = ''
+            this.imageDialogWidth = ''
+            this.imageDialogOpen = true
+            this.$nextTick(() => this.$refs.imageUrlField?.$el?.querySelector('input')?.focus())
+        },
+
+        confirmImageDialog() {
+            const url = this.imageDialogUrl.trim()
+            if (!url) return
+            const alt = this.imageDialogAlt.trim()
+            const w = parseInt(this.imageDialogWidth, 10)
+            const widthSeg = (Number.isFinite(w) && w >= 1 && w <= 2000) ? `|${w}` : ''
+            const snippet = `![${alt}${widthSeg}](${url})`
+
+            const el = this.$refs.editBodyRef
+            if (el) {
+                const start = el.selectionStart ?? this.editBody.length
+                const end   = el.selectionEnd   ?? this.editBody.length
+                this.editBody = this.editBody.slice(0, start) + snippet + this.editBody.slice(end)
+                this.$nextTick(() => {
+                    el.focus()
+                    el.setSelectionRange(start + snippet.length, start + snippet.length)
+                })
+            } else {
+                this.editBody += (this.editBody && !this.editBody.endsWith('\n') ? '\n' : '') + snippet
+            }
+            this.imageDialogOpen = false
+        },
+
+        /**
+         * Open the NC FilePicker filtered to images, then resolve the chosen
+         * file's numeric id and pre-fill the URL field with the core preview URL.
+         * Identical to the PostMessageForm path — kept in lockstep so the two
+         * insertion points behave the same.
+         */
+        async browseImageFromFiles() {
+            this.imageDialogBrowsing = true
+            try {
+                const { getFilePickerBuilder } = await import('@nextcloud/dialogs')
+                const picker = getFilePickerBuilder(t('teamhub', 'Choose an image'))
+                    .setMimeTypeFilter(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif'])
+                    .setMultiSelect(false)
+                    .allowDirectories(false)
+                    .addButton({
+                        // @nextcloud/dialogs v7 requires at least one button — otherwise
+                        // the picker renders with no confirm action and selections cannot
+                        // be applied. pick() resolves with the path on click; callback no-op.
+                        label: t('teamhub', 'Choose'),
+                        variant: 'primary',
+                        callback: () => {},
+                    })
+                    .build()
+                const result = await picker.pick()
+
+                let path = null
+                if (Array.isArray(result)) {
+                    const first = result[0]
+                    path = typeof first === 'string' ? first : (first?.path || null)
+                } else if (typeof result === 'string') {
+                    path = result
+                } else if (result && typeof result === 'object') {
+                    path = result.path || null
+                }
+                if (!path) return
+
+                const uid = getCurrentUser()?.uid
+                if (!uid) return
+                const propUrl = generateRemoteUrl(`dav/files/${uid}${path}`)
+                const propResp = await axios({
+                    method: 'PROPFIND',
+                    url: propUrl,
+                    headers: { Depth: '0', 'Content-Type': 'application/xml' },
+                    data:
+                        '<?xml version="1.0"?>'
+                        + '<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">'
+                        + '<d:prop><oc:fileid/></d:prop></d:propfind>',
+                })
+                const idMatch = String(propResp.data).match(/<oc:fileid>(\d+)<\/oc:fileid>/)
+                const fileId = idMatch ? idMatch[1] : null
+                if (!fileId) {
+                    showError(t('teamhub', 'Could not resolve the file'))
+                    return
+                }
+
+                const basename = path.split('/').filter(Boolean).pop() || ''
+                this.imageDialogUrl = generateUrl('/core/preview') + `?fileId=${fileId}&x=1024&y=1024&a=true`
+                if (!this.imageDialogAlt) {
+                    this.imageDialogAlt = basename
+                }
+            } catch (e) {
+                // User cancelled or picker failed silently
+            } finally {
+                this.imageDialogBrowsing = false
+            }
+        },
+        /**
+         * Open the lightbox when an inline image in the rendered body is clicked.
+         * Uses event delegation on the body container so dynamically rendered
+         * images don't each need a listener. The src reused here is the already
+         * sanitised (proxied / same-origin) value — no second trust path.
+         */
+        onBodyClick(event) {
+            const img = event.target.closest && event.target.closest('img.teamhub-inline-image')
+            if (!img) return
+            event.preventDefault()
+            this.lightboxSrc = img.getAttribute('src') || ''
+            this.lightboxAlt = img.getAttribute('alt') || ''
+            this.$nextTick(() => {
+                const box = document.querySelector('.teamhub-lightbox')
+                box?.focus()
+            })
+        },
+
+        closeLightbox() {
+            this.lightboxSrc = ''
+            this.lightboxAlt = ''
+        },
+
+        /** Keyboard activation (Enter / Space) for a focused inline image. */
+        onBodyKeydown(event) {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            const img = event.target.closest && event.target.closest('img.teamhub-inline-image')
+            if (!img) return
+            event.preventDefault()
+            this.lightboxSrc = img.getAttribute('src') || ''
+            this.lightboxAlt = img.getAttribute('alt') || ''
+            this.$nextTick(() => {
+                const box = document.querySelector('.teamhub-lightbox')
+                box?.focus()
+            })
+        },        async saveEdit() {
             if (!this.editSubject.trim() || !this.editBody.trim()) return
             this.saving = true
             try {
@@ -1408,4 +1796,89 @@ export default {
     background: var(--color-background-hover);
     margin-top: -8px; /* close the gap from the textarea above */
 }
+
+/* ── Inline images in the message body (the "smart frame") ──────────────────
+   Scale to fit the column without cropping. max-width keeps wide images inside
+   the card even if an explicit width="" was larger; object-fit: contain means
+   a width/height combination never distorts or crops. */
+.message-card__body :deep(img.teamhub-inline-image) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: var(--border-radius);
+    margin: 8px 0;
+    cursor: zoom-in;
+    background: var(--color-background-dark);
+}
+
+.message-card__body :deep(img.teamhub-inline-image):focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+
+/* ── Full-size image lightbox ─────────────────────────────────────────────
+   z-index above NcModal (~10000) and NC toast/notification layers. The
+   element is teleported to <body> so it escapes any parent stacking
+   context — z-index alone wouldn't have been enough. */
+.teamhub-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    cursor: zoom-out;
+}
+
+.teamhub-lightbox__img {
+    max-width: 92vw;
+    max-height: 92vh;
+    object-fit: contain;
+    border-radius: var(--border-radius);
+    cursor: default;
+}
+
+.teamhub-lightbox__close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    color: white;
+}
+
+/* ── Insert-image dialog ────────────────────────────────────────────────── */
+.teamhub-image-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 0;
+    min-width: 320px;
+}
+
+.teamhub-image-dialog__hint {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    margin: 0;
+}
+
+.teamhub-image-dialog__divider {
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    text-align: center;
+    margin: 0;
+    position: relative;
+}
+.teamhub-image-dialog__divider::before,
+.teamhub-image-dialog__divider::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: calc(50% - 60px);
+    height: 1px;
+    background: var(--color-border);
+}
+.teamhub-image-dialog__divider::before { left: 0; }
+.teamhub-image-dialog__divider::after  { right: 0; }
 </style>

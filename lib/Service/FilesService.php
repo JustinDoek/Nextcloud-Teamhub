@@ -895,6 +895,150 @@ class FilesService {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Message image cache
+    // -------------------------------------------------------------------------
+
+    /** Hidden folder name inside the team folder used to store cached message images. */
+    public const IMAGE_CACHE_FOLDER = '.teamhub-cache';
+
+    /**
+     * Copy a file from the requesting user's personal Files into the team
+     * folder image cache, then return the cached file's numeric fileId.
+     *
+     * The team folder is circle-shared with all team members, so the cached
+     * copy is accessible to every member without per-user ACL checks.
+     * The file survives even if the original poster leaves the team.
+     *
+     * @param int    $teamFolderId  NC fileId of the team folder root (from resources.files.folder_id)
+     * @param string $sourcePath   Absolute path inside the requesting user's DAV root (e.g. /Photos/cat.png)
+     * @param string $uid          Requesting user's uid
+     * @return array{ fileId: int, cachePath: string }
+     * @throws \RuntimeException on any failure
+     */
+    public function cacheImageInTeamFolder(int $teamFolderId, string $sourcePath, string $uid): array {
+        $this->logger->debug('[TeamHub][FilesService] cacheImageInTeamFolder — start', [
+            'teamFolderId' => $teamFolderId,
+            'sourcePath'   => $sourcePath,
+            'uid'          => $uid,
+            'app'          => Application::APP_ID,
+        ]);
+
+        $rootFolder = $this->container->get(IRootFolder::class);
+
+        // 1. Resolve the source file via the user's own folder — security boundary:
+        //    this ensures the user actually has access to the file they're caching.
+        $userFolder = $rootFolder->getUserFolder($uid);
+        try {
+            $sourceNode = $userFolder->get($sourcePath);
+        } catch (\OCP\Files\NotFoundException $e) {
+            throw new \RuntimeException('Source file not found or not accessible: ' . $sourcePath);
+        }
+        if (!($sourceNode instanceof \OCP\Files\File)) {
+            throw new \RuntimeException('Source path is not a file: ' . $sourcePath);
+        }
+
+        // 2. Resolve the team folder root by its numeric fileId.
+        //    We look it up in the user's mountpoints — the user must be able to
+        //    see the team folder (they are a circle member).
+        $teamFolderNodes = $rootFolder->getById($teamFolderId);
+        if (empty($teamFolderNodes)) {
+            throw new \RuntimeException('Team folder not found: ' . $teamFolderId);
+        }
+        /** @var \OCP\Files\Folder $teamFolder */
+        $teamFolder = $teamFolderNodes[0];
+        if (!($teamFolder instanceof \OCP\Files\Folder)) {
+            throw new \RuntimeException('Team folder ID does not point to a folder: ' . $teamFolderId);
+        }
+
+        // 3. Ensure the hidden cache subfolder exists.
+        try {
+            $cacheFolder = $teamFolder->get(self::IMAGE_CACHE_FOLDER);
+            if (!($cacheFolder instanceof \OCP\Files\Folder)) {
+                throw new \RuntimeException('Cache path exists but is not a folder');
+            }
+        } catch (\OCP\Files\NotFoundException $e) {
+            $cacheFolder = $teamFolder->newFolder(self::IMAGE_CACHE_FOLDER);
+            $this->logger->debug('[TeamHub][FilesService] cacheImageInTeamFolder — created cache folder', [
+                'teamFolderId' => $teamFolderId, 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // 4. Build a timestamp-prefixed filename to avoid collisions.
+        $originalName = $sourceNode->getName();
+        $timestamp    = date('Ymd-His');
+        $cachedName   = $timestamp . '-' . $originalName;
+
+        // 5. Copy the file contents into the cache folder.
+        $content = $sourceNode->getContent();
+        /** @var \OCP\Files\File $cachedFile */
+        $cachedFile = $cacheFolder->newFile($cachedName, $content);
+
+        $this->logger->debug('[TeamHub][FilesService] cacheImageInTeamFolder — cached', [
+            'cachedName'   => $cachedName,
+            'fileId'       => $cachedFile->getId(),
+            'teamFolderId' => $teamFolderId,
+            'app'          => Application::APP_ID,
+        ]);
+
+        return [
+            'fileId'    => $cachedFile->getId(),
+            'cachePath' => self::IMAGE_CACHE_FOLDER . '/' . $cachedName,
+        ];
+    }
+
+    /**
+     * Delete all files inside the hidden image cache folder for a team,
+     * without removing the folder itself.
+     * Returns the number of files deleted.
+     *
+     * @throws \RuntimeException if the team folder cannot be found
+     */
+    public function clearImageCache(int $teamFolderId): int {
+        $this->logger->debug('[TeamHub][FilesService] clearImageCache — start', [
+            'teamFolderId' => $teamFolderId, 'app' => Application::APP_ID,
+        ]);
+
+        $rootFolder       = $this->container->get(IRootFolder::class);
+        $teamFolderNodes  = $rootFolder->getById($teamFolderId);
+        if (empty($teamFolderNodes)) {
+            throw new \RuntimeException('Team folder not found: ' . $teamFolderId);
+        }
+        /** @var \OCP\Files\Folder $teamFolder */
+        $teamFolder = $teamFolderNodes[0];
+
+        try {
+            $cacheFolder = $teamFolder->get(self::IMAGE_CACHE_FOLDER);
+        } catch (\OCP\Files\NotFoundException $e) {
+            // No cache folder — nothing to clear
+            return 0;
+        }
+
+        if (!($cacheFolder instanceof \OCP\Files\Folder)) {
+            throw new \RuntimeException('Cache path is not a folder');
+        }
+
+        $deleted = 0;
+        foreach ($cacheFolder->getDirectoryListing() as $node) {
+            try {
+                $node->delete();
+                $deleted++;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][FilesService] clearImageCache — failed to delete node', [
+                    'name'  => $node->getName(),
+                    'error' => $e->getMessage(),
+                    'app'   => Application::APP_ID,
+                ]);
+            }
+        }
+
+        $this->logger->debug('[TeamHub][FilesService] clearImageCache — done', [
+            'deleted' => $deleted, 'teamFolderId' => $teamFolderId, 'app' => Application::APP_ID,
+        ]);
+
+        return $deleted;
+    }
+
     private function nodeToArray(Node $node, string $teamFolderPath): array {
         $fullPath     = $node->getPath();
         $relativePath = ltrim(substr($fullPath, strlen($teamFolderPath) - 1), '/');

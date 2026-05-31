@@ -132,6 +132,20 @@ class TelemetryService {
     /**
      * Collect current stats without sending — used by the admin UI preview.
      */
+    /**
+     * Increment the monotonic counter of successful meeting-suggestion wizard
+     * runs. Anonymous and aggregate — just a count, no content, no user. Read
+     * back into the telemetry payload as 'suggest_wizard_uses'.
+     */
+    public function incrementSuggestWizardUses(): void {
+        try {
+            $current = (int)$this->config->getAppValue(Application::APP_ID, 'suggest_wizard_uses', '0');
+            $this->config->setAppValue(Application::APP_ID, 'suggest_wizard_uses', (string)($current + 1));
+        } catch (\Throwable $e) {
+            // Telemetry must never affect the request path.
+        }
+    }
+
     public function collectStats(): array {
         $stats = [
             'uuid'                 => $this->getUuid(),
@@ -144,6 +158,7 @@ class TelemetryService {
             'integrations'         => $this->getRegisteredIntegrations(),
             'builtin_integrations' => $this->getBuiltinIntegrationUsage(),
             'presence_module'      => $this->isPresenceModuleEnabled(),
+            'suggest_wizard_uses'  => (int)$this->config->getAppValue(Application::APP_ID, 'suggest_wizard_uses', '0'),
             'link_domains'         => $this->getLinkDomains(),
         ];
         return $stats;

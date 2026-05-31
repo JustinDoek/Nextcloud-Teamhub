@@ -216,6 +216,25 @@
             </NcSettingsSection>
 
             <NcSettingsSection
+                :name="t('teamhub', 'RoomVox integration')"
+                :description="t('teamhub', 'Paste a RoomVox API token (rvx_...) here to let TeamHub book meeting rooms when a user picks one in the meeting wizard. Create the token in RoomVox under Settings → API Tokens; it needs the “book” scope. The token is stored encrypted in app configuration and never returned to the browser.')">
+                <div class="admin-select-row">
+                    <NcTextField
+                        v-model="form.roomvoxApiToken"
+                        type="password"
+                        :label="t('teamhub', 'RoomVox API token')"
+                        :placeholder="form.roomvoxTokenConfigured ? t('teamhub', '••••••••• (configured — leave empty to keep)') : 'rvx_…'"
+                        style="max-width: 400px;" />
+                </div>
+                <p class="admin-section-hint" v-if="form.roomvoxTokenConfigured">
+                    {{ t('teamhub', 'A token is currently configured. Leave the field empty to keep it, paste a new value to replace it, or type __CLEAR__ to remove it.') }}
+                </p>
+                <p class="admin-section-hint" v-else>
+                    {{ t('teamhub', 'No token configured yet. Without one the meeting wizard cannot book rooms via RoomVox even if RoomVox is installed.') }}
+                </p>
+            </NcSettingsSection>
+
+            <NcSettingsSection
                 :name="t('teamhub', 'Registered integrations')"
                 :description="t('teamhub', 'Integrations registered by installed apps via the TeamHub API. Registration and deregistration require NC admin access and are done via the REST API or the app\'s own settings.')">
 
@@ -1503,6 +1522,13 @@ export default {
                 pinMinLevel: 'moderator',
                 intravoxParentPath: 'en/teamhub',
                 presenceModuleEnabled: false,
+                // RoomVox: token is write-only. roomvoxTokenConfigured
+                // reflects whether one is currently stored (returned from
+                // the load endpoint as a boolean); roomvoxApiToken is the
+                // write buffer for the input field — empty means "don't
+                // change the stored value".
+                roomvoxApiToken: '',
+                roomvoxTokenConfigured: false,
             },
             // Invite type toggles
             inviteGroup: true,
@@ -1724,6 +1750,10 @@ export default {
                 this.form.pinMinLevel          = data.pinMinLevel            || 'moderator'
                 this.form.intravoxParentPath   = data.intravoxParentPath     || 'en/teamhub'
                 this.form.presenceModuleEnabled = !!data.presenceModuleEnabled
+                this.form.roomvoxTokenConfigured = !!data.roomvoxTokenConfigured
+                // Reset the token write field on each load — never echo
+                // back a stored token.
+                this.form.roomvoxApiToken = ''
                 // If we're on the presence tab but module is now off, switch away.
                 if (!this.form.presenceModuleEnabled && this.activeTab === 'presence') {
                     this.activeTab = 'integrations'
@@ -1852,6 +1882,12 @@ export default {
             params.set('pinMinLevel',          this.form.pinMinLevel)
             params.set('inviteTypes',          types.join(','))
             params.set('presenceModuleEnabled', this.form.presenceModuleEnabled ? '1' : '0')
+            // Only send the token if the user actually typed something —
+            // an empty buffer means "keep the stored value unchanged" per
+            // backend contract (see TeamService::saveAdminSettings).
+            if (this.form.roomvoxApiToken !== '') {
+                params.set('roomvoxApiToken', this.form.roomvoxApiToken)
+            }
 
             try {
                 await axios.post(
@@ -1861,8 +1897,16 @@ export default {
                 )
                 this.saved = true
                 setTimeout(() => { this.saved = false }, 3000)
+                // Refresh state so the RoomVox "configured" flag and the
+                // empty write-buffer reflect what's now stored.
+                this.load()
             } catch (e) {
-                this.saveError = this.t('teamhub', 'Failed to save settings')
+                // Surface backend validation messages (e.g. malformed token)
+                // when present, falling back to a generic message.
+                const remote = e?.response?.data?.error
+                this.saveError = remote
+                    ? this.t('teamhub', 'Failed to save settings: {error}', { error: remote })
+                    : this.t('teamhub', 'Failed to save settings')
             } finally {
                 this.saving = false
             }

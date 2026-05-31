@@ -38,6 +38,46 @@ Save per-team message permission settings.
 **Body:** `{ pinMinLevel: 'member'|'moderator'|'admin', postMinLevel: 'member'|'moderator'|'admin' }`
 **Response 200:** `{ success: true }`
 
+### POST `/teams/{teamId}/messages/cache-image`
+Copy a file from the requesting user's personal Files into the team folder's hidden image cache (`.teamhub-cache/`). The cached copy is in the circle-shared team folder, so all team members can load it via `/core/preview?fileId=...`.
+
+**Auth:** Team member. Source file is resolved via the user's own DAV folder — they cannot cache files they cannot access.
+**Body:** `{ teamFolderId: int, sourcePath: string }` — `teamFolderId` is the NC fileId of the team folder root (from `resources.files.folder_id`); `sourcePath` is the path inside the user's DAV root (e.g. `/Photos/cat.png`).
+**Response 200:** `{ fileId: int, cachePath: string }`
+**Response 400:** Source file not found, invalid path, or team folder not found.
+**Response 403:** Not a team member.
+
+### DELETE `/teams/{teamId}/messages/image-cache`
+Delete all files inside the `.teamhub-cache/` folder in the team folder. The folder itself is preserved.
+
+**Auth:** Team admin.
+**Body:** `{ teamFolderId: int }`
+**Response 200:** `{ deleted: int }` — count of files removed.
+**Response 400:** Invalid or missing `teamFolderId`.
+**Response 403:** Not a team admin.
+
+---
+
+## Link previews & image proxy
+
+### GET `/api/v1/preview?url=<url>`
+Resolve a URL to Open Graph / HTML metadata server-side (used for message link previews).
+
+**Auth:** Any logged-in user (`NoAdminRequired`, `NoCSRFRequired`).
+**Query:** `url` — must pass `FILTER_VALIDATE_URL` and the SSRF allowlist (https-only; host resolves only to public IPs).
+**Response 200:** `{ url, title, description, image, site_name, is_image }` — `image` is rewritten to the proxy path below.
+**Response 204:** resolved but no useful metadata.
+**Response 400:** missing/invalid/disallowed URL.
+
+### GET `/api/v1/preview/image?url=<url>`
+Proxy a remote image through the backend so the viewer's browser never loads it directly (avoids IP leak and satisfies NC's `img-src` CSP). Used by inline images in messages (remote `https://` srcs are rewritten to this path by the message renderer) and by link-preview thumbnails.
+
+**Auth:** Any logged-in user (`NoAdminRequired`, `NoCSRFRequired`).
+**Query:** `url` — https-only; host (and every redirect hop) must resolve only to public IPs (private/loopback/link-local incl. `169.254.169.254`, IPv6 ULA, and encoded-IP forms are rejected). Up to 3 redirects, each re-validated before fetch.
+**Response 200:** raw image bytes; `Content-Type` echoed from upstream (must be `image/*`); `Cache-Control: public, max-age=3600`. Body capped at 2 MB.
+**Response 400:** invalid/disallowed URL, non-image content type, or body too large.
+**Response 502:** upstream fetch failed or too many redirects.
+
 ---
 
 ## Calendar events — week query (added v3.37.0)
@@ -55,6 +95,45 @@ Delete one or more calendar events. Each deletion is audit-logged as `calendar.e
 **Auth:** Team member.
 **Body:** `{ events: [{ calendarId: int, uri: string, title: string }] }`
 **Response 200:** `{ deleted: int, errors: int }`
+
+---
+
+## Meeting wizard (added v3.59.0, extended v3.60.0)
+
+### GET `/teams/{teamId}/presence/suggest-times`
+Return up to 5 ranked half-day suggestions for a meeting based on presence data. v3.60.0: stage 1 is presence-only — calendar conflicts are no longer consulted at this stage.
+
+**Auth:** Team member. Presence module must be enabled globally AND for the team (403 otherwise).
+**Query:** `date` (YYYY-MM-DD pivot date), `type` (`online` or `office`, default `online`), `attendees` (comma-separated uids; empty = all team members), `limit` (1–10, default 5).
+**Response 200:** `{ suggestions: [{ date, half (0=AM/1=PM), score, availableCount, attendeeCount, conflictCount, unknownCount, inOfficeCount, bestBuildingName, bestBuildingCount, remoteCount }] }`
+
+### GET `/teams/{teamId}/presence/suggest-timeslots` *(new in v3.60.0)*
+Within a half-day already chosen, return the top 3 free 15-minute-grid windows that fit a requested duration. Accounts for every attendee's personal + team-membership calendar conflicts including recurring events.
+
+**Auth:** Team member.
+**Query:** `date` (YYYY-MM-DD), `half` (0 or 1), `duration` (1–1440 minutes, default 60), `attendees` (comma-separated uids; empty = all team members), `type` (`online` or `office`, default `online`), `buildingName` (optional pass-through label for office meetings).
+**Response 200:** `{ suggestions: [{ start: "HH:MM", end: "HH:MM", startTs, endTs, availableCount, attendeeCount, conflictCount, bestBuildingName? }], attendeeCount, durationMinutes, meetingType, bestBuildingName }`
+
+### GET `/teams/{teamId}/rooms` *(new in v3.60.0)*
+Return bookable meeting rooms visible to the current user via RoomVox.
+
+**Auth:** Team member. Returns `[]` if RoomVox is not installed or no API token has been configured by an admin.
+**Response 200:** `{ rooms: [{ id: string, displayName: string, email: string }] }`
+
+### POST `/teams/{teamId}/calendar/events` *(extended in v3.60.0)*
+Create a calendar event. v3.60.0: now requires team membership (was previously missing the gate). Accepts new optional fields for room booking and per-attendee delivery.
+
+**Auth:** Team member.
+**Body:**
+- `title`, `start`, `end` (required)
+- `location` (free-text; ignored if `roomEmail` is set)
+- `description`, `categories`
+- `calendarId` (numeric NC calendar id; defaults to team calendar)
+- `includeTalk` (boolean, default true) — embed Talk meeting URL
+- `attendees` (comma-separated uids OR array; emitted as iTIP attendees and delivered to invitees' personal calendars)
+- `roomEmail`, `roomName`, `roomId` *(new)* — picked RoomVox room. When `roomId` is non-empty, TeamHub calls RoomVox's public API to book the room BEFORE writing the event; booking failure aborts the whole creation.
+**Response 201:** `{ success: true }`
+**Response 400:** `{ error: <RoomVox or validation error message> }`
 
 ---
 
@@ -1287,3 +1366,15 @@ Write one or both config flags. **Team admin only.** Only keys present in the bo
 **Body:** `{ presence_enabled?: 0|1, hide_reasons?: 0|1 }`
 
 **Response 200:** Updated config `{ presence_enabled: bool, hide_reasons: bool }`.
+
+### GET `/teams/{teamId}/presence/suggest-times?date=YYYY-MM-DD&type=online|office&attendees=uid1,uid2`
+Return up to three ranked suggested meeting half-days based on team presence. **Team member only**, and **requires the presence module enabled both globally and for the team** (403 if either is off).
+
+**Query params:**
+- `date` (required) — organiser's target date, `YYYY-MM-DD`. Suggestions fall within ±3 working days of it.
+- `type` (optional, default `online`) — `online` (anyone reachable) or `office` (scored by who shares an office).
+- `attendees` (optional) — comma-separated userIds. Empty means the whole team; the wizard always sends an explicit list. Non-members are silently dropped.
+
+**Response 200:** `{ "suggestions": [ { date, half (0=AM,1=PM), startIso, endIso, meetingType, score, availableCount, attendeeCount, conflictCount, unknownCount, bestRoomId, bestRoomName, bestRoomCount, remoteCount } ] }`. Returns only counts and a room name — never per-user availability. Sorted by score desc, then earliest, then fewest conflicts; zero-score half-days omitted.
+
+**Errors:** `400` invalid date; `403` not a member or module disabled; `401` not authenticated.

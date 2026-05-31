@@ -32,8 +32,9 @@
                 @manage-team="openManageTeam"
                 @copy-link="copyTeamLink"
                 @invite="showInviteModal = true"
-                @schedule-meeting="showScheduleMeeting = true"
+                @schedule-meeting="showAddEvent = true"
                 @add-event="showAddEvent = true"
+                @suggest-meeting="showSuggestMeeting = true"
                 @team-meeting="showTeamMeeting = true"
                 @add-deck-task="showAddTask = true"
                 @add-personal-task="showAddPersonalTask = true"
@@ -212,13 +213,16 @@
             @close="showInviteModal = false"
             @invited="$store.dispatch('fetchMembers', currentTeamId)" />
 
-        <ScheduleMeetingModal v-if="showScheduleMeeting" :team-id="currentTeamId"
-            @close="showScheduleMeeting = false; $store.dispatch('fetchMessages', currentTeamId); $refs.widgetGrid?.refreshCalendar()" />
-
         <AddEventModal v-if="showAddEvent"
             :team-id="currentTeamId"
             :calendars="resources.calendar || []"
             @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()" />
+
+        <SuggestMeetingWizard v-if="showSuggestMeeting"
+            :team-id="currentTeamId"
+            :calendars="resources.calendar || []"
+            @created="$refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()"
+            @close="showSuggestMeeting = false" />
 
         <DeleteEventsModal v-if="showDeleteEvents"
             :team-id="currentTeamId"
@@ -253,14 +257,15 @@ import { NcButton, NcDialog, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
 import CalendarRemove from 'vue-material-design-icons/CalendarRemove.vue'
+import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 
 import TeamTabBar from './TeamTabBar.vue'
 import TeamWidgetGrid from './TeamWidgetGrid.vue'
 import ActivityFeedView from './ActivityFeedView.vue'
 import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
-import ScheduleMeetingModal from './ScheduleMeetingModal.vue'
 import AddEventModal from './AddEventModal.vue'
+import SuggestMeetingWizard from './SuggestMeetingWizard.vue'
 import DeleteEventsModal from './DeleteEventsModal.vue'
 import TeamMeetingModal from './TeamMeetingModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
@@ -281,10 +286,10 @@ export default {
 
     components: {
         NcButton, NcDialog, NcTextField, NcLoadingIcon,
-        FileDocumentOutline, CalendarPlus, CalendarRemove,
+        FileDocumentOutline, CalendarPlus, CalendarRemove, CalendarClock,
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
-        ScheduleMeetingModal, AddEventModal, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
+        AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
         TeamMeetingModal,
         TeamPresenceView,
     },
@@ -318,8 +323,8 @@ export default {
             deletingPage:       false,
             deletePageTarget:   null,
             showInviteModal:     false,
-            showScheduleMeeting: false,
             showAddEvent:        false,
+            showSuggestMeeting:  false,
             showDeleteEvents:    false,
             calendarView:        'dayGridMonth',  // current calendar view mode
             showTeamMeeting:     false,
@@ -388,6 +393,17 @@ export default {
                     label: t('teamhub', 'Delete events'),
                     icon:  CalendarRemove,
                 },
+                // Presence-powered meeting-time suggester. Only shown when the
+                // presence module is enabled both globally and for this team —
+                // the same AND gate the server enforces on the endpoint.
+                ...(this.presenceModuleEnabled && this.presenceConfig.presence_enabled
+                    ? [{
+                        id:    'suggest-meeting',
+                        // TRANSLATORS: button label in the calendar embed toolbar — opens the suggest-meeting-times wizard
+                        label: t('teamhub', 'Suggest meeting times'),
+                        icon:  CalendarClock,
+                    }]
+                    : []),
             ]
         },
 
@@ -872,6 +888,8 @@ export default {
                 this.showAddEvent = true
             } else if (actionId === 'delete-events') {
                 this.showDeleteEvents = true
+            } else if (actionId === 'suggest-meeting') {
+                this.showSuggestMeeting = true
             }
         },
 

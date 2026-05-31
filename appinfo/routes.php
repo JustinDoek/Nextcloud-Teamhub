@@ -43,6 +43,7 @@ return [
         ['name' => 'team#getTeamActivity',        'url' => '/api/v1/teams/{teamId}/activity',                'verb' => 'GET'],
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
+        ['name' => 'team#listRooms',              'url' => '/api/v1/teams/{teamId}/rooms',                   'verb' => 'GET'],
         ['name' => 'team#getCalendarEventsForWeek', 'url' => '/api/v1/teams/{teamId}/calendar/events/week',  'verb' => 'GET'],
         ['name' => 'team#deleteCalendarEvents',   'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'DELETE'],
 
@@ -112,6 +113,8 @@ return [
         ['name' => 'message#closePoll',           'url' => '/api/v1/messages/{messageId}/close-poll',        'verb' => 'POST'],
         ['name' => 'message#markQuestionSolved',  'url' => '/api/v1/messages/{messageId}/mark-solved',       'verb' => 'POST'],
         ['name' => 'message#unmarkQuestionSolved','url' => '/api/v1/messages/{messageId}/unmark-solved',     'verb' => 'POST'],
+        ['name' => 'message#cacheImage',          'url' => '/api/v1/teams/{teamId}/messages/cache-image',   'verb' => 'POST'],
+        ['name' => 'message#clearImageCache',     'url' => '/api/v1/teams/{teamId}/messages/image-cache',   'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
         // Team image — upload, remove, serve
@@ -277,6 +280,8 @@ return [
         // Team-member-gated; config writes require team admin.
         ['name' => 'presenceTeam#getTeamGrid', 'url' => '/api/v1/teams/{teamId}/presence',        'verb' => 'GET'],
         ['name' => 'presenceTeam#getConfig',   'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'GET'],
+        ['name' => 'presenceTeam#suggestTimes', 'url' => '/api/v1/teams/{teamId}/presence/suggest-times', 'verb' => 'GET'],
+        ['name' => 'presenceTeam#suggestTimeslots', 'url' => '/api/v1/teams/{teamId}/presence/suggest-timeslots', 'verb' => 'GET'],
         ['name' => 'presenceTeam#saveConfig',  'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'PUT'],
     ],
 ];
