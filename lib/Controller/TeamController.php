@@ -745,6 +745,7 @@ class TeamController extends Controller {
         }
     }
 
+
     /**
      * GET /api/v1/teams/{teamId}/rooms
      *

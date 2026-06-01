@@ -258,6 +258,9 @@ import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.v
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
 import CalendarRemove from 'vue-material-design-icons/CalendarRemove.vue'
 import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
+import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
+import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
+import CalendarToday from 'vue-material-design-icons/CalendarToday.vue'
 
 import TeamTabBar from './TeamTabBar.vue'
 import TeamWidgetGrid from './TeamWidgetGrid.vue'
@@ -287,6 +290,7 @@ export default {
     components: {
         NcButton, NcDialog, NcTextField, NcLoadingIcon,
         FileDocumentOutline, CalendarPlus, CalendarRemove, CalendarClock,
+        ChevronLeft, ChevronRight, CalendarToday,
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
         AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
@@ -327,6 +331,7 @@ export default {
             showSuggestMeeting:  false,
             showDeleteEvents:    false,
             calendarView:        'dayGridMonth',  // current calendar view mode
+            calendarDate:        new Date(),      // current navigation date for the calendar iframe
             showTeamMeeting:     false,
             showAddTask:         false,
             // Multi-resource picker state (§10.1)
@@ -368,19 +373,81 @@ export default {
         calendarUrl() {
             // NC Calendar app requires the full path including view and date suffix.
             // calendarView is user-selectable from the embed bar dropdown.
+            // calendarDate drives prev/next/today navigation.
             const cal = this.selectedCalendar || (this.resources.calendar && this.resources.calendar[0])
+            const dateStr = this.calendarDateIso
             if (cal?.public_token) {
-                return generateUrl('/apps/calendar/p/' + cal.public_token + '/' + this.calendarView + '/now')
+                return generateUrl('/apps/calendar/p/' + cal.public_token + '/' + this.calendarView + '/' + dateStr)
             }
-            return generateUrl('/apps/calendar')
+            return generateUrl('/apps/calendar/' + this.calendarView + '/' + dateStr)
+        },
+
+        /** ISO date string (YYYY-MM-DD) for the NC Calendar URL. */
+        calendarDateIso() {
+            const d = this.calendarDate
+            const pad = n => String(n).padStart(2, '0')
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+        },
+
+        /**
+         * Human-readable label shown in the embed bar between prev/next buttons.
+         * Format varies by view:
+         *   Month / list-month  → "June 2026"
+         *   Week / list-week    → "2–8 Jun 2026"
+         *   Day / list-day      → "Mon 2 Jun 2026"
+         */
+        calendarDateLabel() {
+            const d = this.calendarDate
+            const view = this.calendarView
+            const locale = document.documentElement.lang || 'en'
+            if (view === 'dayGridMonth' || view === 'listMonth') {
+                return d.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+            }
+            if (view === 'timeGridDay' || view === 'listDay') {
+                return d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+            }
+            // Week views — show Mon–Sun range
+            const startOfWeek = new Date(d)
+            const dow = d.getDay() // 0=Sun
+            const diff = (dow === 0 ? -6 : 1 - dow) // shift to Monday
+            startOfWeek.setDate(d.getDate() + diff)
+            const endOfWeek = new Date(startOfWeek)
+            endOfWeek.setDate(startOfWeek.getDate() + 6)
+            const startFmt = startOfWeek.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
+            const endFmt   = endOfWeek.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+            return `${startFmt} – ${endFmt}`
         },
 
         /**
          * Action buttons injected into the calendar AppEmbed bar.
-         * Always shown: Add event, Delete events.
+         * Prev / date label / next / Today, then Add event, Delete events, optionally Suggest.
          */
         calendarEmbedActions() {
             return [
+                {
+                    id:    'cal-prev',
+                    // TRANSLATORS: button to navigate to the previous month/week/day in the calendar embed
+                    label: t('teamhub', 'Previous'),
+                    icon:  ChevronLeft,
+                },
+                {
+                    id:      'cal-date-label',
+                    label:   this.calendarDateLabel,
+                    icon:    null,
+                    isLabel: true,
+                },
+                {
+                    id:    'cal-next',
+                    // TRANSLATORS: button to navigate to the next month/week/day in the calendar embed
+                    label: t('teamhub', 'Next'),
+                    icon:  ChevronRight,
+                },
+                {
+                    id:    'cal-today',
+                    // TRANSLATORS: button to jump back to today in the calendar embed
+                    label: t('teamhub', 'Today'),
+                    icon:  CalendarToday,
+                },
                 {
                     id:    'add-event',
                     // TRANSLATORS: button label in the calendar embed toolbar — opens the add-event modal
@@ -393,9 +460,6 @@ export default {
                     label: t('teamhub', 'Delete events'),
                     icon:  CalendarRemove,
                 },
-                // Presence-powered meeting-time suggester. Only shown when the
-                // presence module is enabled both globally and for this team —
-                // the same AND gate the server enforces on the endpoint.
                 ...(this.presenceModuleEnabled && this.presenceConfig.presence_enabled
                     ? [{
                         id:    'suggest-meeting',
@@ -890,12 +954,33 @@ export default {
                 this.showDeleteEvents = true
             } else if (actionId === 'suggest-meeting') {
                 this.showSuggestMeeting = true
+            } else if (actionId === 'cal-today') {
+                this.calendarDate = new Date()
+                this.$nextTick(() => this.$refs.calendarEmbed?.reload())
+            } else if (actionId === 'cal-prev' || actionId === 'cal-next') {
+                const dir = actionId === 'cal-next' ? 1 : -1
+                const d = new Date(this.calendarDate)
+                const view = this.calendarView
+                if (view === 'dayGridMonth' || view === 'listMonth') {
+                    // Advance by one calendar month, keeping day=1 to avoid
+                    // Feb-28→Mar-31 overshoot when navigating back.
+                    d.setDate(1)
+                    d.setMonth(d.getMonth() + dir)
+                } else if (view === 'timeGridDay' || view === 'listDay') {
+                    d.setDate(d.getDate() + dir)
+                } else {
+                    // Week views: advance by 7 days
+                    d.setDate(d.getDate() + dir * 7)
+                }
+                this.calendarDate = d
+                this.$nextTick(() => this.$refs.calendarEmbed?.reload())
             }
         },
 
         onCalendarEmbedSelect({ id, value }) {
             if (id === 'calendar-view') {
                 this.calendarView = value
+                this.calendarDate = new Date()
                 // calendarUrl recomputes automatically; reload the iframe with the new URL.
                 this.$nextTick(() => this.$refs.calendarEmbed?.reload())
             }

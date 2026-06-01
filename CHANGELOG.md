@@ -3,11 +3,6 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-### Added inline images in messages. 
-### Added more options to the add event modal.
-### Added a meeting planner that works with presence and calendar info.
-
-
 ## [3.61.0] — 2026-05-31 — Image cache, consolidated event modal, widget cleanup
 
 ### Added

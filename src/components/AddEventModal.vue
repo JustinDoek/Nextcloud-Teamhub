@@ -59,7 +59,7 @@
                 </div>
             </div>
 
-            <!-- Location — RoomVox room picker when rooms available, free-text fallback -->
+            <!-- Location — room picker when rooms are available (RoomVox and/or CRM), free-text fallback -->
             <div v-if="loadingRooms" class="addevent-modal__field addevent-modal__rooms-loading">
                 <NcLoadingIcon :size="16" />
                 <span>{{ t('teamhub', 'Looking up rooms…') }}</span>
@@ -77,7 +77,12 @@
                         {{ r.displayName }}
                     </option>
                 </select>
-                <p class="addevent-modal__hint">{{ t('teamhub', 'Picking a room books it via RoomVox.') }}</p>
+                <p v-if="pickedRoomIsRoomVox" class="addevent-modal__hint">
+                    {{ t('teamhub', 'This room will be booked automatically via RoomVox.') }}
+                </p>
+                <p v-else-if="selectedRoomId" class="addevent-modal__hint">
+                    {{ t('teamhub', 'This room will be invited to the event. Booking must be confirmed by the resource manager.') }}
+                </p>
             </div>
             <div v-else class="addevent-modal__field">
                 <NcTextField
@@ -251,6 +256,12 @@ export default {
         showCalendarPicker() {
             return this.calendars && this.calendars.length > 1
         },
+        /** True when the selected room comes from RoomVox (auto-booking applies). */
+        pickedRoomIsRoomVox() {
+            if (!this.selectedRoomId) return false
+            const r = this.rooms.find(r => r.id === this.selectedRoomId)
+            return r ? (r.source === 'roomvox' || r.source === 'mixed') : false
+        },
         allSelected() {
             return this.members.length > 0
                 && this.members.every(m => !!this.checked[m.userId])
@@ -345,17 +356,18 @@ export default {
                     title:       this.form.title.trim(),
                     start:       startDt.toISOString(),
                     end:         endDt.toISOString(),
-                    // When a room is picked, location comes from the room — don't send free-text
                     location:    picked ? '' : this.form.location.trim(),
                     description: this.form.description.trim(),
                     categories:  this.form.categories.trim(),
                     includeTalk: this.form.includeTalk ? 1 : 0,
                     attendees:   this.selectedIds.join(','),
                     calendarId:  this.selectedCalendarId || (this.calendars[0]?.id ?? null),
-                    // RoomVox fields
-                    roomEmail:   picked ? picked.email   : '',
+                    roomEmail:   picked ? picked.email       : '',
                     roomName:    picked ? picked.displayName : '',
-                    roomId:      picked ? picked.id      : '',
+                    // Only pass roomId for RoomVox rooms — ActivityService uses
+                    // roomId !== '' as the gate for calling RoomVoxClient::createBooking.
+                    // CRM rooms go in as NEEDS-ACTION ATTENDEEs without a booking attempt.
+                    roomId:      (picked && this.pickedRoomIsRoomVox) ? picked.id : '',
                 }
 
 

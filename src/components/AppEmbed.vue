@@ -21,18 +21,23 @@
                 </select>
 
                 <!-- Custom action buttons injected by the parent (e.g. calendar add/delete) -->
-                <NcButton
-                    v-for="action in embedActions"
-                    :key="action.id"
-                    variant="tertiary"
-                    :aria-label="action.label"
-                    :title="action.label"
-                    @click="$emit('action', action.id)">
-                    <template #icon>
-                        <component :is="action.icon" :size="16" />
-                    </template>
-                    {{ action.label }}
-                </NcButton>
+                <template v-for="action in embedActions" :key="action.id">
+                    <!-- Date label between prev/next — plain text, not a button -->
+                    <span v-if="action.isLabel" class="app-embed__bar-date-label">
+                        {{ action.label }}
+                    </span>
+                    <NcButton
+                        v-else
+                        variant="tertiary"
+                        :aria-label="action.label"
+                        :title="action.label"
+                        @click="$emit('action', action.id)">
+                        <template #icon>
+                            <component :is="action.icon" :size="16" />
+                        </template>
+                        {{ action.icon ? '' : action.label }}
+                    </NcButton>
+                </template>
                 <NcButton
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Reload')"
@@ -553,6 +558,16 @@ export default {
 .app-embed__bar-select:focus-visible {
     border-color: var(--color-primary-element);
     box-shadow: 0 0 0 2px var(--color-primary-element-light);
+}
+
+.app-embed__bar-date-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-main-text);
+    padding: 0 6px;
+    min-width: 110px;
+    text-align: center;
+    white-space: nowrap;
 }
 
 .app-embed__label {

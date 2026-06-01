@@ -560,10 +560,12 @@ export default {
                     includeTalk: this.effectiveIncludeTalk ? 1 : 0,
                     roomEmail: picked ? picked.email : '',
                     roomName: picked ? picked.displayName : '',
-                    // roomId is the RoomVox-internal id (needed for the
-                    // /api/v1/rooms/{id}/bookings call). Empty when no
-                    // room was picked.
-                    roomId: picked ? picked.id : '',
+                    // roomId is the RoomVox-internal id used for the booking
+                    // call. Only send it for RoomVox rooms (source === 'roomvox'
+                    // or 'mixed') — CRM-only rooms don't support auto-booking
+                    // and should go in as NEEDS-ACTION ATTENDEEs instead.
+                    roomId: (picked && (picked.source === 'roomvox' || picked.source === 'mixed'))
+                        ? picked.id : '',
                     // The wizard's selected-members list becomes the
                     // attendee list on the event so the meeting lands in
                     // each invitee's personal calendar with a 15-min
