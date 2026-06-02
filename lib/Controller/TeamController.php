@@ -152,14 +152,28 @@ class TeamController extends Controller {
 
     /**
      * Flat deduplicated list of all users with effective access to the team.
-     * Used by the "Show all members" modal in the widget.
+     * Used by the members widget (Members + Tomorrow + Search tabs) and the
+     * @mention autocomplete. Each row carries userId/displayName plus, when
+     * available, email/phone/ncStatus for the widget rendering.
+     *
+     * Response envelope:
+     *   { members: [ ... ], talkAvailable: bool }
+     *
+     * `talkAvailable` is a per-request fact (Spreed enabled for the current
+     * user) — surfaced here so the widget can decide whether to show the
+     * Talk contact icon at all. Legacy consumers that read only `members`
+     * continue to work unchanged.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getAllEffectiveMembers(string $teamId): JSONResponse {
         try {
             $data = $this->memberService->getAllEffectiveMembers($teamId);
-            return new JSONResponse(['members' => $data]);
+            $talkAvailable = $this->memberService->isTalkAvailableForCurrentUser();
+            return new JSONResponse([
+                'members'        => $data,
+                'talkAvailable'  => $talkAvailable,
+            ]);
         } catch (\Throwable $e) {
             $this->logger->error('[TeamController] Failed to get all effective members', [
                 'teamId' => $teamId,

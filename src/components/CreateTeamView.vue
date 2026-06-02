@@ -450,8 +450,6 @@ export default {
             if (this.intravoxAvailable) {
                 appStates.push({ app_id: 'intravox', enabled: true })
             }
-            // Shared files widget starts disabled — admin opts in explicitly.
-            appStates.push({ app_id: 'shared_files', enabled: false })
 
             this.progressTasks = tasks
             this.step = 5  // Progress is step 5

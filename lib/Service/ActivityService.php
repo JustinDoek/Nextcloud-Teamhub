@@ -745,13 +745,19 @@ class ActivityService {
                 throw new \Exception('RoomVox booking failed: ' . $e->getMessage());
             }
         } elseif ($bookingRoom && $roomId === '') {
-            // We have a room email but no room id — caller bug. Log and
-            // refuse the booking. (UI is wired to send both; this is
-            // defensive against future regressions.)
-            $this->logger->warning('[TeamHub][ActivityService] room email present but room id missing — cannot call RoomVox', [
+            // Non-RoomVox room — the frontend deliberately omits `roomId`
+            // when the picked room is backed by NC Calendar's Resource
+            // Management (CRM), not RoomVox. We do NOT call RoomVoxClient
+            // for these; instead Sabre's scheduling plugin handles the
+            // booking via the resource backend's auto-accept logic when
+            // the iTIP REQUEST is delivered to the resource principal
+            // (the ATTENDEE;CUTYPE=ROOM line written below is the trigger).
+            //
+            // No-op here — just informational so installs running with
+            // both RoomVox and CRM rooms can be distinguished in logs.
+            $this->logger->info('[TeamHub][ActivityService] non-RoomVox room — booking via CalDAV scheduling', [
                 'teamId' => $teamId, 'roomEmail' => $roomEmail, 'app' => Application::APP_ID,
             ]);
-            throw new \Exception('Cannot book room: room identifier missing.');
         }
 
         $ical .= "BEGIN:VEVENT\r\n";

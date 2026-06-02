@@ -71,53 +71,8 @@
             </div>
 
             <!-- ─── Members ───────────────────────────────────────── -->
-            <div v-if="activeWidget === 'widget-members'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--padded">
-                <!-- Direct user avatars -->
-                <div v-if="members.length" class="teamhub-mobile-avatar-stack">
-                    <NcAvatar
-                        v-for="member in visibleMembers"
-                        :key="member.userId"
-                        :user="member.userId"
-                        :display-name="member.displayName"
-                        :show-user-status="false"
-                        :disable-menu="false"
-                        :size="32" />
-                </div>
-
-                <!-- Group / sub-team memberships -->
-                <div v-if="memberships && memberships.length" class="teamhub-mobile-memberships">
-                    <div
-                        v-for="m in memberships"
-                        :key="m.type + ':' + m.displayName"
-                        class="teamhub-mobile-membership-row">
-                        <div
-                            class="teamhub-mobile-membership-icon"
-                            :class="'teamhub-mobile-membership-icon--' + m.type">
-                            <AccountGroup v-if="m.type === 'group'" :size="18" />
-                            <AccountMultipleIcon v-else :size="18" />
-                        </div>
-                        <span class="teamhub-mobile-membership-name">{{ m.displayName }}</span>
-                        <span
-                            class="teamhub-mobile-membership-pill"
-                            :class="'teamhub-mobile-membership-pill--' + m.type">
-                            {{ m.type === 'group' ? t('teamhub', 'Group') : t('teamhub', 'Team') }}
-                        </span>
-                        <!-- TRANSLATORS: user count on a group/team membership pill, e.g. "1 user" or "6 users" -->
-                        <span class="teamhub-mobile-membership-count">
-                            {{ n('teamhub', '{n} user', '{n} users', m.memberCount, { n: m.memberCount }) }}
-                        </span>
-                    </div>
-                </div>
-
-                <!-- TRANSLATORS: button label showing total member count, e.g. "Show all 1 member" or "Show all 12 members" -->
-                <NcButton
-                    v-if="effectiveMemberCount > members.length"
-                    variant="secondary"
-                    wide
-                    class="teamhub-mobile-members-action"
-                    @click="$emit('show-all-members')">
-                    {{ n('teamhub', 'Show all {n} member', 'Show all {n} members', effectiveMemberCount, { n: effectiveMemberCount }) }}
-                </NcButton>
+            <div v-if="activeWidget === 'widget-members'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
             </div>
 
             <!-- ─── Calendar ──────────────────────────────────────── -->
@@ -143,19 +98,9 @@
                     @pages-loaded="$emit('pages-loaded', $event)" />
             </div>
 
-            <!-- ─── Files: Favourites ─────────────────────────────── -->
-            <div v-if="activeWidget === 'widget-files-favorites'" class="teamhub-mobile-canvas-body">
-                <FilesFavoritesWidget />
-            </div>
-
-            <!-- ─── Files: Recent ─────────────────────────────────── -->
-            <div v-if="activeWidget === 'widget-files-recent'" class="teamhub-mobile-canvas-body">
-                <FilesRecentWidget />
-            </div>
-
-            <!-- ─── Files: Shared with team ───────────────────────── -->
-            <div v-if="activeWidget === 'widget-files-shared'" class="teamhub-mobile-canvas-body">
-                <FilesSharedWidget />
+            <!-- ─── File Center (tabbed: Favourites / Recent / Shared) ── -->
+            <div v-if="activeWidget === 'widget-files-center'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <FilesWidget />
             </div>
 
             <!-- ─── External integration widgets ──────────────────── -->
@@ -265,7 +210,6 @@ import { NcAvatar, NcButton } from '@nextcloud/vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
-import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
@@ -280,8 +224,6 @@ import FilePlus from 'vue-material-design-icons/FilePlus.vue'
 import LocationExit from 'vue-material-design-icons/LocationExit.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
-import ShareVariantIcon from 'vue-material-design-icons/ShareVariant.vue'
-import StarOutlineIcon from 'vue-material-design-icons/StarOutline.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import VideoIcon from 'vue-material-design-icons/Video.vue'
 
@@ -291,9 +233,8 @@ import DeckWidget from './DeckWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
-import FilesFavoritesWidget from './FilesFavoritesWidget.vue'
-import FilesRecentWidget from './FilesRecentWidget.vue'
-import FilesSharedWidget from './FilesSharedWidget.vue'
+import FilesWidget          from './FilesWidget.vue'
+import MembersWidget        from './MembersWidget.vue'
 
 export default {
     name: 'MobileWidgetView',
@@ -302,15 +243,15 @@ export default {
         NcAvatar, NcButton,
         // icons used in the icon bar / canvas headers — registered here so
         // <component :is="..."> resolves them
-        MessageOutline, InformationOutline, AccountGroup, AccountMultipleIcon,
+        MessageOutline, InformationOutline, AccountGroup,
         AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
         FileDocumentOutline, FilePlus, LocationExit, Plus, Puzzle,
-        ShareVariantIcon, StarOutlineIcon, TrashCan, VideoIcon,
+        TrashCan, VideoIcon,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
         IntravoxWidget, IntegrationWidget,
-        FilesFavoritesWidget, FilesRecentWidget, FilesSharedWidget,
+        FilesWidget, MembersWidget,
     },
 
     props: {
@@ -331,7 +272,6 @@ export default {
         'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded',
         'set-view',
-        'show-all-members',
         'widget-actions-loaded',
     ],
 
@@ -347,19 +287,12 @@ export default {
 
     computed: {
         ...mapState([
-            'currentTeamId', 'resources', 'members', 'memberships',
-            'effectiveMemberCount',
-            'intravoxAvailable', 'teamWidgets', 'isCurrentUserDirectMember',
+            'currentTeamId', 'resources',
+            'teamWidgets', 'isCurrentUserDirectMember',
         ]),
         ...mapGetters(['currentTeam']),
 
         team() { return this.currentTeam || {} },
-
-        // Members that are real users (have a userId), for the avatar stack.
-        // Computed so the template v-for doesn't re-filter every render (perf pass V6).
-        visibleMembers() {
-            return (this.members || []).filter(mm => mm.userId)
-        },
 
         /**
          * The full list of widgets the current user has access to.
@@ -429,25 +362,10 @@ export default {
 
             if (this.resources.files) {
                 list.push({
-                    key: 'widget-files-favorites',
-                    title: t('teamhub', 'Favourite files'),
-                    shortTitle: t('teamhub', 'Favourites'),
-                    icon: 'StarOutlineIcon',
-                })
-                list.push({
-                    key: 'widget-files-recent',
-                    title: t('teamhub', 'Recently modified'),
-                    shortTitle: t('teamhub', 'Recent'),
-                    icon: 'ClockOutline',
-                })
-            }
-
-            if (this.resources.shared_files) {
-                list.push({
-                    key: 'widget-files-shared',
-                    title: t('teamhub', 'Shared files'),
-                    shortTitle: t('teamhub', 'Shared'),
-                    icon: 'ShareVariantIcon',
+                    key: 'widget-files-center',
+                    title: t('teamhub', 'File Center'),
+                    shortTitle: t('teamhub', 'Files'),
+                    icon: 'Folder',
                 })
             }
 
@@ -818,6 +736,11 @@ export default {
     min-height: 0;
 }
 
+/* FilesWidget renders its own tab bar — suppress the default canvas top gap */
+.teamhub-mobile-canvas-body--notoppad {
+    padding-top: 0;
+}
+
 .teamhub-mobile-canvas-body--padded {
     padding: 16px;
     gap: 16px;
@@ -885,78 +808,10 @@ export default {
 
 /* ─── Members ──────────────────────────────────────────────── */
 
-.teamhub-mobile-avatar-stack {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.teamhub-mobile-memberships {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.teamhub-mobile-membership-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: var(--border-radius-large);
-    background: var(--color-background-hover);
-}
-
-.teamhub-mobile-membership-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.teamhub-mobile-membership-icon--group {
-    background: color-mix(in srgb, var(--color-primary-element) 14%, transparent);
-    color: var(--color-primary-element);
-}
-.teamhub-mobile-membership-icon--team {
-    background: color-mix(in srgb, var(--color-success) 14%, transparent);
-    color: var(--color-success-text);
-}
-
-.teamhub-mobile-membership-name {
-    flex: 1 1 auto;
-    font-size: 14px;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.teamhub-mobile-membership-pill {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: var(--border-radius-pill, 999px);
-    flex-shrink: 0;
-}
-.teamhub-mobile-membership-pill--group {
-    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
-    color: var(--color-primary-element);
-}
-.teamhub-mobile-membership-pill--team {
-    background: color-mix(in srgb, var(--color-success) 18%, transparent);
-    color: var(--color-success-text);
-}
-
-.teamhub-mobile-membership-count {
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
-    flex-shrink: 0;
-}
-
-.teamhub-mobile-members-action {
-    margin-top: 8px;
+/* Members canvas embeds MembersWidget, which has its own internal padding
+   (sticky tab bar at top). Wrapper should not add top padding on top of that. */
+.teamhub-mobile-canvas-body--notoppad {
+    padding-top: 0;
 }
 
 /* ─── FAB ──────────────────────────────────────────────────── */

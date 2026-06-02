@@ -5,12 +5,6 @@
             <NcLoadingIcon :size="20" />
         </div>
 
-        <!-- Toggle is off — team owner has not enabled this widget -->
-        <div v-else-if="!resources.shared_files" class="th-widget__state">
-            <FolderAccountIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'Not enabled by the team owner') }}</span>
-        </div>
-
         <!-- Toggle is on but nothing has been shared yet -->
         <div v-else-if="items.length === 0" class="th-widget__state">
             <ShareVariantIcon :size="36" class="th-widget__empty-icon" />
@@ -89,7 +83,7 @@ import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcAvatar } from '@nextcloud/vue'
 
 // Icons
-import FolderAccountIcon    from 'vue-material-design-icons/FolderAccount.vue'
+
 import ShareVariantIcon     from 'vue-material-design-icons/ShareVariant.vue'
 import FolderIcon           from 'vue-material-design-icons/Folder.vue'
 import FileIcon             from 'vue-material-design-icons/File.vue'
@@ -113,7 +107,7 @@ export default {
 
     components: {
         NcLoadingIcon, NcAvatar,
-        FolderAccountIcon, ShareVariantIcon, FolderIcon, FileIcon,
+        ShareVariantIcon, FolderIcon, FileIcon,
         FileImageIcon, FilePdfBoxIcon, FileWordIcon, FileExcelIcon,
         FilePowerpointIcon, FileVideoIcon, FileMusicIcon, FileCodeIcon,
         FileDocumentIcon, NoteTextIcon, ChevronLeftIcon, ChevronRightIcon,
@@ -129,7 +123,7 @@ export default {
     },
 
     computed: {
-        ...mapState(['currentTeamId', 'resources']),
+        ...mapState(['currentTeamId']),
 
         totalPages() {
             return Math.max(1, Math.ceil(this.total / LIMIT))

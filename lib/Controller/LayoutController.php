@@ -103,31 +103,13 @@ class LayoutController extends Controller {
             'hSaved'      => 3,
         ],
         [
-            'i'           => 'widget-files-favorites',
+            'i'           => 'widget-files-center',
             'x'           => 9, 'y' => 16,
-            'w'           => 3, 'h' => 3,
-            'minW'        => 2, 'minH' => 1,
+            'w'           => 3, 'h' => 4,
+            'minW'        => 2, 'minH' => 2,
             'isResizable' => true,
             'collapsed'   => false,
-            'hSaved'      => 3,
-        ],
-        [
-            'i'           => 'widget-files-recent',
-            'x'           => 9, 'y' => 19,
-            'w'           => 3, 'h' => 3,
-            'minW'        => 2, 'minH' => 1,
-            'isResizable' => true,
-            'collapsed'   => false,
-            'hSaved'      => 3,
-        ],
-        [
-            'i'           => 'widget-files-shared',
-            'x'           => 9, 'y' => 22,
-            'w'           => 3, 'h' => 3,
-            'minW'        => 2, 'minH' => 1,
-            'isResizable' => true,
-            'collapsed'   => false,
-            'hSaved'      => 3,
+            'hSaved'      => 4,
         ],
     ];
 
@@ -142,6 +124,9 @@ class LayoutController extends Controller {
 
     // Allowed widget i-values (static). Dynamic integration widget IDs follow
     // the pattern "widget-int-{registryId}" and are validated by prefix below.
+    // Legacy IDs (widget-files-favorites, widget-files-recent, widget-files-shared)
+    // are accepted on save (backward compat for any in-flight saves) but stripped
+    // from saved layouts by mergeNewWidgets / pruneLegacyWidgets on every GET.
     private const ALLOWED_WIDGET_IDS = [
         'msgstream',
         'widget-teaminfo',
@@ -150,6 +135,8 @@ class LayoutController extends Controller {
         'widget-deck',
         'widget-activity',
         'widget-pages',
+        'widget-files-center',
+        // Legacy — kept so saves from old clients are not rejected mid-migration.
         'widget-files-favorites',
         'widget-files-recent',
         'widget-files-shared',
@@ -469,6 +456,22 @@ class LayoutController extends Controller {
      * x-column as specified in DEFAULT_LAYOUT, so they do not overlap anything.
      */
     private function mergeNewWidgets(array $layout): array {
+        // Prune legacy widget IDs that have been consolidated into new ones.
+        // widget-files-{favorites,recent,shared} → widget-files-center (v3.62).
+        // Filter them out before merging so the new consolidated widget is added.
+        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared'];
+        $pruned = false;
+        $layout = array_values(array_filter($layout, static function (array $item) use ($legacyIds, &$pruned): bool {
+            if (in_array($item['i'], $legacyIds, true)) {
+                $pruned = true;
+                return false;
+            }
+            return true;
+        }));
+        if ($pruned) {
+            $this->logger->debug('[TeamHub][LayoutController] mergeNewWidgets — pruned legacy files widgets, will add widget-files-center');
+        }
+
         // Build a set of widget IDs already present.
         $existing = [];
         foreach ($layout as $item) {

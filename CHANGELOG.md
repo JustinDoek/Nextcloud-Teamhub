@@ -3,6 +3,68 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.63.0] — 2026-06-02 — Members widget overhaul
+
+Session focus: replacing the flat-avatar-stack members widget with a tabbed widget that gives every member their own row, surfaces live status + contact actions, and adds a visualisation of tomorrow's scheduled presence.
+
+### Added
+
+- **`MembersWidget.vue`** — new tabbed members widget mounted on the team home. Three tabs:
+  - **Members** — vertical scrollable list, one row per effective team member (direct + indirect via groups/sub-teams, deduplicated). Each row shows avatar + presence dot, name + "Current Status: …" text, and right-aligned Talk / phone / email icons. Each contact icon renders only when the corresponding data exists for that user. Talk launches a 1:1 conversation via `generateUrl('/apps/spreed/') + '?callUser=' + encodeURIComponent(uid)`. Sorted by live presence rank, then by display name.
+  - **Tomorrow** — same row shape but right-side shows two presence pills (morning / afternoon) using the colour and label from the team's presence schedule for tomorrow. Pill text colour computed from background luminance so admin-chosen colours stay legible. Footer link "View Full Presence Calendar" emits `view-presence-calendar` → parent emits `set-view='presence'`. Hidden when the presence module is disabled instance-wide or for the team.
+  - **Search** — single search input that filters the member list by displayName/userId. Auto-focuses on tab open.
+- **`MemberRow.vue`** (`src/components/members/`) — row component used by Members and Search tabs.
+- **`MemberPresenceRow.vue`** (`src/components/members/`) — row component used by the Tomorrow tab.
+- **Backend enrichment** — `MemberService::getAllEffectiveMembers` now returns each row with `email` (when account-property scope permits), `phone` (when account-property scope permits), and `ncStatus` (live NC user status with `{status, message, icon}`, batched via `IUserStatusManager::getUserStatuses($uids)` in a single call).
+- **`MemberService::isTalkAvailableForCurrentUser()`** — helper indicating whether the Spreed app is enabled for the viewer. Surfaced in the `/members/all` envelope as `talkAvailable`.
+
+### Changed
+
+- **`GET /api/v1/teams/{teamId}/members/all`** response envelope is now `{ members: [...], talkAvailable: bool }`. The `members` field continues to carry `userId` and `displayName` (legacy consumers unchanged); new fields `email`, `phone`, `ncStatus` are additive. Store unwrap tolerates a bare array for forward/backward compatibility.
+- **Vuex store** gained `allEffectiveMembersTalkAvailable` state and a matching mutation. `fetchAllEffectiveMembers` reads the new envelope.
+- **`TeamWidgetGrid.vue`** — desktop grid and tablet members blocks now render `<MembersWidget />` instead of inline avatar/membership content. The "Show all N members" modal removed (Search tab replaces it).
+- **`MobileWidgetView.vue`** — mobile members canvas renders `<MembersWidget />` and re-emits `set-view` to the parent. `show-all-members` emit removed.
+
+### Removed
+
+- **All Members modal** in `TeamWidgetGrid.vue` (template + `NcModal`/`NcTextField`/`NcLoadingIcon` imports + `allMembersModalOpen`/`allMembersList`/`allMembersLoading`/`allMembersSearch` data + `openAllMembersModal`/`closeAllMembersModal`/`filteredAllMembers` methods/computeds + associated CSS).
+- **Avatar-stack rendering and helpers** in `TeamWidgetGrid.vue` (`membersWithPresence`, `visibleMembersWithPresence`, `tabletAvatarMembers`, `ncStatusColor`, `ncStatusLabel`, `presenceSortRank`, `loadTodayPresence`, `presenceSlots`/`ncStatusByUser` data, today-presence watcher, associated CSS). MembersWidget owns its own status/presence logic now.
+- **Inline group/team memberships list** from `TeamWidgetGrid.vue` and `MobileWidgetView.vue`. The Members tab now lists the effective users directly (deduplicated across direct membership and indirect via groups/sub-teams). The Manage Team → Members view continues to show how each user was added (direct vs. via group/team) for administrative clarity.
+- **Unused state from MobileWidgetView**: `members`/`memberships`/`effectiveMemberCount` mapState entries, `visibleMembers` computed, `show-all-members` emit, `AccountMultipleIcon` import, and `.teamhub-mobile-memberships*` CSS.
+- **Unused `intravoxAvailable` mapState** in both `TeamWidgetGrid.vue` and `MobileWidgetView.vue` (was no longer referenced after earlier sessions).
+- **Unused `axios` import** in `TeamWidgetGrid.vue` (was used only by removed methods).
+
+### Security
+
+- **Email visibility scope respected.** Email is now read via `IAccountManager` and skipped when the user's account-property scope is `SCOPE_PRIVATE`, matching the existing phone-field behaviour. Fallback to `IUser::getEMailAddress()` (which has no scope) only when `IAccountManager` is unavailable. Phone-field behaviour unchanged (already respected scope).
+- **Authorization gate unchanged**: `getAllEffectiveMembers` still calls `requireMemberLevel($teamId)`. Non-members cannot reach the enriched data.
+- **Talk URL** uses `encodeURIComponent(uid)` to neutralise any URL-injection vector from a userId carrying control characters.
+- **No new endpoints.** Existing endpoint, additive fields only.
+
+## [3.62.0] — 2026-06-01 — Files Center consolidation + Decisions feature design
+
+Session focus: consolidating the three files widgets into one tabbed widget; locking the design for the upcoming Decisions feature (module-gated, mirroring the Presence pattern).
+
+### Added
+
+- **`FilesWidget` (Files Center)** — new consolidated widget on the team home with three internal tabs: Favourite Files / Recently Modified / Shared Files. Default tab: Recently Modified. Replaces the three previously-separate widgets. Adds a `+` button in the header that opens the team folder in NC Files. Renders on desktop (grid), tablet, and mobile layouts.
+- **`ROADMAP.md`** — forward-looking proposal log, distinct from CHANGELOG (shipped) and HANDOFF (per-session). Five proposed features captured: Team Decisions (locked, next), Team Timeline (Gantt-like view), Team Workload, Team Pulse digest, Team Objectives.
+- **`docs/design/decisions.md`** — full v1 specification for the Decisions feature. Module-gated mirroring Presence (global `decisions_module_enabled` app-config + per-team `teamhub_decision_team.decisions_enabled`). Three-state lifecycle (`proposed | decided | withdrawn`). One-shot marking; no modal — refinement happens by posting a synthesised comment before marking. Supersession link-only via `supersedes_id`. Snapshots question text and selected-answer text on the decision row for audit durability. Impact required (low/medium/high); category optional with autocomplete from team history.
+- **`docs/design/decisions-session-plan.md`** — implementation slicing for Decisions across five sessions (A: module gate, B: data layer, C: in-stream entry point, D: widget, E: tab view) plus an optional polish session.
+
+### Changed
+
+- **Files widgets consolidated.** `widget-files-favorites`, `widget-files-recent`, and `widget-files-shared` replaced by a single `widget-files-center`. Existing saved layouts auto-migrate via `LayoutController::mergeNewWidgets` — the three legacy IDs are pruned on the first GET and the new consolidated widget is added in their place. Old IDs kept in `ALLOWED_WIDGET_IDS` temporarily so in-flight saves from cached clients aren't rejected mid-upgrade.
+
+### Removed
+
+- **`shared_files` per-team toggle.** Manage-team's Team Apps section no longer carries the toggle; create-team flow no longer pushes a `shared_files: false` app state; mobile view's "Shared files" widget entry consolidated into the new Files Center entry. The Shared Files tab is always available in the consolidated widget when the team has any files resource. `FolderAccountIcon` import removed from `FilesSharedWidget` and `ManageTeamView` (was only used for the now-removed empty state).
+- **`FilesFavoritesWidget`, `FilesRecentWidget`, `FilesSharedWidget`** are no longer registered as standalone grid widgets — they're now internal sub-components of `FilesWidget`, mounted only when their tab is active (no wasted API calls for off-screen tabs).
+
+### Security
+
+- No new endpoints. No new API responses. No new fields exposed. No authorisation gates weakened. `teamFolderUrl` constructed via `generateUrl()` + `encodeURIComponent(path)`; path source is server-derived (`ResourceService`), not user input.
+
 ## [3.61.0] — 2026-05-31 — Image cache, consolidated event modal, widget cleanup
 
 ### Added

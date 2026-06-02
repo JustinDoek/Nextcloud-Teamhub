@@ -7,10 +7,13 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Service\AuditService;
+use OCP\Accounts\IAccountManager;
+use OCP\Accounts\PropertyDoesNotExistException;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
 use OCP\IUserSession;
 use OCP\Notification\IManager as INotificationManager;
+use OCP\UserStatus\IManager as IUserStatusManager;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 
@@ -81,6 +84,59 @@ class MemberService {
             }
         }
         return $this->circlesManager;
+    }
+
+    // -------------------------------------------------------------------------
+    // Lazy helpers for IAccountManager / IUserStatusManager
+    //
+    // Fetched via the container (not via constructor injection) to keep the
+    // MemberService constructor signature stable — every change to it ripples
+    // through tests and any subclass. Both services have shipped since NC 25.
+    // Any failure to resolve is treated as "feature unavailable" and the
+    // members-widget endpoint silently degrades (no email/phone or no live
+    // status), rather than the whole request failing.
+    // -------------------------------------------------------------------------
+
+    /** @var IAccountManager|null */
+    private $accountManager = null;
+    /** @var bool */
+    private $accountManagerResolveFailed = false;
+
+    private function getAccountManager(): ?IAccountManager {
+        if ($this->accountManager !== null) {
+            return $this->accountManager;
+        }
+        if ($this->accountManagerResolveFailed) {
+            return null;
+        }
+        try {
+            $this->accountManager = $this->container->get(IAccountManager::class);
+            return $this->accountManager;
+        } catch (\Throwable $e) {
+            $this->accountManagerResolveFailed = true;
+            return null;
+        }
+    }
+
+    /** @var IUserStatusManager|null */
+    private $userStatusManager = null;
+    /** @var bool */
+    private $userStatusResolveFailed = false;
+
+    private function getUserStatusManager(): ?IUserStatusManager {
+        if ($this->userStatusManager !== null) {
+            return $this->userStatusManager;
+        }
+        if ($this->userStatusResolveFailed) {
+            return null;
+        }
+        try {
+            $this->userStatusManager = $this->container->get(IUserStatusManager::class);
+            return $this->userStatusManager;
+        } catch (\Throwable $e) {
+            $this->userStatusResolveFailed = true;
+            return null;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -435,6 +491,22 @@ class MemberService {
         }
         $dRes->closeCursor();
 
+        // Step 4: enrich each row with email, phone, and live NC status.
+        //
+        // Used by the members widget (Members + Tomorrow + Search tabs). The
+        // @mention autocomplete consumer reads only userId/displayName and is
+        // unaffected by the extra fields.
+        //
+        // - Email: IUser::getEMailAddress() returns the stored address, no
+        //   visibility check applies. Empty/null if not set.
+        // - Phone: read via IAccountManager respecting account visibility.
+        //   Only returned when scope is LOCAL/FEDERATED/PUBLISHED — never
+        //   for PRIVATE.
+        // - ncStatus: live status from IUserStatusManager, batched in one
+        //   call. Status is one of 'online' | 'away' | 'dnd' | 'busy' |
+        //   'invisible' | 'offline'. Message may be null. Icon may be null.
+        $list = $this->enrichMembersForWidget($list);
+
         // Sort by display name, case-insensitive
         usort($list, fn ($a, $b) => strcasecmp($a['displayName'], $b['displayName']));
 
@@ -443,6 +515,149 @@ class MemberService {
         ]);
 
         return $list;
+    }
+
+    /**
+     * Enrich a flat member list with email, phone, and live NC user status.
+     *
+     * Pure addition — input rows keep all their existing keys. New keys:
+     *   - email     string|null
+     *   - phone     string|null    (only when account-property visibility is
+     *                                LOCAL / FEDERATED / PUBLISHED; never PRIVATE)
+     *   - ncStatus  array|null     { status, message, icon }
+     *
+     * Phone is read via IAccountManager so the user's chosen visibility scope
+     * is respected. Email is read directly from IUser — NC has no per-user
+     * scope on the primary email address; it's the team-membership boundary
+     * that controls who can see it here (only members of the same team can
+     * call this endpoint, enforced by getAllEffectiveMembers's gate).
+     *
+     * The whole pass degrades silently — any error per user falls back to
+     * null for that field, so a single broken account never blocks the list.
+     */
+    private function enrichMembersForWidget(array $list): array {
+        if (empty($list)) {
+            return $list;
+        }
+
+        $userIds = array_map(static fn ($r) => $r['userId'], $list);
+
+        // ── Batch-fetch live NC user statuses ──
+        $statusByUid = [];
+        $usm = $this->getUserStatusManager();
+        if ($usm !== null) {
+            try {
+                $statuses = $usm->getUserStatuses($userIds);
+                foreach ($statuses as $uid => $st) {
+                    $statusByUid[(string)$uid] = [
+                        'status'  => method_exists($st, 'getStatus')        ? (string)$st->getStatus() : null,
+                        'message' => method_exists($st, 'getMessage')       ? ($st->getMessage() ?: null) : null,
+                        'icon'    => method_exists($st, 'getIcon')          ? ($st->getIcon() ?: null) : null,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // Non-fatal — widget shows without status text/dot.
+                $statusByUid = [];
+            }
+        }
+
+        $am = $this->getAccountManager();
+
+        // ── Per-user enrichment ──
+        foreach ($list as &$row) {
+            $uid = $row['userId'];
+            $row['email']    = null;
+            $row['phone']    = null;
+            $row['ncStatus'] = $statusByUid[$uid] ?? null;
+
+            $user = $this->userManager->get($uid);
+            if ($user === null) {
+                continue;
+            }
+
+            // Email — respect IAccountManager visibility scope, same as
+            // phone below. A user who explicitly marked their email as
+            // "Private" in their NC profile should have that respected even
+            // by fellow team members. When IAccountManager isn't available
+            // we degrade to IUser::getEMailAddress() (which has no scope)
+            // rather than fail closed, since the team-membership gate is
+            // still in force.
+            if ($am !== null) {
+                try {
+                    $accountForEmail = $am->getAccount($user);
+                    $emProp = $accountForEmail->getProperty(IAccountManager::PROPERTY_EMAIL);
+                    $emValue = $emProp->getValue();
+                    $emScope = $emProp->getScope();
+                    if (is_string($emValue) && $emValue !== ''
+                        && $emScope !== IAccountManager::SCOPE_PRIVATE) {
+                        $row['email'] = $emValue;
+                    }
+                } catch (PropertyDoesNotExistException $e) {
+                    // No email property — leave null.
+                } catch (\Throwable $e) {
+                    // Fall back to the user-backend value if account-manager
+                    // access fails for any other reason.
+                    try {
+                        $em = $user->getEMailAddress();
+                        if (is_string($em) && $em !== '') {
+                            $row['email'] = $em;
+                        }
+                    } catch (\Throwable $e2) {
+                        // ignore
+                    }
+                }
+            } else {
+                // No account manager available at all — fall back to the
+                // user-backend email. This path is hit only on very
+                // unusual NC installs.
+                try {
+                    $em = $user->getEMailAddress();
+                    if (is_string($em) && $em !== '') {
+                        $row['email'] = $em;
+                    }
+                } catch (\Throwable $e) {
+                    // ignore
+                }
+            }
+
+            // Phone — respect the user's chosen visibility scope.
+            if ($am !== null) {
+                try {
+                    $account = $am->getAccount($user);
+                    $prop = $account->getProperty(IAccountManager::PROPERTY_PHONE);
+                    $value = $prop->getValue();
+                    $scope = $prop->getScope();
+                    if (is_string($value) && $value !== ''
+                        && $scope !== IAccountManager::SCOPE_PRIVATE) {
+                        $row['phone'] = $value;
+                    }
+                } catch (PropertyDoesNotExistException $e) {
+                    // No phone property set — leave null.
+                } catch (\Throwable $e) {
+                    // Any other failure: degrade silently.
+                }
+            }
+        }
+        unset($row);
+
+        return $list;
+    }
+
+    /**
+     * Whether the Talk (spreed) app is enabled for the current user.
+     * Used by the widget endpoint so the frontend can decide whether to
+     * render the Talk contact icon at all.
+     */
+    public function isTalkAvailableForCurrentUser(): bool {
+        $user = $this->userSession->getUser();
+        if ($user === null) {
+            return false;
+        }
+        try {
+            return $this->appManager->isEnabledForUser('spreed', $user);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**

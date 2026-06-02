@@ -222,70 +222,8 @@
                             <ChevronDown v-else :size="16" />
                         </button>
                     </div>
-                    <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content">
-                        <!-- Direct user avatars sorted by merged presence status: online first, off/free last -->
-                        <div v-if="members.length" class="teamhub-avatar-stack">
-                            <div
-                                v-for="member in visibleMembersWithPresence"
-                                :key="member.userId"
-                                class="teamhub-stacked-avatar-wrap"
-                                :title="member.displayName + (member.presenceLabel ? ' — ' + member.presenceLabel : '')">
-                                <NcAvatar
-                                    :user="member.userId"
-                                    :display-name="member.displayName"
-                                    :show-user-status="false"
-                                    :disable-menu="false"
-                                    :size="32"
-                                    class="teamhub-stacked-avatar" />
-                                <!-- Presence dot: coloured circle in bottom-right of avatar -->
-                                <span
-                                    v-if="member.presenceColor"
-                                    class="teamhub-presence-dot"
-                                    :style="{ backgroundColor: member.presenceColor }"
-                                    :aria-label="member.presenceLabel"
-                                    aria-hidden="false">
-                                </span>
-                            </div>
-                        </div>
-
-                        <!-- Flat list of group/team memberships with pills -->
-                        <div v-if="memberships && memberships.length" class="teamhub-memberships-list">
-                            <div
-                                v-for="m in memberships"
-                                :key="m.type + ':' + m.displayName"
-                                class="teamhub-membership-row">
-                                <div
-                                    class="teamhub-membership-icon"
-                                    :class="'teamhub-membership-icon--' + m.type">
-                                    <AccountGroup v-if="m.type === 'group'" :size="18" />
-                                    <AccountMultipleIcon v-else :size="18" />
-                                </div>
-                                <span class="teamhub-membership-name">{{ m.displayName }}</span>
-                                <span
-                                    class="teamhub-membership-pill"
-                                    :class="'teamhub-membership-pill--' + m.type">
-                                    {{ m.type === 'group' ? t('teamhub', 'Group') : t('teamhub', 'Team') }}
-                                </span>
-                                <span class="teamhub-membership-count">
-                                    {{
-                                        // TRANSLATORS: user count on a group/team membership pill, e.g. "1 user" or "6 users"
-                                        n('teamhub', '{n} user', '{n} users', m.memberCount, { n: m.memberCount })
-                                    }}
-                                </span>
-                            </div>
-                        </div>
-
-                        <!-- Show all button — reveals modal with every effective user -->
-                        <button
-                            v-if="effectiveMemberCount > members.length"
-                            class="teamhub-members-show-all"
-                            type="button"
-                            @click="openAllMembersModal">
-                            {{
-                                // TRANSLATORS: button label showing total member count, e.g. "Show all 1 member" or "Show all 12 members"
-                                n('teamhub', 'Show all {n} member', 'Show all {n} members', effectiveMemberCount, { n: effectiveMemberCount })
-                            }}
-                        </button>
+                    <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
                     </div>
                 </div>
             </grid-item>
@@ -475,10 +413,10 @@
                 </div>
             </grid-item>
 
-            <!-- Files — Favourites widget -->
+            <!-- Files Center widget — Favourite / Recent / Shared in one tabbed widget -->
             <grid-item
-                v-if="resources.files && getGridItem('widget-files-favorites')"
-                v-bind="getGridItem('widget-files-favorites')"
+                v-if="resources.files && getGridItem('widget-files-center')"
+                v-bind="getGridItem('widget-files-center')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
                 <div class="teamhub-widget-card">
@@ -486,99 +424,36 @@
                         v-if="editMode"
                         class="teamhub-widget-drag-handle"
                         tabindex="0"
-                        :aria-label="t('teamhub', 'Favourite files') + ' — ' + t('teamhub', 'use arrow keys to move')"
-                        @keydown.up.prevent="moveWidget('widget-files-favorites', 'up')"
-                        @keydown.down.prevent="moveWidget('widget-files-favorites', 'down')"
-                        @keydown.left.prevent="moveWidget('widget-files-favorites', 'left')"
-                        @keydown.right.prevent="moveWidget('widget-files-favorites', 'right')">
+                        :aria-label="t('teamhub', 'Files') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-files-center', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-files-center', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-files-center', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-files-center', 'right')">
                         <DragVariant :size="16" />
-                        <span aria-hidden="true">{{ t('teamhub', 'Favourite files') }}</span>
+                        <span aria-hidden="true">{{ t('teamhub', 'Files') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <StarOutlineIcon :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Favourite Files') }}</h2>
+                        <Folder :size="25" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'File Center') }}</h2>
+                        <a
+                            v-if="resources.files && resources.files.path"
+                            :href="teamFolderUrl"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="teamhub-widget-header-btn"
+                            :aria-label="t('teamhub', 'Open team folder in Files')">
+                            <PlusIcon :size="18" aria-hidden="true" />
+                        </a>
                         <button
                             class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-favorites') ? t('teamhub', 'Expand Favourite Files') : t('teamhub', 'Collapse Favourite Files')"
-                            @click.stop="toggleCollapse('widget-files-favorites')">
-                            <ChevronUp v-if="!isCollapsed('widget-files-favorites')" :size="16" />
+                            :aria-label="isCollapsed('widget-files-center') ? t('teamhub', 'Expand File Center') : t('teamhub', 'Collapse File Center')"
+                            @click.stop="toggleCollapse('widget-files-center')">
+                            <ChevronUp v-if="!isCollapsed('widget-files-center')" :size="16" />
                             <ChevronDown v-else :size="16" />
                         </button>
                     </div>
-                    <div v-show="!isCollapsed('widget-files-favorites')" class="teamhub-widget-content">
-                        <FilesFavoritesWidget />
-                    </div>
-                </div>
-            </grid-item>
-
-            <!-- Files — Recent widget -->
-            <grid-item
-                v-if="resources.files && getGridItem('widget-files-recent')"
-                v-bind="getGridItem('widget-files-recent')"
-                class="teamhub-grid-item"
-                :class="{ 'teamhub-grid-item--editing': editMode }">
-                <div class="teamhub-widget-card">
-                    <div
-                        v-if="editMode"
-                        class="teamhub-widget-drag-handle"
-                        tabindex="0"
-                        :aria-label="t('teamhub', 'Recently modified files') + ' — ' + t('teamhub', 'use arrow keys to move')"
-                        @keydown.up.prevent="moveWidget('widget-files-recent', 'up')"
-                        @keydown.down.prevent="moveWidget('widget-files-recent', 'down')"
-                        @keydown.left.prevent="moveWidget('widget-files-recent', 'left')"
-                        @keydown.right.prevent="moveWidget('widget-files-recent', 'right')">
-                        <DragVariant :size="16" />
-                        <span aria-hidden="true">{{ t('teamhub', 'Recently modified files') }}</span>
-                    </div>
-                    <div class="teamhub-widget-header">
-                        <ClockOutlineIcon :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Recently Modified') }}</h2>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-recent') ? t('teamhub', 'Expand Recently Modified') : t('teamhub', 'Collapse Recently Modified')"
-                            @click.stop="toggleCollapse('widget-files-recent')">
-                            <ChevronUp v-if="!isCollapsed('widget-files-recent')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
-                    </div>
-                    <div v-show="!isCollapsed('widget-files-recent')" class="teamhub-widget-content">
-                        <FilesRecentWidget />
-                    </div>
-                </div>
-            </grid-item>
-
-            <!-- Files — Shared with team widget -->
-            <grid-item
-                v-if="resources.shared_files && getGridItem('widget-files-shared')"
-                v-bind="getGridItem('widget-files-shared')"
-                class="teamhub-grid-item"
-                :class="{ 'teamhub-grid-item--editing': editMode }">
-                <div class="teamhub-widget-card">
-                    <div
-                        v-if="editMode"
-                        class="teamhub-widget-drag-handle"
-                        tabindex="0"
-                        :aria-label="t('teamhub', 'Shared files') + ' — ' + t('teamhub', 'use arrow keys to move')"
-                        @keydown.up.prevent="moveWidget('widget-files-shared', 'up')"
-                        @keydown.down.prevent="moveWidget('widget-files-shared', 'down')"
-                        @keydown.left.prevent="moveWidget('widget-files-shared', 'left')"
-                        @keydown.right.prevent="moveWidget('widget-files-shared', 'right')">
-                        <DragVariant :size="16" />
-                        <span aria-hidden="true">{{ t('teamhub', 'Shared files') }}</span>
-                    </div>
-                    <div class="teamhub-widget-header">
-                        <ShareVariantIcon :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Shared Files') }}</h2>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-shared') ? t('teamhub', 'Expand Shared Files') : t('teamhub', 'Collapse Shared Files')"
-                            @click.stop="toggleCollapse('widget-files-shared')">
-                            <ChevronUp v-if="!isCollapsed('widget-files-shared')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
-                    </div>
-                    <div v-show="!isCollapsed('widget-files-shared')" class="teamhub-widget-content">
-                        <FilesSharedWidget />
+                    <div v-show="!isCollapsed('widget-files-center')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <FilesWidget />
                     </div>
                 </div>
             </grid-item>
@@ -723,24 +598,8 @@
                             <AccountPlus :size="18" />
                         </button>
                     </div>
-                    <div v-if="!isCollapsed('widget-members')" class="teamhub-tablet-widget__body">
-                        <div class="teamhub-tablet-members">
-                            <div class="teamhub-tablet-members__avatars">
-                                <NcAvatar
-                                    v-for="m in tabletAvatarMembers"
-                                    :key="m.userId"
-                                    :user="m.userId"
-                                    :display-name="m.displayName"
-                                    :show-user-status="false"
-                                    :size="28" />
-                            </div>
-                            <NcButton
-                                v-if="effectiveMemberCount > members.length"
-                                variant="secondary"
-                                @click="openAllMembersModal">
-                                {{ n('teamhub', 'Show all {n} member', 'Show all {n} members', effectiveMemberCount, { n: effectiveMemberCount }) }}
-                            </NcButton>
-                        </div>
+                    <div v-if="!isCollapsed('widget-members')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
                     </div>
                 </div>
 
@@ -836,45 +695,17 @@
                     </div>
                 </div>
 
-                <!-- Files: Favourites — no actions -->
-                <div v-if="getGridItem('widget-files-favorites') && resources.files" class="teamhub-tablet-widget">
+                <!-- Files Center — tabbed widget -->
+                <div v-if="getGridItem('widget-files-center') && resources.files" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-files-favorites')">
-                            <StarOutlineIcon :size="18" />
-                            <span>{{ t('teamhub', 'Favourite files') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-favorites') }" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-files-center')">
+                            <Folder :size="18" />
+                            <span>{{ t('teamhub', 'File Center') }}</span>
+                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-center') }" />
                         </button>
                     </div>
-                    <div v-if="!isCollapsed('widget-files-favorites')" class="teamhub-tablet-widget__body">
-                        <FilesFavoritesWidget />
-                    </div>
-                </div>
-
-                <!-- Files: Recent — no actions -->
-                <div v-if="getGridItem('widget-files-recent') && resources.files" class="teamhub-tablet-widget">
-                    <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-files-recent')">
-                            <ClockOutline :size="18" />
-                            <span>{{ t('teamhub', 'Recently modified') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-recent') }" />
-                        </button>
-                    </div>
-                    <div v-if="!isCollapsed('widget-files-recent')" class="teamhub-tablet-widget__body">
-                        <FilesRecentWidget />
-                    </div>
-                </div>
-
-                <!-- Files: Shared — no actions -->
-                <div v-if="getGridItem('widget-files-shared') && resources.shared_files" class="teamhub-tablet-widget">
-                    <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-files-shared')">
-                            <ShareVariantIcon :size="18" />
-                            <span>{{ t('teamhub', 'Shared files') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-shared') }" />
-                        </button>
-                    </div>
-                    <div v-if="!isCollapsed('widget-files-shared')" class="teamhub-tablet-widget__body">
-                        <FilesSharedWidget />
+                    <div v-if="!isCollapsed('widget-files-center')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <FilesWidget />
                     </div>
                 </div>
 
@@ -929,67 +760,17 @@
             @delete-page="$emit('delete-page')"
             @pages-loaded="$emit('pages-loaded', $event)"
             @set-view="$emit('set-view', $event)"
-            @widget-actions-loaded="$emit('widget-actions-loaded', $event)"
-            @show-all-members="openAllMembersModal" />
+            @widget-actions-loaded="$emit('widget-actions-loaded', $event)" />
 
-        <!-- Show all effective members modal — opened from the members widget -->
-        <NcModal
-            v-if="allMembersModalOpen"
-            :name="t('teamhub', 'All members ({n})', { n: allMembersList.length || effectiveMemberCount })"
-            size="normal"
-            @close="closeAllMembersModal">
-            <div class="teamhub-all-members-modal">
-                <h2 class="teamhub-all-members-modal__title">
-                    {{ t('teamhub', 'All members') }}
-                    <span v-if="!allMembersLoading" class="teamhub-all-members-modal__count">
-                        ({{ allMembersList.length }})
-                    </span>
-                </h2>
-
-                <NcTextField
-                    v-if="!allMembersLoading && allMembersList.length > 0"
-                    v-model="allMembersSearch"
-                    :label="t('teamhub', 'Search members')"
-                    :placeholder="t('teamhub', 'Search by name…')"
-                    class="teamhub-all-members-modal__search" />
-
-                <div v-if="allMembersLoading" class="teamhub-all-members-modal__loading">
-                    <NcLoadingIcon :size="32" />
-                </div>
-
-                <ul v-else-if="filteredAllMembers.length" class="teamhub-all-members-modal__list">
-                    <li
-                        v-for="m in filteredAllMembers"
-                        :key="m.userId"
-                        class="teamhub-all-members-modal__row">
-                        <NcAvatar
-                            :user="m.userId"
-                            :display-name="m.displayName"
-                            :show-user-status="true"
-                            :disable-menu="false"
-                            :size="36" />
-                        <div class="teamhub-all-members-modal__info">
-                            <span class="teamhub-all-members-modal__name">{{ m.displayName }}</span>
-                            <span class="teamhub-all-members-modal__uid">{{ m.userId }}</span>
-                        </div>
-                    </li>
-                </ul>
-
-                <div v-else class="teamhub-all-members-modal__empty">
-                    {{ t('teamhub', 'No members match your search.') }}
-                </div>
-            </div>
-        </NcModal>
     </div>
 </template>
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
 import { mapState, mapGetters, mapMutations } from 'vuex'
-import { NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton } from '@nextcloud/vue'
+import { NcAvatar, NcActions, NcActionButton, NcButton } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
@@ -1001,11 +782,11 @@ import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
-import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
 import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
+import PlusIcon    from 'vue-material-design-icons/Plus.vue'
 
 // Canonical Circles config bit values — see src/constants/circlesConfig.js
 import {
@@ -1037,10 +818,7 @@ import FilePlus from 'vue-material-design-icons/FilePlus.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import ContentSaveAll from 'vue-material-design-icons/ContentSaveAll.vue'
 import Restore from 'vue-material-design-icons/Restore.vue'
-import StarOutlineIcon from 'vue-material-design-icons/StarOutline.vue'
-import ClockOutlineIcon from 'vue-material-design-icons/ClockOutline.vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
-import ShareVariantIcon from 'vue-material-design-icons/ShareVariant.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -1048,29 +826,28 @@ import CalendarWidget from './CalendarWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
-import FilesFavoritesWidget from './FilesFavoritesWidget.vue'
-import FilesRecentWidget from './FilesRecentWidget.vue'
-import FilesSharedWidget from './FilesSharedWidget.vue'
+import FilesWidget          from './FilesWidget.vue'
+import MembersWidget        from './MembersWidget.vue'
 import MobileWidgetView from './MobileWidgetView.vue'
 
 export default {
     name: 'TeamWidgetGrid',
 
     components: {
-        NcAvatar, NcActions, NcActionButton, NcModal, NcTextField, NcLoadingIcon, NcButton,
+        NcAvatar, NcActions, NcActionButton, NcButton,
         GridLayout, GridItem,
         MessageOutline, Folder, Calendar, CalendarPlus, CalendarClock, CardText,
-        CheckboxMarkedOutline, InformationOutline, AccountGroup, AccountMultipleIcon,
-        ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus,
+        CheckboxMarkedOutline, InformationOutline, AccountGroup,
+        ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus, PlusIcon,
         Cog, Puzzle, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
         ChevronUp, ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         ContentSaveAll, Restore,
-        StarOutlineIcon, ClockOutlineIcon, ClipboardPlusOutline, ShareVariantIcon,
+        ClipboardPlusOutline,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
-        FilesFavoritesWidget, FilesRecentWidget, FilesSharedWidget,
+        FilesWidget, MembersWidget,
         MobileWidgetView,
     },
 
@@ -1103,33 +880,14 @@ export default {
     ],
 
     data() {
-        return {
-            // "Show all members" modal state
-            allMembersModalOpen: false,
-            allMembersList:      [],
-            allMembersLoading:   false,
-            allMembersSearch:    '',
-            // Today's presence slots for the team — used by members widget
-            presenceSlots:       {},   // { userId: { 0: slot, 1: slot } }
-            presenceSlotsTeamId: null, // Which team the slots are for
-            ncStatusByUser:      {},   // { userId: { status, overrides } } live NC status
-        }
-    },
-
-    watch: {
-        currentTeamId: {
-            immediate: true,
-            handler(newId) {
-                if (newId) this.loadTodayPresence(newId)
-            },
-        },
+        return {}
     },
 
     computed: {
         ...mapState([
-            'currentTeamId', 'resources', 'members', 'memberships',
+            'currentTeamId', 'resources', 'members',
             'effectiveMemberCount',
-            'intravoxAvailable', 'teamWidgets', 'isCurrentUserDirectMember',
+            'teamWidgets', 'isCurrentUserDirectMember',
             'resourceWarnings',
             'presenceModuleEnabled', 'presenceConfig',
         ]),
@@ -1138,89 +896,24 @@ export default {
         team() { return this.currentTeam || {} },
 
         /**
-         * Members sorted by their current merged presence status, then by name.
-         * Each member gets a presenceSlug and presenceColor for the widget dot.
-         *
-         * Ranking (lower sorts first), confirmed with the team:
-         *   0  NC online           — live, actively available
-         *   1  schedule "busy" type — scheduled-but-reachable work state
-         *   2  NC dnd / busy        — live, do-not-disturb
-         *   3  NC away              — live, stepped away
-         *   4  schedule "free" type — scheduled home/office (lowest priority)
-         *   5  no status            — no schedule, no live status
-         *
-         * The NC live status only participates in the ranking when it actually
-         * overrides the schedule (backend sets `overrides`), matching what the
-         * merged dot shows. When it does not override, we rank on the schedule's
-         * busy/free flag (`slot.is_busy`, supplied by the backend per type — works
-         * for custom types and survives hide-reasons mode, unlike a slug guess).
-         */
-        membersWithPresence() {
-            const today = new Date().toISOString().slice(0, 10)
-            const half  = new Date().getHours() < 12 ? 0 : 1
-            return (this.members || []).map(m => {
-                const userSlots = this.presenceSlots[m.userId] || {}
-                // Key format from team presence API: "YYYY-MM-DD_0" or "YYYY-MM-DD_1"
-                const slot = userSlots[`${today}_${half}`]
-                    || userSlots[`${today}_${half === 0 ? 1 : 0}`]
-                    || null
-
-                // Presence schedule is the baseline dot.
-                const scheduleColor = slot?.color || null
-                const scheduleLabel = slot?.label || null
-                const scheduleBusy  = !!(slot && slot.is_busy)
-
-                // NC live status may override the schedule (single merged dot).
-                // The backend already classified whether this status overrides
-                // (dnd/busy/online, or a user-set away); we only pick the colour
-                // and label here. When it overrides, the NC dot replaces the
-                // schedule dot; otherwise the schedule shows through.
-                const nc = this.ncStatusByUser[m.userId] || null
-                const ncOverrides = !!(nc && nc.overrides)
-
-                const dotColor = ncOverrides
-                    ? this.ncStatusColor(nc.status)
-                    : scheduleColor
-                const dotLabel = ncOverrides
-                    ? this.ncStatusLabel(nc.status)
-                    : scheduleLabel
-
-                return {
-                    ...m,
-                    presenceSlug:  slot?.slug  || null,
-                    // presenceColor/Label now hold the *merged* dot result.
-                    presenceColor: dotColor,
-                    presenceLabel: dotLabel,
-                    // Sort key derived from whichever source drives the merged dot.
-                    presenceRank:  this.presenceSortRank(ncOverrides ? nc.status : null, slot, scheduleBusy),
-                }
-            }).sort((a, b) => {
-                if (a.presenceRank !== b.presenceRank) return a.presenceRank - b.presenceRank
-                // Stable, predictable tie-break within a rank: by display name.
-                return (a.displayName || '').localeCompare(b.displayName || '')
-            })
-        },
-
-        // Presence-sorted members that are real users (have a userId), used by
-        // the avatar stack. Computed so the template v-for doesn't re-filter on
-        // every render (perf pass V6).
-        visibleMembersWithPresence() {
-            return this.membersWithPresence.filter(mm => mm.userId)
-        },
-
-        // First 16 real-user members for the tablet avatar row. Computed for the
-        // same reason as above (perf pass V6).
-        tabletAvatarMembers() {
-            return (this.members || []).slice(0, 16).filter(mm => mm.userId)
-        },
-
-        /**
          * Show the Upcoming Tasks widget when Deck is active for the team
          * OR when the NC Tasks app is installed and the team has a calendar.
          * The widget renders whichever subset of tasks is available.
          */
         showTasksWidget() {
             return !!((this.resources.deck && this.resources.deck.length > 0) || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0))
+        },
+
+        /**
+         * URL to open the team folder directly in NC Files.
+         * Uses the /files/{userId}/{path} route which NC Files maps to the
+         * correct folder view regardless of whether it's a group folder or a
+         * shared folder. Falls back gracefully if resources.files is unset.
+         */
+        teamFolderUrl() {
+            if (!this.resources.files || !this.resources.files.path) return null
+            const path = this.resources.files.path.replace(/^\//, '')
+            return generateUrl(`/apps/files/?dir=/${encodeURIComponent(path)}`)
         },
 
         /**
@@ -1345,103 +1038,12 @@ export default {
             const m = this.members.find(m => m.userId === uid)
             return m && m.level >= 4
         },
-
-        /**
-         * Filtered subset of allMembersList based on allMembersSearch.
-         * Case-insensitive match against displayName and userId.
-         */
-        filteredAllMembers() {
-            const q = (this.allMembersSearch || '').trim().toLowerCase()
-            if (!q) return this.allMembersList
-            return this.allMembersList.filter(m =>
-                (m.displayName || '').toLowerCase().includes(q)
-                || (m.userId || '').toLowerCase().includes(q)
-            )
-        },
     },
 
     methods: {
         t, n,
 
         ...mapMutations(['SET_RESOURCE_WARNING_FOCUS']),
-
-        // ── Today's presence for members widget ──────────────────────
-
-        /**
-         * NC user-status → dot colour, following NC's own status palette
-         * (online green, away amber, dnd/busy red). Offline/unknown → null so
-         * the merged dot falls back to the presence schedule.
-         */
-        ncStatusColor(status) {
-            // Hard, saturated colours for visibility on small avatar dots — the
-            // soft theme vars (--color-success/warning/error) wash out at 10px.
-            switch (status) {
-                case 'online': return '#00c853' // hard green
-                case 'away':   return '#ffab00' // hard amber
-                case 'dnd':
-                case 'busy':   return '#d50000' // hard red
-                default:       return null
-            }
-        },
-
-        /**
-         * Rank a member for the members-widget presence sort. Lower sorts first.
-         * See the ranking table on the membersWithPresence computed for rationale.
-         *
-         * @param {string|null} ncStatus  live NC status, only when it overrides the schedule
-         * @param {object|null} slot      today's schedule slot (may be null)
-         * @param {boolean} scheduleBusy  whether the schedule slot is a "busy" type
-         * @returns {number} rank 0..5
-         */
-        presenceSortRank(ncStatus, slot, scheduleBusy) {
-            // Live NC status wins the dot when it overrides — rank on it directly.
-            if (ncStatus === 'online') return 0
-            if (ncStatus === 'dnd' || ncStatus === 'busy') return 2
-            if (ncStatus === 'away') return 3
-            // Otherwise rank on the schedule.
-            if (slot) return scheduleBusy ? 1 : 4
-            // No schedule and no overriding live status.
-            return 5
-        },
-
-        /**
-         * NC user-status → human label for the dot's title/aria text.
-         */
-        ncStatusLabel(status) {
-            switch (status) {
-                // TRANSLATORS: NC user status — user is online/active
-                case 'online': return t('teamhub', 'Online')
-                // TRANSLATORS: NC user status — user is away
-                case 'away':   return t('teamhub', 'Away')
-                // TRANSLATORS: NC user status — do not disturb
-                case 'dnd':    return t('teamhub', 'Do not disturb')
-                // TRANSLATORS: NC user status — busy
-                case 'busy':   return t('teamhub', 'Busy')
-                default:       return null
-            }
-        },
-
-        async loadTodayPresence(teamId) {
-            if (!teamId) return
-            try {
-                const today = new Date().toISOString().slice(0, 10)
-                const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/presence`),
-                    { params: { from: today, to: today } },
-                )
-                if (data?.slots) {
-                    this.presenceSlots = data.slots
-                    this.presenceSlotsTeamId = teamId
-                }
-                // NC live user status per member, used to override the presence
-                // schedule on the merged avatar dot (see memberPresenceDot).
-                this.ncStatusByUser = (data && data.nc_status && typeof data.nc_status === 'object')
-                    ? data.nc_status
-                    : {}
-            } catch (err) {
-                // Non-fatal — members widget shows without presence data.
-            }
-        },
 
         /**
          * Called from the warning block "Open settings →" button.
@@ -1454,32 +1056,6 @@ export default {
 
         onLayoutUpdated(newLayout) {
             this.$emit('layout-updated', newLayout)
-        },
-
-        /**
-         * Open the "Show all members" modal and lazy-load the full flat list
-         * of effective members (direct + expanded from groups/teams, deduplicated).
-         */
-        async openAllMembersModal() {
-            this.allMembersModalOpen = true
-            this.allMembersSearch    = ''
-            this.allMembersLoading   = true
-            try {
-                const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/members/all`)
-                )
-                this.allMembersList = Array.isArray(data.members) ? data.members : []
-            } catch (e) {
-                this.allMembersList = []
-            } finally {
-                this.allMembersLoading = false
-            }
-        },
-
-        closeAllMembersModal() {
-            this.allMembersModalOpen = false
-            this.allMembersList      = []
-            this.allMembersSearch    = ''
         },
 
         onLeaveTeamClick() {
@@ -1817,7 +1393,33 @@ export default {
     min-height: 0;
 }
 
+/* Consolidated widgets (e.g. Files Center) manage their own internal padding
+   via the tab bar — no extra padding needed at the content wrapper level. */
+.teamhub-widget-content--notoppad { padding-top: 0; }
+
 .teamhub-widget-content--teaminfo { padding: 0 12px 10px; }
+
+/* Small icon-button in widget header (e.g. "open in Files" on Files Center) */
+.teamhub-widget-header-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--border-radius);
+    color: var(--color-text-maxcontrast);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    margin-left: auto;
+    flex-shrink: 0;
+    text-decoration: none;
+}
+.teamhub-widget-header-btn:hover {
+    background: var(--color-background-hover);
+    color: var(--color-primary-element);
+}
 
 .teamhub-team-description {
     padding: 8px 0 4px;
@@ -1935,222 +1537,6 @@ export default {
     outline: 2px solid var(--color-warning);
     outline-offset: 2px;
     border-radius: 2px;
-}
-
-.teamhub-avatar-stack {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 12px;
-}
-
-.teamhub-stacked-avatar { border: 2px solid var(--color-main-background); }
-
-/* Presence dot wrapper — positions the dot relative to the avatar */
-.teamhub-stacked-avatar-wrap {
-    position: relative;
-    display: inline-flex;
-}
-/* Coloured dot in the bottom-right corner of the avatar */
-.teamhub-presence-dot {
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 2px solid var(--color-main-background);
-    display: block;
-    pointer-events: none;
-}
-
-/*
- * Belt-and-braces: we render our own merged presence/status dot (above) and
- * pass :show-user-status="false" to NcAvatar in the stack. Should NcAvatar
- * still render its native user-status indicator (prop behaviour has varied
- * across @nextcloud/vue versions), hide it so the two dots cannot overlap.
- * Scoped to the members avatar stack only — the "Show all" modal keeps NC's
- * native status intentionally.
- */
-.teamhub-avatar-stack .teamhub-stacked-avatar :deep(.avatar__status),
-.teamhub-avatar-stack .teamhub-stacked-avatar :deep(.user-status-icon) {
-    display: none !important;
-}
-.teamhub-more-members { font-size: 12px; color: var(--color-text-maxcontrast); }
-
-/* ── Members widget — flat memberships list with pills ──────────── */
-.teamhub-memberships-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 12px;
-    padding-top: 10px;
-}
-
-.teamhub-membership-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    min-width: 0;
-    border-radius: var(--border-radius);
-}
-
-.teamhub-membership-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.teamhub-membership-icon--group {
-    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
-    color: var(--color-primary-element);
-}
-
-.teamhub-membership-icon--circle {
-    background: color-mix(in srgb, var(--color-warning) 22%, transparent);
-    color: var(--color-warning-text);
-}
-
-.teamhub-membership-name {
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.teamhub-membership-pill {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: var(--border-radius-pill);
-    white-space: nowrap;
-    flex-shrink: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.teamhub-membership-pill--group {
-    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
-    color: var(--color-primary-element);
-}
-
-.teamhub-membership-pill--circle {
-    background: color-mix(in srgb, var(--color-warning) 22%, transparent);
-    color: var(--color-warning-text);
-}
-
-.teamhub-membership-count {
-    font-size: 11px;
-    color: var(--color-text-maxcontrast);
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-/* Show all link */
-.teamhub-members-show-all {
-    display: block;
-    width: 90%;
-    margin-top: 10px;
-    padding: 6px 12px;
-    border: none;
-    background: transparent;
-    font-size: 12px;
-    color: var(--color-primary-element);
-    cursor: pointer;
-    border-radius: var(--border-radius);
-    text-align: center;
-}
-.teamhub-members-show-all:hover {
-    background: var(--color-background-hover);
-    text-decoration: underline;
-}
-
-/* ── All members modal ─────────────────────────────────────────── */
-.teamhub-all-members-modal {
-    padding: 18px 22px 22px;
-    max-height: 80vh;
-    overflow-y: auto;
-}
-
-.teamhub-all-members-modal__title {
-    margin: 0 0 12px;
-    font-size: 18px;
-    font-weight: 600;
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-}
-
-.teamhub-all-members-modal__count {
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-maxcontrast);
-}
-
-.teamhub-all-members-modal__search {
-    margin-bottom: 12px;
-}
-
-.teamhub-all-members-modal__loading {
-    display: flex;
-    justify-content: center;
-    padding: 40px 0;
-}
-
-.teamhub-all-members-modal__list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.teamhub-all-members-modal__row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 6px 4px;
-    border-radius: var(--border-radius);
-}
-.teamhub-all-members-modal__row:hover {
-    background: var(--color-background-hover);
-}
-
-.teamhub-all-members-modal__info {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-}
-
-.teamhub-all-members-modal__name {
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.teamhub-all-members-modal__uid {
-    font-size: 11px;
-    color: var(--color-text-maxcontrast);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.teamhub-all-members-modal__empty {
-    padding: 40px 0;
-    text-align: center;
-    color: var(--color-text-maxcontrast);
 }
 
 .teamhub-teaminfo-body {
@@ -2365,6 +1751,10 @@ export default {
     padding: 0 0 8px;
     border-top: 1px solid var(--color-border);
 }
+/* FilesWidget manages its own top chrome (tab bar) — no extra top border needed */
+.teamhub-tablet-widget__body--notoppad {
+    border-top: none;
+}
 
 /* ─── Tablet inline widget content ────────────────────────── */
 
@@ -2387,18 +1777,5 @@ export default {
     font-size: 13px;
     line-height: 1.5;
     color: var(--color-text-maxcontrast);
-}
-
-.teamhub-tablet-members {
-    padding: 4px 14px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.teamhub-tablet-members__avatars {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
 }
 </style>

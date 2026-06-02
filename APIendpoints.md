@@ -382,9 +382,28 @@ List members of a team for the home-page members widget.
 ```
 
 ### GET `/teams/{teamId}/members/all`
-Flat deduplicated list of every effective user of the team (direct + expanded from groups/sub-teams). Used by the "Show all members" modal.
+Flat deduplicated list of every effective user of the team (direct + expanded from groups/sub-teams). Used by the members widget (Members + Tomorrow + Search tabs) and by @mention autocomplete.
 **Auth:** Team member.
-**Response:** `{ members: [ { userId, displayName } ] }` — sorted by displayName case-insensitive.
+**Response:**
+```
+{
+  members: [
+    {
+      userId:      string,
+      displayName: string,
+      email:       string|null,   // omitted/null when no email is set, or when the user's NC profile scope on email is "Private"
+      phone:       string|null,   // omitted/null when no phone is set, or when the user's NC profile scope on phone is "Private"
+      ncStatus:    {              // null when no live status info is available
+        status:  'online'|'away'|'dnd'|'busy'|'invisible'|'offline'|null,
+        message: string|null,     // user-set status message (e.g. "In Meeting")
+        icon:    string|null,
+      } | null,
+    }
+  ],
+  talkAvailable: bool,            // whether the Spreed app is enabled for the current user — drives whether the widget shows the Talk contact icon
+}
+```
+Members are sorted by displayName case-insensitive. Email and phone visibility respect the user's chosen account-property scope (`SCOPE_PRIVATE` is filtered out; `LOCAL` / `FEDERATED` / `PUBLISHED` are returned). Legacy consumers reading a bare array continue to work via tolerant unwrap on the client side, but the documented shape is the envelope.
 
 ### GET `/teams/{teamId}/members/manage`
 Structured member breakdown for the Manage Team → Members tab.
@@ -489,7 +508,7 @@ Provision resources for the specified apps and persist the full app enabled/disa
 **Auth:** Team admin.
 **Body:** `{ apps: string[], teamName: string, appStates?: [{ app_id: string, enabled: bool }] }`
 - `apps` — resource keys to provision: `talk`, `files`, `calendar`, `deck`, `intravox`
-- `appStates` — optional; full state for all apps including disabled ones. Used by the create-team wizard to seed `teamhub_team_apps` immediately. Each `app_id` is validated against the allowlist `spreed`, `files`, `shared_files`, `calendar`, `deck`, `intravox`.
+- `appStates` — optional; full state for all apps including disabled ones. Used by the create-team wizard to seed `teamhub_team_apps` immediately. Each `app_id` is validated against the allowlist `spreed`, `files`, `calendar`, `deck`, `intravox`.
 **Response:** Per-app results map. Each value has either resource details or `{ error: string }`.
 
 ### DELETE `/teams/{teamId}/resources/{app}`

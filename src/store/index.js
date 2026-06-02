@@ -26,7 +26,8 @@ export default createStore({
         messageSettings: { pinMinLevel: 'moderator', postMinLevel: 'member' }, // per-team message settings
         comments: {},          // { messageId: [comments] }
         members: [],
-        allEffectiveMembers: [],   // flat [{userId, displayName}] of ALL members including indirect (via groups/teams) — used for @mention autocomplete
+        allEffectiveMembers: [],   // flat [{userId, displayName, email?, phone?, ncStatus?}] of ALL members including indirect (via groups/teams) — used by the MembersWidget and for @mention autocomplete
+        allEffectiveMembersTalkAvailable: false, // per-request fact: is Talk (spreed) enabled for the current user — drives whether the chat icon shows in the members widget rows
         memberships: [],           // flat list of {type: 'group'|'circle', displayName, memberCount}
         effectiveMemberCount: 0,   // total users including those via groups/teams (from circles_membership)
         hasMoreMembers: false,     // true when effective_count > members shown in widget
@@ -197,6 +198,7 @@ export default createStore({
         },
         SET_MEMBERS(state, members) { state.members = members },
         SET_ALL_EFFECTIVE_MEMBERS(state, members) { state.allEffectiveMembers = Array.isArray(members) ? members : [] },
+        SET_ALL_EFFECTIVE_MEMBERS_TALK_AVAILABLE(state, available) { state.allEffectiveMembersTalkAvailable = !!available },
         SET_MEMBERSHIPS(state, memberships) { state.memberships = memberships },
         SET_EFFECTIVE_MEMBER_COUNT(state, count) { state.effectiveMemberCount = count },
         SET_HAS_MORE_MEMBERS(state, val) { state.hasMoreMembers = val },
@@ -469,14 +471,17 @@ export default createStore({
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`)
                 )
-                // Backend returns { members: [...] }, but tolerate a bare array too
-                // for compatibility with any future shape change.
+                // Backend returns { members: [...], talkAvailable: bool }.
+                // Tolerate a bare array too for forward/backward compatibility.
                 const members = Array.isArray(data)
                     ? data
                     : (Array.isArray(data?.members) ? data.members : [])
                 commit('SET_ALL_EFFECTIVE_MEMBERS', members)
+                commit('SET_ALL_EFFECTIVE_MEMBERS_TALK_AVAILABLE',
+                    !Array.isArray(data) && !!data?.talkAvailable)
             } catch (e) {
                 commit('SET_ALL_EFFECTIVE_MEMBERS', [])
+                commit('SET_ALL_EFFECTIVE_MEMBERS_TALK_AVAILABLE', false)
             }
         },
 

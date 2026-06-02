@@ -1266,7 +1266,6 @@ import Delete from 'vue-material-design-icons/Delete.vue'
 import DragVertical from 'vue-material-design-icons/DragVertical.vue'
 import MessageIcon from 'vue-material-design-icons/Message.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
-import FolderAccountIcon from 'vue-material-design-icons/FolderAccount.vue'
 import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
 import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 import FileDocumentOutlineIcon from 'vue-material-design-icons/FileDocumentOutline.vue'
@@ -1305,7 +1304,7 @@ export default {
     components: {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
-        MessageIcon, FolderIcon, FolderAccountIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
+        MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
         ChevronRight, ChevronDown,
         ImageIcon, TrashCanOutline, TrashCan, UploadIcon, AccountArrowRight,
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
@@ -1450,9 +1449,9 @@ export default {
             return this.activeFilesRows.some(r => r.resourceId.startsWith('gf:'))
         },
 
-        /** Toggle-driven apps (not resource-backed) — Shared Files + Intravox. */
+        /** Toggle-driven apps (not resource-backed) — Intravox only. Shared Files is always-on via the File Center widget. */
         toggleApps() {
-            return (this.teamAppsList || []).filter(a => ['shared_files', 'intravox'].includes(a.id))
+            return (this.teamAppsList || []).filter(a => ['intravox'].includes(a.id))
         },
 
         /** Title for the connect picker dialog. */
@@ -1627,13 +1626,6 @@ export default {
                     installed: true,
                 },
                 {
-                    id: 'shared_files',
-                    label: t('teamhub', 'Shared files'),
-                    description: t('teamhub', 'Files and folders shared with this team'),
-                    icon: FolderAccountIcon,
-                    installed: true,
-                },
-                {
                     id: 'calendar',
                     label: t('teamhub', 'Calendar'),
                     description: t('teamhub', 'Team calendar and events'),
@@ -1659,8 +1651,7 @@ export default {
                 .filter(def => def.installed)
                 .map(def => {
                     const row = this.teamApps.find(a => a.app_id === def.id)
-                    const defaultEnabled = def.id === 'shared_files' ? false : true
-                    const enabled = row ? row.enabled : defaultEnabled
+                    const enabled = row ? row.enabled : true
                     return { ...def, enabled }
                 })
         },
