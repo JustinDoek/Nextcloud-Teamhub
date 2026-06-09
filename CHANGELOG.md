@@ -3,6 +3,10 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+# Decisions module
+Teams take decisions all the time. Sometimes they are recorded at a meeting, somtimes it's just an interaction between members, but often you wonder what, when, who and in which context was something decided? And where can we find a record of that? 
+Enter the Decision module. It presents a widget where you can keep up with the latest decisions and approve decisions if you are eligable. Through the menu item you can go to the modules landing page where you can search and browse through all decisions from within the team. When the Nextcloud admin activates this module every team admin can decide to activate it within the team and configure the settings. 
+
 ## [3.74.0] — 2026-06-09 — Decisions: link decision + cross-app design unification
 
 ### Added
