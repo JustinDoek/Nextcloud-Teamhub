@@ -2,50 +2,51 @@
     <div class="th-widget">
         <!-- Loading state -->
         <div v-if="loading" class="th-widget__state">
-            <NcLoadingIcon :size="20" />
+            <span class="th-widget__spinner" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
         <!-- No files resource for this team -->
-        <div v-else-if="!resources.files" class="th-widget__state">
-            <FolderIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'No team folder configured') }}</span>
+        <div v-else-if="!resources.files" class="th-widget__state th-widget__state--empty">
+            <FolderIcon :size="18" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'No team folder configured') }}</span>
         </div>
 
         <!-- Empty — no favourites inside team folder -->
-        <div v-else-if="files.length === 0" class="th-widget__state">
-            <StarIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'No favourited files in this team folder') }}</span>
+        <div v-else-if="files.length === 0" class="th-widget__state th-widget__state--empty">
+            <StarIcon :size="18" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'No favourited files in this team folder') }}</span>
         </div>
 
         <!-- File list -->
-        <ul v-else class="th-widget__list">
+        <ul v-else class="th-widget__rows">
             <li
                 v-for="file in files"
                 :key="file.id"
                 class="th-widget__row">
 
                 <!-- File-type icon badge -->
-                <div class="th-widget__badge th-widget__badge--file" aria-hidden="true">
+                <div class="th-files-fav__badge" aria-hidden="true">
                     <component :is="fileIcon(file)" :size="18" />
                 </div>
 
-                <!-- Main content -->
-                <div class="th-widget__body">
-                    <div class="th-widget__row-top">
+                <!-- Main content — size-driven hierarchy -->
+                <div class="th-files-fav__body">
+                    <div class="th-files-fav__title-row">
                         <a
                             :href="fileUrl(file)"
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="th-widget__title th-widget__title--link"
+                            class="th-files-fav__title"
                             :title="file.name"
                             @click="onOpen($event, file)">
                             {{ file.name }}
                         </a>
-                        <StarIcon :size="13" class="th-widget__star-badge" />
+                        <StarIcon :size="13" class="th-files-fav__star-badge" />
                     </div>
-                    <div class="th-widget__row-bottom">
-                        <span class="th-widget__meta">{{ formatDate(file.mtime) }}</span>
-                        <span v-if="file.path && file.path !== file.name" class="th-widget__meta th-widget__meta--sep">
+                    <div class="th-files-fav__meta">
+                        <span>{{ formatDate(file.mtime) }}</span>
+                        <span v-if="file.path && file.path !== file.name" class="th-files-fav__meta-sep">
                             {{ folderPath(file) }}
                         </span>
                     </div>
@@ -185,40 +186,10 @@ export default {
 </script>
 
 <style scoped>
-.th-widget { padding: 0; }
+/* Widget-specific only — shared classes from widget-tokens.css */
 
-/* Loading / empty states */
-.th-widget__state {
+.th-files-fav__badge {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px 16px;
-    color: var(--color-text-maxcontrast);
-    font-size: 15px;
-    text-align: center;
-}
-.th-widget__empty-icon {
-    opacity: 0.35;
-    color: var(--color-primary-element);
-}
-
-/* List */
-.th-widget__list { list-style: none; padding: 0; margin: 0; }
-.th-widget__row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--color-border);
-}
-.th-widget__row:last-child { border-bottom: none; }
-
-/* File icon badge */
-.th-widget__badge {
-    display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
@@ -227,68 +198,56 @@ export default {
     border-radius: var(--border-radius-large);
     background: var(--color-background-dark, #f4f4f4);
     border: 1px solid var(--color-border);
+    color: var(--color-primary-element);
 }
-.th-widget__badge--file { color: var(--color-primary-element); }
 
-/* Body */
-.th-widget__body {
+.th-files-fav__body {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
 }
-.th-widget__row-top {
+
+.th-files-fav__title-row {
     display: flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
 }
-.th-widget__row-bottom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-}
 
-/* Title link */
-.th-widget__title {
+.th-files-fav__title {
     flex: 1;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: var(--th-widget-row-primary-size);
+    font-weight: var(--th-widget-row-primary-weight);
     color: var(--color-main-text);
+    text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.th-widget__title--link {
-    color: var(--color-main-text);
-    text-decoration: none;
-}
-.th-widget__title--link:hover {
+
+.th-files-fav__title:hover {
     color: var(--color-primary-element);
     text-decoration: underline;
 }
 
-/* Inline star badge next to the title */
-.th-widget__star-badge {
+.th-files-fav__star-badge {
     flex-shrink: 0;
-    color: var(--color-warning-text, #7a5900);
+    color: var(--th-color-warning);
 }
 
-/* Meta line */
-.th-widget__meta {
-    display: inline-flex;
+.th-files-fav__meta {
+    display: flex;
     align-items: center;
-    gap: 3px;
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 140px;
+    gap: 6px;
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-meta-weight);
+    color: var(--th-widget-meta-color);
+    flex-wrap: wrap;
 }
-.th-widget__meta--sep::before {
+
+.th-files-fav__meta-sep::before {
     content: '·';
     margin-right: 4px;
     color: var(--color-border-dark);

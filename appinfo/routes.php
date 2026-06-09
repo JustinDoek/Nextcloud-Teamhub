@@ -113,6 +113,7 @@ return [
         ['name' => 'message#closePoll',           'url' => '/api/v1/messages/{messageId}/close-poll',        'verb' => 'POST'],
         ['name' => 'message#markQuestionSolved',  'url' => '/api/v1/messages/{messageId}/mark-solved',       'verb' => 'POST'],
         ['name' => 'message#unmarkQuestionSolved','url' => '/api/v1/messages/{messageId}/unmark-solved',     'verb' => 'POST'],
+        ['name' => 'message#registerAttachment',  'url' => '/api/v1/messages/{messageId}/attachments',       'verb' => 'POST'],
         ['name' => 'message#cacheImage',          'url' => '/api/v1/teams/{teamId}/messages/cache-image',   'verb' => 'POST'],
         ['name' => 'message#clearImageCache',     'url' => '/api/v1/teams/{teamId}/messages/image-cache',   'verb' => 'DELETE'],
 
@@ -283,6 +284,50 @@ return [
         ['name' => 'presenceTeam#suggestTimes', 'url' => '/api/v1/teams/{teamId}/presence/suggest-times', 'verb' => 'GET'],
         ['name' => 'presenceTeam#suggestTimeslots', 'url' => '/api/v1/teams/{teamId}/presence/suggest-timeslots', 'verb' => 'GET'],
         ['name' => 'presenceTeam#saveConfig',  'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'PUT'],
+
+        // Decisions module — team config (v3.64.0, Session A)
+        // Both endpoints require the global module flag to be on AND team membership.
+        // saveConfig additionally requires team admin.
+        ['name' => 'decision#getConfig',  'url' => '/api/v1/teams/{teamId}/decisions/config', 'verb' => 'GET'],
+        ['name' => 'decision#saveConfig', 'url' => '/api/v1/teams/{teamId}/decisions/config', 'verb' => 'PUT'],
+
+        // Decisions module — feature endpoints (v3.65.0, Session B)
+        // All require global flag on, per-team flag on, and team membership.
+        // Mark/withdraw additionally require proposer OR admin level.
+        ['name' => 'decision#index',      'url' => '/api/v1/teams/{teamId}/decisions',                          'verb' => 'GET'],
+        ['name' => 'decision#propose',    'url' => '/api/v1/teams/{teamId}/decisions',                          'verb' => 'POST'],
+        ['name' => 'decision#categories', 'url' => '/api/v1/teams/{teamId}/decisions/categories',               'verb' => 'GET'],
+        ['name' => 'decision#sources',    'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/sources',    'verb' => 'GET'],
+
+        // v3.71.10 — proposal source file content (read-only viewer)
+        ['name' => 'decision#fileContent', 'url' => '/api/v1/files/{fileId}/content',                          'verb' => 'GET'],
+
+        // Session G — predefined-category management (admin-only writes).
+        ['name' => 'decision#listCategories',   'url' => '/api/v1/teams/{teamId}/decisions/manage/categories',                  'verb' => 'GET'],
+        ['name' => 'decision#createCategory',   'url' => '/api/v1/teams/{teamId}/decisions/manage/categories',                  'verb' => 'POST'],
+        ['name' => 'decision#updateCategory',   'url' => '/api/v1/teams/{teamId}/decisions/manage/categories/{categoryId}',     'verb' => 'PUT'],
+        ['name' => 'decision#deleteCategory',   'url' => '/api/v1/teams/{teamId}/decisions/manage/categories/{categoryId}',     'verb' => 'DELETE'],
+        ['name' => 'decision#show',       'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}',             'verb' => 'GET'],
+        // Session H — lifecycle endpoints.
+        // 'finalize' replaces the legacy 'mark' route. Old clients in flight
+        // before upgrade get a 404; intended — we wipe test data per Session G plan.
+        ['name' => 'decision#finalize',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/finalize',    'verb' => 'POST'],
+        ['name' => 'decision#refreshProposal', 'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/refresh-proposal', 'verb' => 'POST'],
+        ['name' => 'decision#withdraw',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/withdraw',    'verb' => 'POST'],
+        ['name' => 'decision#approve',    'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/approve',     'verb' => 'POST'],
+        ['name' => 'decision#deny',       'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/deny',        'verb' => 'POST'],
+        // Session J — audit timeline (read-only).
+        ['name' => 'decision#audit',      'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/audit',       'verb' => 'GET'],
+
+        // Session B — decision ↔ task links
+        ['name' => 'decision#listTasks',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/tasks',            'verb' => 'GET'],
+        ['name' => 'decision#createTask',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/tasks',            'verb' => 'POST'],
+        ['name' => 'decision#deleteTask',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/tasks/{taskId}',   'verb' => 'DELETE'],
+
+        // Session C — decision ↔ decision links
+        ['name' => 'decision#listDecisionLinks',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/links',           'verb' => 'GET'],
+        ['name' => 'decision#createDecisionLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/links',           'verb' => 'POST'],
+        ['name' => 'decision#deleteDecisionLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/links/{linkId}',  'verb' => 'DELETE'],
     ],
 ];
 // Note: just checking structure

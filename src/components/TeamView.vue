@@ -45,7 +45,8 @@
                 @widget-actions-loaded="onWidgetActionsLoaded"
                 @leave-team="onLeaveTeam"
                 @set-as-default="setAsDefault"
-                @reset-to-default="resetToDefault" />
+                @reset-to-default="resetToDefault"
+                @propose-decision="openCompose" />
 
             <!-- Activity feed -->
             <ActivityFeedView v-if="currentView === 'activity'" />
@@ -86,6 +87,12 @@
                 v-if="currentView === 'presence' && presenceModuleEnabled && presenceConfig.presence_enabled"
                 :team-id="currentTeamId"
                 :hide-reasons="presenceConfig.hide_reasons" />
+
+            <!-- Decisions tab — rendered when module is enabled globally AND for this team -->
+            <TeamDecisionsView
+                v-if="currentView === 'decisions' && decisionsModuleEnabled && decisionsConfig.decisions_enabled"
+                @propose-decision="openCompose"
+                @propose-decision-superseding="openDecisionCompose" />
 
             <!-- External menu_item integrations — preloaded by registry_id -->
             <template v-for="menuItem in externalMenuItems">
@@ -243,6 +250,15 @@
             @close="showAddPersonalTask = false"
             @created="$store.dispatch('fetchTeamTasks', currentTeamId)" />
 
+        <!-- Shared compose-decision modal — triggered by widget header `+`
+             and by TeamDecisionsView's Propose button. Always renders proposals
+             as `finalized` (auto-skip the open/discussion phase) since the
+             proposer fills the entire proposal in the modal. -->
+        <ComposeDecisionModal
+            :open="composeDecisionOpen"
+            @close="composeDecisionOpen = false"
+            @decision-created="onDecisionCreatedFromCompose" />
+
     </div>
 </template>
 
@@ -274,7 +290,9 @@ import TeamMeetingModal from './TeamMeetingModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
-import TeamPresenceView from './TeamPresenceView.vue'
+import TeamPresenceView   from './TeamPresenceView.vue'
+import TeamDecisionsView  from './TeamDecisionsView.vue'
+import ComposeDecisionModal from './ComposeDecisionModal.vue'
 
 function debounce(fn, delay) {
     let timer = null
@@ -296,6 +314,8 @@ export default {
         AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
         TeamMeetingModal,
         TeamPresenceView,
+        TeamDecisionsView,
+        ComposeDecisionModal,
     },
 
     data() {
@@ -339,6 +359,9 @@ export default {
             showCalendarPicker:  false,
             selectedCalendar:    null,   // { id, name } — set when picker chooses
             showAddPersonalTask: false,
+            // Compose-decision modal (Session A) — opened by widget header `+`
+            // and by TeamDecisionsView's Propose button. Single instance.
+            composeDecisionOpen: false,
             widgetDynamicActions: {},
             // Set of view keys whose iframe has been rendered at least once.
             // Once a view is in this set the AppEmbed is kept in the DOM
@@ -353,6 +376,7 @@ export default {
             'currentTeamId', 'currentView', 'resources', 'webLinks', 'filesEmbedFileUrl',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
+            'decisionsConfig', 'decisionsModuleEnabled',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -553,6 +577,7 @@ export default {
                 this.editMode = false
                 this.preloadedViews = new Set()
                 this.SET_PRESENCE_CONFIG({ presence_enabled: false, hide_reasons: false })
+                this.SET_DECISIONS_CONFIG({ decisions_enabled: false })
                 // loadLayout now includes presenceConfig in its response,
                 // so a single request is all we need. No race conditions.
                 this.loadLayout(newId)
@@ -562,6 +587,13 @@ export default {
         // the presence tab toggle), rebuild the tab list immediately so the
         // Presence tab appears/disappears without a page reload.
         presenceConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
+        // Same pattern for decisionsConfig — rebuild tabs when per-team toggle changes.
+        decisionsConfig: {
             deep: true,
             handler() {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
@@ -654,10 +686,48 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET']),
 
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
+
+        /**
+         * Navigate to the message stream and pre-set the compose form to
+         * open in decision mode. supersedesId is the decision id being
+         * superseded (null for a fresh proposal).
+         *
+         * The compose form reads window.__teamhubDecisionCompose on mount /
+         * next stream activation and pre-fills accordingly, then clears it.
+         */
+        openDecisionCompose(supersedesId) {
+            window.__teamhubDecisionCompose = { supersedesId: supersedesId || null }
+            this.SET_VIEW('msgstream')
+        },
+
+        // Session A — open the focused compose modal (no supersedes — for
+        // supersedes the legacy handshake to msgstream remains, since the
+        // form needs the prior decision context loaded into the inline form).
+        openCompose() {
+            this.composeDecisionOpen = true
+        },
+
+        // Fired by ComposeDecisionModal after a successful proposal.
+        // The payload is the new message object with .decision embedded.
+        // We navigate to the Decisions tab and select the new decision
+        // so the user lands on its detail view immediately.
+        async onDecisionCreatedFromCompose(message) {
+            const decision = message?.decision || null
+            this.composeDecisionOpen = false
+            // Switch to the Decisions view.
+            this.SET_VIEW('decisions')
+            // Hand the messageId off via the store mutation so TeamDecisionsView's
+            // watcher picks it up and scrolls/selects on next render.
+            if (decision && decision.messageId) {
+                this.$nextTick(() => {
+                    this.SET_DECISIONS_TARGET(decision.messageId)
+                })
+            }
+        },
 
         // ── Layout load / save ──────────────────────────────────────
 
@@ -672,6 +742,13 @@ export default {
                 }
                 if (data.presenceConfig) {
                     this.SET_PRESENCE_CONFIG(data.presenceConfig)
+                }
+                // Decisions module flag — default off until getTeam confirms it's on.
+                if (typeof data.decisionsModuleEnabled === 'boolean') {
+                    this.SET_DECISIONS_MODULE_ENABLED(data.decisionsModuleEnabled)
+                }
+                if (data.decisionsConfig) {
+                    this.SET_DECISIONS_CONFIG(data.decisionsConfig)
                 }
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
@@ -856,6 +933,10 @@ export default {
             if (this.presenceModuleEnabled && this.presenceConfig && this.presenceConfig.presence_enabled) {
                 tabs.push({ key: 'presence', label: t('teamhub', 'Presence'), icon: 'OfficeBuilding' })
             }
+            // Decisions tab — same double-gate pattern.
+            if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
+                tabs.push({ key: 'decisions', label: t('teamhub', 'Decisions'), icon: 'Gavel' })
+            }
             ;(this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
             ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
@@ -883,7 +964,7 @@ export default {
         syncExtTabs() {
             const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence'])
+            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence', 'decisions'])
             this.orderedTabs = [
                 ...this.orderedTabs.filter(t => builtinKeys.has(t.key)),
                 ...extTabs,

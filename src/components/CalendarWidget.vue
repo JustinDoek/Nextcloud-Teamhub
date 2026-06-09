@@ -1,40 +1,41 @@
 <template>
     <div class="th-widget">
         <div v-if="loading" class="th-widget__state">
-            <NcLoadingIcon :size="20" />
+            <span class="th-widget__spinner" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
-        <div v-else-if="events.length === 0" class="th-widget__state">
-            <CalendarIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'No upcoming events') }}</span>
+        <div v-else-if="events.length === 0" class="th-widget__state th-widget__state--empty">
+            <CalendarIcon :size="18" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'No upcoming events') }}</span>
         </div>
-        <ul v-else class="th-widget__list">
+        <ul v-else class="th-widget__rows">
             <li v-for="event in events" :key="event.id" class="th-widget__row">
                 <!-- Date badge -->
-                <div class="th-widget__badge th-widget__badge--calendar" aria-hidden="true">
-                    <span class="th-widget__badge-month">{{ formatMonth(event.start) }}</span>
-                    <span class="th-widget__badge-day">{{ formatDay(event.start) }}</span>
+                <div class="th-cal__date-badge" aria-hidden="true">
+                    <span class="th-cal__date-badge-month">{{ formatMonth(event.start) }}</span>
+                    <span class="th-cal__date-badge-day">{{ formatDay(event.start) }}</span>
                 </div>
 
                 <!-- Main content -->
-                <div class="th-widget__body">
-                    <div class="th-widget__row-top">
+                <div class="th-cal__body">
+                    <div class="th-cal__title-row">
                         <a
                             v-if="event.editUrl"
                             :href="event.editUrl"
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="th-widget__title th-widget__title--link"
+                            class="th-cal__title"
                             :title="t('teamhub', 'Open in Calendar')">
                             {{ event.title }}
                         </a>
-                        <span v-else class="th-widget__title">{{ event.title }}</span>
+                        <span v-else class="th-cal__title">{{ event.title }}</span>
                         <!-- Join button — shown when location is a https URL (Talk or video link) -->
                         <a
                             v-if="joinUrl(event)"
                             :href="joinUrl(event)"
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="th-widget__join-btn"
+                            class="th-cal__join-btn"
                             :title="t('teamhub', 'Join meeting')">
                             <VideoIcon :size="14" />
                             {{
@@ -43,19 +44,20 @@
                             }}
                         </a>
                     </div>
-                    <div class="th-widget__row-bottom">
-                        <span class="th-widget__meta">{{ formatTimeRange(event.start, event.end, event.allDay) }}</span>
-                        <span v-if="locationText(event)" class="th-widget__meta th-widget__meta--sep">
+                    <div class="th-cal__meta">
+                        <span>{{ formatTimeRange(event.start, event.end, event.allDay) }}</span>
+                        <span v-if="locationText(event)" class="th-cal__meta-sep">
                             <MapMarkerIcon :size="12" />{{ locationText(event) }}
                         </span>
-                        <!-- Source pills: calendar name + app label -->
+                        <!-- Source pills: calendar name + app label.
+                             Use shared outline pill vocabulary. -->
                         <span
                             v-if="event.calendarName && resources.calendar && resources.calendar.length > 1"
-                            class="th-widget__source-pill th-widget__source-pill--calname"
+                            class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral th-cal__calname"
                             :title="event.calendarName">
                             {{ truncate(event.calendarName, 20) }}
                         </span>
-                        <span class="th-widget__source-pill th-widget__source-pill--calendar">
+                        <span class="th-widget__pill th-widget__pill--outline th-widget__pill--primary">
                             {{ t('teamhub', 'Calendar') }}
                         </span>
                     </div>
@@ -188,39 +190,10 @@ export default {
 </script>
 
 <style scoped>
-.th-widget { padding: 0; }
+/* Widget-specific only — shared classes from widget-tokens.css */
 
-/* Shared state: loading / empty */
-.th-widget__state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px 16px;
-    color: var(--color-text-maxcontrast);
-    font-size: 15px;
-    text-align: center;
-}
-.th-widget__empty-icon {
-    opacity: 0.35;
-    color: var(--color-primary-element);
-}
-
-/* List */
-.th-widget__list { list-style: none; padding: 0; margin: 0; }
-
-.th-widget__row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--color-border);
-}
-.th-widget__row:last-child { border-bottom: none; }
-
-/* Date badge */
-.th-widget__badge {
+/* Date badge — distinct to Calendar widget */
+.th-cal__date-badge {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -232,8 +205,7 @@ export default {
     background: var(--color-background-dark, #f4f4f4);
     border: 1px solid var(--color-border);
 }
-.th-widget__badge--calendar {}
-.th-widget__badge-month {
+.th-cal__date-badge-month {
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -241,113 +213,86 @@ export default {
     line-height: 1;
     text-transform: uppercase;
 }
-.th-widget__badge-day {
+.th-cal__date-badge-day {
     font-size: 16px;
     font-weight: 700;
     color: var(--color-main-text);
     line-height: 1.1;
 }
 
-/* Body: stacked top/bottom rows */
-.th-widget__body {
+.th-cal__body {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
 }
-.th-widget__row-top {
+
+.th-cal__title-row {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
 }
-.th-widget__row-bottom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-}
 
-/* Title */
-.th-widget__title {
+.th-cal__title {
     flex: 1;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: var(--th-widget-row-primary-size);
+    font-weight: var(--th-widget-row-primary-weight);
     color: var(--color-main-text);
+    text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
-.th-widget__title--link {
-    color: var(--color-main-text);
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.th-widget__title--link:hover {
+.th-cal__title:hover {
     color: var(--color-primary-element);
     text-decoration: underline;
 }
 
-/* Meta line */
-.th-widget__meta {
+.th-cal__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-meta-weight);
+    color: var(--th-widget-meta-color);
+    flex-wrap: wrap;
+}
+
+.th-cal__meta-sep {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
-    white-space: nowrap;
 }
-.th-widget__meta--sep::before {
+.th-cal__meta-sep::before {
     content: '·';
     margin-right: 4px;
     color: var(--color-border-dark);
 }
 
-/* Join button */
-.th-widget__join-btn {
+/* Join meeting — primary action; uses NC primary directly */
+.th-cal__join-btn {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
     padding: 2px 8px;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-pill-weight);
     border-radius: var(--border-radius-pill);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
     text-decoration: none;
     transition: opacity 0.15s;
 }
-.th-widget__join-btn:hover { opacity: 0.85; }
+.th-cal__join-btn:hover { opacity: 0.85; }
 
-/* Source pills */
-.th-widget__source-pill--calname {
-    display: inline-block;
-    padding: 1px 7px;
-    border-radius: var(--border-radius-pill);
-    font-size: 11px;
-    font-weight: 500;
-    background: var(--color-background-dark);
-    color: var(--color-text-maxcontrast);
-    border: 1px solid var(--color-border);
+/* Constrain calendar-name outline pill width */
+.th-cal__calname {
     max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    vertical-align: middle;
-}
-.th-widget__source-pill--calendar {
-    display: inline-block;
-    padding: 1px 7px;
-    border-radius: var(--border-radius-pill);
-    font-size: 11px;
-    font-weight: 500;
-    background: var(--color-primary-element-light, rgba(0,130,201,0.12));
-    color: var(--color-primary-element);
-    border: 1px solid var(--color-primary-element-light, rgba(0,130,201,0.25));
-    vertical-align: middle;
 }
 </style>

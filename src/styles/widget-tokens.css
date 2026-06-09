@@ -1,0 +1,238 @@
+/* ──────────────────────────────────────────────────────────────────────────
+ * TeamHub — shared widget design tokens
+ *
+ * Loaded once from main.js so every widget — Decisions, Deck, Members,
+ * Files*, Calendar, Activity, Intravox, Integration, ExternalWidgetItem —
+ * inherits the same typography scale, colour assignments, and structural
+ * helpers. Widgets stop defining font-size/weight/colour in their own
+ * scoped blocks and reach for these tokens instead.
+ *
+ * Why CSS custom properties on :root rather than @import in each widget:
+ *  - Vue 2 scoped styles wrap rules in [data-v-XXX] selectors. A scoped
+ *    .th-widget__row in widget A is invisible to widget B. CSS variables
+ *    cascade across that boundary; classes here are deliberately
+ *    unscoped (this file is loaded outside any component) and so they
+ *    apply globally to whichever widget consumes the class name.
+ *  - One file = one source of truth. A widget-pass that wants to
+ *    re-tune spacing or font sizes edits one number here, not twelve
+ *    places spread across twelve files.
+ *
+ * Convention: anything widget-internal stays in the widget's own
+ * scoped block (the Decisions tab bar, the Members search box,
+ * the Calendar date column). Anything shared lives here.
+ * ────────────────────────────────────────────────────────────────────── */
+
+:root {
+    /* ── Brand colour palette — hard-contrast, defined by TeamHub ──────
+       The NC theme variables (--color-success, --color-warning, etc.) on
+       many themes render as very soft tints — e.g. a pale mint green for
+       success, a soft amber for warning. Against white pill text those
+       reads as washed out. We define our own hard-contrast tokens so a
+       "success" pill in TeamHub reads as success at a glance regardless
+       of theme. NC vars are still consulted for chrome (borders,
+       backgrounds, primary-element) — we only override the *semantic*
+       colours that show up as fills behind white text. */
+    --th-color-success:        #2d7d46;   /* solid green */
+    --th-color-success-soft:   #e6f0e9;   /* hover/tint background */
+    --th-color-warning:        #a05a00;   /* solid dark amber, 5.4:1 contrast vs white */
+    --th-color-warning-soft:   #fbe9d1;
+    --th-color-error:          #c8253f;   /* solid red — matches tab badge */
+    --th-color-error-soft:     #f6d8de;
+    --th-color-neutral:        #6c757d;   /* solid slate-grey */
+    --th-color-neutral-soft:   var(--color-background-dark);
+
+    /* ── Typography scale — size is the primary signal, weight is secondary.
+       Previous scale leaned on bold (500/600/700) to distinguish lines;
+       we now use size for hierarchy and reserve heavy weight for pills
+       and the widget header only. */
+    --th-widget-title-size:        14px;
+    --th-widget-title-weight:      600;   /* widget HEADER only */
+
+    --th-widget-row-primary-size:  14px;
+    --th-widget-row-primary-weight: 500;  /* medium, not bold */
+
+    --th-widget-row-meta-size:     12px;
+    --th-widget-row-meta-weight:   400;   /* regular */
+
+    --th-widget-pill-size:         10px;
+    --th-widget-pill-weight:       700;   /* pills stay heavy — that's what makes a pill a pill */
+
+    --th-widget-empty-size:        12px;
+    --th-widget-empty-weight:      400;
+
+    /* Spacing — row geometry. Three widgets already share these values
+       (10px 14px padding, 12px gap); we promote them to canonical. */
+    --th-widget-row-padding:       10px 14px;
+    --th-widget-row-gap:           12px;
+
+    /* Aliases used elsewhere in the codebase — point them at the new
+       hard-contrast tokens. Kept named "success-strong" for back-compat
+       with the detail-panel pills already shipped in v3.73.3. */
+    --th-widget-success-strong:    var(--th-color-success);
+    --th-widget-meta-color:        var(--color-text-maxcontrast);
+    --th-widget-empty-color:       var(--color-text-maxcontrast);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Shared utility classes
+ *
+ * Widgets opt in by using these class names directly. The cascade still
+ * lets a widget override a property locally when truly necessary (it
+ * shouldn't be necessary often — that's the point).
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* Outer panel wrapper — every widget renders inside one of these
+   (TeamWidgetGrid already provides chrome; this is for any widget
+   that wants to set its own internal scrollable region). */
+.th-widget__panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+
+/* Title typography — apply to whatever element holds the widget title */
+.th-widget__title {
+    font-size: var(--th-widget-title-size);
+    font-weight: var(--th-widget-title-weight);
+    color: var(--color-main-text);
+}
+
+/* Row list reset — for <ul> wrappers around list items */
+.th-widget__rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+/* Generic row item — icon + primary text + (optional) trailing meta.
+   Widgets with richer row structure (Decisions accent bar + meta line)
+   compose their own layout but use the typography tokens below. */
+.th-widget__row {
+    display: flex;
+    align-items: center;
+    gap: var(--th-widget-row-gap);
+    padding: var(--th-widget-row-padding);
+    border-bottom: 1px solid var(--color-border);
+    text-decoration: none;
+    color: var(--color-main-text);
+}
+
+.th-widget__row:last-child {
+    border-bottom: none;
+}
+
+.th-widget__row--clickable {
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+
+.th-widget__row--clickable:hover {
+    background: var(--color-background-hover);
+}
+
+.th-widget__row--clickable:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: -2px;
+}
+
+.th-widget__row-icon {
+    flex: 0 0 auto;
+    color: var(--color-text-maxcontrast);
+    display: inline-flex;
+    align-items: center;
+}
+
+.th-widget__row-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--th-widget-row-primary-size);
+    font-weight: var(--th-widget-row-primary-weight);
+    color: var(--color-main-text);
+}
+
+.th-widget__row-meta {
+    flex: 0 0 auto;
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-meta-weight);
+    color: var(--th-widget-meta-color);
+    white-space: nowrap;
+}
+
+/* State rows — loading / empty / error. Use whichever modifier applies. */
+.th-widget__state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 14px;
+    font-size: var(--th-widget-empty-size);
+    font-weight: var(--th-widget-empty-weight);
+    color: var(--th-widget-empty-color);
+}
+
+.th-widget__state--empty {
+    font-style: italic;
+}
+
+.th-widget__state--error {
+    color: var(--color-error-text);
+    font-style: normal;
+}
+
+.th-widget__state-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Spinner — small, themed, used by state="loading" rows */
+.th-widget__spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--color-border-dark);
+    border-top-color: var(--color-primary-element);
+    border-radius: 50%;
+    animation: th-widget-spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes th-widget-spin { to { transform: rotate(360deg); } }
+
+/* Pill base — solid filled, white text. Matches the detail-panel
+   link-pill family so widget pills and detail-panel pills read as
+   the same element across the app. Use modifier classes for colour. */
+.th-widget__pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: var(--th-widget-pill-size);
+    font-weight: var(--th-widget-pill-weight);
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #fff;
+    background: var(--th-widget-meta-color);
+}
+
+.th-widget__pill--primary    { background: var(--color-primary-element); }
+.th-widget__pill--success    { background: var(--th-color-success); }
+.th-widget__pill--warning    { background: var(--th-color-warning); }
+.th-widget__pill--error      { background: var(--th-color-error); }
+.th-widget__pill--neutral    { background: var(--th-color-neutral); }
+
+/* Outline pill variant — same dimensions, transparent fill, coloured
+   border + text. Used where a row already has a strong background
+   and a solid pill would be too loud. */
+.th-widget__pill--outline {
+    background: transparent;
+    border: 1px solid currentColor;
+}
+.th-widget__pill--outline.th-widget__pill--primary { color: var(--color-primary-element); }
+.th-widget__pill--outline.th-widget__pill--success { color: var(--th-color-success); }
+.th-widget__pill--outline.th-widget__pill--warning { color: var(--th-color-warning); }
+.th-widget__pill--outline.th-widget__pill--error   { color: var(--th-color-error); }
+.th-widget__pill--outline.th-widget__pill--neutral { color: var(--th-color-neutral); }

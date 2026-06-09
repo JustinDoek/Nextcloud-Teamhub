@@ -1,6 +1,6 @@
 {
   "name": "teamhub",
-  "version": "3.63.1",
+  "version": "3.74.0",
   "description": "Team collaboration hub for Nextcloud",
   "scripts": {
     "dev": "vite build --mode development",

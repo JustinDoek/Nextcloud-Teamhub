@@ -130,8 +130,9 @@ export default {
     align-items: center;
     gap: 5px;
     padding: 8px 10px 7px;
-    font-size: 12px;
-    font-weight: 500;
+    /* Tokens — tabs use row-meta size at row-primary weight */
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-primary-weight);
     color: var(--color-text-maxcontrast);
     background: transparent;
     border: none;
@@ -157,7 +158,7 @@ export default {
 .th-files-widget__tab--active {
     color: var(--color-primary-element);
     border-bottom-color: var(--color-primary-element);
-    font-weight: 600;
+    font-weight: var(--th-widget-title-weight);
 }
 
 /* ── Tab panels ── */

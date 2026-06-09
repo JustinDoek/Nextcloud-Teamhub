@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\LayoutMapper;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -111,6 +112,15 @@ class LayoutController extends Controller {
             'collapsed'   => false,
             'hSaved'      => 4,
         ],
+        [
+            'i'           => 'widget-decisions',
+            'x'           => 9, 'y' => 20,
+            'w'           => 3, 'h' => 4,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 4,
+        ],
     ];
 
     private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck'];
@@ -136,6 +146,7 @@ class LayoutController extends Controller {
         'widget-activity',
         'widget-pages',
         'widget-files-center',
+        'widget-decisions',
         // Legacy — kept so saves from old clients are not rejected mid-migration.
         'widget-files-favorites',
         'widget-files-recent',
@@ -143,7 +154,7 @@ class LayoutController extends Controller {
     ];
 
     // Allowed built-in tab keys.
-    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'presence'];
+    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'presence', 'decisions'];
 
     public function __construct(
         string $appName,
@@ -155,6 +166,7 @@ class LayoutController extends Controller {
         private LoggerInterface $logger,
         private MemberService $memberService,
         private PresenceTeamService $presenceTeamService,
+        private DecisionTeamService $decisionTeamService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -204,12 +216,14 @@ class LayoutController extends Controller {
                 'itemsAfter'  => count($mergedDefault),
             ]);
         return new JSONResponse([
-            'layout'                => $mergedDefault,
-            'tabOrder'              => $userDefault['tabOrder'],
-            'isDefault'             => true,
-            'userDefault'           => $mergedDefault,
-            'presenceConfig'        => $this->presenceTeamService->getConfig($teamId),
-            'presenceModuleEnabled' => $this->isPresenceModuleEnabled(),
+            'layout'                 => $mergedDefault,
+            'tabOrder'               => $userDefault['tabOrder'],
+            'isDefault'              => true,
+            'userDefault'            => $mergedDefault,
+            'presenceConfig'         => $this->presenceTeamService->getConfig($teamId),
+            'presenceModuleEnabled'  => $this->isPresenceModuleEnabled(),
+            'decisionsConfig'        => $this->decisionTeamService->getConfig($teamId),
+            'decisionsModuleEnabled' => $this->isDecisionsModuleEnabled(),
         ]);
         }
 
@@ -225,12 +239,14 @@ class LayoutController extends Controller {
         ]);
 
         return new JSONResponse([
-            'layout'                => $layout,
-            'tabOrder'              => $tabOrder,
-            'isDefault'             => false,
-            'userDefault'           => $userDefault['layout'],
-            'presenceConfig'        => $this->presenceTeamService->getConfig($teamId),
-            'presenceModuleEnabled' => $this->isPresenceModuleEnabled(),
+            'layout'                 => $layout,
+            'tabOrder'               => $tabOrder,
+            'isDefault'              => false,
+            'userDefault'            => $userDefault['layout'],
+            'presenceConfig'         => $this->presenceTeamService->getConfig($teamId),
+            'presenceModuleEnabled'  => $this->isPresenceModuleEnabled(),
+            'decisionsConfig'        => $this->decisionTeamService->getConfig($teamId),
+            'decisionsModuleEnabled' => $this->isDecisionsModuleEnabled(),
         ]);
     }
 
@@ -522,6 +538,10 @@ class LayoutController extends Controller {
 
     private function isPresenceModuleEnabled(): bool {
         return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
+    }
+
+    private function isDecisionsModuleEnabled(): bool {
+        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1';
     }
 
     private function currentUserId(): ?string {

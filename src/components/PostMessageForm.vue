@@ -1,7 +1,8 @@
 <template>
     <div class="post-form">
-        <!-- Message type selector -->
-        <div class="post-form__type">
+        <!-- Message type selector — hidden when the form is embedded in
+             ComposeDecisionModal (forceDecision prop locks it to 'decision'). -->
+        <div v-if="!forceDecision" class="post-form__type">
             <label class="post-form__type-option" :class="{ active: messageType === 'normal' }">
                 <input v-model="messageType" type="radio" value="normal">
                 <MessageOutline :size="16" />
@@ -16,6 +17,14 @@
                 <input v-model="messageType" type="radio" value="question">
                 <HelpCircleOutline :size="16" />
                 {{ t('teamhub', 'Question') }}
+            </label>
+            <label
+                v-if="decisionsAvailable"
+                class="post-form__type-option"
+                :class="{ active: messageType === 'decision' }">
+                <input v-model="messageType" type="radio" value="decision">
+                <GavelIcon :size="16" />
+                {{ t('teamhub', 'Decision') }}
             </label>
         </div>
 
@@ -204,6 +213,94 @@
             </NcButton>
         </div>
 
+        <!-- Decision options -->
+        <div v-if="messageType === 'decision'" class="post-form__decision-options">
+            <!-- Supersede banner — shown when this proposal will replace another -->
+            <div v-if="decisionSupersedesId" class="decision-supersede-banner" role="note">
+                <SwapHorizontal :size="16" aria-hidden="true" />
+                <span class="decision-supersede-banner__text">
+                    <!-- TRANSLATORS: shown above the message composer when the user is creating a proposal that supersedes an earlier one -->
+                    {{ t('teamhub', 'This proposal will supersede decision #{id}. The original will be withdrawn if it is still open.', { id: decisionSupersedesId }) }}
+                </span>
+                <button
+                    type="button"
+                    class="decision-supersede-banner__clear"
+                    :aria-label="t('teamhub', 'Cancel superseding')"
+                    :title="t('teamhub', 'Cancel superseding')"
+                    @click="decisionSupersedesId = null">
+                    <Close :size="14" />
+                </button>
+            </div>
+
+            <div class="decision-field">
+                <label class="post-form__label" for="decision-impact">
+                    {{ t('teamhub', 'Impact') }}
+                    <span class="decision-required" aria-hidden="true">*</span>
+                </label>
+                <div id="decision-impact" class="decision-impact-row" role="radiogroup" :aria-label="t('teamhub', 'Decision impact')">
+                    <label
+                        v-for="opt in impactOptions"
+                        :key="opt.value"
+                        class="decision-impact-chip"
+                        :class="{ active: decisionImpact === opt.value, ['decision-impact-chip--' + opt.value]: true }">
+                        <input
+                            v-model="decisionImpact"
+                            type="radio"
+                            name="decision-impact-radio"
+                            :value="opt.value">
+                        <span>{{ opt.label }}</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Level picker — only rendered when the per-team toggle is on -->
+            <div v-if="decisionsLevelEnabled" class="decision-field">
+                <label class="post-form__label" for="decision-level">
+                    {{ t('teamhub', 'Level') }}
+                </label>
+                <div id="decision-level" class="decision-impact-row" role="radiogroup" :aria-label="t('teamhub', 'Decision level')">
+                    <label
+                        v-for="opt in levelOptions"
+                        :key="opt.value"
+                        class="decision-impact-chip decision-level-chip"
+                        :class="{ active: decisionLevel === opt.value }">
+                        <input
+                            v-model="decisionLevel"
+                            type="radio"
+                            name="decision-level-radio"
+                            :value="opt.value">
+                        <span>{{ opt.label }}</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="decision-field">
+                <label class="post-form__label" for="decision-category">
+                    {{ t('teamhub', 'Category') }}
+                    <span class="decision-required" aria-hidden="true">*</span>
+                </label>
+
+                <!-- No categories yet — admin warning -->
+                <div v-if="!loadingCategories && !decisionCategoryOptions.length" class="decision-category-empty" role="alert">
+                    <!-- TRANSLATORS: Shown in the message composer when no decision categories have been set up for this team -->
+                    {{ t('teamhub', 'No decision categories have been set up for this team. Ask a team admin to add categories in Manage team → Decisions.') }}
+                </div>
+
+                <NcSelect
+                    v-else
+                    id="decision-category"
+                    v-model="decisionCategory"
+                    :options="decisionCategoryOptions"
+                    :loading="loadingCategories"
+                    :clearable="false"
+                    :searchable="true"
+                    :placeholder="t('teamhub', 'Pick a category')"
+                    label="name"
+                    track-by="id"
+                    :aria-label="t('teamhub', 'Decision category')" />
+            </div>
+        </div>
+
         <!-- Actions -->
         <div class="post-form__actions">
             <NcButton
@@ -291,12 +388,15 @@ import {
     NcRichContenteditable,
     NcLoadingIcon,
     NcDialog,
+    NcSelect,
 } from '@nextcloud/vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
 import PollIcon from 'vue-material-design-icons/Poll.vue'
+import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Close from 'vue-material-design-icons/Close.vue'
+import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
 import Send from 'vue-material-design-icons/Send.vue'
 import Paperclip from 'vue-material-design-icons/Paperclip.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
@@ -315,19 +415,46 @@ const ATTACH_FOLDER = 'TeamHub Attachments'
 export default {
     name: 'PostMessageForm',
     components: {
-        NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon, NcDialog,
-        MessageOutline, HelpCircleOutline, PollIcon, Plus, Close, Send,
+        NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon, NcDialog, NcSelect,
+        MessageOutline, HelpCircleOutline, PollIcon, GavelIcon, Plus, Close, Send, SwapHorizontal,
         Paperclip, LinkVariant,
         FormatBold, FormatItalic, CodeTags, CodeBraces,
         FormatHeader2, FormatListBulleted, ImageIcon, FolderIcon,
     },
     emits: ['submitted', 'cancel'],
 
+    props: {
+        // When true, hides the message-type selector (Message/Poll/Question/Decision)
+        // and locks the form into 'decision' mode. Used by ComposeDecisionModal
+        // so the form can be embedded in a Decisions-only modal without exposing
+        // the other message types.
+        forceDecision: {
+            type: Boolean,
+            default: false,
+        },
+    },
+
     data() {
         return {
             subject: '',
             body: '',
+            // When forceDecision is set we initialise messageType to 'decision'
+            // in created() (props aren't available at data() time in Options API
+            // factory functions). The default below covers the normal inline case.
             messageType: 'normal',
+            // Decision-specific fields (only used when messageType === 'decision')
+            decisionImpact: '',
+            decisionLevel: 'operational',
+            // NcSelect bound — selected option object { id, name, approvers, ... } or null
+            decisionCategory: null,
+            // Predefined categories for this team — populated by loadDecisionCategories
+            decisionCategoryOptions: [],
+            decisionCategoriesLoaded: false,
+            loadingCategories: false,
+            // Supersede handshake (Session E flow finally wired in Session K).
+            // When non-null, this proposal supersedes the referenced decision —
+            // the backend auto-withdraws that decision on successful submit.
+            decisionSupersedesId: null,
             // Poll options carry a stable `id` so the v-for can key on identity
             // rather than array index (perf pass V6). Index-as-key on inputs
             // bound with v-model causes Vue to reuse the wrong DOM node when an
@@ -357,7 +484,7 @@ export default {
     },
 
     computed: {
-        ...mapState(['members', 'allEffectiveMembers', 'messageSettings']),
+        ...mapState(['members', 'allEffectiveMembers', 'messageSettings', 'decisionsModuleEnabled', 'decisionsConfig', 'currentView']),
 
         mentions() {
             // NcRichContenteditable user-data must be a plain object keyed by userId.
@@ -379,26 +506,31 @@ export default {
         subjectLabel() {
             if (this.messageType === 'poll') return t('teamhub', 'Poll Question')
             if (this.messageType === 'question') return t('teamhub', 'Question')
+            if (this.messageType === 'decision') return t('teamhub', 'Decision question')
             return t('teamhub', 'Subject')
         },
         subjectPlaceholder() {
             if (this.messageType === 'poll') return t('teamhub', 'What would you like to ask?')
             if (this.messageType === 'question') return t('teamhub', 'Your question…')
+            if (this.messageType === 'decision') return t('teamhub', 'What needs to be decided?')
             return t('teamhub', 'Message subject')
         },
         bodyLabel() {
             if (this.messageType === 'poll') return t('teamhub', 'Description (optional)')
             if (this.messageType === 'question') return t('teamhub', 'Details (optional)')
+            if (this.messageType === 'decision') return t('teamhub', 'Context')
             return t('teamhub', 'Message')
         },
         bodyPlaceholder() {
             if (this.messageType === 'poll') return t('teamhub', 'Add more context to your poll…')
             if (this.messageType === 'question') return t('teamhub', 'Provide more details…')
+            if (this.messageType === 'decision') return t('teamhub', 'Explain the trade-offs, constraints, or background…')
             return t('teamhub', 'Write your message… (type / for Smart Picker, @ to mention)')
         },
         submitButtonText() {
             if (this.messageType === 'poll') return t('teamhub', 'Create Poll')
             if (this.messageType === 'question') return t('teamhub', 'Ask Question')
+            if (this.messageType === 'decision') return t('teamhub', 'Propose Decision')
             return t('teamhub', 'Post Message')
         },
 
@@ -408,13 +540,111 @@ export default {
                 return this.pollOptions.filter(o => o.text.trim()).length >= 2
             }
             if (this.messageType === 'normal' && !this.body.trim() && this.attachments.filter(a => a.shareUrl).length === 0) return false
+            if (this.messageType === 'decision') {
+                // Impact is required.
+                if (!this.decisionImpact) return false
+                // Category is now required — picked from the predefined team
+                // list. If the team has no categories at all, the form shows
+                // a warning above and the user can't pick one, so submit
+                // remains disabled.
+                if (!this.decisionCategory) return false
+            }
             return true
         },
+
+        // ── Decision helpers ────────────────────────────────────────────────
+
+        /**
+         * Decision compose option is shown only when the module is enabled
+         * globally AND for the current team. Both flags arrive on the layout
+         * response (loaded by TeamView) and live in the Vuex store.
+         */
+        decisionsAvailable() {
+            return !!(this.decisionsModuleEnabled
+                && this.decisionsConfig
+                && this.decisionsConfig.decisions_enabled)
+        },
+
+        // True when the per-team level toggle is on.
+        decisionsLevelEnabled() {
+            return !!(this.decisionsConfig && this.decisionsConfig.decisions_level_enabled)
+        },
+
+        impactOptions() {
+            return [
+                { value: 'low',    label: t('teamhub', 'Low') },
+                { value: 'medium', label: t('teamhub', 'Medium') },
+                { value: 'high',   label: t('teamhub', 'High') },
+            ]
+        },
+
+        levelOptions() {
+            return [
+                // TRANSLATORS: Decision level — day-to-day operational decisions
+                { value: 'operational', label: t('teamhub', 'Operational') },
+                // TRANSLATORS: Decision level — medium-term tactical decisions
+                { value: 'tactical',    label: t('teamhub', 'Tactical') },
+                // TRANSLATORS: Decision level — long-term strategic decisions
+                { value: 'strategic',   label: t('teamhub', 'Strategic') },
+            ]
+        },
+    },
+
+    watch: {
+        // When the user picks Decision for the first time, fetch the team's
+        // predefined categories. Subsequent toggles are a no-op.
+        messageType(newVal) {
+            if (newVal === 'decision' && !this.decisionCategoriesLoaded) {
+                this.loadDecisionCategories()
+            }
+        },
+        // When the user navigates back to the message stream (e.g. from
+        // the Decisions tab's Supersede flow), check the global handshake.
+        currentView(newVal) {
+            if (newVal === 'msgstream') {
+                this.consumeDecisionComposeHandshake()
+            }
+        },
+    },
+
+    created() {
+        // When the form is embedded in ComposeDecisionModal, lock into decision
+        // mode from the very first render so the decision-specific UI shows
+        // without flicker, and prime the category dropdown.
+        if (this.forceDecision) {
+            this.messageType = 'decision'
+            this.loadDecisionCategories()
+        }
+    },
+
+    mounted() {
+        // Catch the handshake if the form was already mounted when the
+        // user clicked Supersede (the common case — the stream form is
+        // typically already in the DOM, hidden behind a tab).
+        this.consumeDecisionComposeHandshake()
     },
 
     methods: {
         t,
         ...mapActions(['postMessage']),
+
+        /**
+         * Read window.__teamhubDecisionCompose set by TeamView.openDecisionCompose().
+         * If present, pre-set the form to Decision mode and stash the
+         * supersedesId. Clears the global so we don't double-consume.
+         */
+        consumeDecisionComposeHandshake() {
+            const handshake = window.__teamhubDecisionCompose
+            if (!handshake) return
+            window.__teamhubDecisionCompose = null
+            this.messageType = 'decision'
+            this.decisionSupersedesId = handshake.supersedesId || null
+            // Trigger category load if not already done (watcher handles
+            // the case where messageType was already 'decision').
+            if (!this.decisionCategoriesLoaded) {
+                this.loadDecisionCategories()
+            }
+        },
 
         /**
          * Auto-complete callback for NcRichContenteditable @-mentions.
@@ -767,19 +997,34 @@ export default {
             }
 
             try {
-                // Determine upload folder:
-                // Prefer team shared folder → Attachments subfolder
-                // Fall back to personal /TeamHub Attachments
-                const teamFilesPath = this.$store.state.resources?.files?.path || null
+                // Determine upload folder. Strategy:
+                //   - Shared-folder team folder → upload into {team folder}/Attachments
+                //     (lives inside the team's share; everyone in the team can read it)
+                //   - Group Folder team folder → upload into the user's PERSONAL
+                //     'TeamHub Attachments/' instead. Group Folders have their own
+                //     ACL layer that often forbids create-folder for normal members
+                //     (MKCOL returns 405) and the path can include the mount-point
+                //     prefix vs. the team-subfolder prefix in ways that vary by
+                //     install. Keeping uploads in personal files for the GF case
+                //     avoids both problems. The decision-finalize step later
+                //     copies attachments into .proposals/{decisionId}/ via
+                //     server-side file-id lookup, so the user-side upload
+                //     location is decoupled from where the proposal eventually
+                //     stores its source files.
+                //   - No team folder → personal /TeamHub Attachments
+                const teamFiles    = this.$store.state.resources?.files || null
+                const teamFilesPath = teamFiles?.path || null
+                const teamFolderType = teamFiles?.folder_type || null
                 let uploadFolder
 
-                if (teamFilesPath) {
+                if (teamFilesPath && teamFolderType === 'shared') {
                     // teamFilesPath is the file_target from share table, e.g. "/Team Name"
                     uploadFolder = teamFilesPath.replace(/\/$/, '') + '/Attachments'
                 } else {
+                    // Group folder, or no team folder at all → personal attachments
                     uploadFolder = '/' + ATTACH_FOLDER
                 }
-
+                // Debug log stripped at session end (3.71.10).
                 // 1. Ensure folder exists (MKCOL — 405 = already exists, fine)
                 const folderDavUrl = generateRemoteUrl(`dav/files/${uid}${uploadFolder}`)
                 try {
@@ -872,7 +1117,12 @@ export default {
                     : `[📎 ${fileName}](${fileViewUrl})`
                 this.body = this.body + (this.body && !this.body.endsWith('\n') ? '\n' : '') + linkText
 
-                writeAttachment({ uploading: false, filePath: ncFilePath })
+                writeAttachment({
+                    uploading: false,
+                    filePath: ncFilePath,
+                    fileId: fileId ? parseInt(fileId, 10) : null,
+                    fileName,
+                })
 
             } catch (e) {
                 const msg = e.response?.data?.ocs?.meta?.message || e.response?.statusText || e.message || 'Upload failed'
@@ -897,6 +1147,34 @@ export default {
         addPollOption() { this.pollOptions.push({ id: this.pollOptionSeq++, text: '' }) },
         removePollOption(index) { this.pollOptions.splice(index, 1) },
 
+        // ── Decision helpers ────────────────────────────────────────────────
+
+        async loadDecisionCategories() {
+            const teamId = this.$store.state.currentTeamId
+            this.loadingCategories = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/decisions/manage/categories`)
+                )
+                this.decisionCategoryOptions = Array.isArray(data?.items) ? data.items : []
+                this.decisionCategoriesLoaded = true
+            } catch (err) {
+                console.error('[TeamHub][PostMessageForm] loadDecisionCategories error:', err)
+                // Non-fatal — the template renders the "no categories" warning
+                // when the list is empty, so the user still sees something.
+                this.decisionCategoriesLoaded = true
+            } finally {
+                this.loadingCategories = false
+            }
+        },
+
+        resetDecisionFields() {
+            this.decisionImpact    = ''
+            this.decisionLevel     = 'operational'
+            this.decisionCategory  = null
+            this.decisionSupersedesId = null
+        },
+
         // ── Submit ──────────────────────────────────────────────────────────
         async submit() {
             if (!this.canSubmit) return
@@ -908,19 +1186,95 @@ export default {
                     messageType: this.messageType,
                     priority: 'normal',
                     pollOptions: null,
+                    decision: null,
                 }
                 if (this.messageType === 'poll') {
                     messageData.pollOptions = this.pollOptions.map(o => o.text.trim()).filter(Boolean)
                 }
+                if (this.messageType === 'decision') {
+                    messageData.decision = {
+                        impact: this.decisionImpact,
+                        level: this.decisionsLevelEnabled ? this.decisionLevel : 'operational',
+                        // Category is now picked from the predefined list (an
+                        // object with id/name) — send the name string the
+                        // backend currently stores. Required field; submit is
+                        // gated upstream so this is non-null.
+                        category: this.decisionCategory?.name || null,
+                        // source_type defaults to 'message' server-side for
+                        // decisions created from the compose form.
+                        // supersedesId not exposed in v1 compose form — only via
+                        // the "Supersede this decision" entry point from Session E.
+                        // Set when the proposer used the "Supersede" action
+                        // from the Decisions tab. Backend auto-withdraws the
+                        // referenced decision if it was still open.
+                        supersedesId: this.decisionSupersedesId,
+                        // Session A: when the form is in the compose modal
+                        // (forceDecision prop), the proposer has written the
+                        // full proposal upfront. Skip the open/discussion phase
+                        // and land directly on 'finalized' (awaits approval).
+                        autoFinalize: this.forceDecision,
+                    }
+                }
 
-                await this.postMessage(messageData)
+                const createdMessage = await this.postMessage(messageData)
+
+                // Register attachments (v3.71.2) — link uploaded files to this
+                // message via the sidecar table so the Decisions module can
+                // copy them into .proposals/{decisionId}/ on finalize.
+                // Best-effort: a single failure does not block the success path.
+                const newMessageId = createdMessage?.id || createdMessage?.message?.id || null
+                if (newMessageId) {
+                    const toRegister = this.attachments.filter(a => a.fileId && !a.error)
+                    if (this.attachments.length > 0 && toRegister.length === 0) {
+                        console.warn('[TeamHub][PostMessageForm] attachments present but none have fileId — uploads likely failed')
+                    }
+                    for (const att of toRegister) {
+                        try {
+                            await axios.post(
+                                generateUrl(`/apps/teamhub/api/v1/messages/${newMessageId}/attachments`),
+                                { file_id: att.fileId, file_name: att.fileName || att.name }
+                            )
+                        } catch (regErr) {
+                            console.warn('[TeamHub][PostMessageForm] attachment registration failed (non-fatal)', {
+                                fileId: att.fileId, err: regErr?.message,
+                            })
+                            showError(t(
+                                'teamhub',
+                                'Failed to link attachment {name}: {error}',
+                                {
+                                    name:  att.fileName || att.name || '(unknown)',
+                                    error: regErr?.response?.data?.error || regErr?.message || 'Unknown error',
+                                },
+                            ))
+                        }
+                    }
+
+                    // Session A — compose modal posts as auto-finalized. The
+                    // proposal-doc write was intentionally skipped inside
+                    // propose() (transaction-timing concerns). Run it now
+                    // via refresh-proposal so .proposals/{id}/{id}.md is
+                    // written and any attachment copies land alongside.
+                    // Always fires for compose-modal decisions, even with
+                    // zero attachments — the .md is the primary artefact.
+                    const newDecisionId = createdMessage?.decision?.id || null
+                    if (this.forceDecision && newDecisionId) {
+                        try {
+                            await axios.post(
+                                generateUrl(`/apps/teamhub/api/v1/teams/${this.$store.state.currentTeamId}/decisions/${newDecisionId}/refresh-proposal`)
+                            )
+                        } catch (refreshErr) {
+                            console.warn('[TeamHub][PostMessageForm] refresh-proposal failed (non-fatal)', refreshErr?.message)
+                        }
+                    }
+                }
 
                 showSuccess(
-                    this.messageType === 'poll'    ? t('teamhub', 'Poll created!') :
+                    this.messageType === 'poll'     ? t('teamhub', 'Poll created!') :
                     this.messageType === 'question' ? t('teamhub', 'Question posted!') :
+                    this.messageType === 'decision' ? t('teamhub', 'Decision proposed!') :
                                                       t('teamhub', 'Message posted!')
                 )
-                this.$emit('submitted')
+                this.$emit('submitted', createdMessage)
 
                 // Reset
                 this.subject = ''
@@ -928,6 +1282,7 @@ export default {
                 this.messageType = 'normal'
                 this.pollOptions = [{ id: this.pollOptionSeq++, text: '' }, { id: this.pollOptionSeq++, text: '' }]
                 this.attachments = []
+                this.resetDecisionFields()
             } catch (e) {
                 const status = e?.response?.status
                 const isHtml = (e?.response?.headers?.['content-type'] ?? '').includes('text/html')
@@ -1093,6 +1448,97 @@ export default {
 
 .poll-option-row > :first-child { flex: 1; }
 
+/* Decision form */
+.post-form__decision-options {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-hover);
+}
+
+.decision-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.decision-required {
+    color: var(--color-error-text);
+    margin-left: 4px;
+}
+
+.decision-optional {
+    color: var(--color-text-maxcontrast);
+    font-weight: normal;
+    font-size: 0.85em;
+    margin-left: 6px;
+}
+
+.decision-impact-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.decision-impact-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    border-radius: var(--border-radius-pill);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    user-select: none;
+}
+
+.decision-impact-chip input { display: none; }
+
+.decision-impact-chip:hover {
+    background: var(--color-background-dark);
+}
+
+.decision-impact-chip.active {
+    border-color: var(--color-primary-element);
+    background: var(--color-primary-element-light);
+    color: var(--color-primary-element-text-dark, var(--color-main-text));
+    font-weight: 600;
+}
+
+.decision-impact-chip--high.active {
+    border-color: var(--color-error);
+    background: color-mix(in srgb, var(--color-error) 12%, transparent);
+}
+
+.decision-impact-chip--medium.active {
+    border-color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+
+.decision-impact-chip--low.active {
+    border-color: var(--color-success);
+    background: color-mix(in srgb, var(--color-success) 12%, transparent);
+}
+
+/* Level chip uses a neutral blue-ish accent so it's visually distinct from impact */
+.decision-level-chip.active {
+    border-color: var(--color-primary-element);
+    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
+    color: var(--color-primary-element-text, var(--color-main-text));
+}
+
+.decision-category-empty {
+    padding: 10px 12px;
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-warning, var(--color-border-dark));
+    border-radius: var(--border-radius);
+    font-size: 0.9em;
+    color: var(--color-text-maxcontrast);
+    line-height: 1.4;
+}
+
 .post-form__image-dialog {
     display: flex;
     flex-direction: column;
@@ -1125,4 +1571,45 @@ export default {
 }
 .post-form__image-dialog-divider::before { left: 0; }
 .post-form__image-dialog-divider::after  { right: 0; }
+.decision-supersede-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: color-mix(in srgb, var(--color-warning, #c9a227) 12%, transparent);
+    border: 1px solid var(--color-warning, #c9a227);
+    border-radius: var(--border-radius);
+    color: var(--color-warning-text, #a05a00);
+    font-size: 0.9em;
+}
+
+.decision-supersede-banner__text {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.decision-supersede-banner__clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--border-radius);
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.decision-supersede-banner__clear:hover {
+    background: color-mix(in srgb, var(--color-warning, #c9a227) 20%, transparent);
+}
+
+.decision-supersede-banner__clear:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+
 </style>

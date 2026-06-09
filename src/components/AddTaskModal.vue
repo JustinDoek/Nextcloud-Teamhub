@@ -177,13 +177,22 @@ export default {
             }
 
             try {
-                await axios.post(
+                const res = await axios.post(
                     generateUrl(`/apps/deck/api/v1.0/boards/${this.activeBoardId}/stacks/${stackId}/cards`),
                     payload,
                     { headers: { 'OCS-APIRequest': 'true' } }
                 )
                 showSuccess(t('teamhub', 'Task added'))
-                this.$emit('created')
+                // Session B: emit the created card info so callers can
+                // capture the path for linking to a decision.
+                const card = res?.data || {}
+                this.$emit('created', {
+                    boardId: this.activeBoardId,
+                    stackId,
+                    cardId: card.id || null,
+                    title:  card.title || this.form.title.trim(),
+                    path:   card.id ? `apps/deck/board/${this.activeBoardId}/card/${card.id}` : null,
+                })
                 this.$emit('close')
             } catch (e) {
                 const msg = e?.response?.data?.message || ''

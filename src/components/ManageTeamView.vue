@@ -882,10 +882,12 @@
                 </p>
 
                 <!-- ── Internal integrations (built into TeamHub) ──────────── -->
-                <div v-if="isTeamAdmin && presenceModuleEnabled" class="integrations-subsection">
+                <div v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection">
                     <h4 class="integrations-subsection__title">{{ t('teamhub', 'Internal integrations') }}</h4>
                     <div class="widgets-list">
+                        <!-- Presence row — only shown when presence module is on -->
                         <div
+                            v-if="presenceModuleEnabled"
                             class="widget-item widget-item--internal"
                             :class="{ 'widget-item--enabled': presenceEnabled }">
                             <span class="widget-drag-handle widget-drag-handle--placeholder" />
@@ -913,7 +915,7 @@
 
                         <!-- Sub-option: only shown when presence is enabled -->
                         <div
-                            v-if="presenceEnabled"
+                            v-if="presenceModuleEnabled && presenceEnabled"
                             class="widget-item widget-item--internal widget-item--sub">
                             <span class="widget-drag-handle widget-drag-handle--placeholder" />
                             <div class="widget-info">
@@ -929,11 +931,41 @@
                                 {{ presenceHideReasons ? t('teamhub', 'Hidden') : t('teamhub', 'Visible') }}
                             </NcCheckboxRadioSwitch>
                         </div>
+
+                        <!-- Decisions row — only shown when decisions module is on -->
+                        <div
+                            v-if="decisionsModuleEnabled"
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': decisionsEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Decisions feature/module (a TeamHub built-in integration that lets teams record decisions) -->
+                                    {{ t('teamhub', 'Decisions') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Allow team members to propose, discuss, and record decisions in the message stream and Decisions tab.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="decisionsEnabled"
+                                :disabled="savingDecisionsConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Decisions for this team')"
+                                @update:model-value="setDecisionsEnabled($event)">
+                                {{ decisionsEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
                     </div>
                 </div>
 
                 <!-- ── Third-party integrations (registered by other apps) ── -->
-                <h4 v-if="isTeamAdmin && presenceModuleEnabled" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
+                <h4 v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
                 <div v-if="loadingWidgets" class="section-loading">
                     <NcLoadingIcon :size="32" />
                 </div>
@@ -985,6 +1017,353 @@
                                 @update:model-value="toggleIntegration(integration, $event)">
                                 {{ integration.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
                             </NcCheckboxRadioSwitch>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- TAB: Decisions (only shown when decisionsModuleEnabled) -->
+        <div v-else-if="activeTab === 'decisions'" class="manage-tab-content">
+
+            <!-- v3.71.9 — toggle moved out: lives only in Integrations tab now.
+                 If decisions is disabled here we still show this tab (it's
+                 conditional on the module-level enable), but with a hint
+                 directing the admin to flip it on under Integrations. -->
+            <div v-if="!decisionsEnabled" class="manage-section">
+                <p class="manage-section-desc manage-section-desc--inline">
+                    {{ t('teamhub', 'Decisions are disabled for this team. Enable the module under the Integrations tab to start managing categories.') }}
+                </p>
+            </div>
+
+            <!-- Category management — only when decisions is enabled -->
+            <div v-if="decisionsEnabled" class="manage-section">
+                <h3>{{ t('teamhub', 'Settings') }}</h3>
+
+                <!-- Decision level field toggle -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Decision level field') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Show Operational / Tactical / Strategic level on decisions. Useful for teams that work with strategic taxonomy.') }}</span>
+                    </div>
+                    <NcCheckboxRadioSwitch
+                        :model-value="decisionsLevelEnabled"
+                        :disabled="savingDecisionsConfig"
+                        type="switch"
+                        :aria-label="t('teamhub', 'Enable the Level field for decisions')"
+                        @update:model-value="setDecisionsLevelEnabled($event)">
+                        {{ decisionsLevelEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                    </NcCheckboxRadioSwitch>
+                </div>
+
+                <!-- Minimum role for actions -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Minimum role for actions') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'The minimum team role required to link tasks, create tasks, and link decisions on any decision.') }}</span>
+                    </div>
+                    <select
+                        :value="decisionsActionMinLevel"
+                        :disabled="savingDecisionsConfig"
+                        class="teamhub-dec-level-select"
+                        :aria-label="t('teamhub', 'Minimum role for decision actions')"
+                        @change="setDecisionsActionMinLevel(Number($event.target.value))">
+                        <!-- NC Circles levels: 1=member, 4=moderator, 8=admin -->
+                        <option :value="1">{{ t('teamhub', 'Member') }}</option>
+                        <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
+                        <option :value="8">{{ t('teamhub', 'Admin') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div v-if="decisionsEnabled" class="manage-section">
+                <h3>{{ t('teamhub', 'Decision categories') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Define the categories proposers can choose from. Each category has one or more approvers — the people who can finalize decisions in that category. If you leave the approvers field empty, the team owner is used as the default approver.') }}
+                </p>
+
+                <!-- Loading -->
+                <div v-if="loadingDecCategories" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+
+                <!-- Category list -->
+                <template v-else>
+                    <ul v-if="decCategories.length" class="teamhub-dec-cats__list teamhub-dec-cats__list--standalone">
+                        <li
+                            v-for="cat in decCategories"
+                            :key="cat.id"
+                            class="teamhub-dec-cats__row">
+
+
+                            <!-- Read mode -->
+                            <template v-if="decCatEditing !== cat.id">
+                                <div class="teamhub-dec-cats__row-main">
+                                    <span v-if="cat.icon && categoryIconMap[cat.icon]" class="teamhub-dec-cats__row-icon" aria-hidden="true">
+                                        <component :is="categoryIconMap[cat.icon]" :size="20" />
+                                    </span>
+                                    <div class="teamhub-dec-cats__row-text">
+                                        <span class="teamhub-dec-cats__row-name">{{ cat.name }}</span>
+                                        <span v-if="cat.description" class="teamhub-dec-cats__row-desc">{{ cat.description }}</span>
+                                    </div>
+                                    <span class="teamhub-dec-cats__row-approvers">
+                                        {{ formatApprovers(cat.approvers) }}
+                                    </span>
+                                </div>
+                                <div class="teamhub-dec-cats__row-actions">
+                                    <NcButton
+                                        variant="tertiary"
+                                        :aria-label="t('teamhub', 'Edit category {name}', { name: cat.name })"
+                                        @click="startEditDecCategory(cat)">
+                                        <template #icon><PencilIcon :size="16" /></template>
+                                    </NcButton>
+                                    <NcButton
+                                        variant="tertiary"
+                                        :aria-label="t('teamhub', 'Delete category {name}', { name: cat.name })"
+                                        @click="confirmDeleteDecCategory(cat)">
+                                        <template #icon><Delete :size="16" /></template>
+                                    </NcButton>
+                                </div>
+                            </template>
+
+                            <!-- Edit mode -->
+                            <template v-else>
+                                <div class="teamhub-dec-cats__edit">
+                                    <div class="teamhub-dec-cats__edit-row">
+                                        <div class="teamhub-dec-cats__edit-icon-wrap">
+                                            <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Icon') }}</label>
+                                            <div class="teamhub-dec-cats__icon-picker-wrap">
+                                                <button
+                                                    type="button"
+                                                    class="teamhub-dec-cats__icon-btn"
+                                                    :aria-label="t('teamhub', 'Choose category icon')"
+                                                    :aria-expanded="decCatIconPickerOpen"
+                                                    @click.stop="decCatIconPickerOpen = !decCatIconPickerOpen">
+                                                    <component v-if="decCatForm.icon && categoryIconMap[decCatForm.icon]" :is="categoryIconMap[decCatForm.icon]" :size="20" aria-hidden="true" />
+                                                    <span v-else class="teamhub-dec-cats__icon-btn-placeholder" aria-hidden="true">—</span>
+                                                </button>
+                                                <div v-if="decCatIconPickerOpen" class="teamhub-dec-cats__icon-popover" @click.stop>
+                                                    <!-- Search inside picker -->
+                                                    <div class="teamhub-dec-cats__icon-search-wrap">
+                                                        <input
+                                                            v-model="catIconSearch"
+                                                            type="search"
+                                                            class="teamhub-dec-cats__icon-search"
+                                                            :placeholder="t('teamhub', 'Search icons…')"
+                                                            :aria-label="t('teamhub', 'Search icons')"
+                                                            autofocus>
+                                                        <button
+                                                            type="button"
+                                                            class="teamhub-dec-cats__icon-clear-btn"
+                                                            :aria-label="t('teamhub', 'Remove icon')"
+                                                            @click.stop="clearCatIcon">
+                                                            {{ t('teamhub', 'None') }}
+                                                        </button>
+                                                    </div>
+                                                    <!-- Scrollable grouped grid -->
+                                                    <div class="teamhub-dec-cats__icon-scroll" role="listbox" :aria-label="t('teamhub', 'Select an icon')">
+                                                        <div
+                                                            v-for="group in filteredIconGroups"
+                                                            :key="group.name"
+                                                            class="teamhub-dec-cats__icon-group">
+                                                            <div class="teamhub-dec-cats__icon-group-hdr">{{ group.name }}</div>
+                                                            <div class="teamhub-dec-cats__icon-group-grid">
+                                                                <button
+                                                                    v-for="ic in group.icons"
+                                                                    :key="ic.name"
+                                                                    type="button"
+                                                                    class="teamhub-dec-cats__icon-grid-btn"
+                                                                    :class="{ 'teamhub-dec-cats__icon-grid-btn--selected': decCatForm.icon === ic.name }"
+                                                                    :aria-label="ic.label"
+                                                                    :title="ic.label"
+                                                                    role="option"
+                                                                    :aria-selected="decCatForm.icon === ic.name"
+                                                                    @click.stop="selectCatIcon(ic.name)">
+                                                                    <component :is="categoryIconMap[ic.name]" :size="20" aria-hidden="true" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <p v-if="!filteredIconGroups.length" class="teamhub-dec-cats__icon-no-results">
+                                                            {{ t('teamhub', 'No icons match "{q}"', { q: catIconSearch }) }}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="teamhub-dec-cats__edit-name-wrap">
+                                            <label class="teamhub-dec-cats__edit-label" :for="`dec-cat-edit-name-${cat.id}`">{{ t('teamhub', 'Name') }}</label>
+                                            <input
+                                                :id="`dec-cat-edit-name-${cat.id}`"
+                                                v-model="decCatForm.name"
+                                                type="text"
+                                                maxlength="128"
+                                                class="teamhub-dec-cats__edit-input">
+                                        </div>
+                                    </div>
+
+                                    <label class="teamhub-dec-cats__edit-label" :for="`dec-cat-edit-desc-${cat.id}`">{{ t('teamhub', 'Description') }}</label>
+                                    <input
+                                        :id="`dec-cat-edit-desc-${cat.id}`"
+                                        v-model="decCatForm.description"
+                                        type="text"
+                                        maxlength="500"
+                                        class="teamhub-dec-cats__edit-input"
+                                        :placeholder="t('teamhub', 'Optional short description shown in the category grid')">
+
+                                    <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Approvers') }}</label>
+                                    <p class="teamhub-dec-cats__edit-hint">{{ t('teamhub', 'Leave empty to default to the team owner.') }}</p>
+                                    <NcSelect
+                                        v-model="decCatForm.approvers"
+                                        :options="memberUserOptions"
+                                        :multiple="true"
+                                        :close-on-select="false"
+                                        :clearable="true"
+                                        label="displayName"
+                                        track-by="userId"
+                                        :placeholder="t('teamhub', 'Pick one or more members')"
+                                        :aria-label="t('teamhub', 'Approver users')" />
+
+                                    <div class="teamhub-dec-cats__edit-actions">
+                                        <NcButton variant="secondary" @click="cancelEditDecCategory">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                        <NcButton
+                                            variant="primary"
+                                            :disabled="savingDecCategory || !decCatForm.name.trim()"
+                                            @click="saveDecCategory">
+                                            {{ savingDecCategory ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
+                                        </NcButton>
+                                    </div>
+
+                                    <p v-if="decCatFormError" class="teamhub-dec-cats__edit-error" role="alert">
+                                        {{ decCatFormError }}
+                                    </p>
+                                </div>
+                            </template>
+                        </li>
+                    </ul>
+
+                    <p v-else-if="!decCatEditing" class="teamhub-dec-cats__empty-text">
+                        {{ t('teamhub', 'No categories yet. Add the first one below.') }}
+                    </p>
+
+                    <!-- Add-new form -->
+                    <div class="teamhub-dec-cats__add-area">
+                        <NcButton
+                            v-if="decCatEditing !== 'new'"
+                            variant="secondary"
+                            @click="startCreateDecCategory">
+                            <template #icon><PlusIcon :size="16" /></template>
+                            {{ t('teamhub', 'Add category') }}
+                        </NcButton>
+
+                        <div v-else class="teamhub-dec-cats__edit">
+                                    <div class="teamhub-dec-cats__edit-row">
+                                        <div class="teamhub-dec-cats__edit-icon-wrap">
+                                            <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Icon') }}</label>
+                                            <div class="teamhub-dec-cats__icon-picker-wrap">
+                                                <button
+                                                    type="button"
+                                                    class="teamhub-dec-cats__icon-btn"
+                                                    :aria-label="t('teamhub', 'Choose category icon')"
+                                                    :aria-expanded="decCatIconPickerOpen"
+                                                    @click.stop="decCatIconPickerOpen = !decCatIconPickerOpen">
+                                                    <component v-if="decCatForm.icon && categoryIconMap[decCatForm.icon]" :is="categoryIconMap[decCatForm.icon]" :size="20" aria-hidden="true" />
+                                                    <span v-else class="teamhub-dec-cats__icon-btn-placeholder" aria-hidden="true">—</span>
+                                                </button>
+                                                <div v-if="decCatIconPickerOpen" class="teamhub-dec-cats__icon-popover" @click.stop>
+                                                    <!-- Search inside picker -->
+                                                    <div class="teamhub-dec-cats__icon-search-wrap">
+                                                        <input
+                                                            v-model="catIconSearch"
+                                                            type="search"
+                                                            class="teamhub-dec-cats__icon-search"
+                                                            :placeholder="t('teamhub', 'Search icons…')"
+                                                            :aria-label="t('teamhub', 'Search icons')"
+                                                            autofocus>
+                                                        <button
+                                                            type="button"
+                                                            class="teamhub-dec-cats__icon-clear-btn"
+                                                            :aria-label="t('teamhub', 'Remove icon')"
+                                                            @click.stop="clearCatIcon">
+                                                            {{ t('teamhub', 'None') }}
+                                                        </button>
+                                                    </div>
+                                                    <!-- Scrollable grouped grid -->
+                                                    <div class="teamhub-dec-cats__icon-scroll" role="listbox" :aria-label="t('teamhub', 'Select an icon')">
+                                                        <div
+                                                            v-for="group in filteredIconGroups"
+                                                            :key="group.name"
+                                                            class="teamhub-dec-cats__icon-group">
+                                                            <div class="teamhub-dec-cats__icon-group-hdr">{{ group.name }}</div>
+                                                            <div class="teamhub-dec-cats__icon-group-grid">
+                                                                <button
+                                                                    v-for="ic in group.icons"
+                                                                    :key="ic.name"
+                                                                    type="button"
+                                                                    class="teamhub-dec-cats__icon-grid-btn"
+                                                                    :class="{ 'teamhub-dec-cats__icon-grid-btn--selected': decCatForm.icon === ic.name }"
+                                                                    :aria-label="ic.label"
+                                                                    :title="ic.label"
+                                                                    role="option"
+                                                                    :aria-selected="decCatForm.icon === ic.name"
+                                                                    @click.stop="selectCatIcon(ic.name)">
+                                                                    <component :is="categoryIconMap[ic.name]" :size="20" aria-hidden="true" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <p v-if="!filteredIconGroups.length" class="teamhub-dec-cats__icon-no-results">
+                                                            {{ t('teamhub', 'No icons match "{q}"', { q: catIconSearch }) }}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="teamhub-dec-cats__edit-name-wrap">
+                                            <label class="teamhub-dec-cats__edit-label" for="dec-cat-name-new-standalone">{{ t('teamhub', 'Name') }}</label>
+                                            <input
+                                                id="dec-cat-name-new-standalone"
+                                                v-model="decCatForm.name"
+                                                type="text"
+                                                maxlength="128"
+                                                class="teamhub-dec-cats__edit-input"
+                                                :placeholder="t('teamhub', 'e.g. Architecture, Hiring, Policy')">
+                                        </div>
+                                    </div>
+
+                                    <label class="teamhub-dec-cats__edit-label" for="dec-cat-desc-new-standalone">{{ t('teamhub', 'Description') }}</label>
+                                    <input
+                                        id="dec-cat-desc-new-standalone"
+                                        v-model="decCatForm.description"
+                                        type="text"
+                                        maxlength="500"
+                                        class="teamhub-dec-cats__edit-input"
+                                        :placeholder="t('teamhub', 'Optional short description shown in the category grid')">
+
+                                    <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Approvers') }}</label>
+                            <p class="teamhub-dec-cats__edit-hint">{{ t('teamhub', 'Leave empty to default to the team owner.') }}</p>
+                            <NcSelect
+                                v-model="decCatForm.approvers"
+                                :options="memberUserOptions"
+                                :multiple="true"
+                                :close-on-select="false"
+                                :clearable="true"
+                                label="displayName"
+                                track-by="userId"
+                                :placeholder="t('teamhub', 'Pick one or more members')"
+                                :aria-label="t('teamhub', 'Approver users')" />
+
+                            <div class="teamhub-dec-cats__edit-actions">
+                                <NcButton variant="secondary" @click="cancelEditDecCategory">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                <NcButton
+                                    variant="primary"
+                                    :disabled="savingDecCategory || !decCatForm.name.trim()"
+                                    @click="saveDecCategory">
+                                    {{ savingDecCategory ? t('teamhub', 'Saving…') : t('teamhub', 'Create') }}
+                                </NcButton>
+                            </div>
+
+                            <p v-if="decCatFormError" class="teamhub-dec-cats__edit-error" role="alert">
+                                {{ decCatFormError }}
+                            </p>
                         </div>
                     </div>
                 </template>
@@ -1256,13 +1635,15 @@ import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { mapState, mapMutations } from 'vuex'
-import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountRemove from 'vue-material-design-icons/AccountRemove.vue'
 import Check from 'vue-material-design-icons/Check.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
+import PencilIcon from 'vue-material-design-icons/Pencil.vue'
+import PlusIcon from 'vue-material-design-icons/Plus.vue'
 import DragVertical from 'vue-material-design-icons/DragVertical.vue'
 import MessageIcon from 'vue-material-design-icons/Message.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
@@ -1285,6 +1666,8 @@ import ArchiveTeamModal from './ArchiveTeamModal.vue'
 import ResourcePicker from './ResourcePicker.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
+import GavelIcon from 'vue-material-design-icons/Gavel.vue'
+import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
 
 // Circles config bitmask constants — canonical values from circlesConfig.js.
 // These MUST match OCA\Circles\Model\Circle::CFG_* in the Circles app.
@@ -1302,7 +1685,7 @@ import {
 export default {
     name: 'ManageTeamView',
     components: {
-        NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
+        NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
         ChevronRight, ChevronDown,
@@ -1311,7 +1694,7 @@ export default {
         ArchiveTeamModal,
         ResourcePicker,
         InviteMemberModal,
-        AccountPlusIcon,
+        AccountPlusIcon, PencilIcon, PlusIcon, GavelIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -1402,10 +1785,44 @@ export default {
             presenceEnabled:     false,
             presenceHideReasons: false,
             savingPresenceConfig: false,
+            // Decisions config (Session A) — loaded when settings tab opens
+            decisionsEnabled:      false,
+            decisionsLevelEnabled: false,
+            decisionsActionMinLevel: 1,  // Session B: default = Member
+            savingDecisionsConfig: false,
+
+            // Decision categories — Session G
+            decCategories:          [],
+            loadingDecCategories:   false,
+            decCatEditing:          null,
+            decCatForm:             { name: '', icon: '', description: '', approvers: [] },
+            decCatIconPickerOpen:   false,   // controls the MDI icon picker popover
+            catIconSearch:          '',      // search filter inside the icon picker
+            savingDecCategory:      false,
+            decCatFormError:        '',
         }
     },
     computed: {
-        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled']),
+        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled']),
+
+        // Category icon helpers — used by the MDI icon picker and list rendering
+        categoryIconList() { return CATEGORY_ICONS },
+        categoryIconMap()  { return CATEGORY_ICON_MAP },
+
+        // Group + filter icons for the picker UI.
+        // Returns [{ name, icons: [...] }, ...] for groups that have matches.
+        filteredIconGroups() {
+            const q = this.catIconSearch.trim().toLowerCase()
+            const groups = new Map()
+            for (const ic of CATEGORY_ICONS) {
+                if (q && !ic.label.toLowerCase().includes(q) && !ic.name.toLowerCase().includes(q)) {
+                    continue
+                }
+                if (!groups.has(ic.group)) groups.set(ic.group, [])
+                groups.get(ic.group).push(ic)
+            }
+            return [...groups.entries()].map(([name, icons]) => ({ name, icons }))
+        },
 
         /** Numeric fileId of the team folder root, or null if none connected.
          *  Used by the image cache clear button. */
@@ -1549,14 +1966,19 @@ export default {
         },
 
         tabs() {
-            return [
+            const list = [
                 { key: 'description',  label: t('teamhub', 'Description'),  icon: 'TextIcon' },
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
                 { key: 'messages',     label: t('teamhub', 'Permissions'),  icon: 'MessageIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
                 { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
-                { key: 'danger',       label: t('teamhub', 'Maintenance'),  icon: 'AlertIcon' },
             ]
+            // Decisions tab — only shown when the module is globally enabled by the admin.
+            if (this.decisionsModuleEnabled) {
+                list.push({ key: 'decisions', label: t('teamhub', 'Decisions'), icon: 'GavelIcon' })
+            }
+            list.push({ key: 'danger', label: t('teamhub', 'Maintenance'), icon: 'AlertIcon' })
+            return list
         },
 
         invitationOptions() {
@@ -1655,6 +2077,24 @@ export default {
                     return { ...def, enabled }
                 })
         },
+
+        /**
+         * Members shaped for NcSelect (multiselect of approvers).
+         * v3.71.9 — switched from manageMembers.direct → allEffectiveMembers
+         * so members added indirectly (via a group or sub-team) appear in
+         * the approver picker too. The label falls back to the UID only
+         * when displayName is missing, so we never render an empty option.
+         * MUST live in `computed`, not `watch` — it returns a value.
+         */
+        memberUserOptions() {
+            const list = this.$store.state.allEffectiveMembers || []
+            return list
+                .filter(m => m.userId)
+                .map(m => ({
+                    userId:      m.userId,
+                    displayName: m.displayName && m.displayName.trim() ? m.displayName : m.userId,
+                }))
+        },
     },
     watch: {
         'team.id'() {
@@ -1680,6 +2120,14 @@ export default {
             }
             if (tab === 'integrations') {
                 this.loadPresenceConfig()
+                this.loadDecisionsConfig()
+            }
+            if (tab === 'decisions') {
+                // Refresh decisions config and categories when switching to the decisions tab.
+                this.loadDecisionsConfig()
+                // v3.71.9 — ensure the approver picker has the full effective
+                // member list (incl. indirect via groups/sub-teams).
+                this.$store.dispatch('fetchAllEffectiveMembers', this.team.id)
             }
             // If the warning block sent us here with focus flag set, scroll to at-risk section.
             if (tab === 'settings' && this.resourceWarningFocus) {
@@ -1698,11 +2146,21 @@ export default {
     },
     mounted() {
         this.loadAll()
+        this._iconPickerOutside = (e) => {
+            if (this.decCatIconPickerOpen && !e.target.closest('.teamhub-dec-cats__icon-picker-wrap')) {
+                this.decCatIconPickerOpen = false
+            }
+        }
+        document.addEventListener('click', this._iconPickerOutside)
+    },
+
+    beforeDestroy() {
+        document.removeEventListener('click', this._iconPickerOutside)
     },
     methods: {
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG']),
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG']),
 
         loadAll() {
             this.loadMembers()
@@ -1712,6 +2170,7 @@ export default {
             this.loadIntegrationRegistry()
             this.loadMeetingSettings()
             this.loadPresenceConfig()
+            this.loadDecisionsConfig()
         },
 
         getMemberRoleLabel(level) {
@@ -2392,6 +2851,225 @@ export default {
             }
         },
 
+        // ── Decisions config (Session A) ────────────────────────────
+
+        async loadDecisionsConfig() {
+            if (!this.team?.id) return
+            if (!this.decisionsModuleEnabled) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/config`)
+                )
+                this.decisionsEnabled      = !!data.decisions_enabled
+                this.decisionsLevelEnabled = !!data.decisions_level_enabled
+                this.decisionsActionMinLevel = data.decisions_action_min_level ?? 4
+                // Sync to store so TeamView's tab list and PostMessageForm stay in sync.
+                this.SET_DECISIONS_CONFIG(data)
+                if (this.decisionsEnabled) {
+                    this.loadDecCategories()
+                }
+            } catch (err) {
+                // Non-fatal — defaults stay at false.
+            }
+        },
+
+        async setDecisionsEnabled(val) {
+            this.savingDecisionsConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/config`),
+                    { decisions_enabled: val ? 1 : 0 }
+                )
+                this.decisionsEnabled      = !!data.decisions_enabled
+                this.decisionsLevelEnabled = !!data.decisions_level_enabled
+                this.decisionsActionMinLevel = data.decisions_action_min_level ?? 4
+                this.SET_DECISIONS_CONFIG(data)
+                if (this.decisionsEnabled) {
+                    this.loadDecCategories()
+                }
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingDecisionsConfig = false
+            }
+        },
+
+        async setDecisionsLevelEnabled(val) {
+            this.savingDecisionsConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/config`),
+                    { decisions_level_enabled: val ? 1 : 0 }
+                )
+                this.decisionsLevelEnabled = !!data.decisions_level_enabled
+                this.decisionsActionMinLevel = data.decisions_action_min_level ?? 4
+                this.SET_DECISIONS_CONFIG(data)
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingDecisionsConfig = false
+            }
+        },
+
+        async setDecisionsActionMinLevel(val) {
+            this.savingDecisionsConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/config`),
+                    { decisions_action_min_level: val }
+                )
+                this.decisionsLevelEnabled = !!data.decisions_level_enabled
+                this.decisionsActionMinLevel = data.decisions_action_min_level ?? 4
+                this.SET_DECISIONS_CONFIG(data)
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingDecisionsConfig = false
+            }
+        },
+
+        // ─── Decision categories (Session G) ──────────────────────────────────
+
+        async loadDecCategories() {
+            if (!this.decisionsModuleEnabled || !this.decisionsEnabled) return
+            this.loadingDecCategories = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/manage/categories`)
+                )
+                this.decCategories = Array.isArray(data?.items) ? data.items : []
+            } catch (err) {
+                console.error('[TeamHub][ManageTeamView] loadDecCategories error:', err)
+                showError(t('teamhub', 'Failed to load decision categories: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.loadingDecCategories = false
+            }
+        },
+
+        // ─── Category icon picker ──────────────────────────────────────────
+
+        catIconComponent(name) {
+            return CATEGORY_ICON_MAP[name] || null
+        },
+
+        selectCatIcon(name) {
+            this.decCatForm.icon      = name
+            this.decCatIconPickerOpen = false
+            this.catIconSearch        = ''
+        },
+
+        clearCatIcon() {
+            this.decCatForm.icon      = ''
+            this.decCatIconPickerOpen = false
+            this.catIconSearch        = ''
+        },
+
+        startCreateDecCategory() {
+            const owner = this.memberUserOptions.find(m => {
+                const direct = this.manageMembers?.direct || []
+                const row = direct.find(d => d.userId === m.userId)
+                return row && row.level >= 9
+            }) || null
+            this.decCatEditing   = 'new'
+            this.decCatForm      = { name: '', icon: '', description: '', approvers: owner ? [owner] : [] }
+            this.decCatFormError = ''
+        },
+
+        startEditDecCategory(cat) {
+            const opts = this.memberUserOptions
+            const approverObjs = (cat.approvers || []).map(uid => {
+                const found = opts.find(o => o.userId === uid)
+                return found || { userId: uid, displayName: uid }
+            })
+            this.decCatEditing   = cat.id
+            this.decCatForm      = { name: cat.name, icon: cat.icon || '', description: cat.description || '', approvers: approverObjs }
+            this.decCatFormError = ''
+        },
+
+        cancelEditDecCategory() {
+            this.decCatEditing        = null
+            this.decCatIconPickerOpen = false
+            this.decCatForm           = { name: '', icon: '', description: '', approvers: [] }
+            this.decCatFormError      = ''
+        },
+
+        async saveDecCategory() {
+            const name = this.decCatForm.name.trim()
+            if (!name) {
+                this.decCatFormError = t('teamhub', 'Name cannot be empty')
+                return
+            }
+            const approverIds = (this.decCatForm.approvers || []).map(a => a.userId).filter(Boolean)
+            const icon        = this.decCatForm.icon?.trim() || null
+            const description = this.decCatForm.description?.trim() || null
+            const isNew       = this.decCatEditing === 'new'
+
+            this.savingDecCategory = true
+            this.decCatFormError   = ''
+            try {
+                if (isNew) {
+                    await axios.post(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/manage/categories`),
+                        { name, icon, description, approvers: approverIds }
+                    )
+                } else {
+                    await axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/manage/categories/${this.decCatEditing}`),
+                        { name, icon, description, approvers: approverIds }
+                    )
+                }
+                this.cancelEditDecCategory()
+                await this.loadDecCategories()
+            } catch (err) {
+                console.error('[TeamHub][ManageTeamView] saveDecCategory error:', err)
+                const apiErr = err?.response?.data?.error || err.message
+                this.decCatFormError = apiErr
+            } finally {
+                this.savingDecCategory = false
+            }
+        },
+
+        async confirmDeleteDecCategory(cat) {
+            // eslint-disable-next-line no-alert
+            if (!window.confirm(t('teamhub', 'Delete category "{name}"? Existing decisions will keep their text but lose the link to this category.', { name: cat.name }))) {
+                return
+            }
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/manage/categories/${cat.id}`)
+                )
+                await this.loadDecCategories()
+            } catch (err) {
+                console.error('[TeamHub][ManageTeamView] deleteDecCategory error:', err)
+                showError(t('teamhub', 'Failed to delete category: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            }
+        },
+
+        formatApprovers(approverUids) {
+            if (!Array.isArray(approverUids) || !approverUids.length) {
+                return t('teamhub', '(no approvers)')
+            }
+            const opts = this.memberUserOptions
+            const names = approverUids.map(uid => {
+                const found = opts.find(o => o.userId === uid)
+                return found ? found.displayName : uid
+            })
+            // Translation-safe join: leave the comma+space to translators if
+            // they want, but in practice it's identical across our supported
+            // locales (nl/de/fr/da/en).
+            return names.join(', ')
+        },
+
         async toggleApp(app, enabled) {
             if (!app.installed) return
             if (!enabled) {
@@ -2722,8 +3400,10 @@ export default {
 <style scoped>
 .manage-team-view {
     padding: 32px 40px;
-    max-width: 900px;
-    margin: 0 auto;
+    /* v3.71.10 — was max-width: 900px; dropped so the manage view uses the
+       full available column. Centering removed alongside since there's
+       nothing to center anymore. */
+    margin: 0;
 }
 
 .manage-team-header {
@@ -3513,6 +4193,14 @@ export default {
     background: var(--color-background-hover);
 }
 
+.widget-item--sub-option {
+    margin-left: 32px;
+    border-left: 2px solid var(--color-border);
+    padding-left: 12px;
+    background: transparent;
+    font-size: 0.9em;
+}
+
 /* Danger zone */
 .manage-section--danger {
     border: 1px solid var(--color-border);
@@ -3891,4 +4579,353 @@ export default {
     color: var(--color-text-maxcontrast);
     margin: 4px 0 0;
 }
+/* ── Decision categories sub-panel (Session G) ── */
+.teamhub-dec-cats__info {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.teamhub-dec-cats__loading {
+    display: flex;
+    justify-content: center;
+    padding: 16px 0;
+}
+
+.teamhub-dec-cats__empty {
+    padding: 8px 0;
+}
+
+.teamhub-dec-cats__empty-text {
+    margin: 0;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    font-style: italic;
+}
+
+.teamhub-dec-cats__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.teamhub-dec-cats__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    background: var(--color-main-background);
+    transition: background 0.1s;
+}
+
+.teamhub-dec-cats__row:hover {
+    background: var(--color-background-hover);
+}
+
+.teamhub-dec-cats__row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.teamhub-dec-cats__row-icon {
+    font-size: 20px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.teamhub-dec-cats__row-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.teamhub-dec-cats__row-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-main-text);
+}
+
+.teamhub-dec-cats__row-desc {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teamhub-dec-cats__row-approvers {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+    max-width: 40%;
+}
+
+.teamhub-dec-cats__row-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.teamhub-dec-cats__edit {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    padding: 12px;
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+}
+
+/* Icon + name on same row */
+.teamhub-dec-cats__edit-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.teamhub-dec-cats__edit-icon-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 0 52px;
+    position: relative;
+}
+
+/* The icon trigger button */
+.teamhub-dec-cats__icon-btn {
+    width: 52px;
+    height: 40px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--color-main-text);
+    transition: border-color 0.15s, background 0.15s;
+}
+.teamhub-dec-cats__icon-btn:hover { border-color: var(--color-primary-element); }
+.teamhub-dec-cats__icon-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 2px; }
+.teamhub-dec-cats__icon-btn-placeholder { color: var(--color-text-maxcontrast); font-size: 16px; }
+
+/* Icon picker wrap — anchor for the popover and target for click-outside detection */
+.teamhub-dec-cats__icon-picker-wrap { position: relative; }
+
+/* Min-level select (Session B) */
+.teamhub-dec-level-select {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+    min-width: 120px;
+    cursor: pointer;
+}
+
+/* Decisions tab settings rows */
+.manage-section__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border);
+}
+.manage-section__row:last-child { border-bottom: none; }
+.manage-section__row-info { flex: 1; min-width: 0; }
+.manage-section__row-title {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-main-text);
+}
+.manage-section__row-desc {
+    display: block;
+    font-size: 12px;
+    color: var(--color-text-maxcontrast);
+    margin-top: 2px;
+}
+
+/* Icon picker popover — searchable, grouped, scrollable */
+.teamhub-dec-cats__icon-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 200;
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+    width: 320px;
+    max-width: 90vw;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.teamhub-dec-cats__icon-search-wrap {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-background-hover);
+}
+
+.teamhub-dec-cats__icon-search {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 12px;
+    outline: none;
+}
+.teamhub-dec-cats__icon-search:focus {
+    border-color: var(--color-primary-element);
+}
+
+.teamhub-dec-cats__icon-clear-btn {
+    padding: 0 10px;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    color: var(--color-text-maxcontrast);
+    cursor: pointer;
+}
+.teamhub-dec-cats__icon-clear-btn:hover { background: var(--color-background-dark); }
+
+.teamhub-dec-cats__icon-scroll {
+    max-height: 380px;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.teamhub-dec-cats__icon-group {
+    margin-bottom: 8px;
+}
+.teamhub-dec-cats__icon-group:last-child {
+    margin-bottom: 0;
+}
+
+.teamhub-dec-cats__icon-group-hdr {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--color-text-maxcontrast);
+    letter-spacing: 0.5px;
+    padding: 6px 4px 4px;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 4px;
+}
+
+.teamhub-dec-cats__icon-group-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.teamhub-dec-cats__icon-no-results {
+    text-align: center;
+    color: var(--color-text-maxcontrast);
+    font-size: 12px;
+    padding: 20px 0;
+}
+
+.teamhub-dec-cats__icon-grid-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--color-main-text);
+    transition: background 0.1s, border-color 0.1s;
+}
+.teamhub-dec-cats__icon-grid-btn:hover { background: var(--color-background-hover); }
+.teamhub-dec-cats__icon-grid-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
+.teamhub-dec-cats__icon-grid-btn--selected {
+    background: color-mix(in srgb, var(--color-primary-element) 14%, transparent);
+    border-color: var(--color-primary-element);
+}
+
+.teamhub-dec-cats__edit-name-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.teamhub-dec-cats__edit-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    margin: 0;
+}
+
+.teamhub-dec-cats__edit-hint {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    font-style: italic;
+    margin: -4px 0 0 0;
+}
+
+.teamhub-dec-cats__edit-input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+}
+
+.teamhub-dec-cats__edit-input:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+
+.teamhub-dec-cats__edit-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.teamhub-dec-cats__edit-error {
+    font-size: 12px;
+    color: var(--color-error-text);
+    margin: 0;
+}
+
+.teamhub-dec-cats__add-area {
+    padding-top: 4px;
+}
+
+/* Standalone variant — used in the dedicated Decisions tab (not nested inside widget-item) */
+.teamhub-dec-cats__list--standalone {
+    margin-bottom: 12px;
+}
+
 </style>

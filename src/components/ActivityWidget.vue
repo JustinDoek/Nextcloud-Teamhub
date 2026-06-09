@@ -1,28 +1,29 @@
 <template>
     <div class="activity-widget">
         <!-- Loading -->
-        <div v-if="loading" class="activity-widget__loading">
-            <NcLoadingIcon :size="20" />
+        <div v-if="loading" class="th-widget__state">
+            <span class="th-widget__spinner" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
         <!-- Empty -->
-        <div v-else-if="!activities.length" class="activity-widget__empty">
-            {{ t('teamhub', 'No recent activity') }}
+        <div v-else-if="!activities.length" class="th-widget__state th-widget__state--empty">
+            <span class="th-widget__state-text">{{ t('teamhub', 'No recent activity') }}</span>
         </div>
 
         <!-- Feed -->
-        <ul v-else class="activity-widget__list">
+        <ul v-else class="th-widget__rows">
             <li
                 v-for="item in visibleActivities"
                 :key="item.activity_id"
-                class="activity-widget__item">
+                class="th-widget__row activity-widget__item">
                 <!-- App icon badge -->
                 <div class="activity-widget__badge" :class="'activity-widget__badge--' + item.app">
                     <component :is="iconComponent(item.icon)" :size="14" />
                 </div>
 
                 <div class="activity-widget__body">
-                    <div class="activity-widget__row">
+                    <div class="activity-widget__subject-row">
                         <NcAvatar
                             v-if="item.user"
                             :user="item.user"
@@ -34,9 +35,9 @@
                         <span class="activity-widget__subject">{{ item.subjectText }}</span>
                     </div>
                     <div class="activity-widget__meta">
-                        <span class="activity-widget__app-label">{{ appLabel(item.app) }}</span>
+                        <span>{{ appLabel(item.app) }}</span>
                         <span class="activity-widget__sep">·</span>
-                        <span class="activity-widget__time" :title="formatAbsoluteTime(item.datetime)">
+                        <span :title="formatAbsoluteTime(item.datetime)">
                             {{ formatRelativeTime(item.datetime) }}
                         </span>
                         <a
@@ -300,42 +301,19 @@ export default {
 </script>
 
 <style scoped>
-.activity-widget {
-    padding: 4px 0 8px;
-}
+/* Widget-specific only — shared classes (.th-widget__row, .th-widget__state,
+   .th-widget__spinner, .th-widget__rows) come from widget-tokens.css. */
 
-.activity-widget__loading,
-.activity-widget__empty {
-    padding: 12px 16px;
-    text-align: left;
-    color: var(--color-text-maxcontrast);
-    font-size: 13px;
-}
-
-.activity-widget__list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
+/* Row override: activity items use flex-start (top-aligned) because the
+   subject text may wrap to multiple lines while the badge stays put. */
 .activity-widget__item {
-    display: flex;
     align-items: flex-start;
-    gap: 8px;
     padding: 7px 14px;
-    border-bottom: 1px solid var(--color-border-dark);
-    transition: background 0.1s;
+    gap: 8px;
 }
 
-.activity-widget__item:last-child {
-    border-bottom: none;
-}
-
-.activity-widget__item:hover {
-    background: var(--color-background-hover);
-}
-
-/* Coloured app badge */
+/* App-coloured badge — hex values are deliberate identifiers per app,
+   not status; they stay as-is rather than going through brand tokens. */
 .activity-widget__badge {
     flex-shrink: 0;
     width: 24px;
@@ -365,34 +343,38 @@ export default {
     gap: 2px;
 }
 
-.activity-widget__row {
+.activity-widget__subject-row {
     display: flex;
     align-items: center;
     gap: 6px;
 }
 
-.activity-widget__avatar {
-    flex-shrink: 0;
-}
+.activity-widget__avatar { flex-shrink: 0; }
 
+/* Subject — primary line.
+   Override: weight 400 (regular). The rest of the app uses medium (500)
+   for the primary line, but activity subjects are sentences with embedded
+   entity names rather than titles, so regular weight reads more naturally
+   here. Size still carries the hierarchy. */
 .activity-widget__subject {
-    font-size: 12.5px;
+    font-size: var(--th-widget-row-primary-size);
+    font-weight: 400;
     color: var(--color-main-text);
     line-height: 1.35;
     word-break: break-word;
 }
 
+/* Meta line — smaller, regular weight */
 .activity-widget__meta {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
-    color: var(--color-text-maxcontrast);
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-meta-weight);
+    color: var(--th-widget-meta-color);
 }
 
-.activity-widget__sep {
-    opacity: 0.5;
-}
+.activity-widget__sep { opacity: 0.5; }
 
 .activity-widget__link {
     display: inline-flex;
@@ -400,12 +382,12 @@ export default {
     color: var(--color-text-maxcontrast);
     opacity: 0.7;
 }
-
 .activity-widget__link:hover {
     opacity: 1;
     color: var(--color-primary-element);
 }
 
+/* Footer */
 .activity-widget__footer {
     display: flex;
     align-items: center;
@@ -418,16 +400,13 @@ export default {
     background: transparent;
     border: none;
     cursor: pointer;
-    font-size: 12px;
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-primary-weight);
     color: var(--color-primary-element);
     padding: 2px 0;
-    font-weight: 500;
     transition: opacity 0.15s;
 }
-
-.activity-widget__more:hover {
-    opacity: 0.75;
-}
+.activity-widget__more:hover { opacity: 0.75; }
 
 .activity-widget__reload {
     display: flex;
@@ -440,7 +419,6 @@ export default {
     border-radius: var(--border-radius);
     transition: color 0.15s, background 0.15s;
 }
-
 .activity-widget__reload:hover {
     color: var(--color-main-text);
     background: var(--color-background-hover);

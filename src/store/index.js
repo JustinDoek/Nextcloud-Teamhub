@@ -47,6 +47,9 @@ export default createStore({
         intravoxParentPath: 'en/teamhub',
         presenceConfig: { presence_enabled: false, hide_reasons: false },
         presenceModuleEnabled: false,
+        decisionsConfig: { decisions_enabled: false, decisions_level_enabled: false, decisions_action_min_level: 1 },
+        decisionsModuleEnabled: false,
+        decisionsTargetMessageId: null, // set by widget/stream to highlight a decision in the tab
         loading: {
             teams: false,
             messages: false,
@@ -162,6 +165,21 @@ export default createStore({
                 state.pinnedMessage = { ...state.pinnedMessage, ...message }
             }
         },
+        /**
+         * Patch the embedded `decision` payload on a message after a
+         * mark/withdraw call, without replacing the rest of the message row.
+         * Targeted mutation (rather than full UPDATE_MESSAGE) so we don't
+         * clobber transient frontend state like in-flight comments.
+         */
+        SET_MESSAGE_DECISION(state, { messageId, decision }) {
+            const idx = state.messages.findIndex(m => m.id === messageId)
+            if (idx !== -1) {
+                state.messages[idx] = { ...state.messages[idx], decision }
+            }
+            if (state.pinnedMessage && state.pinnedMessage.id === messageId) {
+                state.pinnedMessage = { ...state.pinnedMessage, decision }
+            }
+        },
         // Called after a successful pin: move the message out of the regular list
         // and into the pinned slot, clearing any previous pin from the regular list.
         PIN_MESSAGE(state, message) {
@@ -222,6 +240,9 @@ export default createStore({
         SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
         SET_PRESENCE_CONFIG(state, config) { state.presenceConfig = config },
         SET_PRESENCE_MODULE_ENABLED(state, val) { state.presenceModuleEnabled = val },
+        SET_DECISIONS_CONFIG(state, config) { state.decisionsConfig = config },
+        SET_DECISIONS_MODULE_ENABLED(state, val) { state.decisionsModuleEnabled = val },
+        SET_DECISIONS_TARGET(state, messageId) { state.decisionsTargetMessageId = messageId },
         SET_LOADING(state, { key, value }) { state.loading[key] = value }, // Vue 3: direct assignment is reactive
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },
@@ -332,15 +353,97 @@ export default createStore({
             }
         },
 
-        async postMessage({ commit, state, dispatch }, { subject, message, priority, messageType, pollOptions }) {
+        async postMessage({ commit, state, dispatch }, { subject, message, priority, messageType, pollOptions, decision }) {
             const { data } = await axios.post(
                 generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/messages`),
-                { subject, message, priority, messageType, pollOptions }
+                { subject, message, priority, messageType, pollOptions, decision }
             )
             commit('ADD_MESSAGE', data)
             // Refresh unread counts so other users' badges reflect the new message.
             // Fire-and-forget — don't await, don't block the UI.
             dispatch('refreshUnreadCounts')
+            return data
+        },
+
+        // ── Decisions module — Session C ────────────────────────────────────
+
+        /**
+         * Fetch decisions for the widget.
+         * status: null for latest (any status), or 'proposed' for the Open tab.
+         * Returns a plain array of serialised decision objects.
+         */
+        async fetchWidgetDecisions({ state }, { status = null, limit = 5 } = {}) {
+            const params = { limit, sort: 'recent' }
+            if (status) params.status = status
+            const { data } = await axios.get(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/decisions`),
+                { params }
+            )
+            return Array.isArray(data?.items) ? data.items : []
+        },
+
+        /** Fetch the distinct categories used in this team for autocomplete. */
+        async fetchDecisionCategories({ state }) {
+            const { data } = await axios.get(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/decisions/categories`)
+            )
+            return data?.categories || []
+        },
+
+        /**
+         * Session H — finalize an open decision. The proposer's chosen comment
+         * becomes the canonical final wording. Status: open → finalized.
+         *
+         * Backward compat: also exposed as markDecisionBest below so any
+         * older caller keeps working without renaming.
+         */
+        async finalizeDecision({ commit, state }, { decisionId, commentId, messageId }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/decisions/${decisionId}/finalize`),
+                { comment_id: commentId }
+            )
+            commit('SET_MESSAGE_DECISION', { messageId, decision: data })
+            return data
+        },
+
+        // Alias for callers that may still reference the legacy name.
+        async markDecisionBest(ctx, payload) {
+            return ctx.dispatch('finalizeDecision', payload)
+        },
+
+        /** Withdraw a non-terminal decision with a non-empty reason. */
+        async withdrawDecision({ commit, state }, { decisionId, reason, messageId }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/decisions/${decisionId}/withdraw`),
+                { reason }
+            )
+            commit('SET_MESSAGE_DECISION', { messageId, decision: data })
+            return data
+        },
+
+        /**
+         * Approve a finalized decision. Caller must be in the category's
+         * approver list (enforced server-side). Status: finalized → approved.
+         */
+        async approveDecision({ commit, state }, { decisionId, messageId, reason }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/decisions/${decisionId}/approve`),
+                { reason }
+            )
+            commit('SET_MESSAGE_DECISION', { messageId, decision: data })
+            return data
+        },
+
+        /**
+         * Deny a finalized decision with a non-empty reason. Caller must be
+         * in the category's approver list. Status: finalized → denied (terminal).
+         */
+        async denyDecision({ commit, state }, { decisionId, reason, messageId }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/decisions/${decisionId}/deny`),
+                { reason }
+            )
+            commit('SET_MESSAGE_DECISION', { messageId, decision: data })
             return data
         },
 

@@ -201,6 +201,18 @@
             </NcSettingsSection>
 
             <NcSettingsSection
+                :name="t('teamhub', 'Decisions module')"
+                :description="t('teamhub', 'When enabled, team admins can activate Decisions for their team. Members can record and track decisions through the message stream. When disabled, all Decisions UI is hidden across the app.')">
+                <NcCheckboxRadioSwitch
+                    :model-value="form.decisionsModuleEnabled"
+                    type="switch"
+                    :aria-label="t('teamhub', 'Enable Decisions module for all teams')"
+                    @update:model-value="form.decisionsModuleEnabled = $event; save()">
+                    {{ form.decisionsModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                </NcCheckboxRadioSwitch>
+            </NcSettingsSection>
+
+            <NcSettingsSection
                 :name="t('teamhub', 'IntraVox integration')"
                 :description="t('teamhub', 'When IntraVox is enabled for a team, TeamHub creates a page at this path inside IntraVox. Use the format language/folder (e.g. en/teamhub or nl/teamhub). The folder must already exist in IntraVox.')">
                 <div class="admin-select-row">
@@ -1522,6 +1534,7 @@ export default {
                 pinMinLevel: 'moderator',
                 intravoxParentPath: 'en/teamhub',
                 presenceModuleEnabled: false,
+                decisionsModuleEnabled: false,
                 // RoomVox: token is write-only. roomvoxTokenConfigured
                 // reflects whether one is currently stored (returned from
                 // the load endpoint as a boolean); roomvoxApiToken is the
@@ -1750,6 +1763,7 @@ export default {
                 this.form.pinMinLevel          = data.pinMinLevel            || 'moderator'
                 this.form.intravoxParentPath   = data.intravoxParentPath     || 'en/teamhub'
                 this.form.presenceModuleEnabled = !!data.presenceModuleEnabled
+                this.form.decisionsModuleEnabled = !!data.decisionsModuleEnabled
                 this.form.roomvoxTokenConfigured = !!data.roomvoxTokenConfigured
                 // Reset the token write field on each load — never echo
                 // back a stored token.
@@ -1881,7 +1895,8 @@ export default {
             params.set('createTeamGroup',      groupIds)
             params.set('pinMinLevel',          this.form.pinMinLevel)
             params.set('inviteTypes',          types.join(','))
-            params.set('presenceModuleEnabled', this.form.presenceModuleEnabled ? '1' : '0')
+            params.set('presenceModuleEnabled',  this.form.presenceModuleEnabled ? '1' : '0')
+            params.set('decisionsModuleEnabled', this.form.decisionsModuleEnabled ? '1' : '0')
             // Only send the token if the user actually typed something —
             // an empty buffer means "keep the stored value unchanged" per
             // backend contract (see TeamService::saveAdminSettings).

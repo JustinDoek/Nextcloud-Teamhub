@@ -590,10 +590,16 @@ Get team messages and the pinned message.
 **Auth:** Team member.
 **Response:** `{ pinned: object|null, messages: [] }`
 
+**Decision hydration (v3.66.0):** Messages with `messageType === 'decision'` carry an additional `decision` field with the full decision payload (same shape as `GET /decisions/{id}` minus `tasks`). Hydration is batched server-side — no per-message round-trip needed.
+
 ### POST `/teams/{teamId}/messages`
 Post a new message. Sends notifications to all team members.
 **Auth:** Team member.
-**Body:** `{ subject, message, priority?: 'normal'|'priority', messageType?: 'normal'|'poll'|'question', pollOptions?: string[] }`
+**Body:** `{ subject, message, priority?: 'normal'|'priority', messageType?: 'normal'|'poll'|'question'|'decision', pollOptions?: string[], decision?: { impact, category?, supersedesId?, sourceType?, sourceRef? } }`
+
+**Decision-type extension (v3.66.0):** When `messageType === 'decision'`, the `decision` object is required and `impact` within it is mandatory. The endpoint runs both inserts (message + decision row) in a DB transaction — a failed decision insert rolls back the message. The response includes the embedded `decision` payload (same shape as `GET /decisions/{id}`).
+
+Decision messages require the Decisions module to be enabled both globally and for the team; otherwise the endpoint returns 400 `"Decisions module is not enabled for this team"`.
 
 ### PUT `/teams/{teamId}/messages/{messageId}`
 Edit a message. Only the author may edit.
@@ -1385,6 +1391,390 @@ Write one or both config flags. **Team admin only.** Only keys present in the bo
 **Body:** `{ presence_enabled?: 0|1, hide_reasons?: 0|1 }`
 
 **Response 200:** Updated config `{ presence_enabled: bool, hide_reasons: bool }`.
+
+---
+
+### Decisions module — config (v3.64.0, Session A)
+
+Config endpoints require the **global module flag** (`decisions_module_enabled`) to be `'1'`. They do NOT require the per-team flag (the per-team flag is the subject of these endpoints). When the global flag is off, all endpoints return `404`.
+
+### GET `/teams/{teamId}/decisions/config`
+Return per-team Decisions module config. **Team member required.**
+
+**Response 200:** `{ decisions_enabled: bool }`
+
+**Errors:** `404` global module off; `403` not a team member; `401` not authenticated.
+
+### PUT `/teams/{teamId}/decisions/config`
+Update per-team Decisions module config. **Team admin only.** Creates the config row on first write.
+
+**Body:** `{ decisions_enabled: 0|1 }`
+
+**Response 200:** `{ decisions_enabled: bool }`
+
+**Errors:** `400` missing `decisions_enabled`; `404` global module off; `403` not a team admin; `401` not authenticated.
+
+---
+
+### Decisions module — feature endpoints (v3.65.0, Session B)
+
+All feature endpoints require both the global flag AND the team's per-team `decisions_enabled` flag. When either is off — or when the decision/team doesn't exist — the response is `404` (no information leak).
+
+### POST `/teams/{teamId}/decisions`
+Propose a new decision attached to an existing message. **Team member required.**
+
+**Body:**
+- `message_id` (int, required) — message ID in this team.
+- `impact` (string, required) — one of `low`, `medium`, `high`.
+- `category` (string, optional, max 128).
+- `supersedes_id` (int, optional) — decision ID in this team being replaced.
+- `source_type` (string, optional) — one of `message`, `document`, `external`. (`meeting_notes` is reserved and rejected with 400.)
+- `source_ref` (string, optional, max 512) — free-form reference (URL, file id, etc.).
+
+**Response 201:** Serialised decision (see "Decision shape" below).
+
+**Errors:** `400` validation failure or message not in this team; `404` module off, message not found, or decision already exists for this message; `403` not a member.
+
+### GET `/teams/{teamId}/decisions`
+List decisions for the team. **Team member required.**
+
+**Query params** (all optional):
+- `status` — CSV of `proposed`, `decided`, `withdrawn`.
+- `impact` — CSV of `low`, `medium`, `high`.
+- `category` — CSV (exact match).
+- `proposed_by` — CSV of user IDs.
+- `q` — substring match on the decision's question (max 200 chars).
+- `sort` — `recent` (default; sorts by COALESCE(decided_at, withdrawn_at, created_at) DESC) or `created` (created_at DESC).
+- `before` — int cursor; returns rows with id < before.
+- `limit` — default 25, max 100.
+
+**Response 200:** `{ items: Decision[], nextBefore: int|null }`. `nextBefore` is null when no more pages.
+
+### GET `/teams/{teamId}/decisions/{decisionId}`
+Get a single decision with hydrated linked tasks. **Team member required.**
+
+**Response 200:** Decision shape with an additional `tasks: TaskLink[]` field.
+
+**Errors:** `404` decision not found or not in this team.
+
+### GET `/teams/{teamId}/decisions/categories`
+List distinct non-null categories used by decisions in this team. **Team member required.**
+
+**Response 200:** `{ categories: string[] }`
+
+### POST `/teams/{teamId}/decisions/{decisionId}/finalize` (v3.68.0, Session H)
+Finalize an open decision. **Proposer only — no admin override.** Decision must be in `open` state. The chosen comment must be authored by the proposer themselves; it becomes the canonical final wording (`selectedAnswer`).
+
+Side effects on success:
+- Status moves `open → finalized`. Comments lock on the parent message.
+- Writes `{team-folder}/.proposals/{decisionId}.md` containing the question, original message, all comments with authors + timestamps, and the final wording. Sets `source_type='document'` + `source_ref` to the file path. Best-effort: if the team has no team folder, the decision still finalizes with `source_ref=null`.
+- Captures `participants` (current effective team member UIDs); sets `decidedAt`, `answeredBy`, `resolvedBy`.
+- Audit log: `finalized` transition with payload `{comment_id, excerpt}`.
+
+**Body:** `{ comment_id: int }`
+
+**Response 200:** Updated Decision shape.
+
+**Errors:** `400` comment not on parent message OR not authored by proposer; `403` only proposer can finalize; `404` decision/comment not found; terminal state.
+
+> **Note:** The legacy `/mark` endpoint from v3.65.0 is removed in v3.68.0. Existing rows in pre-3.68 status values (`proposed`/`decided`) will still read but cannot transition cleanly — test data should be wiped on upgrade.
+
+### POST `/teams/{teamId}/decisions/{decisionId}/withdraw`
+Move a non-terminal decision to `withdrawn`. **Proposer at any non-terminal status, OR team admin override at any non-terminal status.** Permanently ends the decision.
+
+**Body:** `{ reason: string }` — required, max 1000 chars.
+
+**Response 200:** Updated Decision shape. Sets `withdrawnAt`, `withdrawnReason`, `resolvedBy`, status → `withdrawn`.
+
+**Errors:** `400` reason empty or too long; terminal state.
+
+### POST `/teams/{teamId}/decisions/{decisionId}/approve` (v3.68.0, Session H; reason mandatory v3.72.0)
+Approve a finalized decision with a mandatory reason. **Category-approver only** (the acting user must be in the m:n approver list for the decision's category). When the decision's category isn't in the predefined list (legacy free-text), falls back to team-admin-only.
+
+Side effects: status `finalized → approved` (terminal). Logs `approved` audit transition with the reason in the payload. Regenerates `.proposals/{decisionId}/{decisionId}.md` to append the approval to the audit section.
+
+**Body:** `{ reason: string }` — required, max 1000 chars.
+
+**Response 200:** Updated Decision shape.
+
+**Errors:** `400` reason empty or too long; not finalized; `403` `"Not authorized: you are not an approver for category X"`; `404` decision not found.
+
+### POST `/teams/{teamId}/decisions/{decisionId}/deny` (v3.68.0, Session H)
+Deny a finalized decision with a mandatory reason. **Category-approver only** (same gate as approve).
+
+Side effects: status `finalized → denied` (terminal — permanent). Stores reason in `withdrawnReason`. Logs `denied` audit transition. Regenerates `.proposals/{decisionId}.md`.
+
+**Body:** `{ reason: string }` — required, max 1000 chars.
+
+**Response 200:** Updated Decision shape.
+
+**Errors:** `400` reason empty or too long, or decision not in `finalized` state; `403` not an approver; `404` decision not found.
+
+### GET `/teams/{teamId}/decisions/{decisionId}/audit` (v3.70.0, Session J)
+Full audit timeline for a decision, oldest first. **Team member required.**
+
+**Response 200:**
+```
+{
+  "items": [
+    {
+      "id": int,
+      "transition": "proposed" | "commented" | "finalized" | "withdrawn" | "approved" | "denied",
+      "actor": "uid",
+      "actorDisplayName": "Display Name",
+      "payload": { ... } | null,    // transition-specific; see below
+      "createdAt": unix-ts
+    },
+    ...
+  ]
+}
+```
+
+Payload by transition:
+- `proposed`: `null`
+- `commented`: `{ comment_id: int, excerpt: string (≤200 chars + "…") }`
+- `finalized`: `{ comment_id: int, excerpt: string (full final wording) }`
+- `withdrawn`: `{ reason: string, by_admin?: bool, superseded_by?: int }`
+- `approved`: `{ reason: string }` (v3.72.0 — was `null` before)
+- `denied`: `{ reason: string }`
+
+### GET `/teams/{teamId}/decisions/{decisionId}/sources` (v3.71.2, Session L)
+List source files for a finalized decision — the canonical `.md` plus any attachments copied into `.proposals/{decisionId}/` on finalize. Pre-v3.71.2 (flat layout) decisions return a single `.md` file. **Team member required.**
+
+**Response 200:**
+```
+{
+  "items": [
+    {
+      "file_id":     int,
+      "name":        "string",
+      "mime":        "string",   // best-effort from NC mime detection
+      "size":        int,        // bytes
+      "is_proposal": bool        // true for the canonical .md, false for attachments
+    },
+    ...
+  ]
+}
+```
+
+### GET `/files/{fileId}/content?download={any}` (v3.71.10 / 3.72.0, Session L)
+Stream the raw bytes of a proposal source file. Used by the in-app read-only viewer. **Auth: the file must be (a) accessible to the user via NC's mount/ACL layer, and (b) live inside a `.proposals/` subtree.** Files outside `.proposals/` are rejected as 404 — this endpoint is not a general file-by-id read.
+
+**Query:**
+- `download` — when present (any non-empty value), sets `Content-Disposition: attachment; filename="…"` so browsers save instead of preview. When absent, serves `inline`.
+
+**Headers set on success:**
+- `Content-Type` — from NC's mime detection
+- `Content-Length`
+- `Cache-Control: private, max-age=30`
+
+**Errors:** `404` file not accessible or not inside `.proposals/`; `500` read failure.
+
+### POST `/messages/{messageId}/attachments` (Session L plumbing)
+Register an uploaded file as an attachment of the given message. The frontend calls this after `POST /teams/{teamId}/messages` returns the new message id; the file itself was already uploaded via WebDAV PUT to the user's `TeamHub Attachments/` folder (or the team's `Attachments/` subfolder when the team folder is a shared folder — see `PostMessageForm.vue`). The sidecar row links `message_id ↔ file_id` so `DecisionService::copyAttachmentsIntoFolder` can find them at finalize time.
+
+**Body:** `{ file_id: int, file_name: string }`
+
+**Response 200:** `{ ok: true }` (best-effort — failures are warned to the user via a toast but don't block the message-post success path).
+
+**Errors:** `403` not a member of the team that owns the message; `404` file or message not found.
+
+### POST `/teams/{teamId}/decisions/{decisionId}/refresh-proposal`
+Re-run `writeProposalDocument` for a finalized decision. Called by the frontend after attachment registration for compose-modal decisions. Idempotent. **Team member required.**
+
+**Body:** none
+
+**Response 200:** `{ ok: true, doc_path: string|null, file_id: int|null }`
+
+**Errors:** `400` decision not finalized; `404` decision not found.
+
+### POST `/teams/{teamId}/decisions/{decisionId}/tasks`
+Link an external task (Deck card, URL) to the decision. **Requires `decisions_action_min_level`.**
+
+**Body:** `{ task_path: string, label?: string }`
+
+`task_path` is a relative path (e.g. `apps/deck/board/2/card/9`). Full URLs are auto-stripped to relative.
+
+**Response 201:** TaskLink shape.
+
+**Errors:** `400` task_path empty; `403` insufficient team role.
+
+### GET `/teams/{teamId}/decisions/{decisionId}/tasks`
+List linked tasks. **Team member required.**
+
+**Response 200:** `{ items: TaskLink[] }`
+
+**TaskLink shape:**
+```json
+{
+  "id": 1,
+  "decision_id": 42,
+  "team_id": "circle-uuid",
+  "task_path": "apps/deck/board/2/card/9",
+  "label": "Review mockups",
+  "created_by": "alice",
+  "created_at": 1717920000
+}
+```
+
+### DELETE `/teams/{teamId}/decisions/{decisionId}/tasks/{taskId}`
+Remove a task link. **Requires `decisions_action_min_level`.**
+
+**Response 200:** `{ ok: true }`
+
+**Errors:** `400` link not found; `403` insufficient team role.
+
+---
+
+### Decisions module — decision ↔ decision links (v3.74.0, Session C)
+
+Bidirectional links between decisions in the same team. One row per link in `teamhub_dec_links` with canonical ordering (smaller decision id always in `decision_id_a`); both directions are served from that single row via an OR-query. Self-linking and duplicates rejected at the service boundary. Audit events `decision_linked` / `decision_unlinked` are written to both decisions' audit trails on each mutation.
+
+### GET `/teams/{teamId}/decisions/{decisionId}/links`
+List all decision-decision links involving this decision. **Team member required.**
+
+**Response 200:** `{ items: DecisionLinkRow[] }`
+
+**DecisionLinkRow shape:**
+```
+{
+  id:          int,     // link row id
+  peer_id:     int,     // the other decision's id
+  peer_title:  string,  // the other decision's question
+  peer_status: string,  // open|finalized|approved|denied|withdrawn
+  peer_impact: string,  // low|medium|high
+  peer_level:  string,  // operational|tactical|strategic
+  created_by:  string,  // userId of the linker
+  created_at:  int      // unix timestamp
+}
+```
+
+**Errors:** `404` decision not found or not a team member.
+
+### POST `/teams/{teamId}/decisions/{decisionId}/links`
+Create a bidirectional link to another decision in the same team. **Requires `decisions_action_min_level`.**
+
+**Request body:**
+```
+{ "target_decision_id": int }
+```
+
+**Response 201:** A `DecisionLinkRow` as above.
+
+**Errors:** `400` self-link, duplicate, missing `target_decision_id`, or peer not in team; `403` insufficient team role.
+
+### DELETE `/teams/{teamId}/decisions/{decisionId}/links/{linkId}`
+Remove a decision-decision link. **Requires `decisions_action_min_level`.**
+
+**Response 200:** `{ ok: true }`
+
+**Errors:** `400` link not found or not in this team; `403` insufficient team role.
+
+---
+
+### Decisions module — category management (v3.67.0, Session G)
+
+Per-team predefined categories with m:n approver lists. The team owner is auto-added as the default approver on category creation if the request omits an explicit list, preserving the never-empty-approvers invariant.
+
+### GET `/teams/{teamId}/decisions/manage/categories`
+List categories with approver UIDs. **Team member required** (the message composer uses this to populate the picker).
+
+**Response 200:** `{ items: Category[] }`
+
+**Category shape:**
+```
+{
+  "id": int,
+  "team_id": "circle-uuid",
+  "name": "Architecture",
+  "created_by": "uid",
+  "created_at": unix-ts,
+  "updated_at": unix-ts,
+  "approvers": ["uid1", "uid2", ...]
+}
+```
+
+### POST `/teams/{teamId}/decisions/manage/categories`
+Create a category. **Team admin only.**
+
+**Body:** `{ name: string (1–128 chars, unique per team case-insensitive), approvers?: string[] }`
+
+If `approvers` is omitted or empty, the team owner is substituted in.
+
+**Response 201:** Category shape.
+
+**Errors:** `400` name empty, too long, or already taken.
+
+### PUT `/teams/{teamId}/decisions/manage/categories/{categoryId}`
+Rename and/or replace the approver list. **Team admin only.**
+
+**Body:** `{ name?: string, approvers?: string[] }` — either or both. Approver list is replaced atomically (delete-all + insert) when supplied; same never-empty rule applies.
+
+**Response 200:** Updated Category shape.
+
+### DELETE `/teams/{teamId}/decisions/manage/categories/{categoryId}`
+Delete a category and its approver rows. **Team admin only.** Existing decisions referencing this category by name keep their text but lose the approver gate (fall through to admin-only approvals).
+
+**Response 200:** `{ ok: true }`
+
+---
+
+### Decision shape
+
+```
+{
+  id: int,
+  teamId: string,
+  messageId: int,
+  proposedBy: string,            // user ID
+  answeredBy: string|null,       // author of the marked comment
+  selectedCommentId: int|null,
+  category: string|null,
+  impact: 'low'|'medium'|'high',
+  question: string,              // snapshot of the message subject at propose time
+  selectedAnswer: string|null,   // snapshot of the marked comment body
+  participants: string[]|null,   // UIDs of team members at decision time
+  status: 'proposed'|'decided'|'withdrawn',
+  withdrawnReason: string|null,
+  resolvedBy: string|null,       // who marked/withdrew (proposer or admin)
+  supersedesId: int|null,
+  sourceType: 'message'|'document'|'external'|null,
+  sourceRef: string|null,
+  createdAt: int,    // unix ts
+  decidedAt: int|null,
+  withdrawnAt: int|null,
+  tasks?: TaskLink[]  // only on GET /decisions/{id}
+}
+```
+
+### TaskLink shape
+
+```
+{
+  linkId: int,
+  deckCardId: int,
+  createdAt: int,
+  createdBy: string,
+  card: {
+    id: int,
+    title: string,
+    archived: bool,
+    deletedAt: int,
+    stackTitle: string,
+    boardId: int,
+    boardTitle: string,
+    boardColor: string,  // 6-char hex, no '#'
+    url: string,         // /apps/deck/board/<boardId>/card/<cardId>
+  }|null,
+  missing: bool   // true when the card no longer exists in Deck
+}
+```
+
+### Comment lock (v3.65.0, Session B)
+
+When a message has a decision in `decided` or `withdrawn` state, the existing comment endpoints (`POST/PUT/DELETE comments`) refuse non-admin writes with `403 "Comments are locked: this message has a decided or withdrawn decision"`. Team admins may still moderate (delete/create/update). The lock is automatically off when the decisions module is disabled for the team or globally.
+
+---
 
 ### GET `/teams/{teamId}/presence/suggest-times?date=YYYY-MM-DD&type=online|office&attendees=uid1,uid2`
 Return up to three ranked suggested meeting half-days based on team presence. **Team member only**, and **requires the presence module enabled both globally and for the team** (403 if either is off).

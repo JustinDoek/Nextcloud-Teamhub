@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\DecisionMapper;
+use OCA\TeamHub\Db\DecisionTeamConfigMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Http\Client\IClientService;
 use OCP\IAppConfig;
@@ -55,11 +57,13 @@ class TelemetryService {
     private const TIMEOUT = 10;
 
     public function __construct(
-        private IConfig         $config,
-        private IDBConnection   $db,
-        private IClientService  $clientService,
-        private IUserManager    $userManager,
-        private LoggerInterface $logger,
+        private IConfig                   $config,
+        private IDBConnection             $db,
+        private IClientService            $clientService,
+        private IUserManager              $userManager,
+        private DecisionTeamConfigMapper  $decisionTeamConfigMapper,
+        private DecisionMapper            $decisionMapper,
+        private LoggerInterface           $logger,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -157,7 +161,12 @@ class TelemetryService {
             'message_count'        => $this->countMessages(),
             'integrations'         => $this->getRegisteredIntegrations(),
             'builtin_integrations' => $this->getBuiltinIntegrationUsage(),
-            'presence_module'      => $this->isPresenceModuleEnabled(),
+            'presence_module'             => $this->isPresenceModuleEnabled(),
+            'decisions_module'            => $this->isDecisionsModuleEnabled(),
+            'teams_with_decisions_enabled' => $this->countTeamsWithDecisionsEnabled(),
+            'decisions_count'             => $this->countDecisionsTotal(),
+            'decisions_by_status'         => $this->countDecisionsByStatus(),
+            'decision_categories_count'   => $this->countDecisionCategoriesTotal(),
             'suggest_wizard_uses'  => (int)$this->config->getAppValue(Application::APP_ID, 'suggest_wizard_uses', '0'),
             'link_domains'         => $this->getLinkDomains(),
         ];
@@ -217,6 +226,94 @@ class TelemetryService {
      */
     private function isPresenceModuleEnabled(): bool {
         return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
+    }
+
+    /**
+     * Whether the Decisions module is globally enabled.
+     * (decisions_module_enabled, '1' = on). Reported in telemetry for adoption tracking.
+     */
+    private function isDecisionsModuleEnabled(): bool {
+        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1';
+    }
+
+    /**
+     * Count teams that have decisions enabled in teamhub_decision_team.
+     * Returns 0 if the table doesn't exist yet (fresh installs mid-migration).
+     */
+    private function countTeamsWithDecisionsEnabled(): int {
+        try {
+            return $this->decisionTeamConfigMapper->countEnabledTeams();
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * Count total decision rows across all teams. Used for telemetry.
+     */
+    private function countDecisionsTotal(): int {
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $r = $qb->select($qb->func()->count('*', 'cnt'))
+                ->from('teamhub_decisions')
+                ->executeQuery();
+            $val = $r->fetchOne();
+            $r->closeCursor();
+            return (int)$val;
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * Aggregate counts per decision status. Keys are the five Session H
+     * lifecycle states; values are always present (zero if no rows).
+     * Aggregate-only — no team-id, no proposer-id, no content. Matches the
+     * privacy bar set by DESIGN.md §2.8.
+     *
+     * @return array{open:int, finalized:int, approved:int, denied:int, withdrawn:int}
+     */
+    private function countDecisionsByStatus(): array {
+        $out = [
+            'open' => 0, 'finalized' => 0, 'approved' => 0,
+            'denied' => 0, 'withdrawn' => 0,
+        ];
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $r = $qb->select('status')
+                ->selectAlias($qb->func()->count('*'), 'cnt')
+                ->from('teamhub_decisions')
+                ->groupBy('status')
+                ->executeQuery();
+            while ($row = $r->fetch()) {
+                $key = (string)$row['status'];
+                if (isset($out[$key])) {
+                    $out[$key] = (int)$row['cnt'];
+                }
+            }
+            $r->closeCursor();
+        } catch (\Throwable) {
+            // Fall through with zeros.
+        }
+        return $out;
+    }
+
+    /**
+     * Count distinct predefined categories across all teams. Aggregate
+     * only — proves the feature is being used without revealing names.
+     */
+    private function countDecisionCategoriesTotal(): int {
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $r = $qb->select($qb->func()->count('*', 'cnt'))
+                ->from('teamhub_dec_categories')
+                ->executeQuery();
+            $val = $r->fetchOne();
+            $r->closeCursor();
+            return (int)$val;
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     private function getRegisteredIntegrations(): array {

@@ -914,6 +914,10 @@ class TeamService {
             'groupFoldersDelegation' => $this->safeGetDelegationStatus(),
             // Presence module — default off. NC admin must explicitly enable.
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1',
+            // Decisions module — default off. NC admin must explicitly enable.
+            'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1',
+            // Decisions module — default off. NC admin must explicitly enable.
+            'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1',
             // RoomVox API token: never return the token value itself, only a
             // boolean indicating whether one is configured. The admin can
             // overwrite it (write field) but can't read it back (read field).
@@ -1016,6 +1020,13 @@ class TeamService {
                 Application::APP_ID,
                 'presence_module_enabled',
                 $settings['presenceModuleEnabled'] ? '1' : '0'
+            );
+        }
+        if (isset($settings['decisionsModuleEnabled'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                'decisions_module_enabled',
+                $settings['decisionsModuleEnabled'] ? '1' : '0'
             );
         }
         if (array_key_exists('roomvoxApiToken', $settings)) {

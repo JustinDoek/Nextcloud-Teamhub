@@ -103,6 +103,10 @@
                 <FilesWidget />
             </div>
 
+            <div v-if="activeWidget === 'widget-decisions'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <DecisionsWidget />
+            </div>
+
             <!-- ─── External integration widgets ──────────────────── -->
             <template v-for="ext in teamWidgets">
                 <div
@@ -215,6 +219,7 @@ import Calendar from 'vue-material-design-icons/Calendar.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
 import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
+import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
 import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
 import Cog from 'vue-material-design-icons/Cog.vue'
@@ -234,6 +239,7 @@ import ActivityWidget from './ActivityWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
 import FilesWidget          from './FilesWidget.vue'
+import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
 
 export default {
@@ -244,14 +250,14 @@ export default {
         // icons used in the icon bar / canvas headers — registered here so
         // <component :is="..."> resolves them
         MessageOutline, InformationOutline, AccountGroup,
-        AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline,
+        AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
         FileDocumentOutline, FilePlus, LocationExit, Plus, Puzzle,
         TrashCan, VideoIcon,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
         IntravoxWidget, IntegrationWidget,
-        FilesWidget, MembersWidget,
+        FilesWidget, DecisionsWidget, MembersWidget,
     },
 
     props: {
@@ -289,6 +295,7 @@ export default {
         ...mapState([
             'currentTeamId', 'resources',
             'teamWidgets', 'isCurrentUserDirectMember',
+            'decisionsModuleEnabled', 'decisionsConfig',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -366,6 +373,15 @@ export default {
                     title: t('teamhub', 'File Center'),
                     shortTitle: t('teamhub', 'Files'),
                     icon: 'Folder',
+                })
+            }
+
+            if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
+                list.push({
+                    key: 'widget-decisions',
+                    // TRANSLATORS: mobile navigation label for the Decisions widget
+                    title: t('teamhub', 'Decisions'),
+                    icon: 'GavelIcon',
                 })
             }
 

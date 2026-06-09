@@ -3,6 +3,12 @@
         'message-card--priority': isPriority,
         'message-card--question-solved': isQuestionSolved,
         'message-card--pinned': isPinnedSlot,
+        'message-card--decision': isDecision,
+        'message-card--decision-open':       isDecision && (decisionStatus === 'open' || decisionStatus === 'proposed'),
+        'message-card--decision-finalized':  isDecision && decisionStatus === 'finalized',
+        'message-card--decision-approved':   isDecision && (decisionStatus === 'approved' || decisionStatus === 'decided'),
+        'message-card--decision-denied':     isDecision && decisionStatus === 'denied',
+        'message-card--decision-withdrawn':  isDecision && decisionStatus === 'withdrawn',
     }">
         <!-- Header -->
         <div class="message-card__header">
@@ -22,6 +28,17 @@
             <!-- Question badge -->
             <span v-if="message.messageType === 'question'" class="message-card__question-badge-subtle">
                 <HelpCircleOutline :size="16" />
+            </span>
+            <!-- Decision badge with impact + status -->
+            <span
+                v-if="isDecision"
+                class="message-card__decision-badge"
+                :class="'message-card__decision-badge--' + (decision.impact || 'medium')"
+                :title="decisionBadgeTitle">
+                <GavelIcon :size="14" />
+                <span class="message-card__decision-badge-impact">{{ impactLabel(decision.impact) }}</span>
+                <span class="message-card__decision-badge-dot" aria-hidden="true">·</span>
+                <span class="message-card__decision-badge-status">{{ statusLabel(decisionStatus) }}</span>
             </span>
             <!-- Unpin button — shown on the pinned slot to users with pin rights -->
             <NcButton
@@ -290,6 +307,93 @@
             </div>
         </div>
 
+        <!-- Decision: meta strip (category) and status banner -->
+        <div v-if="isDecision" class="decision-block">
+            <!-- Meta strip — currently only category. The source_type/source_ref
+                 columns exist for future contexts (e.g. decisions created from
+                 meeting notes or external systems); the in-stream compose
+                 form does not surface them. -->
+            <div v-if="decision.category" class="decision-meta">
+                <span class="decision-meta__category" :title="t('teamhub', 'Category')">
+                    {{ decision.category }}
+                </span>
+            </div>
+
+            <!-- Open: action buttons (proposer or admin) -->
+            <div
+                v-if="(decisionStatus === 'open' || decisionStatus === 'proposed') && canManageDecision"
+                class="decision-actions">
+                <NcButton
+                    variant="secondary"
+                    :aria-label="t('teamhub', 'Withdraw this decision proposal')"
+                    @click="openWithdrawDialog">
+                    <template #icon><Close :size="16" /></template>
+                    {{ t('teamhub', 'Withdraw proposal') }}
+                </NcButton>
+                <span class="decision-actions__hint">
+                    {{ t('teamhub', 'Post your final wording as a comment below, then click the gavel on that comment to finalize.') }}
+                </span>
+            </div>
+
+            <!-- Finalized banner (discussion closed, awaiting approval) -->
+            <div v-if="decisionStatus === 'finalized'" class="decision-banner decision-banner--finalized" role="status">
+                <GavelIcon :size="20" />
+                <div class="decision-banner__body">
+                    <strong>{{ t('teamhub', 'Finalized — awaiting approval') }}</strong>
+                    <span v-if="decision.answeredBy" class="decision-banner__sub">
+                        {{ t('teamhub', 'Final wording by {name}', { name: decision.answeredBy }) }}
+                    </span>
+                </div>
+                <NcButton
+                    variant="tertiary"
+                    :title="t('teamhub', 'View this decision in the Decisions tab')"
+                    :aria-label="t('teamhub', 'View in Decisions tab')"
+                    @click="viewInDecisionsTab">
+                    {{ t('teamhub', 'View in Decisions tab') }}
+                </NcButton>
+            </div>
+
+            <!-- Approved banner (legacy 'decided' rows fall in here) -->
+            <div v-if="decisionStatus === 'approved' || decisionStatus === 'decided'" class="decision-banner decision-banner--approved" role="status">
+                <CheckCircle :size="20" />
+                <div class="decision-banner__body">
+                    <strong>{{ t('teamhub', 'Approved') }}</strong>
+                    <span v-if="decision.resolvedBy" class="decision-banner__sub">
+                        {{ t('teamhub', 'Approved by {name}', { name: decision.resolvedBy }) }}
+                    </span>
+                </div>
+                <NcButton
+                    variant="tertiary"
+                    :title="t('teamhub', 'View this decision in the Decisions tab')"
+                    :aria-label="t('teamhub', 'View in Decisions tab')"
+                    @click="viewInDecisionsTab">
+                    {{ t('teamhub', 'View in Decisions tab') }}
+                </NcButton>
+            </div>
+
+            <!-- Denied banner -->
+            <div v-if="decisionStatus === 'denied'" class="decision-banner decision-banner--denied" role="status">
+                <Close :size="20" />
+                <div class="decision-banner__body">
+                    <strong>{{ t('teamhub', 'Denied') }}</strong>
+                    <span v-if="decision.withdrawnReason" class="decision-banner__sub">
+                        {{ t('teamhub', 'Reason: {reason}', { reason: decision.withdrawnReason }) }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Withdrawn banner -->
+            <div v-if="decisionStatus === 'withdrawn'" class="decision-banner decision-banner--withdrawn" role="status">
+                <Close :size="20" />
+                <div class="decision-banner__body">
+                    <strong>{{ t('teamhub', 'Withdrawn') }}</strong>
+                    <span v-if="decision.withdrawnReason" class="decision-banner__sub">
+                        {{ t('teamhub', 'Reason: {reason}', { reason: decision.withdrawnReason }) }}
+                    </span>
+                </div>
+            </div>
+        </div>
+
         <!-- Question solved banner -->
         <div v-if="message.messageType === 'question' && isQuestionSolved" class="question-solved-banner">
             <CheckCircle :size="20" />
@@ -313,9 +417,81 @@
                 :is-author="isAuthor"
                 :question-solved="isQuestionSolved"
                 :solved-comment-id="message.solvedCommentId"
+                :decision="decision"
+                :can-manage-decision="canManageDecision"
+                :can-finalize-decision="canFinalizeDecision"
                 @mark-solved="markSolved"
-                @unmark-solved="unmarkSolved" />
+                @unmark-solved="unmarkSolved"
+                @mark-decision-best="onMarkDecisionBest" />
         </Transition>
+
+        <!-- Withdraw confirmation dialog -->
+        <NcDialog
+            v-if="showWithdrawDialog"
+            :name="t('teamhub', 'Withdraw decision proposal')"
+            :open="showWithdrawDialog"
+            size="normal"
+            @update:open="showWithdrawDialog = $event">
+            <template #default>
+                <p class="decision-dialog__intro">
+                    {{ t('teamhub', 'Withdrawing closes this proposal. The thread will be locked from new comments. This action cannot be undone.') }}
+                </p>
+                <label for="withdraw-reason" class="post-form__label">
+                    {{ t('teamhub', 'Reason') }}
+                    <span class="decision-required" aria-hidden="true">*</span>
+                </label>
+                <textarea
+                    id="withdraw-reason"
+                    v-model="withdrawReason"
+                    rows="3"
+                    maxlength="1000"
+                    class="decision-withdraw-textarea"
+                    :placeholder="t('teamhub', 'Why is this proposal being withdrawn?')"></textarea>
+            </template>
+            <template #actions>
+                <NcButton variant="tertiary" @click="showWithdrawDialog = false">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    variant="error"
+                    :disabled="!withdrawReason.trim() || withdrawing"
+                    @click="confirmWithdraw">
+                    <template #icon>
+                        <NcLoadingIcon v-if="withdrawing" :size="16" />
+                    </template>
+                    {{ t('teamhub', 'Withdraw') }}
+                </NcButton>
+            </template>
+        </NcDialog>
+
+        <!-- Finalize confirmation dialog (Session H — was mark-as-best) -->
+        <NcDialog
+            v-if="showMarkDialog"
+            :name="t('teamhub', 'Finalize decision')"
+            :open="showMarkDialog"
+            size="normal"
+            @update:open="showMarkDialog = $event">
+            <template #default>
+                <p class="decision-dialog__intro">
+                    {{ t('teamhub', 'This will record your comment as the final wording, close the discussion (no more comments), and send the decision to its approver(s) for sign-off. This action cannot be undone.') }}
+                </p>
+            </template>
+            <template #actions>
+                <NcButton variant="tertiary" @click="cancelMark">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton
+                    variant="primary"
+                    :disabled="marking"
+                    @click="confirmMark">
+                    <template #icon>
+                        <NcLoadingIcon v-if="marking" :size="16" />
+                    </template>
+                    <!-- TRANSLATORS: Confirm button in the Finalize dialog. Irreversible: locks discussion and triggers approval. -->
+                    {{ t('teamhub', 'Finalize') }}
+                </NcButton>
+            </template>
+        </NcDialog>
 
         <!-- Insert image by URL dialog (edit toolbar) -->
         <NcDialog
@@ -406,7 +582,7 @@
 </template>
 
 <script>
-import { mapState, mapGetters } from 'vuex'
+import { mapState, mapGetters, mapMutations } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl, generateRemoteUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
@@ -433,6 +609,7 @@ import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import Close from 'vue-material-design-icons/Close.vue'
+import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import CommentsSection from './CommentsSection.vue'
 import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 
@@ -723,6 +900,7 @@ export default {
         HelpCircleOutline,
         CheckCircleOutline,
         CheckCircle,
+        GavelIcon,
         Lock,
         Delete,
         Pencil,
@@ -765,14 +943,74 @@ export default {
             // Full-size image lightbox
             lightboxSrc: '',
             lightboxAlt: '',
+            // Decision-flow dialog state
+            showWithdrawDialog: false,
+            withdrawReason: '',
+            withdrawing: false,
+            showMarkDialog: false,
+            markingCommentId: null,
+            marking: false,
         }
     },
     computed: {
         ...mapState(['members', 'allEffectiveMembers']),
-        ...mapGetters(['commentsForMessage']),
+        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin']),
         isPriority() { return this.message.priority === 'priority' },
         isPollClosed() { return this.message.pollClosed === true },
         isQuestionSolved() { return this.message.questionSolved === true },
+
+        // ── Decision computed properties ────────────────────────────────────
+
+        /** True when this message carries a decision payload. */
+        isDecision() {
+            return this.message.messageType === 'decision' && !!this.message.decision
+        },
+
+        /** The decision payload (or a safe empty shell) — never null in template. */
+        decision() {
+            return this.message.decision || {}
+        },
+
+        decisionStatus() {
+            return (this.message.decision && this.message.decision.status) || 'open'
+        },
+
+        /**
+         * True iff the current user may withdraw OR finalize this open decision.
+         * Finalize specifically is proposer-only — we tighten that gate at the
+         * gavel button itself; canManageDecision is broader (includes admin
+         * for withdraw).
+         */
+        canManageDecision() {
+            if (!this.isDecision) return false
+            // Legacy 'proposed' rows behave like 'open'.
+            const s = this.decisionStatus
+            if (s !== 'open' && s !== 'proposed') return false
+            const uid = this.$store.state.currentUser?.uid
+            if (uid && this.decision.proposedBy === uid) return true
+            return this.currentUserIsTeamAdmin
+        },
+
+        /**
+         * True iff the current user is the proposer of an open decision — the
+         * only case where the gavel-finalize button appears. Admin override
+         * does NOT apply here (only the proposer can finalize per spec).
+         */
+        canFinalizeDecision() {
+            if (!this.isDecision) return false
+            const s = this.decisionStatus
+            if (s !== 'open' && s !== 'proposed') return false
+            const uid = this.$store.state.currentUser?.uid
+            return !!(uid && this.decision.proposedBy === uid)
+        },
+
+        decisionBadgeTitle() {
+            if (!this.isDecision) return ''
+            return t('teamhub', 'Decision · {impact} impact · {status}', {
+                impact: this.impactLabel(this.decision.impact),
+                status: this.statusLabel(this.decisionStatus),
+            })
+        },
 
         /** { [userId]: displayName } for @mention rendering */
         membersMap() {
@@ -835,6 +1073,18 @@ export default {
     },
     methods: {
         t, n,
+        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET']),
+
+        /**
+         * Navigate to the Decisions tab and highlight the row for this message.
+         * The SET_DECISIONS_TARGET mutation stores the messageId; TeamDecisionsView
+         * watches it and scrolls/expands the matching row on arrival.
+         */
+        viewInDecisionsTab() {
+            const messageId = this.message?.id
+            this.SET_DECISIONS_TARGET(messageId)
+            this.SET_VIEW('decisions')
+        },
 
         /** Same NC OCS autocomplete approach as PostMessageForm */
         async editMentionAutoComplete(search, callback) {
@@ -1348,6 +1598,93 @@ export default {
                 showError(t('teamhub', 'Failed to unmark question: {error}', { error: errorMsg }))
             }
         },
+
+        // ── Decision flow ───────────────────────────────────────────────────
+
+        impactLabel(impact) {
+            if (impact === 'high')   return t('teamhub', 'High')
+            if (impact === 'medium') return t('teamhub', 'Medium')
+            if (impact === 'low')    return t('teamhub', 'Low')
+            return t('teamhub', 'Unknown')
+        },
+
+        statusLabel(status) {
+            // TRANSLATORS: status pill — proposer finalized; awaiting approver decision
+            if (status === 'finalized')  return t('teamhub', 'Awaits approval')
+            if (status === 'approved')   return t('teamhub', 'Approved')
+            if (status === 'denied')     return t('teamhub', 'Denied')
+            if (status === 'withdrawn')  return t('teamhub', 'Withdrawn')
+            // Legacy fallback for stale rows
+            if (status === 'decided')    return t('teamhub', 'Approved')
+            // 'open' / 'proposed' / unknown
+            return t('teamhub', 'Open')
+        },
+
+        openWithdrawDialog() {
+            this.withdrawReason = ''
+            this.showWithdrawDialog = true
+        },
+
+        async confirmWithdraw() {
+            const reason = this.withdrawReason.trim()
+            if (!reason) return
+            this.withdrawing = true
+            try {
+                await this.$store.dispatch('withdrawDecision', {
+                    decisionId: this.decision.id,
+                    reason,
+                    messageId: this.message.id,
+                })
+                showSuccess(t('teamhub', 'Decision withdrawn'))
+                this.showWithdrawDialog = false
+                this.withdrawReason = ''
+                // Refresh comments view to update lock state.
+                this.$store.dispatch('fetchComments', this.message.id)
+            } catch (error) {
+                const errorMsg = error?.response?.data?.error || error?.message || 'Unknown error'
+                showError(t('teamhub', 'Failed to withdraw: {error}', { error: errorMsg }))
+            } finally {
+                this.withdrawing = false
+            }
+        },
+
+        /**
+         * Called by CommentsSection when the user clicks "Mark as best answer"
+         * on a specific comment. We open a confirmation dialog before actually
+         * calling the API — the action is irreversible.
+         */
+        onMarkDecisionBest(commentId) {
+            this.markingCommentId = commentId
+            this.showMarkDialog = true
+        },
+
+        cancelMark() {
+            this.showMarkDialog = false
+            this.markingCommentId = null
+        },
+
+        async confirmMark() {
+            if (!this.markingCommentId) return
+            this.marking = true
+            try {
+                // Session H: dispatch the new finalizeDecision action.
+                // (markDecisionBest is still available as a backward-compat alias.)
+                await this.$store.dispatch('finalizeDecision', {
+                    decisionId: this.decision.id,
+                    commentId: this.markingCommentId,
+                    messageId: this.message.id,
+                })
+                showSuccess(t('teamhub', 'Decision finalized — awaiting approval'))
+                this.showMarkDialog = false
+                this.markingCommentId = null
+                this.$store.dispatch('fetchComments', this.message.id)
+            } catch (error) {
+                const errorMsg = error?.response?.data?.error || error?.message || 'Unknown error'
+                showError(t('teamhub', 'Failed to finalize: {error}', { error: errorMsg }))
+            } finally {
+                this.marking = false
+            }
+        },
         getPercentage(index) {
             if (this.pollResults.totalVotes === 0) return 0
             const votes = this.pollResults.votes[index] || 0
@@ -1729,6 +2066,194 @@ export default {
     border-radius: var(--border-radius-large);
     font-size: 14px;
     font-weight: 600;
+}
+
+/* ── Decision card ──────────────────────────────────────────────────────── */
+.message-card--decision {
+    border-left: 4px solid var(--color-primary-element);
+    padding-left: calc(var(--default-clickable-area, 14px) - 4px);
+}
+
+.message-card--decision-open {
+    border-left-color: var(--color-primary-element);
+}
+
+.message-card--decision-finalized {
+    border-left-color: var(--color-warning, #c9a227);
+}
+
+.message-card--decision-approved {
+    border-left-color: var(--color-success);
+}
+
+.message-card--decision-denied {
+    border-left-color: var(--color-error-text);
+    opacity: 0.95;
+}
+
+.message-card--decision-withdrawn {
+    border-left-color: var(--color-text-maxcontrast);
+    opacity: 0.92;
+}
+
+/* Decision badge in header */
+.message-card__decision-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--border-radius-pill);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--color-primary-element-light);
+    color: var(--color-primary-element-text-dark, var(--color-main-text));
+}
+
+.message-card__decision-badge--high {
+    background: color-mix(in srgb, var(--color-error) 16%, transparent);
+    color: var(--color-error-text);
+}
+
+.message-card__decision-badge--medium {
+    background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+    color: var(--color-warning-text, var(--color-main-text));
+}
+
+.message-card__decision-badge--low {
+    background: color-mix(in srgb, var(--color-success) 16%, transparent);
+    color: var(--color-success-text, var(--color-main-text));
+}
+
+.message-card__decision-badge-dot {
+    opacity: 0.5;
+    padding: 0 2px;
+}
+
+.message-card__decision-badge-impact,
+.message-card__decision-badge-status {
+    white-space: nowrap;
+}
+
+/* Decision body block */
+.decision-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.decision-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+}
+
+.decision-meta__category {
+    padding: 2px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-pill);
+    color: var(--color-main-text);
+}
+
+.decision-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    background: var(--color-background-hover);
+    border-radius: var(--border-radius);
+}
+
+.decision-actions__hint {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    flex: 1;
+    min-width: 200px;
+}
+
+.decision-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: var(--border-radius-large);
+    font-size: 14px;
+}
+
+.decision-banner__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.decision-banner__sub {
+    font-size: 13px;
+    font-weight: normal;
+    opacity: 0.85;
+}
+
+.decision-banner--finalized {
+    background: color-mix(in srgb, var(--color-warning, #c9a227) 14%, var(--color-main-background));
+    border: 1px solid var(--color-warning, #c9a227);
+    color: var(--color-warning-text, #a05a00);
+}
+
+.decision-banner--approved {
+    /* Per project rule: use --color-success-text on a contrasting surface,
+     * not --color-main-background on a saturated --color-success. */
+    background: color-mix(in srgb, var(--color-success) 14%, var(--color-main-background));
+    border: 1px solid var(--color-success);
+    color: var(--color-success-text);
+}
+
+.decision-banner--approved :deep(button:disabled) {
+    color: var(--color-success-text);
+    opacity: 0.7;
+}
+
+.decision-banner--denied {
+    background: color-mix(in srgb, var(--color-error-text) 10%, var(--color-main-background));
+    border: 1px solid var(--color-error-text);
+    color: var(--color-error-text);
+}
+
+.decision-banner--withdrawn {
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+    border: 1px solid var(--color-border);
+}
+
+/* Withdraw dialog */
+.decision-dialog__intro {
+    margin: 0 0 12px 0;
+    color: var(--color-text-maxcontrast);
+}
+
+.decision-withdraw-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-family: inherit;
+    font-size: 0.95em;
+    resize: vertical;
+}
+
+.decision-withdraw-textarea:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+
+.decision-required {
+    color: var(--color-error-text);
+    margin-left: 4px;
 }
 
 .message-card__edit {

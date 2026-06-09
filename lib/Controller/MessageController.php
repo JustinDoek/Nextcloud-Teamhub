@@ -70,10 +70,13 @@ class MessageController extends Controller {
         string $message,
         string $priority = 'normal',
         string $messageType = 'normal',
-        ?array $pollOptions = null
+        ?array $pollOptions = null,
+        ?array $decision = null
     ): JSONResponse {
         try {
-            $newMessage = $this->messageService->createMessage($teamId, $subject, $message, $priority, $messageType, $pollOptions);
+            $newMessage = $this->messageService->createMessage(
+                $teamId, $subject, $message, $priority, $messageType, $pollOptions, $decision
+            );
             return new JSONResponse($newMessage, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to create message', [
@@ -213,6 +216,33 @@ class MessageController extends Controller {
                 'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * POST /api/v1/messages/{messageId}/attachments
+     *
+     * Body JSON: { file_id: int, file_name: string }
+     *
+     * Registers an uploaded file as an attachment of the given message.
+     * Authorization is enforced inside the service (caller must be author).
+     * Idempotent on (message_id, file_id).
+     */
+    #[NoAdminRequired]
+    public function registerAttachment(int $messageId, int $file_id, string $file_name): JSONResponse {
+        try {
+            $row = $this->messageService->registerAttachment($messageId, $file_id, $file_name);
+            return new JSONResponse($row, Http::STATUS_CREATED);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Exception $e) {
+            $this->logger->warning('[TeamHub][MessageController] registerAttachment failed', [
+                'messageId' => $messageId, 'file_id' => $file_id,
+                'exception' => $e->getMessage(),
+                'app'       => Application::APP_ID,
+            ]);
+            $status = str_contains($e->getMessage(), 'author') ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 

@@ -121,6 +121,24 @@
                     {{ t('teamhub', 'Presence') }}
                 </button>
 
+                <!-- Built-in: Decisions -->
+                <button
+                    v-else-if="tab.key === 'decisions'"
+                    id="tab-decisions"
+                    :key="'tab-decisions'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'decisions' }"
+                    :aria-selected="currentView === 'decisions' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('decisions')"
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <GavelIcon :size="16" />
+                    {{ t('teamhub', 'Decisions') }}
+                </button>
+
                 <!-- External app tabs -->
                 <button
                     v-else-if="tab.key.startsWith('ext-')"
@@ -225,6 +243,7 @@ import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import Web from 'vue-material-design-icons/Web.vue'
 import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
+import GavelIcon          from 'vue-material-design-icons/Gavel.vue'
 
 export default {
     name: 'TeamTabBar',
@@ -233,7 +252,7 @@ export default {
         NcButton,
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
-        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon,
+        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon,
     },
 
     props: {
@@ -312,6 +331,8 @@ export default {
             case 'deck':
                 return !!(this.resources.deck && this.resources.deck.length > 0)
             case 'presence':
+                return true
+            case 'decisions':
                 return true
             default:
                 // ext-* and link-* tabs always render

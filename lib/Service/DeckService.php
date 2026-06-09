@@ -891,9 +891,126 @@ class DeckService {
      *   3. Direct DB insert        — version-stable last resort; never triggers
      *                                Nextcloud local-access-rules blocks.
      *
+    /**
      * The previous implementation used a loopback HTTP call to the OCS API which
      * fails on NC28+ when the server resolves to 127.0.0.1 / a private IP, because
      * Nextcloud blocks outgoing requests to local addresses by default.
      */
+
+    /**
+     * Fetch display metadata for a set of Deck card IDs in a single query.
+     *
+     * Used by the Decisions module to render "linked tasks" for a decision.
+     *
+     * Result shape, keyed by card id:
+     *   [
+     *     <cardId> => [
+     *       'id'          => int,
+     *       'title'       => string,
+     *       'archived'    => bool,
+     *       'deletedAt'   => int (0 if not deleted),
+     *       'stackTitle'  => string,
+     *       'boardId'     => int,
+     *       'boardTitle'  => string,
+     *       'boardColor'  => string,    // 6-char hex, no '#'
+     *       'url'         => string,    // /apps/deck/board/<boardId>/card/<cardId>
+     *     ]
+     *   ]
+     *
+     * Cards that do not exist are simply absent from the result.
+     *
+     * ACL note (v1): we do not filter by per-user ACL here. The link table
+     * only contains cards a user was permitted to link in the first place;
+     * showing the title back to them later is harmless metadata. If they have
+     * since lost access, Deck itself enforces ACL when they click through.
+     *
+     * @param int[] $cardIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function getCardsByIds(array $cardIds): array {
+        if (empty($cardIds)) {
+            return [];
+        }
+        if (!$this->appManager->isInstalled('deck')) {
+            return [];
+        }
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        $qb = $db->getQueryBuilder();
+
+        // JOIN deck_cards → deck_stacks → deck_boards.
+        // We use createFunction for the table aliases since QB's join() handles
+        // aliases inconsistently across DBAL versions; explicit aliases here
+        // keep the SELECT list unambiguous on both MySQL and PostgreSQL.
+        $qb->select(
+            'c.id AS card_id',
+            'c.title AS card_title',
+            'c.archived AS card_archived',
+            'c.deleted_at AS card_deleted_at',
+            's.title AS stack_title',
+            'b.id AS board_id',
+            'b.title AS board_title',
+            'b.color AS board_color',
+        )
+            ->from('deck_cards', 'c')
+            ->innerJoin('c', 'deck_stacks', 's', $qb->expr()->eq('c.stack_id', 's.id'))
+            ->innerJoin('s', 'deck_boards', 'b', $qb->expr()->eq('s.board_id', 'b.id'))
+            ->where($qb->expr()->in(
+                'c.id',
+                $qb->createNamedParameter($cardIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+            ));
+
+        $out = [];
+        try {
+            $result = $qb->executeQuery();
+            while ($row = $result->fetch()) {
+                $id = (int)$row['card_id'];
+                $boardId = (int)$row['board_id'];
+                $out[$id] = [
+                    'id'         => $id,
+                    'title'      => (string)$row['card_title'],
+                    'archived'   => (bool)$row['card_archived'],
+                    'deletedAt'  => (int)($row['card_deleted_at'] ?? 0),
+                    'stackTitle' => (string)$row['stack_title'],
+                    'boardId'    => $boardId,
+                    'boardTitle' => (string)$row['board_title'],
+                    'boardColor' => (string)($row['board_color'] ?? '0082c9'),
+                    'url'        => '/apps/deck/board/' . $boardId . '/card/' . $id,
+                ];
+            }
+            $result->closeCursor();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[DeckService] getCardsByIds failed', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return [];
+        }
+        return $out;
+    }
+
+    /**
+     * Check whether a Deck card exists at all (regardless of ACL).
+     * Used to validate linkTask() — we refuse to link non-existent cards.
+     */
+    public function cardExists(int $cardId): bool {
+        if (!$this->appManager->isInstalled('deck')) {
+            return false;
+        }
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        $qb = $db->getQueryBuilder();
+        $qb->select('id')
+            ->from('deck_cards')
+            ->where($qb->expr()->eq('id', $qb->createNamedParameter($cardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1);
+        try {
+            $r = $qb->executeQuery();
+            $found = $r->fetch();
+            $r->closeCursor();
+            return $found !== false;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
 
 }

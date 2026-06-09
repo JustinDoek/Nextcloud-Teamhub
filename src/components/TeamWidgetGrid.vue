@@ -458,6 +458,48 @@
                 </div>
             </grid-item>
 
+            <!-- Decisions widget — gated on module + team-level enable flag -->
+            <grid-item
+                v-if="showDecisionsWidget && getGridItem('widget-decisions')"
+                v-bind="getGridItem('widget-decisions')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Decisions') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-decisions', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-decisions', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-decisions', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-decisions', 'right')">
+                        <DragVariant :size="16" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Decisions') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <GavelIcon :size="25" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Decisions') }}</h2>
+                        <button
+                            class="teamhub-widget-header-btn"
+                            :aria-label="t('teamhub', 'Propose new decision')"
+                            @click="$emit('propose-decision')">
+                            <PlusIcon :size="18" aria-hidden="true" />
+                        </button>
+                        <button
+                            class="teamhub-widget-collapse-btn"
+                            :aria-label="isCollapsed('widget-decisions') ? t('teamhub', 'Expand Decisions') : t('teamhub', 'Collapse Decisions')"
+                            @click.stop="toggleCollapse('widget-decisions')">
+                            <ChevronUp v-if="!isCollapsed('widget-decisions')" :size="16" />
+                            <ChevronDown v-else :size="16" />
+                        </button>
+                    </div>
+                    <div v-show="!isCollapsed('widget-decisions')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <DecisionsWidget />
+                    </div>
+                </div>
+            </grid-item>
+
             <!-- External integration widgets -->
             <grid-item
                 v-for="widget in teamWidgets"
@@ -709,6 +751,20 @@
                     </div>
                 </div>
 
+                <!-- Decisions widget — tablet layout -->
+                <div v-if="showDecisionsWidget && getGridItem('widget-decisions')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-decisions')">
+                            <GavelIcon :size="18" />
+                            <span>{{ t('teamhub', 'Decisions') }}</span>
+                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-decisions') }" />
+                        </button>
+                    </div>
+                    <div v-if="!isCollapsed('widget-decisions')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <DecisionsWidget />
+                    </div>
+                </div>
+
                 <!-- External integration widgets — no standard actions -->
                 <div
                     v-for="ext in teamWidgets"
@@ -798,6 +854,7 @@ import {
 } from '../constants/circlesConfig.js'
 import Cog from 'vue-material-design-icons/Cog.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
+import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import DragVariant from 'vue-material-design-icons/DragVariant.vue'
 import ChartBar from 'vue-material-design-icons/ChartBar.vue'
@@ -827,6 +884,7 @@ import IntravoxWidget from './IntravoxWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
 import FilesWidget          from './FilesWidget.vue'
+import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
 import MobileWidgetView from './MobileWidgetView.vue'
 
@@ -839,7 +897,7 @@ export default {
         MessageOutline, Folder, Calendar, CalendarPlus, CalendarClock, CardText,
         CheckboxMarkedOutline, InformationOutline, AccountGroup,
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus, PlusIcon,
-        Cog, Puzzle, ViewDashboardEdit, DragVariant,
+        Cog, Puzzle, GavelIcon, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
         ChevronUp, ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
@@ -847,7 +905,7 @@ export default {
         ClipboardPlusOutline,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
-        FilesWidget, MembersWidget,
+        FilesWidget, DecisionsWidget, MembersWidget,
         MobileWidgetView,
     },
 
@@ -877,6 +935,7 @@ export default {
         'widget-actions-loaded',
         'set-as-default',
         'reset-to-default',
+        'propose-decision',
     ],
 
     data() {
@@ -890,6 +949,7 @@ export default {
             'teamWidgets', 'isCurrentUserDirectMember',
             'resourceWarnings',
             'presenceModuleEnabled', 'presenceConfig',
+            'decisionsModuleEnabled', 'decisionsConfig',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -902,6 +962,14 @@ export default {
          */
         showTasksWidget() {
             return !!((this.resources.deck && this.resources.deck.length > 0) || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0))
+        },
+
+        /**
+         * Show the Decisions widget when the module is globally enabled
+         * AND enabled for this specific team.
+         */
+        showDecisionsWidget() {
+            return !!(this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled)
         },
 
         /**

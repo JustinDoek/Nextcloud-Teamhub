@@ -1,0 +1,115 @@
+<template>
+    <NcModal
+        v-if="open"
+        size="small"
+        :name="t('teamhub', 'Review decision')"
+        @close="$emit('close')">
+        <div class="th-approval-modal">
+            <h3 class="th-approval-modal__title">{{ decision.question || t('teamhub', 'Untitled') }}</h3>
+            <p class="th-approval-modal__hint">
+                {{ t('teamhub', 'Briefly explain your decision — this becomes part of the audit trail.') }}
+            </p>
+            <div class="th-approval-modal__field">
+                <label class="th-approval-modal__label">
+                    {{ t('teamhub', 'Reason') }} <span class="th-approval-modal__required">*</span>
+                </label>
+                <textarea
+                    ref="reasonInput"
+                    v-model="reason"
+                    class="th-approval-modal__textarea"
+                    :placeholder="t('teamhub', 'Your rationale…')"
+                    rows="3"
+                    maxlength="500"
+                    :aria-label="t('teamhub', 'Approval reason')" />
+                <span class="th-approval-modal__counter">{{ reason.length }} / 500</span>
+            </div>
+            <div class="th-approval-modal__actions">
+                <NcButton
+                    variant="primary"
+                    :disabled="!reason.trim() || saving"
+                    class="th-approval-modal__btn--approve"
+                    @click="submit('approve')">
+                    <template #icon><CheckCircleIcon :size="16" /></template>
+                    {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Approve') }}
+                </NcButton>
+                <NcButton
+                    variant="secondary"
+                    :disabled="!reason.trim() || saving"
+                    class="th-approval-modal__btn--deny"
+                    @click="submit('deny')">
+                    <template #icon><CloseCircleIcon :size="16" /></template>
+                    {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Deny') }}
+                </NcButton>
+                <NcButton variant="tertiary" @click="$emit('close')">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+            </div>
+        </div>
+    </NcModal>
+</template>
+
+<script>
+import { translate as t }  from '@nextcloud/l10n'
+import { NcModal, NcButton } from '@nextcloud/vue'
+import CheckCircleIcon from 'vue-material-design-icons/CheckCircle.vue'
+import CloseCircleIcon from 'vue-material-design-icons/CloseCircle.vue'
+
+export default {
+    name: 'DecisionApprovalModal',
+    components: { NcModal, NcButton, CheckCircleIcon, CloseCircleIcon },
+
+    props: {
+        open:     { type: Boolean, default: false },
+        decision: { type: Object,  default: () => ({}) },
+        saving:   { type: Boolean, default: false },
+    },
+
+    emits: ['close', 'approve', 'deny'],
+
+    data() {
+        return { reason: '' }
+    },
+
+    watch: {
+        open(v) {
+            if (v) {
+                this.reason = ''
+                this.$nextTick(() => this.$refs.reasonInput?.focus())
+            }
+        },
+    },
+
+    methods: {
+        t,
+        submit(action) {
+            if (!this.reason.trim()) return
+            this.$emit(action, { decision: this.decision, reason: this.reason.trim() })
+        },
+    },
+}
+</script>
+
+<style scoped>
+.th-approval-modal { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 12px; }
+.th-approval-modal__title { margin: 0; font-size: 16px; font-weight: 700; color: var(--color-main-text); }
+.th-approval-modal__hint { margin: 0; font-size: 12px; color: var(--color-text-maxcontrast); }
+.th-approval-modal__field { display: flex; flex-direction: column; gap: 4px; }
+.th-approval-modal__label { font-size: 13px; font-weight: 600; color: var(--color-main-text); }
+.th-approval-modal__required { color: var(--color-error); }
+.th-approval-modal__textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius); background: var(--color-main-background);
+    color: var(--color-main-text); font-size: 13px; resize: vertical; outline: none;
+}
+.th-approval-modal__textarea:focus { border-color: var(--color-primary-element); }
+.th-approval-modal__counter { font-size: 11px; color: var(--color-text-maxcontrast); text-align: right; }
+.th-approval-modal__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.th-approval-modal__btn--approve {
+    --color-primary-element: #2d7031 !important;
+    --color-primary-element-hover: #245a28 !important;
+}
+.th-approval-modal__btn--deny {
+    --color-primary-element: #c8253f !important;
+    --color-primary-element-hover: #a01e34 !important;
+}
+</style>

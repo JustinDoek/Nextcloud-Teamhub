@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\CommentMapper;
 use OCA\TeamHub\Db\MessageMapper;
 use OCA\TeamHub\Service\AuditService;
+use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\MemberService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -25,6 +26,7 @@ class CommentController extends Controller {
         private MessageMapper $messageMapper,
         private MemberService $memberService,
         private AuditService $auditService,
+        private DecisionService $decisionService,
         private IUserSession $userSession,
         private LoggerInterface $logger,
     ) {
@@ -43,6 +45,20 @@ class CommentController extends Controller {
         }
 
         try {
+            // Decision lock: refuse non-admin updates when the parent message
+            // is in a terminal decision state. Look up the comment first to
+            // resolve message_id.
+            $existing = $this->commentMapper->find($commentId);
+            if ($existing !== null) {
+                $lockError = $this->checkDecisionLockForMessage(
+                    (int)$existing['message_id'],
+                    $user->getUID(),
+                );
+                if ($lockError !== null) {
+                    return $lockError;
+                }
+            }
+
             $data = $this->commentMapper->update($commentId, $user->getUID(), $comment);
             return new JSONResponse($data);
         } catch (\Throwable $e) {
@@ -83,7 +99,26 @@ class CommentController extends Controller {
         }
 
         try {
+            // Decision lock: when the parent message has a decision in
+            // status='decided' or 'withdrawn', comments are frozen for
+            // non-admins. Admins may still moderate (write).
+            $lockError = $this->checkDecisionLockForMessage($messageId, $user->getUID());
+            if ($lockError !== null) {
+                return $lockError;
+            }
+
             $data = $this->commentMapper->create($messageId, $user->getUID(), $comment);
+
+            // Session J — if the parent message has a decision row, log a
+            // 'commented' audit transition. Best-effort; service swallows
+            // its own failures.
+            $this->decisionService->auditCommentOnDecision(
+                $messageId,
+                (int)($data['id'] ?? 0),
+                $user->getUID(),
+                $comment,
+            );
+
             return new JSONResponse($data, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to create comment', [
@@ -147,16 +182,33 @@ class CommentController extends Controller {
 
             $teamId = (string)$message['team_id'];
 
-            // Authorisation: author may always delete; otherwise require team admin.
+            // Decision lock: when the parent message has a terminal-state
+            // decision, refuse the delete unless the caller is a team admin.
+            // (Authors are still locked out — the freeze is real, not just
+            // a hint to non-authors.) Admins fall through to the existing
+            // authorisation block which will set deletedByAdmin=true.
             $isAuthor = ($authorId === $uid);
+            $isAdmin = false;
+            try {
+                $this->memberService->requireAdminLevel($teamId);
+                $isAdmin = true;
+            } catch (\Throwable) {
+                $isAdmin = false;
+            }
+            if (!$isAdmin && $this->decisionService->isCommentLocked($teamId, $messageId)) {
+                return new JSONResponse(
+                    ['error' => 'Comments are locked: this message has a decided or withdrawn decision'],
+                    Http::STATUS_FORBIDDEN
+                );
+            }
+
+            // Authorisation: author may always delete; otherwise require team admin.
             $deletedByAdmin = false;
             if (!$isAuthor) {
-                try {
-                    $this->memberService->requireAdminLevel($teamId);
-                    $deletedByAdmin = true;
-                } catch (\Throwable $e) {
+                if (!$isAdmin) {
                     return new JSONResponse(['error' => 'Insufficient permissions'], Http::STATUS_FORBIDDEN);
                 }
+                $deletedByAdmin = true;
             }
 
             // Solved-question revert: if this comment was the marked answer,
@@ -208,6 +260,47 @@ class CommentController extends Controller {
                 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Decision-lock helper for create/update flows.
+     *
+     * Returns a 403 JSONResponse to be returned to the caller when:
+     *   - the parent message exists,
+     *   - the team has the Decisions module enabled,
+     *   - the message has a decision row in 'decided' or 'withdrawn' state,
+     *   - AND the acting user is NOT a team admin (admins may always moderate).
+     *
+     * Returns null when the comment write should proceed normally.
+     *
+     * Errors looking up the message are swallowed (returns null) because
+     * the caller's own logic will fail on a missing message — duplicating
+     * the 404 path here would just confuse the response shape.
+     */
+    private function checkDecisionLockForMessage(int $messageId, string $uid): ?JSONResponse {
+        try {
+            $message = $this->messageMapper->find($messageId);
+        } catch (\Throwable) {
+            // Parent message missing — let the actual create/update path
+            // surface the right error.
+            return null;
+        }
+        $teamId = (string)$message['team_id'];
+
+        if (!$this->decisionService->isCommentLocked($teamId, $messageId)) {
+            return null;
+        }
+
+        // Locked. Admin override: admin may proceed.
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+            return null;
+        } catch (\Throwable) {
+            return new JSONResponse(
+                ['error' => 'Comments are locked: this message has a decided or withdrawn decision'],
+                Http::STATUS_FORBIDDEN
+            );
         }
     }
 }

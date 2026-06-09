@@ -2,49 +2,48 @@
     <div class="th-widget">
         <!-- Loading state -->
         <div v-if="loading" class="th-widget__state">
-            <NcLoadingIcon :size="20" />
+            <span class="th-widget__spinner" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
         <!-- No files resource for this team -->
-        <div v-else-if="!resources.files" class="th-widget__state">
-            <FolderIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'No team folder configured') }}</span>
+        <div v-else-if="!resources.files" class="th-widget__state th-widget__state--empty">
+            <FolderIcon :size="18" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'No team folder configured') }}</span>
         </div>
 
         <!-- Empty — team folder has no files yet -->
-        <div v-else-if="files.length === 0" class="th-widget__state">
-            <FolderOpenIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'No files in this team folder yet') }}</span>
+        <div v-else-if="files.length === 0" class="th-widget__state th-widget__state--empty">
+            <FolderOpenIcon :size="18" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'No files in this team folder yet') }}</span>
         </div>
 
         <!-- File list (max 5 items, newest first) -->
-        <ul v-else class="th-widget__list">
+        <ul v-else class="th-widget__rows">
             <li
                 v-for="file in files"
                 :key="file.id"
                 class="th-widget__row">
 
                 <!-- File-type icon badge -->
-                <div class="th-widget__badge th-widget__badge--file" aria-hidden="true">
+                <div class="th-files-recent__badge" aria-hidden="true">
                     <component :is="fileIcon(file)" :size="18" />
                 </div>
 
-                <!-- Main content -->
-                <div class="th-widget__body">
-                    <div class="th-widget__row-top">
-                        <a
-                            :href="fileUrl(file)"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="th-widget__title th-widget__title--link"
-                            :title="file.name"
-                            @click="onOpen($event, file)">
-                            {{ file.name }}
-                        </a>
-                    </div>
-                    <div class="th-widget__row-bottom">
-                        <span class="th-widget__meta">{{ formatDate(file.mtime) }}</span>
-                        <span v-if="file.path && file.path !== file.name" class="th-widget__meta th-widget__meta--sep">
+                <!-- Main content — two-line, size-driven hierarchy -->
+                <div class="th-files-recent__body">
+                    <a
+                        :href="fileUrl(file)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="th-files-recent__title"
+                        :title="file.name"
+                        @click="onOpen($event, file)">
+                        {{ file.name }}
+                    </a>
+                    <div class="th-files-recent__meta">
+                        <span>{{ formatDate(file.mtime) }}</span>
+                        <span v-if="file.path && file.path !== file.name" class="th-files-recent__meta-sep">
                             {{ folderPath(file) }}
                         </span>
                     </div>
@@ -184,40 +183,15 @@ export default {
 </script>
 
 <style scoped>
-.th-widget { padding: 0; }
+/* ──────────────────────────────────────────────────────────────────────
+ * FilesRecentWidget — widget-specific styling only.
+ * Loading/error/empty rows, .th-widget__row, .th-widget__rows, and the
+ * spinner come from src/styles/widget-tokens.css.
+ * ────────────────────────────────────────────────────────────────────── */
 
-/* Loading / empty states */
-.th-widget__state {
+/* File icon badge — distinctive to file widgets */
+.th-files-recent__badge {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px 16px;
-    color: var(--color-text-maxcontrast);
-    font-size: 15px;
-    text-align: center;
-}
-.th-widget__empty-icon {
-    opacity: 0.35;
-    color: var(--color-primary-element);
-}
-
-/* List */
-.th-widget__list { list-style: none; padding: 0; margin: 0; }
-.th-widget__row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--color-border);
-}
-.th-widget__row:last-child { border-bottom: none; }
-
-/* File icon badge */
-.th-widget__badge {
-    display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
@@ -226,62 +200,46 @@ export default {
     border-radius: var(--border-radius-large);
     background: var(--color-background-dark, #f4f4f4);
     border: 1px solid var(--color-border);
+    color: var(--color-primary-element);
 }
-.th-widget__badge--file { color: var(--color-primary-element); }
 
-/* Body */
-.th-widget__body {
+/* Two-line row body — bigger title, smaller meta. Size, not weight. */
+.th-files-recent__body {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
-}
-.th-widget__row-top {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-}
-.th-widget__row-bottom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 2px;
 }
 
-/* Title link */
-.th-widget__title {
-    flex: 1;
-    font-size: 14px;
-    font-weight: 500;
+.th-files-recent__title {
+    /* Tokens: primary row size, medium weight (not bold) */
+    font-size: var(--th-widget-row-primary-size);
+    font-weight: var(--th-widget-row-primary-weight);
     color: var(--color-main-text);
+    text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.th-widget__title--link {
-    color: var(--color-main-text);
-    text-decoration: none;
-}
-.th-widget__title--link:hover {
+
+.th-files-recent__title:hover {
     color: var(--color-primary-element);
     text-decoration: underline;
 }
 
-/* Meta line */
-.th-widget__meta {
-    display: inline-flex;
+.th-files-recent__meta {
+    display: flex;
     align-items: center;
-    gap: 3px;
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 140px;
+    gap: 6px;
+    /* Tokens: meta typography */
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-meta-weight);
+    color: var(--th-widget-meta-color);
+    flex-wrap: wrap;
 }
-.th-widget__meta--sep::before {
+
+.th-files-recent__meta-sep::before {
     content: '·';
     margin-right: 4px;
     color: var(--color-border-dark);

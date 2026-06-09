@@ -30,7 +30,8 @@ class MessageService {
     private IConfig $config;
     private IURLGenerator $urlGenerator;
     private MemberService $memberService;
-
+    private DecisionService $decisionService;
+    private \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper;
     public function __construct(
         MessageMapper $messageMapper,
         IUserSession $userSession,
@@ -43,7 +44,9 @@ class MessageService {
         IDBConnection $db,
         IConfig $config,
         IURLGenerator $urlGenerator,
-        MemberService $memberService
+        MemberService $memberService,
+        DecisionService $decisionService,
+        \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -58,6 +61,8 @@ class MessageService {
         $this->config = $config;
         $this->urlGenerator = $urlGenerator;
         $this->memberService = $memberService;
+        $this->decisionService = $decisionService;
+        $this->attachmentMapper = $attachmentMapper;
     }
 
     private function getCirclesManager() {
@@ -75,17 +80,60 @@ class MessageService {
      * total is the count of non-pinned messages, used for pagination.
      */
     public function getTeamMessages(string $teamId, int $limit = 50, int $offset = 0): array {
+        $pinned = $this->messageMapper->findPinnedByTeamId($teamId);
+        $messages = $this->messageMapper->findByTeamId($teamId, $limit, $offset);
+
+        // Hydrate decisions onto decision-typed messages in a single batch.
+        // Module-off teams have no decision rows so the batch comes back
+        // empty — no per-team gate check needed here.
+        $messageIds = [];
+        foreach ($messages as $m) {
+            if (($m['messageType'] ?? '') === 'decision') {
+                $messageIds[] = (int)$m['id'];
+            }
+        }
+        if ($pinned && ($pinned['messageType'] ?? '') === 'decision') {
+            $messageIds[] = (int)$pinned['id'];
+        }
+        $decisions = $this->decisionService->hydrateForMessages($messageIds);
+        foreach ($messages as &$m) {
+            $mid = (int)$m['id'];
+            if (isset($decisions[$mid])) {
+                $m['decision'] = $decisions[$mid];
+            }
+        }
+        unset($m);
+        if ($pinned && isset($decisions[(int)$pinned['id']])) {
+            $pinned['decision'] = $decisions[(int)$pinned['id']];
+        }
+
         return [
-            'pinned'   => $this->messageMapper->findPinnedByTeamId($teamId),
-            'messages' => $this->messageMapper->findByTeamId($teamId, $limit, $offset),
+            'pinned'   => $pinned,
+            'messages' => $messages,
             'total'    => $this->messageMapper->countByTeamId($teamId),
         ];
     }
 
     /**
-     * Create a new message with priority, poll, and question support
+     * Create a new message with priority, poll, question, and decision support.
+     *
+     * For messageType='decision', also creates a row in teamhub_decisions in
+     * the same transaction. If the decision insert fails, the message insert
+     * is rolled back so we never end up with an "orphan" decision-typed message
+     * that has no decision row.
+     *
+     * @param array{impact?:string, category?:?string, supersedesId?:?int, sourceType?:?string, sourceRef?:?string} $decisionData
+     *        Required when messageType='decision'. 'impact' is mandatory; all others are optional.
      */
-    public function createMessage(string $teamId, string $subject, string $message, string $priority = 'normal', string $messageType = 'normal', ?array $pollOptions = null): array {
+    public function createMessage(
+        string $teamId,
+        string $subject,
+        string $message,
+        string $priority = 'normal',
+        string $messageType = 'normal',
+        ?array $pollOptions = null,
+        ?array $decisionData = null,
+    ): array {
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
@@ -94,9 +142,17 @@ class MessageService {
         if (!in_array($priority, ['normal', 'priority'])) {
             $priority = 'normal';
         }
-        
-        if (!in_array($messageType, ['normal', 'poll', 'question'])) {
+
+        if (!in_array($messageType, ['normal', 'poll', 'question', 'decision'])) {
             $messageType = 'normal';
+        }
+
+        // Decision-type guard: if the caller asked for a decision but the
+        // module isn't active for this team, refuse rather than silently
+        // downgrade to 'normal'. The frontend should never get here when
+        // the gate is off, but be defensive.
+        if ($messageType === 'decision' && !$this->decisionService->isModuleActiveForTeam($teamId)) {
+            throw new \Exception('Decisions module is not enabled for this team');
         }
 
         // Check whether the user meets the team's minimum post level.
@@ -125,7 +181,58 @@ class MessageService {
                 }
             }
 
-            $messageData = $this->messageMapper->create($teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions);
+            // ── Transactional create for decision-typed messages ──────────────
+            // The decision row must exist iff the message row exists.
+            // If DecisionService::propose throws (e.g. invalid impact, bad
+            // supersedes target), roll back the message row so the user can
+            // retry without a leftover orphan.
+            if ($messageType === 'decision') {
+                $this->db->beginTransaction();
+                try {
+                    $messageData = $this->messageMapper->create(
+                        $teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions
+                    );
+                    // Required field check happens inside propose(), but we
+                    // pre-validate impact so we fail fast.
+                    $impact = isset($decisionData['impact']) ? (string)$decisionData['impact'] : '';
+                    if ($impact === '') {
+                        throw new \InvalidArgumentException('impact is required for decision-type messages');
+                    }
+                    $decisionRow = $this->decisionService->propose(
+                        $teamId,
+                        (int)$messageData['id'],
+                        $impact,
+                        // v3.72.1 — level field. Optional; defaults to
+                        // 'operational' inside propose() when null/empty.
+                        // The frontend always sends a value (PostMessageForm
+                        // initialises decisionLevel = 'operational'), but
+                        // legacy/external callers may omit it.
+                        isset($decisionData['level']) && $decisionData['level'] !== ''
+                            ? (string)$decisionData['level'] : null,
+                        isset($decisionData['category']) ? (string)$decisionData['category'] : null,
+                        isset($decisionData['supersedesId']) && $decisionData['supersedesId'] !== '' && $decisionData['supersedesId'] !== null
+                            ? (int)$decisionData['supersedesId'] : null,
+                        isset($decisionData['sourceType']) ? (string)$decisionData['sourceType'] : null,
+                        isset($decisionData['sourceRef'])  ? (string)$decisionData['sourceRef']  : null,
+                        $user->getUID(),
+                        // Session A: compose-modal proposals carry autoFinalize=true
+                        // so they bypass the open/discussion phase and go straight
+                        // to 'finalized'. Inline stream proposals remain 'open'.
+                        !empty($decisionData['autoFinalize']),
+                    );
+                    $this->db->commit();
+                    // Attach the decision payload so the frontend can render
+                    // immediately without a follow-up GET.
+                    $messageData['decision'] = $decisionRow;
+                } catch (\Throwable $e) {
+                    try { $this->db->rollBack(); } catch (\Throwable) {}
+                    throw $e;
+                }
+            } else {
+                $messageData = $this->messageMapper->create(
+                    $teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions
+                );
+            }
 
             // Get member UIDs from DB for notifications — no Circles API needed.
             $memberUids = $this->getTeamMemberUids($teamId);
@@ -815,5 +922,103 @@ class MessageService {
         }
 
         return $this->messageMapper->unmarkQuestionSolved($messageId);
+    }
+
+    // ── Attachments (v3.71.2) ─────────────────────────────────────────────
+
+    /**
+     * Register a file as an attachment of a message. Used by the message
+     * compose form: after upload + share, the client reports the resulting
+     * file_id here so the sidecar table records the link. The link enables
+     * the Decisions module to copy attachments into .proposals/{decisionId}/
+     * on finalize.
+     *
+     * Authorization: caller must be the message author. We don't store
+     * arbitrary user-supplied team_id; we derive it from the message row.
+     *
+     * @return array{id:int, message_id:int, file_id:int, file_name:string, uploaded_by:string, created_at:int}
+     */
+    public function registerAttachment(int $messageId, int $fileId, string $fileName): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('Not authenticated');
+        }
+        if ($fileId <= 0) {
+            throw new \InvalidArgumentException('Invalid file_id');
+        }
+        $fileName = trim($fileName);
+        if ($fileName === '') {
+            throw new \InvalidArgumentException('file_name is required');
+        }
+        if (mb_strlen($fileName) > 255) {
+            $fileName = mb_substr($fileName, 0, 255);
+        }
+
+        $message = $this->messageMapper->find($messageId);
+        // SEC: only the author of the message may register attachments on it.
+        if ($message['author_id'] !== $user->getUID()) {
+            throw new \Exception('Only the message author can register attachments');
+        }
+
+        $entity = new \OCA\TeamHub\Db\MessageAttachment();
+        $entity->setMessageId($messageId);
+        $entity->setFileId($fileId);
+        $entity->setFileName($fileName);
+        $entity->setUploadedBy($user->getUID());
+        $entity->setCreatedAt(time());
+
+        try {
+            $saved = $this->attachmentMapper->insert($entity);
+        } catch (\OCP\DB\Exception $e) {
+            // Unique violation = same (message_id, file_id) registered twice.
+            // Treat as idempotent: find and return the existing row.
+            if ($e->getReason() === \OCP\DB\Exception::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
+                foreach ($this->attachmentMapper->findByMessageId($messageId) as $row) {
+                    if ($row->getFileId() === $fileId) {
+                        return [
+                            'id'          => $row->getId(),
+                            'message_id'  => $row->getMessageId(),
+                            'file_id'     => $row->getFileId(),
+                            'file_name'   => $row->getFileName(),
+                            'uploaded_by' => $row->getUploadedBy(),
+                            'created_at'  => $row->getCreatedAt(),
+                        ];
+                    }
+                }
+            }
+            throw $e;
+        }
+
+        $this->logger->debug('[TeamHub][MessageService] registerAttachment', [
+            'message_id' => $messageId, 'file_id' => $fileId,
+            'file_name'  => $fileName, 'uploaded_by' => $user->getUID(),
+        ]);
+
+        return [
+            'id'          => $saved->getId(),
+            'message_id'  => $saved->getMessageId(),
+            'file_id'     => $saved->getFileId(),
+            'file_name'   => $saved->getFileName(),
+            'uploaded_by' => $saved->getUploadedBy(),
+            'created_at'  => $saved->getCreatedAt(),
+        ];
+    }
+
+    /**
+     * List attachments registered against a message. Used internally by the
+     * Decisions module (finalize-time copy into .proposals/{decisionId}/).
+     *
+     * @return array<int, array{file_id:int, file_name:string, uploaded_by:string}>
+     */
+    public function listAttachmentsForMessage(int $messageId): array {
+        $out = [];
+        foreach ($this->attachmentMapper->findByMessageId($messageId) as $row) {
+            $out[] = [
+                'file_id'     => $row->getFileId(),
+                'file_name'   => $row->getFileName(),
+                'uploaded_by' => $row->getUploadedBy(),
+            ];
+        }
+        return $out;
     }
 }

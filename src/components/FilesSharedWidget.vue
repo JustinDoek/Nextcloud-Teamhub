@@ -2,69 +2,68 @@
     <div class="th-widget">
         <!-- Loading state -->
         <div v-if="loading" class="th-widget__state">
-            <NcLoadingIcon :size="20" />
+            <span class="th-widget__spinner" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
         <!-- Toggle is on but nothing has been shared yet -->
-        <div v-else-if="items.length === 0" class="th-widget__state">
-            <ShareVariantIcon :size="36" class="th-widget__empty-icon" />
-            <span>{{ t('teamhub', 'Nothing shared with this team yet') }}</span>
+        <div v-else-if="items.length === 0" class="th-widget__state th-widget__state--empty">
+            <ShareVariantIcon :size="18" aria-hidden="true" />
+            <span class="th-widget__state-text">{{ t('teamhub', 'Nothing shared with this team yet') }}</span>
         </div>
 
         <!-- Item list -->
         <template v-else>
-            <ul class="th-widget__list">
+            <ul class="th-widget__rows">
                 <li
                     v-for="item in items"
                     :key="item.id"
                     class="th-widget__row">
 
                     <!-- Type icon badge -->
-                    <div class="th-widget__badge" aria-hidden="true">
+                    <div class="th-files-shared__badge" aria-hidden="true">
                         <component :is="itemIcon(item)" :size="18" />
                     </div>
 
                     <!-- Main content -->
-                    <div class="th-widget__body">
-                        <div class="th-widget__row-top">
-                            <a
-                                :href="itemUrl(item)"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="th-widget__title th-widget__title--link"
-                                :title="item.name"
-                                @click="onOpen($event, item)">
-                                {{ item.name }}
-                            </a>
-                        </div>
-                        <div class="th-widget__row-bottom">
+                    <div class="th-files-shared__body">
+                        <a
+                            :href="itemUrl(item)"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="th-files-shared__title"
+                            :title="item.name"
+                            @click="onOpen($event, item)">
+                            {{ item.name }}
+                        </a>
+                        <div class="th-files-shared__meta">
                             <NcAvatar
                                 :user="item.shared_by_id"
                                 :display-name="item.shared_by"
                                 :show-user-status="false"
                                 :size="16"
-                                class="th-widget__avatar" />
-                            <span class="th-widget__meta">{{ item.shared_by }}</span>
-                            <span class="th-widget__meta th-widget__meta--sep">{{ formatDate(item.shared_at) }}</span>
+                                class="th-files-shared__avatar" />
+                            <span>{{ item.shared_by }}</span>
+                            <span class="th-files-shared__meta-sep">{{ formatDate(item.shared_at) }}</span>
                         </div>
                     </div>
                 </li>
             </ul>
 
             <!-- Pagination footer -->
-            <div v-if="totalPages > 1" class="th-widget__pagination">
+            <div v-if="totalPages > 1" class="th-files-shared__pagination">
                 <button
-                    class="th-widget__page-btn"
+                    class="th-files-shared__page-btn"
                     :disabled="page === 1"
                     :aria-label="t('teamhub', 'Previous page')"
                     @click="goToPage(page - 1)">
                     <ChevronLeftIcon :size="16" />
                 </button>
-                <span class="th-widget__page-info">
+                <span class="th-files-shared__page-info">
                     {{ page }} / {{ totalPages }}
                 </span>
                 <button
-                    class="th-widget__page-btn"
+                    class="th-files-shared__page-btn"
                     :disabled="page === totalPages"
                     :aria-label="t('teamhub', 'Next page')"
                     @click="goToPage(page + 1)">
@@ -223,40 +222,10 @@ export default {
 </script>
 
 <style scoped>
-.th-widget { padding: 0; }
+/* Widget-specific only — shared classes from widget-tokens.css */
 
-/* Loading / empty states */
-.th-widget__state {
+.th-files-shared__badge {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px 16px;
-    color: var(--color-text-maxcontrast);
-    font-size: 15px;
-    text-align: center;
-}
-.th-widget__empty-icon {
-    opacity: 0.35;
-    color: var(--color-primary-element);
-}
-
-/* List */
-.th-widget__list { list-style: none; padding: 0; margin: 0; }
-.th-widget__row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--color-border);
-}
-.th-widget__row:last-child { border-bottom: none; }
-
-/* Type icon badge */
-.th-widget__badge {
-    display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
@@ -268,71 +237,47 @@ export default {
     color: var(--color-primary-element);
 }
 
-/* Body */
-.th-widget__body {
+.th-files-shared__body {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
-}
-.th-widget__row-top {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-}
-.th-widget__row-bottom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 2px;
 }
 
-/* Title link */
-.th-widget__title {
-    flex: 1;
-    font-size: 14px;
-    font-weight: 500;
+.th-files-shared__title {
+    font-size: var(--th-widget-row-primary-size);
+    font-weight: var(--th-widget-row-primary-weight);
     color: var(--color-main-text);
+    text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.th-widget__title--link {
-    text-decoration: none;
-    color: var(--color-main-text);
-}
-.th-widget__title--link:hover {
+.th-files-shared__title:hover {
     color: var(--color-primary-element);
     text-decoration: underline;
 }
 
-/* Avatar in meta row */
-.th-widget__avatar {
-    flex-shrink: 0;
-}
-
-/* Meta line */
-.th-widget__meta {
-    display: inline-flex;
+.th-files-shared__meta {
+    display: flex;
     align-items: center;
-    gap: 3px;
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
+    gap: 6px;
+    font-size: var(--th-widget-row-meta-size);
+    font-weight: var(--th-widget-row-meta-weight);
+    color: var(--th-widget-meta-color);
+    flex-wrap: wrap;
 }
-.th-widget__meta--sep::before {
+.th-files-shared__avatar { flex-shrink: 0; }
+
+.th-files-shared__meta-sep::before {
     content: '·';
     margin-right: 4px;
     color: var(--color-border-dark);
 }
 
 /* Pagination footer */
-.th-widget__pagination {
+.th-files-shared__pagination {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -340,7 +285,7 @@ export default {
     padding: 8px 14px;
     border-top: 1px solid var(--color-border);
 }
-.th-widget__page-btn {
+.th-files-shared__page-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -354,17 +299,17 @@ export default {
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s;
 }
-.th-widget__page-btn:hover:not(:disabled) {
+.th-files-shared__page-btn:hover:not(:disabled) {
     background: var(--color-background-hover);
     border-color: var(--color-primary-element);
 }
-.th-widget__page-btn:disabled {
+.th-files-shared__page-btn:disabled {
     opacity: 0.35;
     cursor: default;
 }
-.th-widget__page-info {
-    font-size: 12px;
-    color: var(--color-text-maxcontrast);
+.th-files-shared__page-info {
+    font-size: var(--th-widget-row-meta-size);
+    color: var(--th-widget-meta-color);
     min-width: 40px;
     text-align: center;
 }

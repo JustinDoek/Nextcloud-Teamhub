@@ -3,7 +3,367 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.63.0] — 2026-06-02 — Members widget overhaul
+## [3.74.0] — 2026-06-09 — Decisions: link decision + cross-app design unification
+
+### Added
+
+- **Link Decision (Session C)** — bidirectional decision ↔ decision linking with full UI in the detail panel.
+  - New table `teamhub_dec_links` (17 chars ✓): one row per link with canonical ordering (`decision_id_a < decision_id_b`), unique index on the pair, indexes on team + both sides.
+  - `DecisionLink` entity, `DecisionLinkMapper` (with `findByDecisionId` OR-query covering both sides), `DecisionLinkService` enforcing membership for read and `decisions_action_min_level` for create/delete.
+  - 3 new endpoints: `GET/POST/DELETE /api/v1/teams/{teamId}/decisions/{decisionId}/links[/{linkId}]`.
+  - Detail-panel UI: linked-decisions section with peer title + level pill + status pill, click-to-jump navigation, gated "Link decision" button, search-as-you-type decision picker modal (reuses `/decisions?q=` endpoint with 250ms debounce, excludes self + already-linked peers).
+  - Migration `Version000373010Date20260609080000`.
+- **Audit events for task + decision link/unlink** — 4 new transitions in `DecisionAuditService::TRANSITIONS`: `task_linked`, `task_unlinked`, `decision_linked`, `decision_unlinked`. Decision link/unlink events written to both decisions' audit trails.
+- **Shared widget design tokens** (`src/styles/widget-tokens.css`) — single source of truth loaded once from `main.js`. Defines hard-contrast brand palette (`--th-color-{success,warning,error,neutral}` + soft variants), typography scale (title 14/600, row primary 14/500, row meta 12/400, pill 10/700), spacing tokens (row padding 10px 14px, gap 12px), and shared utility classes: `.th-widget__panel`, `.th-widget__title`, `.th-widget__rows`, `.th-widget__row` (+ `--clickable`), `.th-widget__row-icon`, `.th-widget__row-title`, `.th-widget__row-meta`, `.th-widget__state` (+ `--empty`, `--error`), `.th-widget__spinner`, `.th-widget__pill` (+ `--primary`/`--success`/`--warning`/`--error`/`--neutral`, plus `--outline` variant).
+- **`peer_level` field** in decision-link list/create responses.
+
+### Changed
+
+- **All 13 widgets refactored** to consume the shared tokens — `DecisionsWidget`, `DecisionsList`, `ActivityWidget`, `CalendarWidget`, `DeckWidget`, `FilesWidget`, `FilesFavoritesWidget`, `FilesRecentWidget`, `FilesSharedWidget`, `IntegrationWidget`, `IntravoxWidget`, `MembersWidget`, `MemberRow`, `MemberPresenceRow`, `ExternalWidgetItem`. Loading/empty/error states unified to compact `.th-widget__state` rows with shared spinner. Hardcoded font-sizes replaced with tokens (kept only for genuinely widget-specific elements: calendar date badge, tab counter, action button). Soft NC colour vars (`--color-success`, `--color-warning`, `--color-error` and their text variants) replaced with hard-contrast `--th-color-*` tokens app-wide.
+- **DecisionsList row** simplified — impact and level pills removed from the meta line, category now rendered as plain text with small uppercase `CATEGORY` label prefix. Primary line uses size-driven hierarchy (14px medium) instead of bold.
+- **Activity subject** uses regular weight (400) — sentences read better unbolded; the rest of the app keeps medium weight on primary lines.
+- **Detail-panel "Linked tasks", "Linked decisions", and "Source files"** unified under one `.th-dv__link-*` row pattern — same border, hover, focus ring, spacing across all three. Solid-filled pills (no transparency / soft tints).
+- **`--th-color-warning` darkened to `#a05a00`** for WCAG-AA 4.5:1 contrast against white pill text (was `#c97a00`, 3.34:1).
+- **Removed dead deny-modal CSS** (~70 lines) from `DecisionsWidget` — replaced by `DecisionApprovalModal` in Session B.
+- **Link task button** now uses `LinkVariantIcon` (matching Link decision) instead of `PlusIcon`.
+
+### Fixed
+
+- **Focus indicators** on `.th-dv__link-row`, `.th-dv__link-remove`, `.th-dv__dec-picker-item-btn`, and `.th-widget__row--clickable` — removed redundant `outline: none` that was followed by a re-set rule, then ensured each `:focus-visible` has a 2px primary-coloured outline visible (WCAG SC 2.4.7).
+- **`aria-live="polite"`** added to the linked-decisions list and decision-picker results so screen reader users hear async updates.
+
+### Security
+
+- New decision-link endpoints follow the membership + min-level pattern. `listDecisionLinks` requires team membership; `createDecisionLink` and `deleteDecisionLink` require `decisions_action_min_level`. Peer decisions must belong to the same team — cross-team linking rejected at the service boundary. All queries use `OCP\DB\QueryBuilder` with explicit `PARAM_INT`/`PARAM_STR` typing.
+
+---
+
+## [3.73.0] — 2026-06-09 — Decisions: compose modal, task links, approval modal
+
+### Added
+
+- **Compose decision modal** — single shared instance at TeamView level, opened by widget header `+` and Decisions tab Propose button. Wraps PostMessageForm with `forceDecision` prop; auto-finalizes proposals (status='finalized') and writes `.proposals/{id}/{id}.md` via new `refresh-proposal` endpoint. Attachments fully supported.
+- **`POST /decisions/{id}/refresh-proposal`** endpoint — idempotent re-run of `writeProposalDocument` after attachment registration (avoids in-transaction timing issues).
+- **320 verified MDI icons** — shared library `src/lib/decisionCategoryIcons.js` auto-generated from `vue-material-design-icons@5.3.1`. 13 groups (Business, Tech, People, etc). Searchable grouped picker in ManageTeamView with scroll and category headers.
+- **Decision search on landing** — search bar queries decisions globally (backend `q` filter, 250ms debounce) instead of filtering categories client-side.
+- **Task links (Session B)** — new `teamhub_dec_tasks` table columns (`team_id`, `task_path`, `label`), `DecisionTaskMapper`, `DecisionTaskService` with action-level gating, controller endpoints for CRUD (`GET/POST/DELETE /decisions/{id}/tasks`).
+- **Min-role for actions** — `decisions_action_min_level` column on `teamhub_decision_team`; dropdown in ManageTeamView Decisions tab (Member/Moderator/Admin). Controls Link task, Create task, Link decision buttons.
+- **Linked tasks section** in detail panel right column — task list with NC-styled button links, inline "Link task" URL form, "Create task" button opening AddTaskModal with auto-linking.
+- **Decision approval modal** (`DecisionApprovalModal.vue`) — replaces widget's inline Approve/Deny buttons with single "Decision" button that opens modal with reason field + Approve (green) + Deny (red).
+- **Level badge** in widget card meta line (DecisionsList) — shows Operational/Tactical/Strategic when level feature is enabled.
+
+### Changed
+
+- **Landing page redesign** — 2-column responsive grid (1-col on mobile <720px), NC-native card styling with 42px icon bubbles, 15px category names (regular weight descriptions), "All decisions" shortcut row.
+- **Detail panel** — 2-column layout (content left, approval + tasks + audit right; stacks on <920px). "View in stream" button removed.
+- **Level badges** now shown for ALL levels including Operational (was hidden for operational).
+- **Breadcrumb** renders MDI icon component instead of icon name as text.
+- **Decision settings** (level field toggle, min-role dropdown) moved from Integrations tab to Decisions tab in ManageTeamView.
+- **Approve badge** strengthened to `#c8253f !important` with white text and inset border to override NC theme bleed.
+- **AddTaskModal** now emits `{ boardId, stackId, cardId, title, path }` on creation for auto-linking.
+- **Widget approve tab** loads on mount (badge count visible on page load without clicking tab).
+
+### Fixed
+
+- **400 error** on compose modal submit: `MessageService::createMessage` was passing 8 args to `propose()` which expected 9 after `level` was added.
+- **Missing source heading** for compose-modal decisions: `writeProposalDocument` was called inside the DB transaction before commit; now deferred to `refresh-proposal` endpoint.
+- **Widget item click** going to landing instead of detail: `SET_DECISIONS_TARGET` was set before TeamDecisionsView mounted; added `mounted()` check for pending target.
+- **`deck_card_id` NOT NULL** error: old column made nullable so new `task_path` rows can coexist.
+- **Duplicate `listTasks()` method**: old partial Session B code from previous session cleaned up (old entity, mapper, service methods, routes removed).
+- **`CodeBraces` duplicate** in icon library causing build failure.
+- **Missing imports** (NcButton, axios, etc.) swept by greedy regex during icon-map cleanup.
+- **`<template v-for>` key error**: replaced with `<div v-for>` wrapper in icon picker.
+
+### Removed
+
+- Old `DecisionTaskLink.php` and `DecisionTaskLinkMapper.php` (replaced by `DecisionTaskMapper`).
+- Old `linkTask`, `unlinkTask`, `listTasks`, `hydrateTasks` methods from `DecisionService` (replaced by `DecisionTaskService`).
+- Old deny modal from `DecisionsWidget` (replaced by `DecisionApprovalModal`).
+- `src/constants/decisionCategoryIcons.js` (replaced by `src/lib/decisionCategoryIcons.js`).
+
+## [3.72.0] — 2026-06-04 — Decisions: polish pass (Session L)
+
+### Added
+
+- **Decisions tab in Manage Team**: dedicated tab (gavel icon) gated on `decisionsModuleEnabled`. Hosts category management; module-enable toggle continues to live under Integrations.
+- **Approval block** in the Decisions tab detail panel: replaces the previous inline Approve button + separate Deny modal. Shared mandatory-reason textarea drives both Approve (success-variant green) and Deny (error-variant red); reason joins the audit trail.
+- **In-app read-only file viewer** with type-aware rendering: `.md` rendered via DOMPurify-sanitized markdown; plain text via `<pre>`; images via `/core/preview`; PDFs via native `<embed>`; everything else gets a "Preview not available — Download" panel.
+- **New `GET /api/v1/files/{fileId}/content`** endpoint streams raw bytes by file id; authorisation requires the file live inside a `.proposals/` subtree the calling user can natively access. `?download=1` sets `Content-Disposition: attachment`.
+- **`approve()` now requires a mandatory reason** (mirrors `deny()`); stored in the audit-event payload.
+- **2-column category grid** in the Decisions iframe layout; **full-overlay detail view** with a prominent Back chip (was a 360px sidebar that left no room at iframe widths).
+- **Message attachment registration** — `PostMessageForm` calls `POST /messages/{id}/attachments` after posting; sidecar table populated; attachments are copied into `.proposals/{decisionId}/` on finalize.
+
+### Changed
+
+- **Status pill "Finalized" → "Awaits approval"** everywhere (detail panel, filter chips, MessageCard, DecisionsList).
+- **Audit verb "Finalized" → "Finalized proposal"**.
+- **Selected comment label "Decided answer" → "Final proposal"** (detail panel + CommentsSection badge).
+- **Approver picker** reads from `allEffectiveMembers` (was `manageMembers.direct`-only) so members added via groups/sub-teams appear; labels show `displayName` (was UID).
+- **Subject placement**: moved from above the metadata grid to directly above the Final proposal block.
+- **Status filter** matches legacy DB values: `'open'` also matches `'proposed'`, `'approved'` also matches `'decided'`. Fixes empty Open tab for pre-rename decisions.
+- **Widget Latest tab** now refreshes immediately after approve/deny (was emptied without re-fetching, requiring a page reload).
+- **Manage view** dropped `max-width: 900px`; now uses full column width.
+- **`finalize()` no longer overwrites `sourceRef`** with the proposal `.md` path — that path is already presented in the source-files list, so the duplicated text line was removed from the Source heading.
+- **No-preview panel**: removed "Open in Files" button to keep members out of the hidden `.proposals/` folder; Download remains.
+
+### Fixed
+
+- **`memberUserOptions` accidentally in `watch`** (instead of `computed`) — was returning `undefined` and crashing `formatApprovers` with `TypeError: undefined.find(...)`, producing a white screen after creating a category.
+- **Decisions tab not rendering on team home** — `TeamTabBar::isTabRenderable()` was missing a `case 'decisions': return true` even though the tab descriptor was being built. One-line fix.
+- **`.md` viewer showed `<!DOCTYPE html>`** — was fetching via NC's `/f/{id}` redirect which returns an HTML "Files app shell", not the raw file content. Now uses the new TeamHub endpoint.
+- **Attachment upload failed with MKCOL 405** when the team folder is a Group Folder — ACLs forbid create-folder for normal members. Now falls back to personal `TeamHub Attachments/` for the GF case; the proposal-finalize copy step still copies them into `.proposals/` by file-id.
+- **Categories shown in two places** (Integrations tab + Decisions tab) — removed from Integrations; lives only in Decisions tab.
+- **`this.$set` Vue 3 incompatibility** — replaced with array `splice` in `applyDecisionUpdate`.
+- **`window.alert` popups on approve/deny errors** — replaced with NC `showError` toasts in both `TeamDecisionsView` and `DecisionsWidget`. Attachment registration failures now also surface as toasts (were silent `console.warn`).
+- **Recovery**: prior session had added message-attachment plumbing references but never shipped the `Db/MessageAttachment.php` + `Db/MessageAttachmentMapper.php` class files. Caused `Could not resolve …MessageAttachmentMapper` 500s on `/teams`. Recovery zip (3.71.5) shipped the missing files.
+
+### Security
+
+- New `fileContent` endpoint has defense-in-depth: NC's per-user ACL (via `getUserFolder->getById`) plus an explicit `.proposals/` ancestor check before serving bytes.
+- Defensive filename-length cap (200 chars) on `Content-Disposition` header to harden against header-injection via crafted filenames.
+- DOMPurify sanitizes all viewer-rendered markdown with an explicit allowlist.
+
+## [3.71.0] — 2026-06-03 — Decisions: supersede wire-up, telemetry, translation pass (Session K close)
+
+### Added
+
+- **Supersede flow end-to-end**: `PostMessageForm` reads `window.__teamhubDecisionCompose` on mount and on stream-view entry, pre-selects Decision type and stashes `supersedesId`. A banner shows above the form ("This proposal will supersede decision #X…") with a dismiss button. Submit sends the id; backend `DecisionService::propose` auto-withdraws the prior decision when it was still `open`, with the audit transition `withdrawn` payload carrying `superseded_by` so the timeline reads clearly on both sides.
+- **Telemetry: decision lifecycle metrics**: `TelemetryService::collectStats` now emits `decisions_by_status` (aggregate counts per `open|finalized|approved|denied|withdrawn`) and `decision_categories_count`. No team-id, no proposer-id, no content — aggregate-only per DESIGN.md §2.8.
+
+### Changed
+
+- **Translation pass**: `TRANSLATORS:` hints added to status filter chips, sort-order labels, audit verbs. `n()` plural-form used for `{n} day(s) ago` in `DecisionsList` and `TeamDecisionsView` (was `t()` with the plural form hardcoded). `n` imported alongside `t` in `DecisionsList`.
+
+## [3.70.0] — 2026-06-03 — Decisions: audit trail (Session J)
+
+### Added
+
+- **New table `teamhub_dec_audit`** — append-only timeline log, one row per state transition.
+- **`DecisionAuditService`** with the six-transition vocabulary (`proposed/commented/finalized/withdrawn/approved/denied`). Best-effort: log failure never aborts the originating action.
+- **Audit hooks** wired into `DecisionService::propose|finalize|withdraw|approve|deny` and into `CommentController::createComment` (logs `commented` when the parent is a decision; no-op otherwise).
+- **`GET /api/v1/teams/{teamId}/decisions/{decisionId}/audit`** — member-only read endpoint returning the full timeline.
+- **Timeline UI** in `TeamDecisionsView` detail panel — vertical timeline with colour-coded transition dots; reloads after approve/deny so new events appear immediately.
+- **Proposal document regeneration** on approve/deny — `.proposals/{id}.md` now appends an `## Audit trail` section reflecting the full lifecycle.
+
+## [3.69.0] — 2026-06-03 — Decisions: approver UX in widget (Session I)
+
+### Added
+
+- **Approve tab** in `DecisionsWidget` — only visible when the current user is in at least one category's approver list. Shows finalized decisions filtered to the user's approver scope, with a badge count.
+- **Inline approve / deny** per row via `DecisionsList`'s new `show-approver-actions` prop. Deny opens a widget-local modal requiring a reason.
+
+## [3.68.0] — 2026-06-03 — Decisions: lifecycle overhaul + proposal documents (Session H)
+
+### Changed
+
+- **Status vocabulary**: `proposed → open`, `decided → approved`. New states `finalized` and `denied`. `withdrawn` retained. Existing test data should be wiped — there is no data migration.
+- **`finalize()` replaces `markBest()`** — proposer-only; uses their own most-recent comment as the canonical final wording; locks the comment thread.
+- **`writeProposalDocument`** — when a decision is finalized, generate `{team-folder}/.proposals/{id}.md` containing the question, the original message, every comment with author + timestamp, and the final wording. Sets the decision's `source_type='document'` and `source_ref` to the file path.
+
+### Added
+
+- **`approve()` and `deny()`** service methods + matching controller endpoints (`POST /decisions/{id}/approve`, `POST /decisions/{id}/deny`). Gated on the m:n category-approver list from 3.67.0; admin fallback when the category isn't predefined.
+- **`canFinalizeDecision`** computed in `MessageCard`; the gavel-finalize button is shown only on the proposer's own comments while the decision is `open`.
+- **Banners** for `finalized` / `approved` / `denied` / `withdrawn` states in `MessageCard`. Comment-lock placeholder text updated.
+
+### Removed
+
+- **Legacy `POST /decisions/{id}/mark` route** removed (no data migration; existing rows in old states will read but not transition cleanly).
+
+## [3.67.0] — 2026-06-03 — Decisions: category management foundation (Session G)
+
+### Added
+
+- **Two new tables**: `teamhub_dec_categories` (predefined per-team categories with creator metadata) and `teamhub_dec_cat_apprs` (m:n approver list per category).
+- **`DecisionCategoryService`** with team-owner-as-default-approver rule and never-empty-approver-list invariant.
+- **Four controller endpoints**: `GET|POST /decisions/manage/categories`, `PUT|DELETE /decisions/manage/categories/{categoryId}`.
+- **Manage Team → Decisions sub-panel** with category CRUD list, inline edit/create forms, NcSelect multiselect for approvers.
+- **`PostMessageForm` category picker** — free-text input replaced with required NcSelect from the team's predefined list. Empty-team warning when no categories are set up.
+
+## [3.66.7] — 2026-06-03 — Decisions tab in tab bar + UX redesign
+
+### Fixed
+
+- **Decisions tab not appearing in the tab bar** — `TeamTabBar` requires explicit per-key blocks (same as Presence); the `icon: 'Gavel'` descriptor string in `buildAllTabDescriptors` is not used for rendering. Added the `v-else-if="tab.key === 'decisions'"` block and `GavelIcon` import.
+
+### Changed
+
+- **`TeamDecisionsView` redesigned**: category-first layout (decisions grouped by category section with count badges), modern card style with status-coloured left accent, slide-in detail panel (360px, max 40%) with definition-list meta grid, decided-answer block, withdrawn reason, source link, action buttons.
+
+## [3.66.6] — 2026-06-03 — Build fix + widget click destination
+
+### Fixed
+
+- **Build error** from deep import paths in `TeamDecisionsView` (`@nextcloud/vue/dist/Components/NcButton.js`). Switched to the named-import pattern used elsewhere: `import { NcButton, NcModal, NcEmptyContent, NcLoadingIcon } from '@nextcloud/vue'`.
+- **Widget click did nothing** — `DecisionsList::navigateToMessage` was calling `SET_VIEW('msgstream')` but the widget already renders on that view. Now sets `SET_DECISIONS_TARGET(messageId)` and `SET_VIEW('decisions')` so the row highlights in the Decisions tab.
+
+## [3.66.5] — 2026-06-03 — Decisions full canvas tab (Session E)
+
+### Added
+
+- **`TeamDecisionsView`** — full tab canvas with status filter chips, impact filter, sort toggle, expandable rows with detail panels (decided answer, withdrawn reason, source ref, Supersede action), paginated load-more, target-message highlight for navigation from the widget.
+- **`store/index.js`**: new `decisionsTargetMessageId` state + `SET_DECISIONS_TARGET` mutation, used by widget click and MessageCard's "View in Decisions tab" button to scroll/expand the matching row in the tab.
+- **`MessageCard`**: "View in Decisions tab" button enabled (was disabled placeholder), now calls `SET_DECISIONS_TARGET` + `SET_VIEW('decisions')`.
+- **`LayoutController::ALLOWED_TAB_KEYS`**: `decisions` added so saved tab orders accept it.
+
+## [3.66.4] — 2026-06-03 — Widget row content + click navigation
+
+### Fixed
+
+- **Subject missing** in widget rows — `DecisionsList` was reading `d.title` which doesn't exist in the API response; the field is `d.question`. Now renders `d.question` with a fallback for empty rows.
+- **Row click destination** — now navigates to the message stream via `SET_VIEW('msgstream')`. (Superseded in 3.66.6 — destination changed to the Decisions tab.)
+
+### Changed
+
+- **Impact display** moved out of the header chip and into the meta line as full text ("Low" / "Medium" / "High"), colour-coded.
+
+## [3.66.3] — 2026-06-03 — Decisions widget on team home (Session D)
+
+### Added
+
+- **`DecisionsWidget`** with tabbed view (Latest 5 / Open). Lazy-loads the Open tab on first click.
+- **`DecisionsList`** — reusable list-row component with status accent bar, impact chip, status pill, category tag, proposer attribution, and relative date.
+- **`store/index.js`**: new `fetchWidgetDecisions({ status, limit })` action.
+- **`LayoutController::DEFAULT_LAYOUT`** + **`ALLOWED_WIDGET_IDS`**: `widget-decisions` registered; existing installs get it merged in via the existing `mergeNewWidgets` logic on next layout GET.
+- **`TeamWidgetGrid` + `MobileWidgetView`**: widget block gated on `decisionsModuleEnabled && decisionsConfig.decisions_enabled`. Header has a + button emitting `propose-decision`.
+
+## [3.66.2] — 2026-06-02 — Decisions module: drop source-ref picker from compose
+
+### Changed
+
+- **`PostMessageForm`**: removed the Source reference picker (Document / External URL) from the decision compose form. The picker was misconceived — NC Files paths are scoped to the user's personal files, so storing one as a team-visible source was structurally broken; external URLs are better placed in the message body itself, which already supports markdown links. The `teamhub_decisions.source_type` and `source_ref` columns remain on the schema, reserved for future entry points (meeting-notes conversion, API-driven creation, message-conversion). Decisions created via the in-stream compose form now get `source_type='message'` set automatically server-side with `source_ref` left null.
+- **`MessageCard`**: removed the source-link rendering from the decision meta strip; only the optional category chip remains.
+- **DESIGN.md §2.52**: rewrote to document the corrected reasoning.
+
+## [3.66.1] — 2026-06-02 — Decisions module: file picker + decided-state contrast
+
+### Fixed
+
+- **`PostMessageForm`** Files picker showed folders only because the legacy `OC.dialogs.filepicker` treats the `['*']` mime filter as "no file types allowed". Switched to the modern `getFilePickerBuilder` from `@nextcloud/dialogs` with `FilePickerType.Choose` and `allowDirectories(false)`. (Superseded in 3.66.2 — the picker is no longer used.)
+- **Decided-state contrast** in `MessageCard` and `CommentsSection` violated the project rule that text uses `--color-success-text` on a contrasting tinted surface, not `--color-main-background` on a saturated `--color-success`. Both `decision-banner--decided` and `comment__decision-answer-badge` (plus `comment--decided-answer`) now follow the rule with `color-mix(in srgb, var(--color-success) 14%, var(--color-main-background))` backgrounds, `--color-success` borders, and `--color-success-text` foreground.
+
+## [3.66.0] — 2026-06-02 — Decisions module Session C: in-stream entry point
+
+Users can now propose, mark, and withdraw decisions entirely from the message stream. Decisions render with distinctive framing. The comment-lock UI matches the backend lock from v3.65.0.
+
+### Added
+
+- **Decision compose option in `PostMessageForm`** — fourth message type alongside Message / Poll / Question. Gated on `decisionsModuleEnabled && decisionsConfig.decisions_enabled`. Required Impact picker (low/medium/high), optional Category autocomplete (suggestions from `/decisions/categories`), optional Source picker (None / Document via NC Files picker / External URL with validation).
+- **Decision rendering in `MessageCard`** — distinctive header badge (gavel + impact + status), card-left accent border colour-coded by status, meta strip (category + source ref), and per-state UI (proposed: Withdraw button + mark hint; decided: success banner with disabled "View in Decisions tab" button + tooltip; withdrawn: muted banner with reason).
+- **Comment lock UI in `CommentsSection`** — terminal-state decisions disable comment input, edit, and delete for non-admins. The `selected_comment_id` comment is locked from edits/deletes even in proposed state. Admins retain delete-for-moderation capability. Placeholder text explains the lock reason.
+- **"Mark as decided answer" button** — gavel icon affordance on each comment, visible only to proposer/admin when decision status is 'proposed'. Triggers a confirmation modal warning the action is irreversible.
+- **Withdraw modal** — required reason textarea (max 1000 chars) with irreversible-action warning.
+- **Decision-answer styling** — the marked comment renders with a success-coloured border and "Decided answer" badge.
+- **Vuex actions:** `fetchDecisionCategories`, `markDecisionBest`, `withdrawDecision`.
+- **Vuex mutation:** `SET_MESSAGE_DECISION` — targeted patch of a single message's embedded decision payload, preserving the rest of the message row.
+
+### Changed
+
+- **`MessageService::createMessage`** now accepts a `?array $decisionData` parameter. When `messageType === 'decision'`, the method opens a DB transaction, inserts the message, then calls `DecisionService::propose`. If `propose` throws, the transaction rolls back — no orphan decision-typed messages.
+- **`MessageService::createMessage`** refuses `messageType='decision'` when the module isn't active for the team, instead of silently coercing to `'normal'`. Defensive guard against misconfigured frontends.
+- **`MessageService::getTeamMessages`** now hydrates the `decision` payload onto each decision-typed message in one batch query (no per-message round-trip).
+- **`MessageController::createMessage`** signature extended with `?array $decision = null`.
+- **Vuex `postMessage` action** accepts a `decision` field in its payload and forwards it.
+
+### Added (data layer)
+
+- **`DecisionMapper::findByMessageIds(int[])`** — batch lookup keyed by `message_id`.
+- **`DecisionService::hydrateForMessages(int[])`** — public batch serialiser used by `MessageService::getTeamMessages`. Explicitly no gate check; callers have already authorised via the team-scoped message-list query.
+
+### Security
+
+- **Transaction guarantee:** decision-typed message creates are atomic. A `propose()` failure (invalid impact, bad supersedes target, etc.) rolls back the message insert so the user can correct input without leaving behind an orphan message.
+- **Frontend gate respects backend:** Decision option only renders when both module-level and team-level flags are on. Backend re-validates regardless.
+- **Comment lock UI matches server:** non-admins see no edit/delete affordances on locked threads; admins retain moderation. Mirrors `DecisionService::isCommentLocked` exactly.
+
+## [3.65.0] — 2026-06-02 — Decisions module Session B: data layer + API + comment locking
+
+Backend-only session. Builds the full Decisions API on top of the Session A foundation. No frontend changes — `npm run build` not required.
+
+### Added
+
+- **`Decision` entity + `DecisionMapper`** — full type-mapped entity for `teamhub_decisions`; mapper exposes `findById`, `findByMessageId`, `list` (with filters / sort / cursor pagination), `countByTeam`, `distinctCategoriesByTeam`. The `list` method's `'recent'` sort uses `COALESCE(decided_at, withdrawn_at, created_at) DESC` — verified compatible with both PostgreSQL and MySQL/MariaDB.
+- **`DecisionTaskLink` entity + `DecisionTaskLinkMapper`** — entity and CRUD for `teamhub_dec_tasks`. Includes `findPair` (duplicate guard) and `findByDeckCardIds` (for the Deck-side card action surface planned in Session E.5).
+- **`DecisionService`** — full implementation, replacing Session A stubs:
+  - Gate methods: `assertModuleEnabledGlobally()` (config endpoints), `assertModuleEnabledForTeam($teamId)` (feature endpoints), `isModuleActiveForTeam($teamId)` (predicate used by comment locking).
+  - `propose(teamId, messageId, impact, category?, supersedesId?, sourceType?, sourceRef?, actingUserId)`
+  - `markBest(teamId, decisionId, commentId, actingUserId)` — captures participants via `MemberService::getAllEffectiveMembers`.
+  - `withdraw(teamId, decisionId, reason, actingUserId)`
+  - `list(teamId, filters, sort, before, limit)` — paginated; supports status / impact / category / proposedBy / q filters; `'recent'` or `'created'` sort.
+  - `get(teamId, decisionId)` — returns decision with hydrated `tasks` array.
+  - `categories(teamId)` — distinct category list for filter picker.
+  - `linkTask`, `unlinkTask`, `listTasks` — Deck card link CRUD with display-metadata hydration.
+  - `isCommentLocked(teamId, messageId)` — predicate consumed by CommentController.
+- **`DecisionController`** — full API surface (9 new endpoints in addition to Session A's config pair):
+  - `GET /api/v1/teams/{teamId}/decisions` — list
+  - `POST /api/v1/teams/{teamId}/decisions` — propose
+  - `GET /api/v1/teams/{teamId}/decisions/categories`
+  - `GET /api/v1/teams/{teamId}/decisions/{decisionId}` — show with hydrated tasks
+  - `POST /api/v1/teams/{teamId}/decisions/{decisionId}/mark` — mark best comment
+  - `POST /api/v1/teams/{teamId}/decisions/{decisionId}/withdraw`
+  - `POST /api/v1/teams/{teamId}/decisions/{decisionId}/tasks` — link Deck card
+  - `GET /api/v1/teams/{teamId}/decisions/{decisionId}/tasks` — list linked tasks
+  - `DELETE /api/v1/teams/{teamId}/decisions/{decisionId}/tasks/{linkId}` — unlink
+  
+  Read endpoints carry `#[NoCSRFRequired]`; write endpoints require CSRF tokens.
+- **`DeckService::getCardsByIds(int[]): array`** — single-query JOIN over `deck_cards → deck_stacks → deck_boards`, returns card title / archived flag / deleted timestamp / stack title / board id+title+color / direct URL, keyed by card id. Cards absent from the result are treated as deleted by callers. No card body/description returned (no content exposure).
+- **`DeckService::cardExists(int): bool`** — minimal existence probe used by `linkTask` validation.
+- **Telemetry: `decisions_count`** — total decisions across all teams (anonymous count).
+
+### Changed
+
+- **`CommentController`** — `createComment`, `updateComment`, `deleteComment` now consult `DecisionService::isCommentLocked` and refuse non-admin writes when the parent message has a decided or withdrawn decision attached. Admin override is enforced at the controller level via `MemberService::requireAdminLevel`. New private helper: `checkDecisionLockForMessage`.
+- **`MessageService::createMessage`** — `messageType` whitelist now accepts `'decision'`. Session C will use this to mark messages that carry a decision proposal.
+
+### Security
+
+- Cross-team data leak prevention: `DecisionService::loadDecisionInTeam` and `propose`'s message-team check both treat "belongs to a different team" as 404 — never reveal existence of decisions/messages outside the caller's team.
+- `DecisionMapper::list` uses `escapeLikeParameter` on user-supplied `q` filter; the service additionally caps `q` at 200 chars before reaching SQL.
+- Length caps in `DecisionService`: question 4000, selected answer 4000, withdrawn reason 1000, category 128, source_ref 512.
+- `meeting_notes` source type is reserved for a future feature and rejected at the API layer with 400 — prevents accidental writes that would be hard to migrate later.
+
+## [3.64.2] — 2026-06-02 — Hotfix: per-team Decisions toggle was unreachable
+
+### Fixed
+
+- **`DecisionController` / `DecisionService`** — `saveConfig` (PUT `/decisions/config`) called `assertModuleEnabledForTeam()`, which required the team's `decisions_enabled` flag to already be `1`. Since the entire purpose of the endpoint is to set that flag for the first time, the first PUT always returned `404 "Decisions module is not enabled for this team"`, making the per-team toggle unreachable.
+  - Split the gate into two methods. `assertModuleEnabledGlobally()` checks only the global app-config flag and is used by both config endpoints (`getConfig`, `saveConfig`). `assertModuleEnabledForTeam()` still checks both global + per-team flags and will be used by all Session B feature endpoints.
+
+## [3.64.1] — 2026-06-02 — Hotfix: stray brace in LayoutController
+
+### Fixed
+
+- **`LayoutController.php`** — stray extra `}` after the new `isDecisionsModuleEnabled()` helper caused a PHP parse error preventing the app from loading. The helper was correctly added but the original closing brace of `isPresenceModuleEnabled()` was duplicated, leaving the file with one extra `}` before `currentUserId()`. Removed.
+
+## [3.64.0] — 2026-06-02 — Decisions module Session A: activation foundation
+
+Session focus: the on/off framework for the Decisions module. No decisions can be created or viewed yet — this session wires the global admin toggle, per-team toggle, database tables, backend gate enforcement, telemetry, and all frontend state. Sessions B–E add the data layer and UI surfaces.
+
+### Added
+
+- **Migration `Version000364000Date20260602000000`** — creates three new tables in a single migration (safe for fresh installs and existing deployments):
+  - `teamhub_decision_team` (21 chars) — per-team Decisions module config: `id`, `team_id` (unique), `decisions_enabled` (SMALLINT, default 0), `created_at`, `updated_at`.
+  - `teamhub_decisions` (17 chars) — full decision record schema: `id`, `team_id`, `message_id`, `proposed_by`, `answered_by`, `selected_comment_id`, `category`, `impact`, `question`, `selected_answer`, `participants`, `status`, `withdrawn_reason`, `resolved_by`, `supersedes_id`, `source_type`, `source_ref`, `created_at`, `decided_at`, `withdrawn_at`. Indexes on `team_id`, `message_id`, `status`, `supersedes_id`.
+  - `teamhub_dec_tasks` (16 chars) — decision↔Deck card link table: `id`, `decision_id`, `deck_card_id`, `created_at`, `created_by`. Unique index on `(decision_id, deck_card_id)`; index on `deck_card_id`.
+- **`DecisionTeamConfig` entity + `DecisionTeamConfigMapper`** — `findByTeam()` returns null (= disabled) when no row exists; `countEnabledTeams()` for telemetry.
+- **`DecisionTeamService`** — `getConfig()` / `saveConfig()` with create-on-first-write. Mirrors `PresenceTeamService` config pattern.
+- **`DecisionService` skeleton** — `assertModuleEnabledForTeam(string $teamId)` implemented as the security boundary; all Session B methods are stubs throwing `RuntimeException`.
+- **`DecisionController`** — `GET /api/v1/teams/{teamId}/decisions/config` (member-auth) and `PUT /api/v1/teams/{teamId}/decisions/config` (team-admin only). Both call `assertModuleEnabledForTeam` first.
+- **Admin settings** — "Decisions module" toggle section added to NC admin → Settings → TeamHub → Integrations tab. Persisted as `decisions_module_enabled` app-config key (default `'0'`).
+- **Manage Team** — "Decisions" row added to the Internal integrations subsection (Manage Team → Integrations). Visible only when global module flag is on and viewer is a team admin. Toggle persists to `teamhub_decision_team`.
+- **Vuex store** — `decisionsConfig: { decisions_enabled: false }`, `decisionsModuleEnabled: false`, `SET_DECISIONS_CONFIG`, `SET_DECISIONS_MODULE_ENABLED` mutations.
+- **Telemetry** — `decisions_module` (bool) and `teams_with_decisions_enabled` (count) added to the anonymous telemetry payload.
+
+### Changed
+
+- **`TeamService::getAdminSettings()`** — returns `decisionsModuleEnabled` boolean.
+- **`TeamService::getTeam()`** — returns `decisionsModuleEnabled` boolean.
+- **`TeamService::saveAdminSettings()`** — persists `decisionsModuleEnabled` → `decisions_module_enabled` app-config key.
+- **`LayoutController::getLayout()`** — bundles `decisionsConfig` and `decisionsModuleEnabled` in the layout GET response (both code paths: team-specific and cascaded default), avoiding a separate frontend request on team switch.
+- **`ManageTeamView.vue`** — Internal integrations subsection `v-if` updated from `isTeamAdmin && presenceModuleEnabled` to `isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)` so the subsection stays visible when either module is on.
+- **`TeamView.vue`** — resets `decisionsConfig` on team switch; reads both `decisionsModuleEnabled` and `decisionsConfig` from layout response; `decisionsConfig` watcher added to rebuild tab list (ready for Session D tab addition).
+
+
 
 Session focus: replacing the flat-avatar-stack members widget with a tabbed widget that gives every member their own row, surfaces live status + contact actions, and adds a visualisation of tomorrow's scheduled presence.
 

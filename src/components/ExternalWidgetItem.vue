@@ -159,7 +159,7 @@ export default {
 
 .teamhub-external-widget__error {
     font-size: 13px;
-    color: var(--color-error-text);
+    color: var(--th-color-error);
     padding: 8px 0;
     margin: 0;
 }

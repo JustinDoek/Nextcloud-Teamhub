@@ -25,6 +25,10 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import App from './App.vue'
 import store from './store/index.js'
 
+// Shared widget design tokens (typography scale, colour assignments,
+// shared utility classes). Loaded once so every widget inherits.
+import './styles/widget-tokens.css'
+
 // Belt-and-suspenders: also set the header on the shared axios instance so
 // every request carries it regardless of when/how the instance was created.
 if (window.OC && window.OC.requestToken) {
