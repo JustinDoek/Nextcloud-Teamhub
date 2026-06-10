@@ -25,51 +25,55 @@
                         <template v-else>{{ t('teamhub', 'All decisions') }}</template>
                     </span>
 
-                    <!-- Status chips -->
-                    <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by status')">
-                        <button
-                            v-for="chip in statusChips"
-                            :key="chip.value || 'all'"
-                            class="th-dv__chip"
-                            :class="{ 'th-dv__chip--active': filterStatus === chip.value }"
-                            :aria-pressed="filterStatus === chip.value"
-                            @click="setStatusFilter(chip.value)">
-                            {{ chip.label }}
-                        </button>
-                    </div>
+                    <!-- Filters and sort — hidden when the detail panel is open
+                         so only the breadcrumb + propose button remain visible. -->
+                    <template v-if="!selected">
+                        <!-- Status chips -->
+                        <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by status')">
+                            <button
+                                v-for="chip in statusChips"
+                                :key="chip.value || 'all'"
+                                class="th-dv__chip"
+                                :class="{ 'th-dv__chip--active': filterStatus === chip.value }"
+                                :aria-pressed="filterStatus === chip.value"
+                                @click="setStatusFilter(chip.value)">
+                                {{ chip.label }}
+                            </button>
+                        </div>
 
-                    <!-- Impact chips -->
-                    <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by impact')">
-                        <button
-                            v-for="chip in impactChips"
-                            :key="chip.value || 'all-impact'"
-                            class="th-dv__chip"
-                            :class="{ 'th-dv__chip--active': filterImpact === chip.value }"
-                            :aria-pressed="filterImpact === chip.value"
-                            @click="setImpactFilter(chip.value)">
-                            {{ chip.label }}
-                        </button>
-                    </div>
+                        <!-- Impact chips -->
+                        <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by impact')">
+                            <button
+                                v-for="chip in impactChips"
+                                :key="chip.value || 'all-impact'"
+                                class="th-dv__chip"
+                                :class="{ 'th-dv__chip--active': filterImpact === chip.value }"
+                                :aria-pressed="filterImpact === chip.value"
+                                @click="setImpactFilter(chip.value)">
+                                {{ chip.label }}
+                            </button>
+                        </div>
 
-                    <!-- Level chips (only when level feature is on) -->
-                    <div v-if="decisionsLevelEnabled" class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by level')">
-                        <button
-                            v-for="chip in levelChips"
-                            :key="chip.value || 'all-level'"
-                            class="th-dv__chip"
-                            :class="{ 'th-dv__chip--active': filterLevel === chip.value }"
-                            :aria-pressed="filterLevel === chip.value"
-                            @click="setLevelFilter(chip.value)">
-                            {{ chip.label }}
-                        </button>
-                    </div>
+                        <!-- Level chips (only when level feature is on) -->
+                        <div v-if="decisionsLevelEnabled" class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by level')">
+                            <button
+                                v-for="chip in levelChips"
+                                :key="chip.value || 'all-level'"
+                                class="th-dv__chip"
+                                :class="{ 'th-dv__chip--active': filterLevel === chip.value }"
+                                :aria-pressed="filterLevel === chip.value"
+                                @click="setLevelFilter(chip.value)">
+                                {{ chip.label }}
+                            </button>
+                        </div>
 
-                    <!-- Sort -->
-                    <button class="th-dv__sort-btn" :aria-label="sortLabel" @click="toggleSort">
-                        <SortAscendingIcon v-if="sort === 'created'" :size="15" aria-hidden="true" />
-                        <SortDescendingIcon v-else :size="15" aria-hidden="true" />
-                        {{ sortLabel }}
-                    </button>
+                        <!-- Sort -->
+                        <button class="th-dv__sort-btn" :aria-label="sortLabel" @click="toggleSort">
+                            <SortAscendingIcon v-if="sort === 'created'" :size="15" aria-hidden="true" />
+                            <SortDescendingIcon v-else :size="15" aria-hidden="true" />
+                            {{ sortLabel }}
+                        </button>
+                    </template>
                 </template>
 
                 <div class="th-dv__toolbar-spacer" />
@@ -293,23 +297,45 @@
                         </div>
                         <div v-if="decisionsLevelEnabled" class="th-dv__detail-meta-row">
                             <dt>{{ t('teamhub', 'Level') }}</dt>
-                            <dd><span class="th-dv__level-chip" :class="`th-dv__level-chip--${selected.level || 'operational'}`">{{ levelLabel(selected.level) }}</span></dd>
+                            <dd>{{ levelLabel(selected.level) }}</dd>
                         </div>
                         <div v-if="selected.category" class="th-dv__detail-meta-row">
                             <dt>{{ t('teamhub', 'Category') }}</dt>
-                            <dd><span class="th-dv__detail-tag">{{ selected.category }}</span></dd>
+                            <dd>{{ selected.category }}</dd>
                         </div>
                         <div class="th-dv__detail-meta-row">
                             <dt>{{ t('teamhub', 'Proposed by') }}</dt>
-                            <dd>{{ selected.proposedBy }}</dd>
+                            <dd>
+                                <span class="th-dv__user-cell">
+                                    <NcAvatar
+                                        :user="selected.proposedBy"
+                                        :display-name="memberDisplayName(selected.proposedBy)"
+                                        :show-user-status="false"
+                                        :size="20" />
+                                    <span class="th-dv__user-name">{{ memberDisplayName(selected.proposedBy) }}</span>
+                                </span>
+                            </dd>
                         </div>
                         <div class="th-dv__detail-meta-row">
                             <dt>{{ t('teamhub', 'Date') }}</dt>
                             <dd :title="fullDate(selected.createdAt)">{{ relativeDate(selected.createdAt) }}</dd>
                         </div>
-                        <div v-if="(selected.status === 'approved' || selected.status === 'decided') && selected.answeredBy" class="th-dv__detail-meta-row">
+                        <!-- Decided by — the person who approved or denied.
+                             resolvedBy is set by approve() and deny(); it is also set
+                             by finalize() but we gate on status so finalized-only
+                             decisions don't surface the proposer here. -->
+                        <div v-if="selected.resolvedBy && (selected.status === 'approved' || selected.status === 'denied' || selected.status === 'decided')" class="th-dv__detail-meta-row">
                             <dt>{{ t('teamhub', 'Decided by') }}</dt>
-                            <dd>{{ selected.answeredBy }} <span v-if="selected.decidedAt" class="th-dv__detail-meta-sub">· {{ relativeDate(selected.decidedAt) }}</span></dd>
+                            <dd>
+                                <span class="th-dv__user-cell">
+                                    <NcAvatar
+                                        :user="selected.resolvedBy"
+                                        :display-name="memberDisplayName(selected.resolvedBy)"
+                                        :show-user-status="false"
+                                        :size="20" />
+                                    <span class="th-dv__user-name">{{ memberDisplayName(selected.resolvedBy) }}</span>
+                                </span>
+                            </dd>
                         </div>
                     </dl>
 
@@ -526,7 +552,12 @@
                                     <!-- TRANSLATORS: button to paste a URL linking an external task to this decision -->
                                     {{ t('teamhub', 'Link task') }}
                                 </NcButton>
-                                <NcButton variant="secondary" @click="showCreateTaskModal = true">
+                                <!-- Create task is only available when the team has a Deck board configured.
+                                     Without a board there is nowhere to create the card. -->
+                                <NcButton
+                                    v-if="resources.deck && resources.deck.length > 0"
+                                    variant="secondary"
+                                    @click="showCreateTaskModal = true">
                                     <template #icon><PlusIcon :size="16" /></template>
                                     <!-- TRANSLATORS: button to open the Deck card creation modal, auto-linked to this decision -->
                                     {{ t('teamhub', 'Create task') }}
@@ -868,7 +899,7 @@ import { mapState, mapMutations }                from 'vuex'
 import { generateUrl }                           from '@nextcloud/router'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
 import { showError, showSuccess }                from '@nextcloud/dialogs'
-import { NcButton, NcModal, NcEmptyContent, NcLoadingIcon } from '@nextcloud/vue'
+import { NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon } from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import DOMPurify from 'dompurify'
 
@@ -901,7 +932,7 @@ export default {
     name: 'TeamDecisionsView',
 
     components: {
-        NcButton, NcModal, NcEmptyContent, NcLoadingIcon,
+        NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon,
         GavelIcon, PlusIcon, TagIcon, ChevronRightIcon, ChevronLeftIcon,
         CloseIcon, CheckCircleIcon,
         SortAscendingIcon, SortDescendingIcon,
@@ -2206,6 +2237,19 @@ export default {
             return { low: t('teamhub', 'Low'), medium: t('teamhub', 'Medium'), high: t('teamhub', 'High') }[impact] || impact
         },
 
+        /**
+         * Look up a user's display name from the loaded members list.
+         * Falls back to the userId itself when the user is not a current
+         * team member (e.g. they proposed a decision then left the team).
+         * NcAvatar will still render their avatar correctly via NC's user API;
+         * the display name is only used for the label text next to the avatar.
+         */
+        memberDisplayName(userId) {
+            if (!userId) return ''
+            const member = (this.members || []).find(m => m.userId === userId)
+            return member?.displayName || userId
+        },
+
         levelLabel(level) {
             return {
                 // TRANSLATORS: Decision level — day-to-day operational decisions
@@ -2828,7 +2872,7 @@ export default {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
     gap: 24px;
-    padding: 0 20px;
+    padding: 16px 20px 0;
     align-items: start;
 }
 .th-dv__detail-col {
@@ -2933,7 +2977,7 @@ export default {
     margin: 0 0 16px;
     background: var(--color-border);
     border-radius: var(--border-radius-large);
-    overflow: hidden;
+    /* overflow:hidden removed — it clips NcAvatar's user-card popup */
     border: 1px solid var(--color-border);
 }
 
@@ -2961,6 +3005,19 @@ export default {
 }
 
 .th-dv__detail-meta-sub { color: var(--color-text-maxcontrast); font-size: 11px; }
+
+/* Avatar + name inline layout used in Proposed by / Decided by rows */
+.th-dv__user-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.th-dv__user-name {
+    font-size: 12px;
+    color: var(--color-main-text);
+    line-height: 1.4;
+}
 
 .th-dv__detail-tag {
     display: inline-block;
@@ -3017,6 +3074,75 @@ export default {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--color-text-maxcontrast);
+}
+
+/* ── Approval block ──────────────────────────────────────────────────── */
+.th-dv__detail-approval {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: var(--color-background-soft);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+}
+
+.th-dv__approval-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-main-text);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.th-dv__approval-required {
+    color: var(--color-error-text);
+    font-weight: 700;
+}
+
+.th-dv__approval-textarea {
+    width: 100%;
+    min-height: 72px;
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--color-main-text);
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    resize: vertical;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.th-dv__approval-textarea:focus {
+    outline: none;
+    border-color: var(--color-primary-element);
+    box-shadow: 0 0 0 2px var(--color-primary-element-light);
+}
+
+.th-dv__approval-textarea:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.th-dv__approval-counter {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    text-align: right;
+    margin: 0;
+}
+
+.th-dv__approval-counter--warn {
+    color: var(--color-warning-text);
+    font-weight: 600;
+}
+
+.th-dv__approval-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .th-dv__detail-withdrawn-text {

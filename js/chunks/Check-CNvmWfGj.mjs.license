@@ -1,12 +1,7 @@
 SPDX-License-Identifier: MIT
-SPDX-License-Identifier: undefined
 SPDX-FileCopyrightText: Rob Cresswell <robcresswell@pm.me>
-SPDX-FileCopyrightText: teamhub developers
 
 This file is generated from multiple sources. Included packages:
-- teamhub
-	- version: 3.74.8
-	- license: undefined
 - vue-material-design-icons
 	- version: 5.3.1
 	- license: MIT

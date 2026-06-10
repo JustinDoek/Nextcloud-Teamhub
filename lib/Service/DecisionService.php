@@ -67,7 +67,7 @@ class DecisionService {
     private const COMMENTS_LOCKED_STATUSES = ['finalized', 'approved', 'denied', 'withdrawn'];
     // Hidden subfolder in the team folder where finalized proposal documents are written
     private const PROPOSALS_FOLDER = '.proposals';
-    private const ALLOWED_SOURCE_TYPES = ['message', 'document', 'external'];
+    private const ALLOWED_SOURCE_TYPES = ['message', 'document', 'external', 'direct'];
     private const MAX_QUESTION_LEN = 4000;
     private const MAX_ANSWER_LEN = 4000;
     private const MAX_WITHDRAWN_REASON_LEN = 1000;

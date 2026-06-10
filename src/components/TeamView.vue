@@ -545,6 +545,11 @@ export default {
                 layout.forEach(item => {
                     map[item.i] = {
                         x: item.x,
+                        // y is included: vertical reordering is a genuine user preference
+                        // (snap only closes gaps from inactive widgets; active order is
+                        // intentional). Previously omitted, which hid the buttons when
+                        // users changed only widget order — the most common edit.
+                        y: item.y,
                         w: item.w,
                         h: item.h,
                         collapsed: !!item.collapsed,
@@ -560,7 +565,7 @@ export default {
                 const cur = current[id]
                 if (!cur) continue // widget inactive in this team — skip
                 const d = def[id]
-                if (cur.x !== d.x || cur.w !== d.w || cur.h !== d.h || cur.collapsed !== d.collapsed) {
+                if (cur.x !== d.x || cur.y !== d.y || cur.w !== d.w || cur.h !== d.h || cur.collapsed !== d.collapsed) {
                     return true
                 }
             }
@@ -610,9 +615,29 @@ export default {
             deep: true,
             handler() {
                 if (this.layoutLoaded && !this.editMode) {
+                    console.log('[TeamHub][TeamView] resources changed, re-applying snap')
                     this.applySnap()
                 }
             },
+        },
+
+        /**
+         * When the user exits edit mode (true → false), apply snap to close any
+         * gaps left from inactive widgets, then immediately save the resulting
+         * layout so the server has the correct positions. Without this, a user
+         * who drags quickly and exits edit mode before the 1.2 s debounce fires
+         * would not have their final arrangement persisted.
+         */
+        editMode(newVal, oldVal) {
+            console.log('[TeamHub][TeamView] editMode changed:', oldVal, '→', newVal)
+            if (!newVal && oldVal) {
+                // Exiting edit mode — snap first, then save the snapped layout.
+                this.applySnap()
+                this.$nextTick(() => {
+                    console.log('[TeamHub][TeamView] editMode exit: saving layout after snap')
+                    this.saveLayout()
+                })
+            }
         },
     },
 
@@ -736,6 +761,7 @@ export default {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`))
                 this.gridLayout        = Array.isArray(data.layout)      ? data.layout      : []
                 this.userDefaultLayout = Array.isArray(data.userDefault) ? data.userDefault : []
+                console.log('[TeamHub][TeamView] loadLayout: loaded', this.gridLayout.length, 'items, userDefault', this.userDefaultLayout.length, 'items, isDefault:', data.isDefault)
                 // Presence module flag and per-team config both arrive with layout — no race.
                 if (typeof data.presenceModuleEnabled === 'boolean') {
                     this.SET_PRESENCE_MODULE_ENABLED(data.presenceModuleEnabled)
@@ -754,6 +780,7 @@ export default {
                 this.layoutLoaded = true
                 this.applySnap()
             } catch (err) {
+                console.warn('[TeamHub][TeamView] loadLayout: failed', err?.message)
                 this.gridLayout = []
                 this.buildOrderedTabs([])
                 this.layoutLoaded = true
@@ -763,16 +790,20 @@ export default {
         async saveLayout() {
             if (!this.currentTeamId || !this.layoutLoaded) return
             const tabOrder = this.orderedTabs.map(t => t.key)
+            console.log('[TeamHub][TeamView] saveLayout: saving', this.gridLayout.length, 'items')
             try {
                 await axios.put(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
                     { layout: this.gridLayout, tabOrder },
                 )
+                console.log('[TeamHub][TeamView] saveLayout: saved OK')
             } catch (err) {
+                console.warn('[TeamHub][TeamView] saveLayout: failed', err?.response?.status, err?.message)
             }
         },
 
         onLayoutUpdated(newLayout) {
+            console.log('[TeamHub][TeamView] onLayoutUpdated: items:', newLayout.length, 'editMode:', this.editMode)
             this.gridLayout = newLayout
             if (this.editMode && this.layoutLoaded) this._debouncedSave()
         },
@@ -801,6 +832,14 @@ export default {
                 active.add('widget-deck')
             }
             if (this.resources && this.resources.intravox) active.add('widget-pages')
+            // Files widget — active whenever the team has a files resource.
+            // Mirrors v-if="resources.files && ..." in TeamWidgetGrid.
+            if (this.resources && this.resources.files) active.add('widget-files-center')
+            // Decisions widget — active when the module is enabled globally AND for this team.
+            // Mirrors showDecisionsWidget computed in TeamWidgetGrid.
+            if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
+                active.add('widget-decisions')
+            }
             // Dynamic integration widgets.
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
             return active
@@ -825,6 +864,7 @@ export default {
 
             const activeIds = this.getActiveWidgetIds()
             const PARK_Y = 9999
+            console.log('[TeamHub][TeamView] applySnap: active widgets:', [...activeIds], 'total layout items:', this.gridLayout.length)
 
             // Build a map of x → [items in that column].
             const columns = {}
@@ -857,6 +897,7 @@ export default {
                 }
             }
 
+            console.log('[TeamHub][TeamView] applySnap: result', snapped.map(i => `${i.i}@y=${i.y}`))
             this.gridLayout = snapped
         },
 

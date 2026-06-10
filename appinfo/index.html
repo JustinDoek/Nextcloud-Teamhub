@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Primary SEO -->
+<title>TeamHub — Team Workspace for Nextcloud | Messages, Calendar, Files, Deck &amp; Presence</title>
+<meta name="description" content="TeamHub gives every Nextcloud Team a dedicated home — persistent messages, drag-and-drop widgets, Talk chat, Calendar, Files, Deck, and a built-in Presence module so everyone knows who is working where. Free, open-source, self-hosted.">
+<meta name="keywords" content="Nextcloud team workspace, Nextcloud app, team collaboration, Nextcloud Teams, Nextcloud Circles, self-hosted team portal, open source intranet, team presence, Nextcloud Calendar, Nextcloud Deck, Nextcloud Talk, Nextcloud Files">
+<meta name="author" content="TeamHub">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://tldr.host/teamhub/">
+
+<!-- Open Graph (Facebook, LinkedIn) -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tldr.host/teamhub/">
+<meta property="og:title" content="TeamHub — Team Workspace for Nextcloud">
+<meta property="og:description" content="Free, open-source Nextcloud app that gives every team a dedicated home — messages, widgets, Calendar, Deck, Talk, Files and Presence in one place. Self-hosted.">
+<meta property="og:image" content="https://tldr.host/teamhub/uploads/widgets-deb1e23f.webp">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="TeamHub workspace showing the team home view with widgets, messages and tabs">
+<meta property="og:site_name" content="TeamHub">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter / X Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TeamHub — Team Workspace for Nextcloud">
+<meta name="twitter:description" content="Free Nextcloud app giving every team a proper home — messages, Calendar, Deck, Talk, Files and Presence. Self-hosted &amp; open-source.">
+<meta name="twitter:image" content="https://tldr.host/teamhub/uploads/widgets-deb1e23f.webp">
+
+<!-- Structured Data: SoftwareApplication -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "TeamHub",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Nextcloud",
+  "description": "TeamHub is a free, open-source Nextcloud app that gives every team a dedicated workspace — persistent messages, drag-and-drop widgets, Calendar, Files, Deck, Talk integration and a Presence module showing who is working where.",
+  "url": "https://tldr.host/teamhub/",
+  "downloadUrl": "https://apps.nextcloud.com/apps/teamhub",
+  "softwareVersion": "3.48",
+  "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+  "isAccessibleForFree": true,
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "screenshot": "https://tldr.host/teamhub/uploads/widgets-deb1e23f.webp",
+  "featureList": "Team workspace, Drag-and-drop widgets, Persistent team messages, Activity feed, Calendar integration, Deck board integration, Talk chat integration, Files folder integration, Presence module, Meeting automation, Open developer API",
+  "softwareRequirements": "Nextcloud 32 or later, PHP 8.1–8.4",
+  "keywords": "Nextcloud team workspace, team collaboration, self-hosted, open source, Nextcloud app",
+  "codeRepository": "https://github.com/JustinDoek/nextcloud-teamhub",
+  "author": {
+    "@type": "Person",
+    "name": "Justin Doek"
+  }
+}
+</script>
+
+<!-- Structured Data: FAQPage for key questions -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is TeamHub for Nextcloud?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "TeamHub is a free, open-source Nextcloud app that gives every Nextcloud Team a dedicated home page — with persistent messages, a tab bar linking Talk, Files, Calendar and Deck, drag-and-drop widgets, and a Presence module showing who is working where."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is TeamHub free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. TeamHub is free and open-source under the AGPL-3.0 license. It runs entirely on your own Nextcloud server — no external services, no subscriptions."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does TeamHub relate to Nextcloud Teams (Circles)?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "TeamHub is built on top of Nextcloud Teams. It does not replace it — every team you see in TeamHub is a real Nextcloud Team. TeamHub adds the workspace UI: a home page, tab bar, widget grid, message stream, and Presence module on top of the existing membership infrastructure."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the Presence module?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The Presence module lets team members publish their working location each half-day — office, home, vacation, or non-working. The team Presence tab shows a week grid of who is where. Schedules sync automatically to each member's Nextcloud Calendar."
+      }
+    }
+  ]
+}
+</script>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --g:#2d7d46;--gl:#e8f5ee;--gd:#1e5c33;--g2:#5de88a;
+  --glow:rgba(45,125,70,0.45);--glow2:rgba(45,125,70,0.2);
+  --dark:#0E156B;--dark2:#0d1a2e;--dark3:#112238;
+  --navy:#1e3a5f;
+  --talk:#7c3aed;--cal:#0066cc;--deck:#2d7d46;--files:#1e4076;--circles:#e67e22;
+  --gray-50:#f8f9fa;--gray-100:#f1f3f5;--gray-200:#e4e7eb;
+  --gray-400:#9aa0a6;--gray-600:#5f6368;--gray-700:#3c4043;--gray-900:#111827;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --r:10px;--r2:14px;
+}
+html{scroll-behavior:smooth;}
+body{font-family:var(--font);color:var(--gray-900);background:#fff;line-height:1.6;-webkit-font-smoothing:antialiased;}
+a{color:var(--g);text-decoration:none;}
+
+/* ––– NAV ––– */
+nav{background:var(--dark);padding:0 2rem;display:flex;align-items:center;justify-content:space-between;height:54px;position:sticky;top:0;z-index:100;border-bottom:1px solid rgba(255,255,255,0.06);}
+.nav-l{display:flex;align-items:center;gap:10px;text-decoration:none;}
+.nav-icon{width:30px;height:30px;background:var(--g);border-radius:7px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px var(--glow);}
+.nav-icon svg{width:17px;height:17px;fill:white;}
+.nav-name{color:white;font-size:17px;font-weight:700;}
+.nav-badge{background:rgba(93,232,138,0.12);color:var(--g2);font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;border:1px solid rgba(93,232,138,0.2);}
+.nav-r{display:flex;align-items:center;gap:18px;}
+.nav-link{color:rgba(255,255,255,0.6);font-size:13px;text-decoration:none;font-weight:500;transition:color 0.2s;}
+.nav-link:hover{color:white;}
+.nav-cta{background:var(--g);color:white;text-decoration:none;padding:7px 16px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 0 16px var(--glow2);transition:box-shadow 0.2s,background 0.2s;}
+.nav-cta:hover{background:var(--gd);box-shadow:0 0 24px var(--glow);}
+
+/* ––– HERO (DARK) ––– */
+.hero{background:var(--dark);padding:80px 2rem 0;position:relative;overflow:hidden;}
+.hero-glow-1{position:absolute;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(45,125,70,0.28) 0%,transparent 65%);top:-180px;right:-60px;pointer-events:none;}
+.hero-glow-2{position:absolute;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(30,64,118,0.35) 0%,transparent 65%);bottom:-100px;left:10%;pointer-events:none;}
+.hero-glow-3{position:absolute;width:250px;height:250px;border-radius:50%;background:radial-gradient(circle,rgba(124,58,237,0.18) 0%,transparent 65%);top:60px;left:5%;pointer-events:none;}
+.hero-inner{max-width:1220px;margin:0 auto;display:grid;grid-template-columns:1fr 1.15fr;gap:60px;align-items:center;position:relative;z-index:1;}
+.hero-text{padding-bottom:80px;}
+.eyebrow{display:inline-flex;align-items:center;gap:6px;background:rgba(93,232,138,0.1);color:var(--g2);font-size:12px;font-weight:600;padding:5px 13px;border-radius:20px;margin-bottom:22px;border:1px solid rgba(93,232,138,0.2);text-transform:uppercase;letter-spacing:0.5px;}
+.eyebrow svg{width:13px;height:13px;fill:var(--g2);}
+.hero h1{font-size:clamp(32px,4.5vw,54px);font-weight:800;line-height:1.1;letter-spacing:-0.8px;color:white;margin-bottom:20px;}
+.hero h1 span{background:linear-gradient(135deg,#5de88a,#2d9e5e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.hero-sub{font-size:17px;color:rgba(255,255,255,0.65);max-width:520px;margin-bottom:36px;line-height:1.7;}
+.hero-btns{display:flex;gap:12px;flex-wrap:wrap;}
+.btn-p{background:var(--g);color:white;text-decoration:none;padding:13px 26px;border-radius:8px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;box-shadow:0 0 24px var(--glow),0 4px 12px rgba(0,0,0,0.3);transition:box-shadow 0.2s,transform 0.2s;}
+.btn-p:hover{box-shadow:0 0 36px var(--glow),0 4px 20px rgba(0,0,0,0.4);transform:translateY(-1px);}
+.btn-p svg{width:17px;height:17px;fill:white;}
+.btn-s{background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.8);text-decoration:none;padding:13px 26px;border-radius:8px;font-size:14px;font-weight:500;border:1px solid rgba(255,255,255,0.12);transition:background 0.2s,border-color 0.2s;}
+.btn-s:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2);}
+
+/* Mockup */
+.hero-visual{position:relative;padding-top:20px;}
+.mockup-outer{border-radius:14px;overflow:hidden;box-shadow:0 0 0 1px rgba(93,232,138,0.25),0 0 50px rgba(45,125,70,0.3),0 0 100px rgba(45,125,70,0.12),0 32px 80px rgba(0,0,0,0.5);transform:perspective(1200px) rotateY(-4deg) rotateX(2deg);transition:transform 0.6s ease;animation:floatmock 6s ease-in-out infinite;}
+.mockup-outer:hover{transform:perspective(1200px) rotateY(-1deg) rotateX(0deg);}
+@keyframes floatmock{0%,100%{transform:perspective(1200px) rotateY(-4deg) rotateX(2deg) translateY(0);}50%{transform:perspective(1200px) rotateY(-4deg) rotateX(2deg) translateY(-8px);}}
+.mk-bar{background:#1a2e4a;height:34px;display:flex;align-items:center;padding:0 14px;gap:8px;}
+.mk-dots{display:flex;gap:5px;}
+.mk-dot{width:9px;height:9px;border-radius:50%;}
+.mk-dot.r{background:#ff5f57;}.mk-dot.y{background:#febc2e;}.mk-dot.g{background:#28c840;}
+.mk-title{flex:1;text-align:center;color:rgba(255,255,255,0.4);font-size:10px;}
+.mk-bar-nav{display:flex;gap:7px;}
+.mk-bar-nav span{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,0.2);}
+.mockup-outer img{display:block;width:100%;height:auto;}
+
+/* ––– PROOF BAR ––– */
+.proof{background:var(--dark2);padding:14px 2rem;display:flex;align-items:center;justify-content:center;gap:28px;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,0.06);}
+.proof-item{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;color:rgba(255,255,255,0.5);}
+.proof-dot{width:6px;height:6px;border-radius:50%;background:var(--g2);}
+
+/* ––– SECTION CHROME ––– */
+section{padding:80px 2rem;}
+section.alt{background:var(--gray-50);}
+.inner{max-width:1100px;margin:0 auto;}
+.sh{text-align:center;margin-bottom:52px;}
+.sh-eyebrow{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--g);background:var(--gl);padding:4px 12px;border-radius:20px;margin-bottom:14px;}
+.sh h2{font-size:clamp(26px,3vw,38px);font-weight:800;letter-spacing:-0.5px;margin-bottom:12px;line-height:1.15;}
+.sh p{font-size:16px;color:var(--gray-600);max-width:580px;margin:0 auto;line-height:1.7;}
+
+/* ––– VS TEAMS (trimmed) ––– */
+.compare-brief{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px;}
+.cb-card{background:white;border-radius:var(--r2);border:1.5px solid var(--gray-200);padding:24px 26px;transition:border-color 0.2s,box-shadow 0.2s;}
+.cb-card:hover{border-color:rgba(45,125,70,0.3);box-shadow:0 0 0 4px rgba(45,125,70,0.06),0 4px 20px rgba(0,0,0,0.06);}
+.cb-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;display:flex;align-items:center;gap:7px;}
+.cb-card.teams .cb-tag{color:#a85a1a;}
+.cb-card.hub .cb-tag{color:var(--gd);}
+.cb-tag svg{width:13px;height:13px;}
+.cb-card.teams .cb-tag svg{fill:#a85a1a;}
+.cb-card.hub .cb-tag svg{fill:var(--gd);}
+.cb-card h3{font-size:18px;font-weight:700;margin-bottom:6px;}
+.cb-card p{font-size:14px;color:var(--gray-600);line-height:1.65;}
+.cb-card ul{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:6px;}
+.cb-card ul li{font-size:13px;color:var(--gray-700);display:flex;align-items:flex-start;gap:8px;}
+.cb-card ul li svg{width:13px;height:13px;flex-shrink:0;margin-top:3px;}
+.cb-card.hub ul li svg{fill:var(--g);}
+.cb-card.teams ul li svg{fill:#e67e22;}
+.expand-btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--g);background:var(--gl);border:none;cursor:pointer;padding:8px 14px;border-radius:8px;transition:background 0.2s;}
+.expand-btn:hover{background:#d3ecdb;}
+.expand-btn svg{width:14px;height:14px;fill:var(--g);transition:transform 0.2s;}
+.expand-panel{overflow:hidden;max-height:0;transition:max-height 0.4s ease,opacity 0.3s ease;opacity:0;}
+.expand-panel.open{max-height:800px;opacity:1;}
+
+/* ––– ARCHITECTURE ––– */
+.stack-simple{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:0;}
+.ss-layer{border-radius:12px;padding:18px 22px;border:2px solid transparent;position:relative;}
+.ss-layer-top{background:linear-gradient(135deg,#e8f5ee,#d3ecdb);border-color:var(--g);box-shadow:0 0 0 1px var(--g),0 4px 20px rgba(45,125,70,0.15);}
+.ss-layer-mid{background:linear-gradient(135deg,#eaf2fb,#d8e6f5);border-color:#5b9bd5;}
+.ss-layer-low{background:linear-gradient(135deg,#fef3e7,#fce0c5);border-color:var(--circles);box-shadow:0 0 0 1px var(--circles),0 4px 20px rgba(230,126,34,0.1);}
+.ss-layer-base{background:white;border-color:var(--gray-200);border-style:dashed;}
+.ss-meta{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;opacity:0.7;}
+.ss-layer-top .ss-meta{color:var(--gd);}
+.ss-layer-mid .ss-meta{color:#1a5276;}
+.ss-layer-low .ss-meta{color:#a85a1a;}
+.ss-layer-base .ss-meta{color:var(--gray-400);}
+.ss-layer h4{font-size:16px;font-weight:700;margin-bottom:4px;}
+.ss-layer p{font-size:13px;color:var(--gray-700);line-height:1.55;}
+.ss-arrow{display:flex;justify-content:center;margin:2px 0;color:var(--gray-400);font-size:16px;line-height:1;}
+.ss-apps{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.ss-pill{display:inline-flex;align-items:center;gap:5px;background:white;border:1px solid var(--gray-200);border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:500;color:var(--gray-700);}
+.ss-pill svg{width:11px;height:11px;}
+
+/* ––– FEATURES STRIP ––– */
+.feat-strip-wrap{position:relative;}
+.feat-strip{display:flex;gap:12px;overflow-x:auto;padding:4px 4px 16px;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-behavior:smooth;scroll-snap-type:x mandatory;}
+.feat-strip::-webkit-scrollbar{display:none;}
+.feat-strip-nav{display:flex;justify-content:center;gap:10px;margin-top:4px;margin-bottom:8px;}
+.fsn-btn{width:36px;height:36px;border-radius:50%;border:1.5px solid var(--gray-200);background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color 0.2s,box-shadow 0.2s;}
+.fsn-btn:hover{border-color:var(--g);box-shadow:0 0 0 3px rgba(45,125,70,0.1);}
+.fsn-btn svg{width:16px;height:16px;fill:var(--gray-700);}
+.fsn-dots{display:flex;align-items:center;gap:6px;}
+.fsn-dot{width:6px;height:6px;border-radius:50%;background:var(--gray-200);transition:background 0.2s,width 0.2s;cursor:pointer;}
+.fsn-dot.active{background:var(--g);width:18px;border-radius:3px;}
+.feat-card{flex:0 0 200px;scroll-snap-align:start;background:white;border:1.5px solid var(--gray-200);border-radius:var(--r2);padding:20px 18px;cursor:pointer;transition:border-color 0.2s,box-shadow 0.2s,background 0.2s,color 0.2s;user-select:none;position:relative;}
+.feat-card:hover{border-color:rgba(45,125,70,0.4);box-shadow:0 0 0 3px rgba(45,125,70,0.08),0 6px 24px rgba(45,125,70,0.12);}
+.feat-card.active{background:var(--dark);border-color:var(--g);box-shadow:0 0 0 2px var(--g),0 0 24px var(--glow),0 8px 30px rgba(0,0,0,0.3);}
+.fc-icon{width:38px;height:38px;border-radius:9px;background:var(--gl);display:flex;align-items:center;justify-content:center;margin-bottom:12px;transition:background 0.2s;}
+.fc-icon svg{width:20px;height:20px;fill:var(--g);transition:fill 0.2s;}
+.feat-card.active .fc-icon{background:rgba(45,125,70,0.2);}
+.feat-card.active .fc-icon svg{fill:var(--g2);}
+.fc-title{font-size:13.5px;font-weight:700;margin-bottom:5px;color:var(--gray-900);line-height:1.3;transition:color 0.2s;}
+.fc-sub{font-size:12px;color:var(--gray-600);line-height:1.5;transition:color 0.2s;}
+.feat-card.active .fc-title{color:white;}
+.feat-card.active .fc-sub{color:rgba(255,255,255,0.6);}
+.fc-arrow{position:absolute;bottom:14px;right:14px;width:18px;height:18px;fill:var(--gray-400);transition:fill 0.2s,transform 0.2s;}
+.feat-card.active .fc-arrow{fill:var(--g2);transform:rotate(90deg);}
+
+/* Feature detail panel */
+.feat-detail{overflow:hidden;max-height:0;transition:max-height 0.5s ease,opacity 0.35s ease;opacity:0;margin-top:4px;}
+.feat-detail.open{max-height:700px;opacity:1;}
+.feat-detail-inner{background:var(--dark);border:1px solid rgba(45,125,70,0.25);border-radius:var(--r2);padding:28px 32px;box-shadow:0 0 40px rgba(45,125,70,0.1);display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start;}
+.fd-text{}
+.fd-eyebrow{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:var(--g2);margin-bottom:10px;}
+.fd-title{font-size:22px;font-weight:800;color:white;margin-bottom:10px;letter-spacing:-0.3px;}
+.fd-desc{font-size:14px;color:rgba(255,255,255,0.65);line-height:1.7;margin-bottom:20px;}
+.fd-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.fd-point{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:11px 13px;}
+.fd-point h5{font-size:12px;font-weight:700;color:white;margin-bottom:4px;display:flex;align-items:center;gap:6px;}
+.fd-point h5::before{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--g2);flex-shrink:0;}
+.fd-point p{font-size:11.5px;color:rgba(255,255,255,0.5);line-height:1.55;}
+.fd-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;}
+.fd-tag{background:rgba(45,125,70,0.15);color:var(--g2);font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;border:1px solid rgba(45,125,70,0.25);}
+/* Screenshot side */
+.fd-screenshot{position:relative;}
+.fd-screenshot-frame{border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);box-shadow:0 0 0 1px rgba(45,125,70,0.2),0 0 30px rgba(45,125,70,0.15),0 16px 40px rgba(0,0,0,0.4);}
+.fd-screenshot-bar{background:#1a2e4a;height:26px;display:flex;align-items:center;padding:0 10px;gap:6px;}
+.fd-screenshot-dots{display:flex;gap:4px;}
+.fd-screenshot-dot{width:7px;height:7px;border-radius:50%;}
+.fd-screenshot img{display:block;width:100%;height:220px;object-fit:cover;}
+.fd-screenshot-label{margin-top:10px;font-size:11px;color:rgba(255,255,255,0.35);text-align:center;}
+@media(max-width:800px){
+  .feat-detail-inner{grid-template-columns:1fr;}
+  .feat-detail.open{max-height:1000px;}
+}
+
+/* ––– INTEGRATIONS ––– */
+.int-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;}
+.int-pill{display:flex;align-items:center;gap:12px;background:white;border:1.5px solid var(--gray-200);border-radius:var(--r);padding:14px 16px;transition:border-color 0.2s,box-shadow 0.2s;}
+.int-pill:hover{border-color:rgba(45,125,70,0.3);box-shadow:0 0 0 3px rgba(45,125,70,0.06);}
+.int-pill-name{font-size:13.5px;font-weight:600;color:var(--gray-900);}
+.int-pill-desc{font-size:11.5px;color:var(--gray-400);margin-top:1px;}
+.int-pill-api{display:flex;align-items:center;gap:12px;background:var(--gl);border:1.5px dashed var(--g);border-radius:var(--r);padding:14px 16px;}
+.int-note{margin-top:16px;background:var(--gl);border:1px solid rgba(45,125,70,0.2);border-radius:var(--r);padding:12px 16px;font-size:13px;color:var(--gd);display:flex;align-items:center;gap:8px;}
+.int-note svg{width:15px;height:15px;fill:var(--g);flex-shrink:0;}
+
+/* ––– USE CASES ––– */
+.uc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;}
+.uc-card{background:white;border:1.5px solid var(--gray-200);border-radius:var(--r);padding:22px 22px;transition:border-color 0.2s,box-shadow 0.2s;}
+.uc-card:hover{border-color:rgba(45,125,70,0.35);box-shadow:0 0 0 4px rgba(45,125,70,0.06),0 6px 24px rgba(45,125,70,0.1);}
+.uc-icon{width:38px;height:38px;border-radius:8px;background:var(--gl);display:flex;align-items:center;justify-content:center;margin-bottom:14px;}
+.uc-icon svg{width:20px;height:20px;fill:var(--g);}
+.uc-card h4{font-size:15px;font-weight:700;margin-bottom:6px;}
+.uc-card p{font-size:13.5px;color:var(--gray-600);line-height:1.6;}
+
+/* ––– DEV SECTION ––– */
+.dev{background:var(--dark);padding:80px 2rem;position:relative;overflow:hidden;}
+.dev::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(93,232,138,0.035) 1px,transparent 1px),linear-gradient(90deg,rgba(93,232,138,0.035) 1px,transparent 1px);background-size:44px 44px;}
+.dev::after{content:'';position:absolute;top:-200px;right:-200px;width:700px;height:700px;background:radial-gradient(circle,rgba(45,125,70,0.18) 0%,transparent 65%);pointer-events:none;}
+.dev-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:start;position:relative;z-index:1;}
+.dev-eyebrow{display:inline-block;background:rgba(93,232,138,0.12);border:1px solid rgba(93,232,138,0.2);color:var(--g2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;padding:3px 10px;border-radius:20px;margin-bottom:14px;}
+.dev h2{font-size:30px;font-weight:800;color:white;margin-bottom:12px;letter-spacing:-0.4px;}
+.dev h2 span{color:var(--g2);}
+.dev-p{font-size:15px;color:rgba(255,255,255,0.65);line-height:1.7;margin-bottom:20px;}
+.dev-types{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px;}
+.dev-type{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:6px;padding:7px 13px;font-size:12px;color:rgba(255,255,255,0.8);}
+.dev-steps{list-style:none;display:flex;flex-direction:column;gap:14px;}
+.dev-step{display:flex;gap:12px;align-items:flex-start;}
+.dev-num{width:24px;height:24px;min-width:24px;border-radius:50%;background:var(--g);color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px;box-shadow:0 0 10px var(--glow2);}
+.dev-step-t{font-size:13.5px;color:rgba(255,255,255,0.7);line-height:1.6;}
+.dev-step-t strong{color:white;}
+.code-box{background:#040d18;border:1px solid rgba(93,232,138,0.15);border-radius:10px;padding:22px;box-shadow:0 0 30px rgba(45,125,70,0.1),inset 0 1px 0 rgba(93,232,138,0.08);}
+.code-box pre{font-size:11.5px;line-height:1.75;color:#a8d8b0;white-space:pre;overflow-x:auto;font-family:'Fira Mono','Menlo','Consolas',monospace;}
+.cg{color:#5de88a;}.cb{color:#79b8ff;}.co{color:#ffa657;}.cm{color:rgba(255,255,255,0.35);}.cw{color:white;}
+
+/* ––– CTA ––– */
+.cta{background:var(--dark);padding:88px 2rem;text-align:center;position:relative;overflow:hidden;}
+.cta::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:700px;height:700px;background:radial-gradient(circle,rgba(45,125,70,0.25) 0%,transparent 60%);pointer-events:none;}
+.cta-inner{position:relative;z-index:1;}
+.cta h2{font-size:clamp(28px,3.5vw,44px);font-weight:800;color:white;margin-bottom:14px;letter-spacing:-0.5px;}
+.cta h2 span{background:linear-gradient(135deg,#5de88a,#2d9e5e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.cta p{font-size:17px;color:rgba(255,255,255,0.65);max-width:480px;margin:0 auto 32px;line-height:1.7;}
+.cta-btns{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;}
+.btn-w{background:white;color:var(--g);text-decoration:none;padding:13px 30px;border-radius:8px;font-size:14px;font-weight:700;display:inline-flex;align-items:center;gap:8px;box-shadow:0 0 30px rgba(255,255,255,0.15);transition:box-shadow 0.2s,transform 0.2s;}
+.btn-w:hover{box-shadow:0 0 40px rgba(255,255,255,0.25);transform:translateY(-1px);}
+.btn-w svg{width:17px;height:17px;}
+.btn-wo{background:transparent;color:white;border:1.5px solid rgba(255,255,255,0.25);text-decoration:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;transition:border-color 0.2s;}
+.btn-wo:hover{border-color:rgba(255,255,255,0.5);}
+.cta-note{font-size:12px;color:rgba(255,255,255,0.35);margin-top:18px;position:relative;z-index:1;}
+
+footer{background:#030a13;color:rgba(255,255,255,0.4);padding:24px 2rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;border-top:1px solid rgba(255,255,255,0.06);}
+footer p{font-size:12.5px;}
+footer a{color:rgba(255,255,255,0.4);text-decoration:none;font-size:12.5px;margin-left:16px;transition:color 0.2s;}
+footer a:hover{color:white;}
+
+/* ––– WHATS NEW ––– */
+.whats-new{background:var(--dark2);border-bottom:1px solid rgba(93,232,138,0.12);padding:10px 2rem;}
+.wn-inner{max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.wn-badge{background:var(--g);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;}
+.wn-items{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.wn-item{display:flex;align-items:center;gap:5px;font-size:12px;color:rgba(255,255,255,0.55);font-weight:500;}
+.wn-item svg{opacity:0.6;flex-shrink:0;}
+.wn-dot{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,0.2);flex-shrink:0;}
+@media(max-width:600px){.wn-items{gap:8px;}.wn-dot{display:none;}}
+
+/* ––– LIVE STATS ––– */
+.live-stats{background:var(--dark);border-bottom:1px solid rgba(255,255,255,0.06);padding:48px 2rem;}
+.ls-inner{max-width:860px;margin:0 auto;display:flex;align-items:center;justify-content:center;gap:0;flex-wrap:wrap;position:relative;}
+.ls-item{flex:1;min-width:180px;text-align:center;padding:0 40px;}
+.ls-value{font-size:clamp(36px,5vw,56px);font-weight:800;letter-spacing:-2px;color:white;font-variant-numeric:tabular-nums;line-height:1;margin-bottom:8px;background:linear-gradient(135deg,#fff 40%,rgba(93,232,138,0.85));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.ls-label{font-size:13px;color:rgba(255,255,255,0.45);font-weight:500;letter-spacing:0.2px;}
+.ls-divider{width:1px;height:60px;background:rgba(255,255,255,0.08);flex-shrink:0;}
+.ls-note{width:100%;text-align:center;font-size:11px;color:rgba(255,255,255,0.2);margin-top:28px;letter-spacing:0.3px;}
+@media(max-width:600px){.ls-divider{display:none;}.ls-item{flex:0 0 100%;padding:16px 0;}.ls-note{margin-top:8px;}}
+
+
+/* ––– PRESENCE SECTION ––– */
+.presence{background:var(--dark);padding:80px 2rem;position:relative;overflow:hidden;}
+.presence::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle at 70% 50%,rgba(45,125,70,0.12) 0%,transparent 60%),radial-gradient(circle at 20% 30%,rgba(30,64,118,0.18) 0%,transparent 50%);pointer-events:none;}
+.presence-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center;position:relative;z-index:1;}
+.pres-eyebrow{display:inline-block;background:rgba(93,232,138,0.12);border:1px solid rgba(93,232,138,0.2);color:var(--g2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;padding:3px 10px;border-radius:20px;margin-bottom:16px;}
+.presence h2{font-size:clamp(26px,3.2vw,38px);font-weight:800;color:white;letter-spacing:-0.5px;line-height:1.15;margin-bottom:14px;}
+.presence h2 span{color:var(--g2);}
+.pres-p{font-size:15px;color:rgba(255,255,255,0.65);line-height:1.75;margin-bottom:28px;}
+.pres-features{display:flex;flex-direction:column;gap:14px;margin-bottom:28px;}
+.pres-feat{display:flex;gap:14px;align-items:flex-start;}
+.pres-feat-icon{width:34px;height:34px;min-width:34px;border-radius:8px;background:rgba(45,125,70,0.18);border:1px solid rgba(45,125,70,0.3);display:flex;align-items:center;justify-content:center;}
+.pres-feat-icon svg{width:17px;height:17px;fill:var(--g2);}
+.pres-feat-text{}
+.pres-feat-text strong{font-size:13.5px;color:white;display:block;margin-bottom:3px;}
+.pres-feat-text span{font-size:12.5px;color:rgba(255,255,255,0.5);line-height:1.5;}
+.pres-link{display:inline-flex;align-items:center;gap:7px;background:var(--g);color:white;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 0 20px var(--glow2);transition:box-shadow 0.2s,transform 0.2s;}
+.pres-link:hover{box-shadow:0 0 30px var(--glow);transform:translateY(-1px);}
+.pres-link svg{width:15px;height:15px;fill:white;}
+.pres-link-s{display:inline-flex;align-items:center;gap:7px;color:rgba(255,255,255,0.5);text-decoration:none;font-size:13px;font-weight:500;margin-left:16px;transition:color 0.2s;}
+.pres-link-s:hover{color:white;}
+/* Presence visual — week grid mockup */
+.pres-visual{position:relative;}
+.pres-grid-card{background:#0d1a2e;border:1px solid rgba(93,232,138,0.2);border-radius:14px;padding:20px;box-shadow:0 0 0 1px rgba(93,232,138,0.1),0 0 40px rgba(45,125,70,0.15),0 24px 60px rgba(0,0,0,0.5);}
+.pres-grid-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.pres-grid-title{font-size:13px;font-weight:700;color:white;}
+.pres-grid-week{font-size:11px;color:rgba(255,255,255,0.35);display:flex;align-items:center;gap:6px;}
+.pres-grid-week svg{width:12px;height:12px;fill:rgba(255,255,255,0.35);}
+.pres-days{display:grid;grid-template-columns:90px repeat(5,1fr);gap:4px;font-size:10.5px;}
+.pres-day-label{color:rgba(255,255,255,0.35);font-weight:600;text-align:center;padding:4px 0;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;}
+.pres-member-label{color:rgba(255,255,255,0.5);font-size:11px;display:flex;align-items:center;gap:6px;padding:2px 0;}
+.pres-member-label .pm-av{width:20px;height:20px;border-radius:50%;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0;}
+.pres-cell{border-radius:5px;height:22px;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:600;letter-spacing:0.2px;}
+.pc-office{background:rgba(45,125,70,0.25);color:#5de88a;border:1px solid rgba(45,125,70,0.35);}
+.pc-home{background:rgba(30,64,118,0.35);color:#79b8ff;border:1px solid rgba(30,64,118,0.5);}
+.pc-vacation{background:rgba(230,126,34,0.2);color:#ffa657;border:1px solid rgba(230,126,34,0.3);}
+.pc-off{background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.06);}
+.pres-legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);}
+.pres-legend-item{display:flex;align-items:center;gap:5px;font-size:10.5px;color:rgba(255,255,255,0.4);}
+.pres-legend-dot{width:8px;height:8px;border-radius:2px;}
+@media(max-width:900px){.presence-inner{grid-template-columns:1fr;gap:40px;}}
+
+.reveal.visible{opacity:1;transform:none;}
+.reveal-d1{transition-delay:0.07s;}.reveal-d2{transition-delay:0.14s;}.reveal-d3{transition-delay:0.21s;}
+
+@media(max-width:900px){
+  .hero-inner{grid-template-columns:1fr;gap:36px;}
+  .hero{text-align:left;padding:60px 1.25rem 0;}
+  .hero-text{padding-bottom:0;}
+  .hero-visual{overflow:hidden;}
+  .mockup-outer{transform:none;animation:none;}
+  .compare-brief{grid-template-columns:1fr;}
+  .dev-inner{grid-template-columns:1fr;}
+}
+@media(max-width:640px){
+  section{padding:56px 1.25rem;}
+  .nav-r .nav-link{display:none;}
+  .feat-card{flex:0 0 170px;}
+  .feat-detail-inner{padding:20px 18px;}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-l">
+    <div class="nav-icon"><svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"></path></svg></div>
+    <span class="nav-name">TeamHub</span>
+    <span class="nav-badge">Nextcloud App</span>
+  </a>
+  <div class="nav-r">
+    <a href="#vs-teams" class="nav-link">vs Nextcloud Teams</a>
+    <a href="#features" class="nav-link">Features</a>
+    <a href="#presence" class="nav-link">Presence</a>
+    <a href="#stack" class="nav-link">Architecture</a>
+    <a href="#developers" class="nav-link">Developers</a>
+    <a href="https://tldr.host/teamhub/docs" class="nav-cta">Docs</a>
+    <a href="https://github.com/JustinDoek/nextcloud-teamhub" class="nav-cta">View on GitHub</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-glow-1"></div>
+  <div class="hero-glow-2"></div>
+  <div class="hero-glow-3"></div>
+  <div class="hero-inner">
+    <div class="hero-text">
+      <div class="eyebrow"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg>Free &amp; open source · Self-hosted</div>
+      <h1>The team workspace your <span>Nextcloud</span> was missing</h1>
+      <p class="hero-sub">TeamHub turns every Nextcloud Team into a real workspace — messages, activity feed, meeting automation, shared file widgets, Presence module, and one-click access to Talk, Files, Calendar and Deck. Now in English, German, Danish, Dutch and French.</p>
+      <div class="hero-btns">
+        <a href="https://github.com/JustinDoek/nextcloud-teamhub" class="btn-p">
+          <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"></path></svg>
+          Get on GitHub
+        </a>
+        <a href="https://apps.nextcloud.com/apps/teamhub" class="btn-s" style="background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.15);display:inline-flex;align-items:center;gap:8px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"></path></svg>
+          Nextcloud App Store
+        </a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="mockup-outer">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot r"></div><div class="mk-dot y"></div><div class="mk-dot g"></div></div>
+          <div class="mk-title">TeamHub · Nextcloud</div>
+          <div class="mk-bar-nav"><span></span><span></span><span></span></div>
+        </div>
+        <img src="uploads/widgets-deb1e23f.webp" alt="TeamHub workspace" style="display:block;width:100%;height:auto;">
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROOF BAR -->
+<div class="proof">
+  <div class="proof-item"><div class="proof-dot"></div>Runs on your own Nextcloud server</div>
+  <div class="proof-item"><div class="proof-dot"></div>Nextcloud 32 – 34</div>
+  <div class="proof-item"><div class="proof-dot"></div>PHP 8.1 – 8.4</div>
+  <div class="proof-item"><div class="proof-dot"></div>PostgreSQL &amp; MySQL/MariaDB</div>
+  <div class="proof-item"><div class="proof-dot"></div>AGPL-3.0</div>
+  <div class="proof-item"><div class="proof-dot"></div>WCAG 2.2 AA</div>
+  <div class="proof-item"><div class="proof-dot"></div>🇩🇪 🇩🇰 🇳🇱 🇫🇷 translated</div>
+</div>
+
+<!-- WHATS NEW BANNER -->
+<div class="whats-new">
+  <div class="wn-inner">
+    <span class="wn-badge">New</span>
+    <div class="wn-items">
+      <span class="wn-item"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>WCAG 2.2 AA tested</span>
+      <span class="wn-dot"></span>
+      <span class="wn-item"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg>DE · DA · NL · FR</span>
+      <span class="wn-dot"></span>
+      <span class="wn-item"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>Meeting automation</span>
+      <span class="wn-dot"></span>
+      <span class="wn-item"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Presence module</span>
+    </div>
+  </div>
+</div>
+
+<!-- LIVE STATS -->
+<div class="live-stats" id="live-stats">
+  <div class="ls-inner">
+    <div class="ls-item">
+      <div class="ls-value" id="stat-installs">—</div>
+      <div class="ls-label">Active installations</div>
+    </div>
+    <div class="ls-divider"></div>
+    <div class="ls-item">
+      <div class="ls-value" id="stat-teams">—</div>
+      <div class="ls-label">Teams in use</div>
+    </div>
+    <div class="ls-divider"></div>
+    <div class="ls-item">
+      <div class="ls-value" id="stat-users">—</div>
+      <div class="ls-label">Users across all instances</div>
+    </div>
+    <div class="ls-note">Live · updated every 24 h from opt-in telemetry</div>
+  </div>
+</div>
+
+<!-- VS NEXTCLOUD TEAMS -->
+<section id="vs-teams" class="alt">
+  <div class="inner">
+    <div class="sh reveal">
+      <div class="sh-eyebrow">How it relates to Nextcloud Teams</div>
+      <h2>Built on Nextcloud Teams — a different layer</h2>
+      <p>Nextcloud Teams manages who belongs where. TeamHub is the workspace built on top of it. Complementary, not competing.</p>
+    </div>
+    <div class="compare-brief reveal">
+      <div class="cb-card teams">
+        <div class="cb-tag"><svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5z"></path></svg>Nextcloud Teams (Circles)</div>
+        <h3>The membership backbone</h3>
+        <p>Answers <em>"who is in this group?"</em> — ships with Nextcloud, lives inside Contacts.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"></path></svg>Creates groups and provides sharing targets across all apps</li>
+          <li><svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"></path></svg>Member levels, federation, visibility settings</li>
+          <li><svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"></path></svg>No team home page, no message stream, no workspace UI</li>
+        </ul>
+      </div>
+      <div class="cb-card hub">
+        <div class="cb-tag"><svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"></path></svg>TeamHub</div>
+        <h3>The team workspace</h3>
+        <p>Answers <em>"where does this team work?"</em> — installs alongside, wraps Talk + Files + Calendar + Deck.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"></path></svg>Dedicated home page, tab bar, widget grid per team</li>
+          <li><svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"></path></svg>Auto-provisions Talk room, Files folder, Calendar, Deck board</li>
+          <li><svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"></path></svg>Reuses NC Teams membership — same teams, same members</li>
+        </ul>
+      </div>
+    </div>
+    <div style="text-align:center;" class="reveal">
+      <button class="expand-btn" onclick="toggleExpand('vs-detail',this)">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"></path></svg>
+        Full comparison
+      </button>
+    </div>
+    <div class="expand-panel" id="vs-detail" style="margin-top:20px;">
+      <div style="background:white;border:1.5px solid var(--gray-200);border-radius:var(--r2);padding:28px;">
+        <p style="font-size:14px;color:var(--gray-700);line-height:1.7;margin-bottom:14px;"><strong>Nextcloud Teams</strong> provides the list of people that any other Nextcloud app can share with. It surfaces as a sub-section inside the Contacts app and in the Unified Search and Sharing menus of other apps. It has no dedicated navigation entry of its own.</p>
+        <p style="font-size:14px;color:var(--gray-700);line-height:1.7;margin-bottom:14px;"><strong>TeamHub</strong> does not replace Nextcloud Teams. Every team you see in TeamHub is a real Nextcloud Team in the database — accessible from Contacts and shareable from any other app. Removing TeamHub does not remove your teams or shares; it just removes the dedicated workspace UI built on top of them.</p>
+        <p style="font-size:14px;color:var(--gray-700);line-height:1.7;">TeamHub adds: a dedicated app entry in the top navigation, automatic provisioning of a Talk room + Files folder + Calendar + Deck board per team, a tab bar linking to those resources, a persistent message stream, a 30-day activity feed, a configurable widget grid, a browse-teams directory, and an open API for other apps to register widgets or tabs.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="stack">
+  <div class="inner">
+    <div class="sh reveal">
+      <div class="sh-eyebrow">Architecture</div>
+      <h2>A layer on top of the apps you already run</h2>
+      <p>TeamHub composes Talk, Files, Calendar and Deck into one team workspace. Each integration is auto-detected — missing apps are simply hidden.</p>
+    </div>
+    <div class="stack-simple">
+      <div class="ss-layer ss-layer-top reveal">
+        <div class="ss-meta">Layer 3 · Workspace UI</div>
+        <h4>TeamHub</h4>
+        <p>Tab bar · Message stream · Activity feed · Widget grid · Browse Teams · Admin settings · Integration API</p>
+      </div>
+      <div class="ss-arrow reveal">▲</div>
+      <div class="ss-layer ss-layer-mid reveal">
+        <div class="ss-meta">Layer 2 · Collaboration apps (auto-detected)</div>
+        <h4>Nextcloud Talk · Files · Calendar · Deck · IntraVox</h4>
+        <div class="ss-apps">
+          <span class="ss-pill"><svg viewBox="0 0 24 24" fill="#7c3aed"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"></path></svg>Talk room</span>
+          <span class="ss-pill"><svg viewBox="0 0 24 24" fill="#1e4076"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"></path></svg>Files folder</span>
+          <span class="ss-pill"><svg viewBox="0 0 24 24" fill="#0066cc"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"></path></svg>Calendar</span>
+          <span class="ss-pill"><svg viewBox="0 0 24 24" fill="#2d7d46"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"></path></svg>Deck board</span>
+          <span class="ss-pill"><svg viewBox="0 0 24 24" fill="#1a5276"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"></path></svg>IntraVox pages</span>
+        </div>
+      </div>
+      <div class="ss-arrow reveal">▲</div>
+      <div class="ss-layer ss-layer-low reveal">
+        <div class="ss-meta">Layer 1 · Membership backbone</div>
+        <h4>Nextcloud Teams (Circles)</h4>
+        <p>The group primitive — who belongs to which team, with what role. TeamHub never invents its own user-group model.</p>
+      </div>
+      <div class="ss-arrow reveal">▲</div>
+      <div class="ss-layer ss-layer-base reveal">
+        <div class="ss-meta">Foundation</div>
+        <h4 style="color:var(--gray-700)">Your Nextcloud server</h4>
+        <p>Nextcloud 32 – 34 · PHP 8.1 – 8.4 · PostgreSQL or MySQL/MariaDB · Self-hosted · AGPL-3.0 · WCAG 2.2 AA</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES STRIP -->
+<section id="features" class="alt">
+  <div class="inner">
+    <div class="sh reveal">
+      <div class="sh-eyebrow">What TeamHub does</div>
+      <h2>Eleven features, one workspace</h2>
+      <p>Click any feature to see how it works.</p>
+    </div>
+    <div class="feat-strip-wrap reveal">
+      <div class="feat-strip" id="feat-strip">
+        <div class="feat-card" data-feat="0" onclick="selectFeat(0,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"></path></svg></div>
+          <div class="fc-title">Team workspace</div>
+          <div class="fc-sub">Dedicated home page per team with a full tab bar</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="1" onclick="selectFeat(1,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M3 5h8v6H3V5zm10 8h8v6h-8v-6zM3 13h8v6H3v-6zm10-8h8v6h-8V5z"></path></svg></div>
+          <div class="fc-title">Widget grid</div>
+          <div class="fc-sub">Drag-and-drop widgets — calendar, tasks, files, members</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="2" onclick="selectFeat(2,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"></path></svg></div>
+          <div class="fc-title">Team messages</div>
+          <div class="fc-sub">Persistent announcement board with polls &amp; threads</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="3" onclick="selectFeat(3,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"></path></svg></div>
+          <div class="fc-title">Activity feed</div>
+          <div class="fc-sub">30-day timeline across files, calendar, Deck &amp; members</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="4" onclick="selectFeat(4,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg></div>
+          <div class="fc-title">Team management</div>
+          <div class="fc-sub">Invite, roles, logos, ownership transfer</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="5" onclick="selectFeat(5,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></div>
+          <div class="fc-title">Browse &amp; join</div>
+          <div class="fc-sub">Directory of all visible teams with search &amp; one-click join</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="6" onclick="selectFeat(6,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"></path></svg></div>
+          <div class="fc-title">Custom tabs</div>
+          <div class="fc-sub">Add any URL as a tab, disable apps per team</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="7" onclick="selectFeat(7,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"></path></svg></div>
+          <div class="fc-title">Admin governance</div>
+          <div class="fc-sub">Restrict creation, invitation types, audit &amp; repair</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="8" onclick="selectFeat(8,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"></path></svg></div>
+          <div class="fc-title">Open API</div>
+          <div class="fc-sub">Any Nextcloud app can register widgets or tab iframes</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="9" onclick="selectFeat(9,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"></path></svg></div>
+          <div class="fc-title">Meeting automation</div>
+          <div class="fc-sub">Schedule, agenda templates &amp; auto Talk room creation</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+        <div class="feat-card" data-feat="10" onclick="selectFeat(10,this)">
+          <div class="fc-icon"><svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 6H6v-2h12v2zm-4 4H6v-2h8v2z"></path></svg></div>
+          <div class="fc-title">Shared files widget</div>
+          <div class="fc-sub">Pinned team files &amp; recent uploads directly on the home view</div>
+          <svg class="fc-arrow" viewBox="0 0 24 24"><path d="M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z"></path></svg>
+        </div>
+      </div>
+
+      <!-- Strip navigation -->
+      <div class="feat-strip-nav">
+        <button class="fsn-btn" id="fsn-prev" onclick="stripScroll(-1)" title="Previous">
+          <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"></path></svg>
+        </button>
+        <div class="fsn-dots" id="fsn-dots"></div>
+        <button class="fsn-btn" id="fsn-next" onclick="stripScroll(1)" title="Next">
+          <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"></path></svg>
+        </button>
+      </div>
+
+      <div class="feat-detail" id="feat-detail">
+        <div class="feat-detail-inner" id="feat-detail-inner"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRESENCE MODULE -->
+<section id="presence" class="presence" aria-labelledby="presence-heading">
+  <div class="presence-inner">
+    <div class="reveal">
+      <div class="pres-eyebrow">New feature</div>
+      <h2 id="presence-heading">Know where your team is, <span>right now</span></h2>
+      <p class="pres-p">The Presence module lets every team member publish their working location each half-day — office, home, vacation, or unavailable. The team view collects it all into one live grid, and your schedule syncs automatically to Nextcloud Calendar.</p>
+      <div class="pres-features">
+        <div class="pres-feat">
+          <div class="pres-feat-icon">
+            <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+          </div>
+          <div class="pres-feat-text">
+            <strong>Team week grid</strong>
+            <span>See everyone's Morning and Afternoon status across Mon – Sun. Same status merges into one block; mixed types split to two.</span>
+          </div>
+        </div>
+        <div class="pres-feat">
+          <div class="pres-feat-icon">
+            <svg viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+          </div>
+          <div class="pres-feat-text">
+            <strong>Calendar sync</strong>
+            <span>Your schedule writes to your default Nextcloud Calendar as VEVENT entries — free for Office / Home, busy for Vacation / Holiday.</span>
+          </div>
+        </div>
+        <div class="pres-feat">
+          <div class="pres-feat-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+          </div>
+          <div class="pres-feat-text">
+            <strong>Office locations</strong>
+            <span>Admins define a building → floor → room hierarchy. Members pick a room when setting an Office status.</span>
+          </div>
+        </div>
+        <div class="pres-feat">
+          <div class="pres-feat-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+          </div>
+          <div class="pres-feat-text">
+            <strong>Admin-locked holidays</strong>
+            <span>Nextcloud admins add holiday dates — members see a locked cell and cannot override it. Affects every user's schedule and calendar.</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <a href="https://tldr.host/teamhub/docs/user/presence.html" class="pres-link">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+          Read the docs
+        </a>
+        <a href="https://tldr.host/teamhub/docs/nextcloud-admin/presence.html" class="pres-link-s">Admin setup →</a>
+      </div>
+    </div>
+
+    <!-- Presence week grid mockup -->
+    <div class="pres-visual reveal reveal-d1" aria-hidden="true">
+      <div class="pres-grid-card">
+        <div class="pres-grid-header">
+          <div class="pres-grid-title">Team Presence — week view</div>
+          <div class="pres-grid-week">
+            <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+            May 19 – 23
+            <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+          </div>
+        </div>
+        <div class="pres-days">
+          <!-- Header row -->
+          <div></div>
+          <div class="pres-day-label">Mon</div>
+          <div class="pres-day-label">Tue</div>
+          <div class="pres-day-label">Wed</div>
+          <div class="pres-day-label">Thu</div>
+          <div class="pres-day-label">Fri</div>
+          <!-- Member 1 -->
+          <div class="pres-member-label"><div class="pm-av" style="background:#2d7d46">JD</div> Justin</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-home">Home</div>
+          <!-- Member 2 -->
+          <div class="pres-member-label"><div class="pm-av" style="background:#0066cc">ML</div> Maria</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-vacation">Vacation</div>
+          <div class="pres-cell pc-vacation">Vacation</div>
+          <!-- Member 3 -->
+          <div class="pres-member-label"><div class="pm-av" style="background:#7c3aed">TK</div> Thomas</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-off">—</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-office">Office</div>
+          <!-- Member 4 -->
+          <div class="pres-member-label"><div class="pm-av" style="background:#e67e22">AV</div> Anna</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-office">Office</div>
+          <div class="pres-cell pc-home">Home</div>
+          <div class="pres-cell pc-off">—</div>
+        </div>
+        <div class="pres-legend">
+          <div class="pres-legend-item"><div class="pres-legend-dot" style="background:#5de88a;"></div>Office</div>
+          <div class="pres-legend-item"><div class="pres-legend-dot" style="background:#79b8ff;"></div>Home</div>
+          <div class="pres-legend-item"><div class="pres-legend-dot" style="background:#ffa657;"></div>Vacation</div>
+          <div class="pres-legend-item"><div class="pres-legend-dot" style="background:rgba(255,255,255,0.12);"></div>No entry</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INTEGRATIONS -->
+<section id="integrations">
+  <div class="inner">
+    <div class="sh reveal">
+      <div class="sh-eyebrow">Integrations</div>
+      <h2>Auto-detected. Zero configuration.</h2>
+      <p>TeamHub checks what's installed and turns on the matching tabs and widgets. Nothing to set up — missing apps are simply hidden.</p>
+    </div>
+    <div class="int-grid reveal">
+      <div class="int-pill">
+        <svg viewBox="0 0 24 24" fill="#e67e22" width="22" height="22" style="flex-shrink:0"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5z"></path></svg>
+        <div><div class="int-pill-name">Nextcloud Teams</div><div class="int-pill-desc">Membership backbone — required</div></div>
+      </div>
+      <div class="int-pill">
+        <svg viewBox="0 0 24 24" fill="#0066cc" width="22" height="22" style="flex-shrink:0"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"></path></svg>
+        <div><div class="int-pill-name">Calendar</div><div class="int-pill-desc">Events + meeting scheduler</div></div>
+      </div>
+      <div class="int-pill">
+        <svg viewBox="0 0 24 24" fill="#2d7d46" width="22" height="22" style="flex-shrink:0"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"></path></svg>
+        <div><div class="int-pill-name">Deck</div><div class="int-pill-desc">Tasks + board view</div></div>
+      </div>
+      <div class="int-pill">
+        <svg viewBox="0 0 24 24" fill="#1e4076" width="22" height="22" style="flex-shrink:0"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"></path></svg>
+        <div><div class="int-pill-name">Files</div><div class="int-pill-desc">Shared team folder</div></div>
+      </div>
+      <div class="int-pill">
+        <svg viewBox="0 0 24 24" fill="#7c3aed" width="22" height="22" style="flex-shrink:0"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"></path></svg>
+        <div><div class="int-pill-name">Talk</div><div class="int-pill-desc">Team chat + video calls</div></div>
+      </div>
+      <div class="int-pill-api">
+        <svg viewBox="0 0 24 24" fill="#2d7d46" width="22" height="22" style="flex-shrink:0"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"></path></svg>
+        <div><div class="int-pill-name" style="color:var(--gd)">Your app via API</div><div class="int-pill-desc" style="color:var(--g)">Register widgets or tab iframes</div></div>
+      </div>
+    </div>
+    <div class="int-note reveal" style="margin-top:16px;">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg>
+      Only Nextcloud Teams is required. All other integrations are auto-detected.
+    </div>
+  </div>
+</section>
+
+<!-- USE CASES -->
+<section class="alt">
+  <div class="inner">
+    <div class="sh reveal">
+      <div class="sh-eyebrow">Who it's for</div>
+      <h2>Built for teams that already live in Nextcloud</h2>
+    </div>
+    <div class="uc-grid">
+      <div class="uc-card reveal reveal-d1">
+        <div class="uc-icon"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path></svg></div>
+        <h4>Project teams</h4>
+        <p>Shared tasks, files, recurring meetings and status updates — all in one place.</p>
+      </div>
+      <div class="uc-card reveal reveal-d2">
+        <div class="uc-icon"><svg viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"></path></svg></div>
+        <h4>Departments</h4>
+        <p>A stable home with resources, announcements and team-wide activity for long-running groups.</p>
+      </div>
+      <div class="uc-card reveal reveal-d3">
+        <div class="uc-icon"><svg viewBox="0 0 24 24"><path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z"></path></svg></div>
+        <h4>Boards &amp; committees</h4>
+        <p>Closed membership, polls for decisions, and an activity trail for governance.</p>
+      </div>
+      <div class="uc-card reveal reveal-d1">
+        <div class="uc-icon"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path></svg></div>
+        <h4>External collaborations</h4>
+        <p>Federated teams across multiple Nextcloud servers, with TeamHub as the workspace UI.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEVELOPER API -->
+<section id="developers" class="dev">
+  <div class="dev-inner">
+    <div>
+      <div class="dev-eyebrow">Developer API</div>
+      <h2>Built for <span>extensibility</span></h2>
+      <p class="dev-p">Any Nextcloud app on the same instance can register integrations into TeamHub. No HTTP loopback — everything runs in-process.</p>
+      <div class="dev-types">
+        <div class="dev-type">Widget — sidebar card with items &amp; actions</div>
+        <div class="dev-type">Tab — sandboxed iframe as a tab</div>
+      </div>
+      <ul class="dev-steps">
+        <li class="dev-step"><div class="dev-num">1</div><div class="dev-step-t"><strong>Register from your app's bootstrap</strong> using TeamHub's IntegrationService — one call, no credentials forwarded</div></li>
+        <li class="dev-step"><div class="dev-num">2</div><div class="dev-step-t"><strong>Implement ITeamHubWidget</strong> — return items and optional action buttons</div></li>
+        <li class="dev-step"><div class="dev-num">3</div><div class="dev-step-t"><strong>Team admins enable</strong> your integration per team from the Integrations tab</div></li>
+        <li class="dev-step"><div class="dev-num">4</div><div class="dev-step-t"><strong>Your widget or tab appears</strong> in the team home view alongside native widgets</div></li>
+      </ul>
+    </div>
+    <div class="code-box">
+      <pre><span class="cm">// 1. Register in Application::boot()</span>
+<span class="cb">$integrationService</span><span class="cw">-&gt;</span><span class="cg">registerIntegration</span><span class="cw">(</span>
+  <span class="co">appId</span><span class="cw">:           </span><span class="cg">'myapp'</span><span class="cw">,</span>
+  <span class="co">integrationType</span><span class="cw">: </span><span class="cg">'widget'</span><span class="cw">,</span>
+  <span class="co">title</span><span class="cw">:           </span><span class="cg">'My App Widget'</span><span class="cw">,</span>
+  <span class="co">phpClass</span><span class="cw">:        </span><span class="cb">MyWidget</span><span class="cw">::class,</span>
+  <span class="co">calledInProcess</span><span class="cw">: </span><span class="cb">true</span><span class="cw">,</span>
+<span class="cw">);</span>
+
+<span class="cm">// 2. Implement ITeamHubWidget</span>
+<span class="cb">class</span> <span class="cg">MyWidget</span> <span class="cb">implements</span> <span class="cg">ITeamHubWidget</span> <span class="cw">{</span>
+  <span class="cb">public function</span> <span class="cg">getWidgetData</span><span class="cw">(</span>
+    <span class="co">string</span> <span class="cb">$teamId</span><span class="cw">,</span>
+    <span class="co">string</span> <span class="cb">$userId</span>
+  <span class="cw">): </span><span class="co">array</span> <span class="cw">{</span>
+    <span class="cb">return</span> <span class="cw">[</span>
+      <span class="cg">'items'</span>   <span class="cw">=&gt; </span><span class="cb">$this</span><span class="cw">-&gt;getItems(</span><span class="cb">$teamId</span><span class="cw">),</span>
+      <span class="cg">'actions'</span> <span class="cw">=&gt; </span><span class="cb">$this</span><span class="cw">-&gt;getActions(</span><span class="cb">$teamId</span><span class="cw">),</span>
+    <span class="cw">];</span>
+  <span class="cw">}</span>
+<span class="cw">}</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="cta-inner">
+    <h2>Give your teams a <span>proper home</span></h2>
+    <p>Free, open source, and self-hosted. Runs on your own Nextcloud server, on top of the apps you already trust.</p>
+    <div class="cta-btns">
+      <a href="https://github.com/JustinDoek/nextcloud-teamhub" class="btn-w">
+        <svg viewBox="0 0 24 24" fill="#2d7d46"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"></path></svg>
+        View on GitHub
+      </a>
+      <a href="#features" class="btn-wo">Explore features</a>
+    </div>
+    <p class="cta-note">Install from source · Nextcloud 32 – 34 · AGPL-3.0</p>
+  </div>
+</section>
+
+<footer>
+  <p>TeamHub · A Nextcloud app · Built on Nextcloud Teams and the Nextcloud collaboration apps · Open source</p>
+  <div>
+    <a href="#vs-teams">vs Nextcloud Teams</a>
+    <a href="#features">Features</a>
+    <a href="#presence">Presence</a>
+    <a href="#developers">Developers</a>
+    <a href="https://tldr.host/teamhub/docs">Docs</a>
+    <a href="https://github.com/JustinDoek/nextcloud-teamhub">GitHub</a>
+  </div>
+</footer>
+
+<script>
+// Feature data
+// crop: CSS object-position for the shared screenshot
+const feats = [
+  {title:"Team workspace",desc:"Each team gets its own home in TeamHub with a tab bar linking directly to its shared Talk, Files, Calendar and Deck — already scoped to the team.",points:[{h:"Auto-provisioned",p:"Talk room, Files folder, Calendar and Deck board created automatically on team creation."},{h:"Auto-detected",p:"If an app isn't installed, its tab simply doesn't appear. Nothing to configure."},{h:"Per-user tab order",p:"Each user drags tabs into their preferred order, saved per user per team."},{h:"Custom URL tabs",p:"Team admins can add any URL as a tab — internal apps, external dashboards, anything."}],tags:["Talk","Files","Calendar","Deck"],img:"uploads/widgets-deb1e23f.webp",crop:"center top",label:"Team home — widget grid overview"},
+  {title:"Widget grid",desc:"A drag-and-drop grid of widgets on the team home view — calendar events, open tasks, recent files, members, activity snapshot, and wiki pages. Layout saved per user per team.",points:[{h:"Upcoming events",p:"Next calendar entries with a 'Schedule meeting' action."},{h:"Open Deck tasks",p:"Cards from the team's Deck board sorted by due date."},{h:"Recent & favourite files",p:"Recently modified and starred files inside the team folder."},{h:"Members",p:"Avatar stack with invite action for moderators."}],tags:["Calendar","Deck","Files","Per-user layout"],img:"uploads/widgets-deb1e23f.webp",crop:"center top",label:"Widget grid — tasks, events, files, activity"},
+  {title:"Team messages",desc:"A persistent message stream in the centre of every team's home view — designed to be found again later, unlike Talk's ephemeral chat scroll.",points:[{h:"Threaded comments",p:"Every message has its own thread so discussion stays grouped."},{h:"Polls & questions",p:"Collect team input without leaving the home view."},{h:"Inline editing",p:"Authors can edit their own messages after posting."},{h:"Notifications",p:"Members notified when a new message is posted."}],tags:["Persistent","Nextcloud Notifications"],img:"uploads/team_messages-2df96f10.webp",crop:"center top",label:"Team messages — pinned posts & polls"},
+  {title:"Activity feed",desc:"A 30-day timeline showing file changes, calendar events, Deck card updates, Talk events and member joins — filtered to the current team's resources only.",points:[{h:"Files",p:"Uploads, edits, renames, deletes in the team folder."},{h:"Calendar",p:"Event creations and updates on the team calendar."},{h:"Deck",p:"Card creations, description and assignment changes."},{h:"Membership",p:"Joins, leaves, and role changes visible to all."}],tags:["Files","Calendar","Deck","Talk","Members"],img:"uploads/widgets-deb1e23f.webp",crop:"right top",label:"Team Activity widget — right column"},
+  {title:"Team management",desc:"Create teams, invite by user / group / email / federated account, manage roles, transfer ownership, and upload a team logo — all through the Nextcloud Teams API.",points:[{h:"Invite anyone",p:"Local users, groups, email addresses, or federated accounts."},{h:"Roles & ownership",p:"Promote to moderator or admin. Transfer ownership."},{h:"Team logo",p:"Upload a JPG, PNG, GIF or WebP for the home view."},{h:"Join requests",p:"One-click approve or reject for request-to-join teams."}],tags:["Nextcloud Teams API","Federation"],img:"uploads/manage_team-4e032d90.webp",crop:"center top",label:"Manage Team — description & settings"},
+  {title:"Browse & join",desc:"A directory of every visible team — grid and list view, live search, member counts, and one-click join or request-to-join.",points:[{h:"Grid & list view",p:"Toggle between visual grid (with logos) and compact list."},{h:"Live search",p:"Filter by name or description as you type."},{h:"One-click join",p:"Join directly or send a request to moderators."},{h:"Membership status",p:"See if you're a member, pending, or can join."}],tags:["Visibility","Discoverability"],img:"uploads/browse_teams-8de01128.webp",crop:"center top",label:"Browse Teams — discover & join"},
+  {title:"Custom tabs",desc:"Add any URL as a tab. Disable apps you don't want for a specific team. Each user can drag tabs into their own order.",points:[{h:"Custom URL tabs",p:"Add any URL with a custom label."},{h:"Per-team app disable",p:"Switch off Deck or Calendar for specific teams."},{h:"Per-user order",p:"Each user drags tabs into their preferred order."},{h:"Shareable deep links",p:"Copy a direct link — members land on the team home view."}],tags:["Flexibility","Per-user"],img:"uploads/custom_links-b4e92c71.webp",crop:"center top",label:"Custom links — add any URL as a tab"},
+  {title:"Admin governance",desc:"Restrict team creation, customise the wizard, control invitation types, and audit team integrity — from the standard Nextcloud admin panel.",points:[{h:"Restrict creation",p:"Limit team creation to specific Nextcloud groups."},{h:"Custom wizard text",p:"Set welcome text in the team creation dialog."},{h:"Invitation types",p:"Toggle available invite methods per installation."},{h:"Teams overview",p:"Searchable list of all teams with owner control."}],tags:["Nextcloud admin panel","No external services"],img:"uploads/admin_settings-e080d6f7.webp",crop:"center top",label:"Admin settings — creation & permissions"},
+  {title:"Open API",desc:"Any Nextcloud app can register a sidebar widget or tab iframe into TeamHub with one PHP call. No HTTP loopback — in-process only.",points:[{h:"Sidebar widget",p:"Implement ITeamHubWidget returning items and actions."},{h:"Tab iframe",p:"Your app opens sandboxed as a tab scoped to the team."},{h:"In-process",p:"Runs via DI inside the same PHP process."},{h:"Per-team opt-in",p:"Team admins enable integrations per team."}],tags:["ITeamHubWidget","PHP","DI"],img:"uploads/integrations-681ea79b.webp",crop:"center top",label:"Integrations tab — per-team opt-in"},
+  {title:"Meeting automation",desc:"Schedule team meetings with reusable agenda templates. A Talk room is created automatically for every meeting — no manual setup needed.",points:[{h:"Agenda templates",p:"Save and reuse structured agendas across recurring meetings."},{h:"Auto Talk room",p:"A dedicated Talk room is provisioned the moment a meeting is created."},{h:"Calendar sync",p:"Meetings appear instantly on the team calendar for all members."},{h:"Reminders",p:"Automatic Nextcloud notifications before the meeting starts."}],tags:["Talk","Calendar","Templates"],img:"uploads/widgets-deb1e23f.webp",crop:"center top",label:"Meeting automation — agenda & scheduling"},
+  {title:"Shared files widget",desc:"A dedicated widget on the team home view showing pinned files and the most recent uploads — no need to leave the workspace to find a document.",points:[{h:"Pinned files",p:"Team admins pin key documents so they're always front and centre."},{h:"Recent uploads",p:"Last modified files in the team folder shown automatically."},{h:"One-click open",p:"Opens directly in Nextcloud Files, no extra navigation."},{h:"Upload shortcut",p:"Drop files into the widget to upload straight to the team folder."}],tags:["Files","Widget grid"],img:"uploads/widgets-deb1e23f.webp",crop:"left top",label:"Shared files widget — team home view"}
+];
+
+let activeFeat = null;
+
+function selectFeat(idx, card) {
+  const detail = document.getElementById('feat-detail');
+  const inner = document.getElementById('feat-detail-inner');
+  const allCards = document.querySelectorAll('.feat-card');
+
+  if (activeFeat === idx) {
+    // Toggle off
+    allCards[idx].classList.remove('active');
+    detail.classList.remove('open');
+    activeFeat = null;
+    return;
+  }
+
+  allCards.forEach(c => c.classList.remove('active'));
+  card.classList.add('active');
+  activeFeat = idx;
+
+  const f = feats[idx];
+  inner.innerHTML = `
+    <div class="fd-text">
+      <div class="fd-eyebrow">Feature ${idx + 1} of 11</div>
+      <div class="fd-title">${f.title}</div>
+      <div class="fd-desc">${f.desc}</div>
+      <div class="fd-grid">${f.points.map(p=>`<div class="fd-point"><h5>${p.h}</h5><p>${p.p}</p></div>`).join('')}</div>
+      <div class="fd-tags">${f.tags.map(t=>`<span class="fd-tag">${t}</span>`).join('')}</div>
+    </div>
+    <div class="fd-screenshot">
+      <div class="fd-screenshot-frame">
+        <div class="fd-screenshot-bar">
+          <div class="fd-screenshot-dots">
+            <div class="fd-screenshot-dot" style="background:#ff5f57;width:7px;height:7px;border-radius:50%;"></div>
+            <div class="fd-screenshot-dot" style="background:#febc2e;width:7px;height:7px;border-radius:50%;margin-left:4px;"></div>
+            <div class="fd-screenshot-dot" style="background:#28c840;width:7px;height:7px;border-radius:50%;margin-left:4px;"></div>
+          </div>
+        </div>
+        <img src="${f.img}" alt="${f.title}" style="display:block;width:100%;height:220px;object-fit:cover;object-position:${f.crop};">
+      </div>
+      <div class="fd-screenshot-label">${f.label}</div>
+    </div>
+  `;
+
+  if (!detail.classList.contains('open')) {
+    detail.classList.add('open');
+  }
+
+  // Scroll detail into view
+  setTimeout(()=>{ detail.scrollIntoView({behavior:'smooth',block:'nearest'}); }, 50);
+}
+
+function toggleExpand(id, btn) {
+  const panel = document.getElementById(id);
+  const isOpen = panel.classList.contains('open');
+  panel.classList.toggle('open');
+  btn.querySelector('svg').style.transform = isOpen ? '' : 'rotate(45deg)';
+}
+
+// Strip scroll nav
+const strip = document.getElementById('feat-strip');
+const dotsEl = document.getElementById('fsn-dots');
+const cardW = 212; // card width + gap
+const visible = Math.floor(strip.offsetWidth / cardW);
+let stripPage = 0;
+const totalPages = Math.ceil(11 / visible);
+
+// Build dots
+for (let i = 0; i < 11; i++) {
+  const d = document.createElement('div');
+  d.className = 'fsn-dot' + (i === 0 ? ' active' : '');
+  d.onclick = () => scrollToCard(i);
+  dotsEl.appendChild(d);
+}
+
+function scrollToCard(idx) {
+  strip.scrollTo({left: idx * cardW, behavior:'smooth'});
+}
+
+function stripScroll(dir) {
+  const cards = strip.querySelectorAll('.feat-card');
+  const newIdx = Math.max(0, Math.min(cards.length - 1,
+    Math.round(strip.scrollLeft / cardW) + dir));
+  scrollToCard(newIdx);
+}
+
+strip.addEventListener('scroll', () => {
+  const idx = Math.round(strip.scrollLeft / cardW);
+  dotsEl.querySelectorAll('.fsn-dot').forEach((d,i) => d.classList.toggle('active', i === idx));
+});
+
+
+// ── Live stats counter ──────────────────────────────────────────────────
+(function(){
+  function animateCount(el, target, duration) {
+    const start = performance.now();
+    const startVal = 0;
+    function tick(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      // ease out expo
+      const eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+      const current = Math.round(startVal + (target - startVal) * eased);
+      el.textContent = current.toLocaleString();
+      if (progress < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  async function loadStats() {
+    try {
+      const res  = await fetch('public-stats.php');
+      if (!res.ok) throw new Error('non-200');
+      const data = await res.json();
+      if (!data.ok) throw new Error('db error');
+
+      animateCount(document.getElementById('stat-installs'), data.active_installs, 1400);
+      animateCount(document.getElementById('stat-teams'),    data.active_teams,    1600);
+      animateCount(document.getElementById('stat-users'),    data.active_users,    1800);
+    } catch(e) {
+      // silently leave dashes if endpoint is unavailable
+    }
+  }
+
+  // Trigger when section scrolls into view
+  const section = document.getElementById('live-stats');
+  if (!section) return;
+  const observer = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) { loadStats(); observer.disconnect(); }
+  }, { threshold: 0.3 });
+  observer.observe(section);
+})();
+
+(function(){
+  const io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('visible'); io.unobserve(e.target); }});
+  },{threshold:0.1,rootMargin:'0px 0px -40px 0px'});
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+})();
+</script>
+</body>
+</html>

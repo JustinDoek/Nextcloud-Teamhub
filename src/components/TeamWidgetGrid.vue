@@ -10,8 +10,8 @@
         <div v-if="editMode && !isMobile && !isTablet" class="teamhub-edit-banner">
             <ViewDashboardEdit :size="16" />
             <span class="teamhub-edit-banner-text">{{ t('teamhub', 'Drag widgets to rearrange. Use the resize icon in the bottom-right corner of each widget to resize.') }}</span>
-            <!-- Default layout actions — only shown when current layout differs from user default -->
-            <div v-if="layoutDiffersFromDefault" class="teamhub-edit-banner-actions">
+            <!-- Default layout actions — always shown in edit mode so they are always discoverable -->
+            <div class="teamhub-edit-banner-actions">
                 <button
                     class="teamhub-layout-default-btn"
                     :title="t('teamhub', 'Save as my default layout for all teams')"
@@ -31,7 +31,7 @@
 
         <grid-layout
             v-if="!isMobile && !isTablet && layoutLoaded && gridLayout.length > 0"
-            :layout="gridLayout"
+            :layout="visibleLayout"
             :col-num="12"
             :row-height="80"
             :is-draggable="editMode"
@@ -39,6 +39,7 @@
             :margin="[12, 12]"
             :use-css-transforms="true"
             :responsive="false"
+            :vertical-compact="false"
             @update:layout="onLayoutUpdated">
 
             <!-- Message stream -->
@@ -973,6 +974,44 @@ export default {
         },
 
         /**
+         * The set of widget IDs that are currently active (their v-if would be
+         * true). Must stay in sync with the v-if conditions on each grid-item.
+         *
+         * Used to compute visibleLayout — the subset of gridLayout that is
+         * actually passed to <grid-layout>. Inactive items are kept in gridLayout
+         * for position memory but excluded here so VGL never sees them and never
+         * inflates the grid height with their y=9999 parking position.
+         */
+        activeWidgetIds() {
+            const active = new Set()
+            active.add('msgstream')
+            active.add('widget-teaminfo')
+            active.add('widget-members')
+            active.add('widget-activity')
+            if (this.resources?.calendar?.length > 0) active.add('widget-calendar')
+            if ((this.resources?.deck?.length > 0) || (this.resources?.tasks && this.resources?.calendar?.length > 0)) {
+                active.add('widget-deck')
+            }
+            if (this.resources?.intravox) active.add('widget-pages')
+            if (this.resources?.files) active.add('widget-files-center')
+            if (this.decisionsModuleEnabled && this.decisionsConfig?.decisions_enabled) {
+                active.add('widget-decisions')
+            }
+            ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
+            return active
+        },
+
+        /**
+         * The layout slice passed to <grid-layout>.
+         * Contains only active widgets — inactive ones are kept in gridLayout
+         * (the full prop) for position memory but excluded here so VGL's total
+         * height calculation stays reasonable and the scrollbar stays accurate.
+         */
+        visibleLayout() {
+            return this.gridLayout.filter(item => this.activeWidgetIds.has(item.i))
+        },
+
+        /**
          * URL to open the team folder directly in NC Files.
          * Uses the /files/{userId}/{path} route which NC Files maps to the
          * correct folder view regardless of whether it's a group folder or a
@@ -1123,7 +1162,22 @@ export default {
         },
 
         onLayoutUpdated(newLayout) {
-            this.$emit('layout-updated', newLayout)
+            // VGL only knows about visibleLayout (active items).
+            // Merge their updated positions back into the full gridLayout so
+            // inactive items (parked at y=9999) are preserved and not lost.
+            const updatedMap = {}
+            newLayout.forEach(item => { updatedMap[item.i] = item })
+
+            const merged = this.gridLayout.map(item =>
+                updatedMap[item.i] ? { ...updatedMap[item.i] } : item,
+            )
+            // Defensive: if VGL added a brand-new item not yet in gridLayout, include it.
+            newLayout.forEach(item => {
+                if (!merged.find(m => m.i === item.i)) merged.push({ ...item })
+            })
+
+            console.log('[TeamHub][TeamWidgetGrid] onLayoutUpdated: active items', newLayout.length, 'total after merge', merged.length)
+            this.$emit('layout-updated', merged)
         },
 
         onLeaveTeamClick() {

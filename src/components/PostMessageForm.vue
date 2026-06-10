@@ -1206,13 +1206,18 @@ export default {
                         // the "Supersede this decision" entry point from Session E.
                         // Set when the proposer used the "Supersede" action
                         // from the Decisions tab. Backend auto-withdraws the
-                        // referenced decision if it was still open.
+                        // referenced decision if it was still open.\
                         supersedesId: this.decisionSupersedesId,
                         // Session A: when the form is in the compose modal
                         // (forceDecision prop), the proposer has written the
                         // full proposal upfront. Skip the open/discussion phase
                         // and land directly on 'finalized' (awaits approval).
                         autoFinalize: this.forceDecision,
+                        // Mark compose-modal proposals as 'direct' so the
+                        // message stream can filter them out. Direct proposals
+                        // bypass stream discussion and live only in the
+                        // Decisions tab.
+                        sourceType: this.forceDecision ? 'direct' : undefined,
                     }
                 }
 

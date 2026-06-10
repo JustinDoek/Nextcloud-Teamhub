@@ -36,10 +36,11 @@
                 <template #icon><MessageOutline :size="64" /></template>
             </NcEmptyContent>
 
-            <!-- Regular messages -->
-            <TransitionGroup v-if="messages.length > 0" name="msg-list" tag="div" class="message-stream__list">
+            <!-- Regular messages — direct-proposal decisions (sourceType='direct') are
+                 excluded here; they live only in the Decisions tab. -->
+            <TransitionGroup v-if="filteredMessages.length > 0" name="msg-list" tag="div" class="message-stream__list">
                 <MessageCard
-                    v-for="msg in messages"
+                    v-for="msg in filteredMessages"
                     :key="msg.id"
                     :message="msg"
                     :can-pin="canPin"
@@ -105,6 +106,19 @@ export default {
         totalPages() {
             if (!this.messagesTotal || !this.messagesLimit) return 1
             return Math.max(1, Math.ceil(this.messagesTotal / this.messagesLimit))
+        },
+
+        /**
+         * Decisions created via the Compose modal (forceDecision=true) or the
+         * "Propose decision" button are direct proposals — they bypass the
+         * stream discussion phase and live only in the Decisions tab.
+         * sourceType 'direct' is set by PostMessageForm when forceDecision=true.
+         * These messages are excluded from the stream so the stream stays clean.
+         */
+        filteredMessages() {
+            return (this.messages || []).filter(
+                msg => !(msg.decision && msg.decision.sourceType === 'direct'),
+            )
         },
     },
     methods: {

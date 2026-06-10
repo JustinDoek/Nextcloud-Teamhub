@@ -47,15 +47,15 @@
                     </template>
                 </NcEmptyContent>
 
-                <!-- Feedback icon-button at bottom of list, visually separated -->
+                <!-- Docs / help link — at bottom of list, visually separated -->
                 <div class="teamhub-feedback-separator" />
                 <li class="teamhub-feedback-item">
                     <button
                         class="teamhub-feedback-btn"
-                        :title="t('teamhub', 'Feedback & Feature Requests')"
-                        :aria-label="t('teamhub', 'Feedback & Feature Requests')"
-                        @click="openFeedbackModal">
-                        <MessageAlertIcon :size="20" />
+                        :title="t('teamhub', 'Help & Documentation')"
+                        :aria-label="t('teamhub', 'Help & Documentation')"
+                        @click="openDocs">
+                        <HelpCircleOutlineIcon :size="20" />
                     </button>
                 </li>
             </template>
@@ -93,9 +93,6 @@
                 @team-left="onTeamLeft" />
         </NcAppContent>
 
-        <FeedbackModal
-            v-if="showFeedbackModal"
-            @close="showFeedbackModal = false" />
     </NcContent>
 </template>
 
@@ -109,25 +106,23 @@ import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Magnify from 'vue-material-design-icons/Magnify.vue'
-import MessageAlertIcon from 'vue-material-design-icons/MessageAlert.vue'
+import HelpCircleOutlineIcon from 'vue-material-design-icons/HelpCircleOutline.vue'
 import TeamView from './components/TeamView.vue'
 import BrowseTeamsView from './components/BrowseTeamsView.vue'
 import ManageTeamView from './components/ManageTeamView.vue'
 import CreateTeamView from './components/CreateTeamView.vue'
-import FeedbackModal from './components/FeedbackModal.vue'
 
 export default {
     name: 'App',
     components: {
         NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble,
-        AccountGroup, Plus, Magnify, MessageAlertIcon,
-        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView, FeedbackModal,
+        AccountGroup, Plus, Magnify, HelpCircleOutlineIcon,
+        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView,
     },
     data() {
         return {
             activeView: null,
             canCreateTeam: true,
-            showFeedbackModal: false,
             // True when the NC sidebar renders as an overlay that should
             // auto-close on selection: phone portrait (≤768px) OR tablet
             // portrait (≤1024px and orientation:portrait).
@@ -204,8 +199,9 @@ export default {
             this.closeSidebarIfOverlay()
         },
 
-        openFeedbackModal() {
-            this.showFeedbackModal = true
+        openDocs() {
+            console.log('[TeamHub][App] Opening documentation')
+            window.open('https://tldr.host/teamhub/docs/', '_blank', 'noopener,noreferrer')
             this.closeSidebarIfOverlay()
         },
 
