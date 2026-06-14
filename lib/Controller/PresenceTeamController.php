@@ -97,7 +97,7 @@ class PresenceTeamController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
 
             // AND gate: global module toggle AND per-team toggle.
-            $globalOn = $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
+            $globalOn = $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1';
             $teamOn   = (bool)($this->teamPresence->getConfig($teamId)['presence_enabled'] ?? false);
             if (!$globalOn || !$teamOn) {
                 return new JSONResponse(['error' => 'Presence module is not enabled'], Http::STATUS_FORBIDDEN);
@@ -184,7 +184,7 @@ class PresenceTeamController extends Controller {
         try {
             $this->memberService->requireMemberLevel($teamId);
 
-            $globalOn = $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
+            $globalOn = $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1';
             $teamOn   = (bool)($this->teamPresence->getConfig($teamId)['presence_enabled'] ?? false);
             if (!$globalOn || !$teamOn) {
                 return new JSONResponse(['error' => 'Presence module is not enabled'], Http::STATUS_FORBIDDEN);

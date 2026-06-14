@@ -97,7 +97,7 @@
 </template>
 
 <script>
-import { mapState, mapActions, mapGetters } from 'vuex'
+import { mapState, mapActions, mapGetters, mapMutations } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { emit } from '@nextcloud/event-bus'
 import { generateUrl } from '@nextcloud/router'
@@ -157,6 +157,13 @@ export default {
             this.fetchCanCreateTeam(),
         ])
 
+        // v3.75.1 — consume ?team=…&decision=… deep link.
+        // Used by approver-meeting descriptions and any future "open this
+        // proposal" entry point (Talk message, email link, etc).
+        // Done after fetchTeams so the team list is available before we
+        // try to select one.
+        await this.consumeDeepLink()
+
         // Poll for new messages every 60s so the unread badge stays current
         // without requiring a page reload. Uses refreshUnreadCounts (silent —
         // no loading spinner) rather than fetchTeams to avoid UI flicker.
@@ -183,6 +190,71 @@ export default {
     methods: {
         t,
         ...mapActions(['fetchTeams', 'selectTeam']),
+        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET']),
+
+        /**
+         * v3.75.1 — Consume the ?team=…&decision=… deep link in the URL.
+         *
+         * Used by approver-meeting calendar descriptions and any future
+         * external link into a specific proposal (Talk message, email, etc).
+         *
+         *   ?team=<teamId>                       → open the team's home view
+         *   ?team=<teamId>&decision=<decisionId> → open the team, switch to
+         *                                          the Decisions tab, and
+         *                                          pre-select the proposal
+         *
+         * The decision id is resolved to its messageId via a single fetch;
+         * decisionsTargetMessageId then drives the existing scroll/select
+         * behaviour in TeamDecisionsView.
+         */
+        async consumeDeepLink() {
+            try {
+                const params = new URLSearchParams(window.location.search || '')
+                const teamId     = params.get('team')
+                const decisionId = params.get('decision')
+                if (!teamId) return
+
+                // Only select the team if it appears in the user's team list.
+                // Defensive: a stale URL pointing at a team the user is no
+                // longer a member of would otherwise leave the UI in an
+                // inconsistent "loading forever" state.
+                const known = (this.teams || []).some(t => t.id === teamId)
+                if (!known) {
+                    console.warn('[TeamHub][App] consumeDeepLink: team not in current user list:', teamId)
+                    return
+                }
+
+                await this.selectTeam(teamId)
+                this.activeView = 'team'
+
+                if (decisionId) {
+                    // Resolve the decision's messageId so the existing
+                    // scrollAndSelectTarget watcher in TeamDecisionsView
+                    // can highlight the right card.
+                    try {
+                        const { data } = await axios.get(
+                            generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/decisions/${decisionId}`),
+                        )
+                        const messageId = data?.messageId
+                        if (messageId) {
+                            // Switch to the Decisions tab and set the target.
+                            // The order matters: setting the target before the
+                            // view ensures the watcher in TeamDecisionsView
+                            // sees the change after the view renders.
+                            this.SET_VIEW('decisions')
+                            this.$nextTick(() => {
+                                this.SET_DECISIONS_TARGET(messageId)
+                            })
+                        }
+                    } catch (e) {
+                        console.warn('[TeamHub][App] consumeDeepLink: decision fetch failed', e?.message)
+                    }
+                }
+            } catch (e) {
+                // Never let a bad URL crash the app.
+                console.warn('[TeamHub][App] consumeDeepLink: failed', e?.message)
+            }
+        },
 
         async fetchCanCreateTeam() {
             try {
@@ -200,7 +272,6 @@ export default {
         },
 
         openDocs() {
-            console.log('[TeamHub][App] Opening documentation')
             window.open('https://tldr.host/teamhub/docs/', '_blank', 'noopener,noreferrer')
             this.closeSidebarIfOverlay()
         },

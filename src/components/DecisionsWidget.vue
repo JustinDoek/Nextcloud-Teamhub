@@ -76,9 +76,26 @@
             :open="!!reviewTarget"
             :decision="reviewTarget || {}"
             :saving="approvingDecisionId !== null"
+            :can-schedule-meeting="canScheduleMeetingForReview"
             @approve="onReviewApprove"
             @deny="onReviewDeny"
+            @schedule-meeting="openApproverMeetingWizard"
             @close="reviewTarget = null" />
+
+        <!-- v3.74.10 — Schedule approver meeting wizard, mounted on demand
+             from the approval modal's "Schedule meeting" button. -->
+        <SuggestMeetingWizard
+            v-if="showApproverMeetingWizard"
+            :team-id="currentTeamId"
+            :calendars="calendars"
+            :prefilled-attendees="approverPrefill.attendees"
+            :prefilled-title="approverPrefill.title"
+            :prefilled-description="approverPrefill.description"
+            :prefilled-category="approverPrefill.category"
+            :prefill-banner="approverPrefill.banner"
+            :lock-attendees="true"
+            @created="onApproverMeetingCreated"
+            @close="showApproverMeetingWizard = false; schedulingMeetingForDecisionId = null" />
     </div>
 </template>
 
@@ -91,6 +108,7 @@ import { showError }                            from '@nextcloud/dialogs'
 import axios                                   from '@nextcloud/axios'
 import DecisionsList                            from './DecisionsList.vue'
 import DecisionApprovalModal                    from './DecisionApprovalModal.vue'
+import SuggestMeetingWizard                     from './SuggestMeetingWizard.vue'
 import GavelIcon                                from 'vue-material-design-icons/Gavel.vue'
 import ClockOutlineIcon                         from 'vue-material-design-icons/ClockOutline.vue'
 import CheckBoldIcon                            from 'vue-material-design-icons/CheckBold.vue'
@@ -101,6 +119,7 @@ export default {
     components: {
         DecisionsList,
         DecisionApprovalModal,
+        SuggestMeetingWizard,
         NcModal,
         NcButton,
         GavelIcon,
@@ -136,14 +155,59 @@ export default {
 
             // Session B: approval modal target (replaces old denyTarget/denyReason)
             reviewTarget:  null,  // decision object being reviewed
+
+            // v3.74.10 — Schedule approver meeting flow (mirrors TeamDecisionsView).
+            showApproverMeetingWizard: false,
+            approverPrefill: {
+                attendees: [],
+                title: '',
+                description: '',
+                category: '',
+                banner: '',
+            },
+            schedulingMeetingForDecisionId: null,
+            openingMeetingWizard: false,
         }
     },
 
     computed: {
-        ...mapState(['currentTeamId']),
+        ...mapState(['currentTeamId', 'resources']),
 
         currentUserId() {
             return window.OC?.currentUser || ''
+        },
+
+        /**
+         * Calendar resource list for this team. Used by the approver-meeting
+         * wizard mount and to gate the schedule-meeting button.
+         */
+        calendars() {
+            return (this.resources && this.resources.calendar) || []
+        },
+
+        /**
+         * True when the team has at least one Calendar configured. Without it
+         * the meeting wizard cannot create an event, so we hide the button.
+         */
+        hasCalendar() {
+            return this.calendars.length > 0
+        },
+
+        /**
+         * True when the schedule-meeting button should appear inside the
+         * approval modal for the currently-reviewed decision. Gates on:
+         *   - team has a Calendar configured (else wizard can't create event),
+         *   - the decision's category has more than one approver (no point
+         *     scheduling a meeting with yourself).
+         * Returns false until categories have loaded.
+         */
+        canScheduleMeetingForReview() {
+            if (!this.hasCalendar) return false
+            if (!this.categoriesLoaded) return false
+            const d = this.reviewTarget
+            if (!d || !d.category) return false
+            const cat = this.categories.find(c => c.name === d.category)
+            return Array.isArray(cat?.approvers) && cat.approvers.length > 1
         },
 
         /**
@@ -346,6 +410,103 @@ export default {
                 showError(t('teamhub', 'Denial failed: {error}', { error: err?.response?.data?.error || err.message }))
             } finally {
                 this.approvingDecisionId = null
+            }
+        },
+
+        // ── v3.74.10 — Schedule approver meeting flow ───────────────────
+
+        /**
+         * Build the description for an approver meeting from the decision data
+         * available on the approve tab. Mirrors TeamDecisionsView.buildMeetingDescription:
+         * title + first 400 chars of body + link back to team home.
+         *
+         * The approve tab's DecisionsList rows do include the message body
+         * via the same decision payload, so `decision.message?.message` works
+         * the same way here.
+         */
+        buildMeetingDescription(d) {
+            const lines = []
+            if (d.question) lines.push(d.question)
+            const body = (d.message && d.message.message) ? String(d.message.message) : ''
+            if (body) {
+                const truncated = body.length > 400 ? body.slice(0, 400).trimEnd() + '…' : body
+                lines.push('')
+                lines.push(truncated)
+            }
+            // Deep link to the specific proposal — see TeamDecisionsView.buildMeetingDescription
+            // for the routing contract App.vue honours on mount. escape:false
+            // prevents NC's t() from turning `&` into `&amp;` (output goes to
+            // a plain-text iCal DESCRIPTION, not HTML).
+            try {
+                const deepUrl = window.location.origin
+                    + generateUrl('/apps/teamhub')
+                    + `?team=${encodeURIComponent(this.currentTeamId)}`
+                    + `&decision=${encodeURIComponent(d.id)}`
+                lines.push('')
+                lines.push(t('teamhub', 'Link: {url}', { url: { value: deepUrl, escape: false } }))
+            } catch (e) {
+                console.warn('[TeamHub][DecisionsWidget] buildMeetingDescription link build failed:', e?.message)
+            }
+            return lines.join('\n')
+        },
+
+        /**
+         * Called from DecisionApprovalModal's @schedule-meeting event.
+         * Closes the approval modal (we don't want both modals open at once),
+         * fetches approvers, then opens the wizard.
+         */
+        async openApproverMeetingWizard(decision) {
+            if (!decision || this.openingMeetingWizard) return
+            this.openingMeetingWizard = true
+            // Close approval modal — the wizard takes over now.
+            this.reviewTarget = null
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/approvers`),
+                )
+                const approverIds = Array.isArray(data?.approvers)
+                    ? data.approvers.map(a => a.userId).filter(Boolean)
+                    : []
+                this.approverPrefill = {
+                    attendees:   approverIds,
+                    // TRANSLATORS: prefilled meeting title for an approver-meeting on a proposal
+                    title:       t('teamhub', 'Proposal meeting'),
+                    description: this.buildMeetingDescription(decision),
+                    category:    t('teamhub', 'Proposals'),
+                    banner:      t('teamhub', 'This meeting will be scheduled with all approvers of this category. The attendee list is locked.'),
+                }
+                this.schedulingMeetingForDecisionId = decision.id
+                this.showApproverMeetingWizard = true
+            } catch (e) {
+                console.warn('[TeamHub][DecisionsWidget] openApproverMeetingWizard approvers fetch failed:', e?.message)
+                showError(t('teamhub', 'Could not load approvers for this proposal'))
+            } finally {
+                this.openingMeetingWizard = false
+            }
+        },
+
+        async onApproverMeetingCreated(payload) {
+            const decisionId = this.schedulingMeetingForDecisionId
+            this.schedulingMeetingForDecisionId = null
+            this.showApproverMeetingWizard = false
+            if (!decisionId || !payload || !payload.eventUid) {
+                console.warn('[TeamHub][DecisionsWidget] onApproverMeetingCreated missing decisionId or eventUid')
+                return
+            }
+            try {
+                const startMs  = payload.start ? new Date(payload.start).getTime() : 0
+                const startSec = startMs > 0 ? Math.floor(startMs / 1000) : Math.floor(Date.now() / 1000)
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decisionId}/meetings`),
+                    {
+                        eventUid:     payload.eventUid,
+                        meetingTitle: payload.title || '',
+                        meetingStart: startSec,
+                    },
+                )
+            } catch (e) {
+                console.warn('[TeamHub][DecisionsWidget] onApproverMeetingCreated record failed:', e?.message)
+                showError(t('teamhub', 'Meeting created, but the link to the proposal could not be saved'))
             }
         },
     },

@@ -99,7 +99,7 @@ class DecisionService {
         $globalEnabled = $this->config->getAppValue(
             Application::APP_ID,
             'decisions_module_enabled',
-            '0'
+            '1'
         ) === '1';
         if (!$globalEnabled) {
             throw new \RuntimeException('Decisions module is not enabled');

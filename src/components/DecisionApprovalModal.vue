@@ -40,6 +40,18 @@
                     <template #icon><CloseCircleIcon :size="16" /></template>
                     {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Deny') }}
                 </NcButton>
+                <!-- v3.74.10 — Schedule approver meeting. Shown only when the
+                     parent enables it (Calendar configured for the team). -->
+                <NcButton
+                    v-if="canScheduleMeeting"
+                    variant="secondary"
+                    :disabled="saving"
+                    :title="t('teamhub', 'Open the meeting wizard pre-filled with the other approvers in this category so you can discuss the proposal together before deciding.')"
+                    @click="$emit('schedule-meeting', decision)">
+                    <template #icon><CalendarPlusIcon :size="16" /></template>
+                    <!-- TRANSLATORS: short button label; hover-tooltip explains the action -->
+                    {{ t('teamhub', 'Schedule meeting') }}
+                </NcButton>
                 <NcButton variant="tertiary" @click="$emit('close')">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
@@ -53,18 +65,22 @@ import { translate as t }  from '@nextcloud/l10n'
 import { NcModal, NcButton } from '@nextcloud/vue'
 import CheckCircleIcon from 'vue-material-design-icons/CheckCircle.vue'
 import CloseCircleIcon from 'vue-material-design-icons/CloseCircle.vue'
+import CalendarPlusIcon from 'vue-material-design-icons/CalendarPlus.vue'
 
 export default {
     name: 'DecisionApprovalModal',
-    components: { NcModal, NcButton, CheckCircleIcon, CloseCircleIcon },
+    components: { NcModal, NcButton, CheckCircleIcon, CloseCircleIcon, CalendarPlusIcon },
 
     props: {
         open:     { type: Boolean, default: false },
         decision: { type: Object,  default: () => ({}) },
         saving:   { type: Boolean, default: false },
+        // v3.74.10 — when true, show "Schedule meeting" in the action row.
+        // Parent passes true only when the team has Calendar configured.
+        canScheduleMeeting: { type: Boolean, default: false },
     },
 
-    emits: ['close', 'approve', 'deny'],
+    emits: ['close', 'approve', 'deny', 'schedule-meeting'],
 
     data() {
         return { reason: '' }

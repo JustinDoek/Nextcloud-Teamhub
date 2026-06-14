@@ -32,6 +32,10 @@ class DecisionAuditService {
         'proposed', 'commented', 'finalized', 'withdrawn', 'approved', 'denied',
         // Session C — link/unlink events
         'task_linked', 'task_unlinked', 'decision_linked', 'decision_unlinked',
+        // v3.74.10 — approver meeting on a proposal
+        'approver_meeting_scheduled',
+        // v3.75.2 — external decision links (outbound URLs)
+        'external_link_added', 'external_link_removed',
     ];
 
     private const MAX_COMMENT_EXCERPT_LEN = 200;

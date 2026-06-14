@@ -1176,7 +1176,6 @@ export default {
                 if (!merged.find(m => m.i === item.i)) merged.push({ ...item })
             })
 
-            console.log('[TeamHub][TeamWidgetGrid] onLayoutUpdated: active items', newLayout.length, 'total after merge', merged.length)
             this.$emit('layout-updated', merged)
         },
 

@@ -21,7 +21,7 @@ class PersonalSettings implements ISettings {
 
     public function getForm(): TemplateResponse {
         $config  = \OC::$server->get(\OCP\IConfig::class);
-        $enabled = $config->getAppValue('teamhub', 'presence_module_enabled', '0') === '1';
+        $enabled = $config->getAppValue('teamhub', 'presence_module_enabled', '1') === '1';
         return new TemplateResponse('teamhub', 'personal', [
             'presenceModuleEnabled' => $enabled,
         ]);

@@ -328,6 +328,16 @@ return [
         ['name' => 'decision#listDecisionLinks',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/links',           'verb' => 'GET'],
         ['name' => 'decision#createDecisionLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/links',           'verb' => 'POST'],
         ['name' => 'decision#deleteDecisionLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/links/{linkId}',  'verb' => 'DELETE'],
+
+        // Session — approver meetings on a proposal (v3.74.10)
+        ['name' => 'decision#listApprovers',      'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/approvers', 'verb' => 'GET'],
+        ['name' => 'decision#listMeetings',       'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/meetings',  'verb' => 'GET'],
+        ['name' => 'decision#createMeeting',      'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/meetings',  'verb' => 'POST'],
+
+        // External decision links (v3.75.2)
+        ['name' => 'decision#listExternalLinks',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/external-links',          'verb' => 'GET'],
+        ['name' => 'decision#createExternalLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/external-links',          'verb' => 'POST'],
+        ['name' => 'decision#deleteExternalLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/external-links/{linkId}', 'verb' => 'DELETE'],
     ],
 ];
 // Note: just checking structure

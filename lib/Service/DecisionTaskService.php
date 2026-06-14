@@ -19,6 +19,7 @@ class DecisionTaskService {
     private MemberService       $memberService;
     private DecisionTeamService $teamService;
     private DecisionAuditService $auditService;
+    private DeckService         $deckService;
     private IDBConnection       $db;
     private IUserSession        $userSession;
     private LoggerInterface     $logger;
@@ -29,6 +30,7 @@ class DecisionTaskService {
         MemberService        $memberService,
         DecisionTeamService  $teamService,
         DecisionAuditService $auditService,
+        DeckService          $deckService,
         IDBConnection        $db,
         IUserSession         $userSession,
         LoggerInterface      $logger,
@@ -38,13 +40,24 @@ class DecisionTaskService {
         $this->memberService   = $memberService;
         $this->teamService     = $teamService;
         $this->auditService    = $auditService;
+        $this->deckService     = $deckService;
         $this->db              = $db;
         $this->userSession     = $userSession;
         $this->logger          = $logger;
     }
 
     /**
-     * List all task links for a decision. Any team member can read.
+     * List all task links for a decision, enriched with Deck card metadata.
+     *
+     * For each task whose path matches the pattern apps/deck/board/{b}/card/{c},
+     * we look up the card in Deck and attach:
+     *   - isDone  (bool): true when the card is archived or in a done stack
+     *   - cardTitle (string|null): the Deck card title if available
+     *
+     * Non-Deck tasks (plain URLs, other paths) get isDone=null so the
+     * frontend knows there is no status to display.
+     *
+     * Any team member can call this endpoint.
      */
     public function listForDecision(string $teamId, int $decisionId): array {
         $this->memberService->requireMemberLevel($teamId);
@@ -52,7 +65,52 @@ class DecisionTaskService {
         if ($d === null || $d->getTeamId() !== $teamId) {
             throw new \InvalidArgumentException('Decision not found in this team');
         }
-        return $this->taskMapper->findByDecision($decisionId);
+        $rows = $this->taskMapper->findByDecision($decisionId);
+
+        // Enrich Deck card rows with live done-status from Deck.
+        $cardIds = [];
+        foreach ($rows as $row) {
+            $cardId = $this->extractDeckCardId($row['task_path']);
+            if ($cardId !== null) {
+                $cardIds[] = $cardId;
+            }
+        }
+
+        $cardInfo = [];
+        if (!empty($cardIds)) {
+            $cardInfo = $this->deckService->getCardsByIds($cardIds);
+        }
+
+        foreach ($rows as &$row) {
+            $cardId = $this->extractDeckCardId($row['task_path']);
+            if ($cardId !== null && isset($cardInfo[$cardId])) {
+                $info            = $cardInfo[$cardId];
+                $row['isDone']    = $info['isDone'];
+                $row['cardTitle'] = $info['title'];
+            } else {
+                // Not a Deck card — no status available.
+                $row['isDone']    = null;
+                $row['cardTitle'] = null;
+            }
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Extract a Deck card ID from a task_path string.
+     *
+     * Recognises paths of the form:
+     *   apps/deck/board/{boardId}/card/{cardId}
+     *
+     * Returns null for any path that does not match (plain URLs, other apps).
+     */
+    private function extractDeckCardId(string $taskPath): ?int {
+        if (preg_match('#(?:apps/)?deck/board/\\d+/card/(\\d+)#', $taskPath, $m)) {
+            return (int)$m[1];
+        }
+        return null;
     }
 
     /**

@@ -416,7 +416,6 @@ class DeckService {
             // Belt-and-braces: ensure edit permission flag is actually set.
             $this->enforceAclEditPermissions($boardId, $teamId, $db);
 
-
             return [
                 'success'  => true,
                 'board_id' => $boardId,
@@ -881,7 +880,6 @@ class DeckService {
         }
     }
 
-
     /**
      * Create a Talk group room and add the circle as participant.
      *
@@ -936,13 +934,16 @@ class DeckService {
         }
 
         $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // Detect whether deck_stacks has a done_status column (added in Deck ~1.9).
+        // We use this for accurate "done" detection; fall back to title heuristic otherwise.
+        $stackCols    = $this->dbIntrospection->getTableColumns('deck_stacks');
+        $hasDoneStatus = in_array('done_status', $stackCols, true);
+
         $qb = $db->getQueryBuilder();
 
         // JOIN deck_cards → deck_stacks → deck_boards.
-        // We use createFunction for the table aliases since QB's join() handles
-        // aliases inconsistently across DBAL versions; explicit aliases here
-        // keep the SELECT list unambiguous on both MySQL and PostgreSQL.
-        $qb->select(
+        $selectCols = [
             'c.id AS card_id',
             'c.title AS card_title',
             'c.archived AS card_archived',
@@ -951,7 +952,12 @@ class DeckService {
             'b.id AS board_id',
             'b.title AS board_title',
             'b.color AS board_color',
-        )
+        ];
+        if ($hasDoneStatus) {
+            $selectCols[] = 's.done_status AS stack_done_status';
+        }
+
+        $qb->select(...$selectCols)
             ->from('deck_cards', 'c')
             ->innerJoin('c', 'deck_stacks', 's', $qb->expr()->eq('c.stack_id', 's.id'))
             ->innerJoin('s', 'deck_boards', 'b', $qb->expr()->eq('s.board_id', 'b.id'))
@@ -964,14 +970,27 @@ class DeckService {
         try {
             $result = $qb->executeQuery();
             while ($row = $result->fetch()) {
-                $id = (int)$row['card_id'];
+                $id      = (int)$row['card_id'];
                 $boardId = (int)$row['board_id'];
+                $archived = (bool)$row['card_archived'];
+
+                // Determine "done" status:
+                // 1. done_status column (preferred — explicit Deck done flag).
+                // 2. Stack title match against "done" (case-insensitive fallback).
+                // 3. Archived cards are always considered done.
+                if ($hasDoneStatus) {
+                    $isDone = $archived || (int)($row['stack_done_status'] ?? 0) === 1;
+                } else {
+                    $isDone = $archived || strtolower(trim((string)$row['stack_title'])) === 'done';
+                }
+
                 $out[$id] = [
                     'id'         => $id,
                     'title'      => (string)$row['card_title'],
-                    'archived'   => (bool)$row['card_archived'],
+                    'archived'   => $archived,
                     'deletedAt'  => (int)($row['card_deleted_at'] ?? 0),
                     'stackTitle' => (string)$row['stack_title'],
+                    'isDone'     => $isDone,
                     'boardId'    => $boardId,
                     'boardTitle' => (string)$row['board_title'],
                     'boardColor' => (string)($row['board_color'] ?? '0082c9'),

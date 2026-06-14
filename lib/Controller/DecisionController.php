@@ -4,7 +4,9 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Service\DecisionCategoryService;
+use OCA\TeamHub\Service\DecisionExternalLinkService;
 use OCA\TeamHub\Service\DecisionLinkService;
+use OCA\TeamHub\Service\DecisionMeetingService;
 use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\DecisionTaskService;
 use OCA\TeamHub\Service\DecisionTeamService;
@@ -58,6 +60,8 @@ class DecisionController extends Controller {
         private DecisionCategoryService $categoryService,
         private DecisionTaskService     $taskService,
         private DecisionLinkService     $linkService,
+        private DecisionMeetingService  $meetingService,
+        private DecisionExternalLinkService $extLinkService,
         private MemberService           $memberService,
         private IUserSession            $userSession,
         private LoggerInterface         $logger,
@@ -690,6 +694,145 @@ class DecisionController extends Controller {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
             return $this->mapError($e, 'deleteTask');
+        }
+    }
+
+
+    // =========================================================================
+    // Approver meetings on a proposal (v3.74.10)
+    // =========================================================================
+
+    /**
+     * GET /api/v1/teams/{teamId}/decisions/{decisionId}/approvers
+     *
+     * Returns the list of approver UIDs (with display names) for the
+     * decision's category. The frontend uses this to pre-fill the
+     * "Schedule approver meeting" wizard's attendee step.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function listApprovers(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $result = $this->meetingService->listApproversForDecision($teamId, $decisionId);
+            return new JSONResponse($result);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'listApprovers');
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/decisions/{decisionId}/meetings
+     *
+     * Returns all approver meetings scheduled for this proposal.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function listMeetings(string $teamId, int $decisionId): JSONResponse {
+        try {
+            return new JSONResponse([
+                'items' => $this->meetingService->listForDecision($teamId, $decisionId),
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'listMeetings');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/meetings
+     * Body: { eventUid: string, meetingTitle: string, meetingStart: int (unix ts) }
+     *
+     * Called by the frontend after the suggest-meeting wizard has already
+     * created the calendar event via POST /calendar/events. This records
+     * the back-reference so the proposal detail panel can show the
+     * "Scheduled meetings" section.
+     */
+    #[NoAdminRequired]
+    public function createMeeting(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid  = $this->requireUser();
+            $body = $this->request->getParams();
+            $eventUid     = trim((string)($body['eventUid']     ?? ''));
+            $meetingTitle = trim((string)($body['meetingTitle'] ?? ''));
+            $meetingStart = isset($body['meetingStart']) ? (int)$body['meetingStart'] : 0;
+
+            $row = $this->meetingService->recordMeeting(
+                $teamId, $decisionId, $eventUid, $meetingTitle, $meetingStart, $uid
+            );
+            return new JSONResponse($row, Http::STATUS_CREATED);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'createMeeting');
+        }
+    }
+
+
+    // =========================================================================
+    // External decision links (v3.75.2)
+    // =========================================================================
+
+    /**
+     * GET /api/v1/teams/{teamId}/decisions/{decisionId}/external-links
+     * List external URL links for a decision. Team-member read.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function listExternalLinks(string $teamId, int $decisionId): JSONResponse {
+        try {
+            return new JSONResponse([
+                'items' => $this->extLinkService->listForDecision($teamId, $decisionId),
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'listExternalLinks');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/external-links
+     * Body: { url: string (http/https, ≤2048), label?: string (≤255) }
+     */
+    #[NoAdminRequired]
+    public function createExternalLink(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid  = $this->requireUser();
+            $body = $this->request->getParams();
+            $url   = (string)($body['url']   ?? '');
+            $label = (string)($body['label'] ?? '');
+
+            $row = $this->extLinkService->linkExternal($teamId, $decisionId, $url, $label, $uid);
+            return new JSONResponse($row, Http::STATUS_CREATED);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'createExternalLink');
+        }
+    }
+
+    /**
+     * DELETE /api/v1/teams/{teamId}/decisions/{decisionId}/external-links/{linkId}
+     */
+    #[NoAdminRequired]
+    public function deleteExternalLink(string $teamId, int $decisionId, int $linkId): JSONResponse {
+        try {
+            $uid = $this->requireUser();
+            $this->extLinkService->deleteLink($teamId, $linkId, $uid);
+            return new JSONResponse(['ok' => true]);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'deleteExternalLink');
         }
     }
 

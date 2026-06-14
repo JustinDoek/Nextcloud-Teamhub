@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Service\AuditService;
+use OCA\TeamHub\Service\TalkService;
 use OCP\Accounts\IAccountManager;
 use OCP\Accounts\PropertyDoesNotExistException;
 use OCP\App\IAppManager;
@@ -42,6 +43,7 @@ class MemberService {
 
     public function __construct(
         private ResourceService      $resourceService,
+        private TalkService          $talkService,
         private IUserSession         $userSession,
         private IAppManager          $appManager,
         private IUserManager         $userManager,
@@ -1112,6 +1114,11 @@ class MemberService {
                 'teamId' => $teamId,
                 'app'    => Application::APP_ID,
             ]);
+
+            // Remove the departing member from the team's Talk room so they
+            // lose access immediately. Talk does not watch for Circles changes.
+            error_log('[TeamHub][MemberService] leaveTeam: removing uid=' . $uid . ' from Talk room');
+            $this->talkService->removeUserFromTeamTalkRoom($teamId, $uid);
         } catch (\Exception $e) {
             $this->logger->error('[MemberService] Error leaving team', [
                 'teamId'    => $teamId,
@@ -1216,6 +1223,20 @@ class MemberService {
             'userType' => $userType,
             'app'      => Application::APP_ID,
         ]);
+
+        // Sync the Talk room to reflect the membership change.
+        // - Direct user (type 1): remove that one attendee row.
+        // - Group/circle (type 2/16): reconcile all attendees against current membership
+        //   because we don't know which individual UIDs were reachable via the removed group.
+        //   The reconcile runs AFTER MembershipService::onUpdate() above, which has already
+        //   rebuilt circles_membership to reflect the removal.
+        if ($userType === 1) {
+            error_log('[TeamHub][MemberService] removeMember: removing user from Talk room targetId=' . $targetId);
+            $this->talkService->removeUserFromTeamTalkRoom($teamId, $targetId);
+        } else {
+            error_log('[TeamHub][MemberService] removeMember: reconciling Talk room after group/circle removal');
+            $this->talkService->reconcileTalkRoomMembers($teamId);
+        }
     }
 
     /**
@@ -1388,6 +1409,14 @@ class MemberService {
                 $this->logger->info('[MemberService] inviteMembers: member added', [
                     'id' => $memberId, 'type' => $memberType, 'app' => Application::APP_ID,
                 ]);
+
+                // Add direct user members to the team's Talk room immediately.
+                // Talk expands circle members once at addCircle() time but does not
+                // watch for subsequent circle membership changes.
+                if ($memberType === 1) {
+                    error_log('[TeamHub][MemberService] inviteMembers: syncing new user to Talk room uid=' . $memberId);
+                    $this->talkService->syncUserToTeamTalkRoom($teamId, $memberId);
+                }
             } catch (\Exception $e) {
                 $results[$memberId] = 'failed: ' . $e->getMessage();
                 $this->logger->warning('[MemberService] Could not invite member', [
@@ -2009,6 +2038,10 @@ class MemberService {
                 $userId,
                 null,
             );
+
+            // Add the newly approved member to the team's Talk room.
+            error_log('[TeamHub][MemberService] approveRequest: syncing approved user to Talk room userId=' . $userId);
+            $this->talkService->syncUserToTeamTalkRoom($teamId, $userId);
         } catch (\Exception $e) {
             $this->logger->error('[MemberService] Error approving request', [
                 'teamId'    => $teamId,

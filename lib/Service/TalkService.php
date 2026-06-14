@@ -57,13 +57,30 @@ class TalkService {
             $roomId = $idRow ? (int)$idRow['id'] : null;
 
             // Add the circle via ParticipantService (Talk default: participant_type=3/PARTICIPANT).
-            // When this fails — common on some Talk versions — fall back to a direct DB insert
-            // so the circle attendee row always exists before we promote it to MODERATOR.
-            $circleLinked = false;
+            // addCircle() requires a \OCA\Circles\Model\Circle object (Talk 17+), not the
+            // circle ID string. resolveCircle() handles the FederatedUserService setup.
+            //
+            // DESIGN: when addCircle() succeeds via Talk's own API, Talk registers the
+            // circle with its internal participant system. getRoomsForUser() then resolves
+            // circle membership natively — no individual talk_attendees rows are needed,
+            // and new team members see the room automatically as they join the circle.
+            //
+            // When addCircle() fails, we fall back to a direct DB insert. In that path,
+            // Talk's event system was never involved, so circle membership is NOT resolved
+            // for the conversation list. expandCircleMembersToTalk() is called as a
+            // safety net only on that fallback path.
+            $circleLinked    = false;
+            $usedTalkApi     = false;
             try {
                 $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $participantService->addCircle($room, $teamId);
+                $circle = $this->resolveCircle($teamId, $uid);
+                if ($circle === null) {
+                    throw new \Exception('Circle could not be resolved — using direct DB fallback');
+                }
+                $participantService->addCircle($room, $circle);
                 $circleLinked = true;
+                $usedTalkApi  = true;
+                error_log('[TeamHub][TalkService] Talk S1: addCircle succeeded via API — circle membership resolved natively by Talk');
             } catch (\Throwable $e) {
                 $this->logger->warning('[TalkService] Talk S1: ParticipantService::addCircle failed — using direct DB fallback', [
                     'error' => $e->getMessage(),
@@ -77,6 +94,16 @@ class TalkService {
 
             if ($roomId !== null && $circleLinked) {
                 $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
+
+                if (!$usedTalkApi) {
+                    // Direct DB fallback path: Talk was not notified via its API so it
+                    // will not resolve circle membership for the conversation list.
+                    // Expand individual attendee rows as a safety net so users can at
+                    // least find the room. New members added later will be in the same
+                    // situation until the room is reconnected.
+                    error_log('[TeamHub][TalkService] Talk S1: using fallback expansion (API path failed)');
+                    $this->expandCircleMembersToTalk($roomId, $teamId, $db);
+                }
             }
 
             return ['token' => $token, 'name' => $teamName, 'circle_added' => $circleLinked];
@@ -101,12 +128,20 @@ class TalkService {
             $idRes->closeCursor();
             $roomId = $idRow ? (int)$idRow['id'] : null;
 
-            // Add circle via ParticipantService; fall back to direct DB insert on failure
+            // Add circle via ParticipantService; fall back to direct DB insert on failure.
+            // Same API-vs-fallback distinction as Strategy 1 — see comments there.
             $circleLinked = false;
+            $usedTalkApi  = false;
             try {
                 $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $participantService->addCircle($room, $teamId);
+                $circle = $this->resolveCircle($teamId, $uid);
+                if ($circle === null) {
+                    throw new \Exception('Circle could not be resolved — using direct DB fallback');
+                }
+                $participantService->addCircle($room, $circle);
                 $circleLinked = true;
+                $usedTalkApi  = true;
+                error_log('[TeamHub][TalkService] Talk S2: addCircle succeeded via API');
             } catch (\Throwable $e) {
                 $this->logger->warning('[TalkService] Talk S2: Manager addCircle failed — using direct DB fallback', [
                     'error' => $e->getMessage(),
@@ -120,6 +155,10 @@ class TalkService {
 
             if ($roomId !== null && $circleLinked) {
                 $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
+                if (!$usedTalkApi) {
+                    error_log('[TeamHub][TalkService] Talk S2: using fallback expansion (API path failed)');
+                    $this->expandCircleMembersToTalk($roomId, $teamId, $db);
+                }
             }
 
             return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
@@ -224,6 +263,14 @@ class TalkService {
                 }
             }
             $aqb->executeStatement();
+
+            // Strategy 3 bypasses Talk's API entirely — Talk will not resolve circle
+            // membership for the conversation list. Expand individual attendee rows as a
+            // safety net so users can find the room. New members added later won't be
+            // automatically synced; the room should be reconnected after Talk API support
+            // is confirmed (Strategies 1/2).
+            error_log('[TeamHub][TalkService] Talk S3: direct DB path — expanding individual members as fallback');
+            $this->expandCircleMembersToTalk($roomId, $teamId, $db);
 
             return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
 
@@ -391,20 +438,29 @@ class TalkService {
             }
 
             // Strategy 1: ParticipantService::addCircle (Talk 17+)
+            // addCircle() requires a Circle object — resolve it first.
+            // When this succeeds, Talk manages circle membership natively.
             $circleAdded = false;
+            $usedTalkApi = false;
             try {
                 $manager = $this->container->get(\OCA\Talk\Manager::class);
                 $room    = $manager->getRoomById($roomId);
                 $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $participantService->addCircle($room, $teamId);
+                $circle = $this->resolveCircle($teamId, $uid);
+                if ($circle === null) {
+                    throw new \Exception('Circle could not be resolved — using direct DB insert');
+                }
+                $participantService->addCircle($room, $circle);
                 $circleAdded = true;
+                $usedTalkApi = true;
+                error_log('[TeamHub][TalkService] connectExistingRoom: addCircle succeeded via API — Talk resolves membership natively');
             } catch (\Throwable $e) {
                 $this->logger->warning('[TalkService] connectExistingRoom: ParticipantService::addCircle failed — using direct DB insert', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
 
-            // Strategy 2: direct DB insert
+            // Strategy 2: direct DB insert (fallback when API unavailable)
             if (!$circleAdded) {
                 $circleAdded = $this->insertTalkCircleAttendee($roomId, $teamId, $roomName, $db);
             }
@@ -416,12 +472,21 @@ class TalkService {
             // Promote circle attendee to MODERATOR.
             $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
 
+            if (!$usedTalkApi) {
+                // Fallback path: Talk was not notified via its API, so it won't resolve
+                // circle membership for the conversation list. Expand individual attendee
+                // rows as a safety net. New members added to the team after this point
+                // will need a room reconnect to gain Talk sidebar visibility.
+                error_log('[TeamHub][TalkService] connectExistingRoom: using fallback expansion (API path failed)');
+                $this->expandCircleMembersToTalk($roomId, $teamId, $db);
+            }
 
             return [
-                'success' => true,
-                'room_id' => $roomId,
-                'token'   => $token,
-                'name'    => $roomName,
+                'success'      => true,
+                'room_id'      => $roomId,
+                'token'        => $token,
+                'name'         => $roomName,
+                'via_talk_api' => $usedTalkApi,
             ];
 
         } catch (\Throwable $e) {
@@ -777,5 +842,518 @@ class TalkService {
      * Delete the shared Files folder for this team.
      * Removes the IShare record AND deletes the folder node itself.
      */
+
+    // =========================================================================
+    // Per-member Talk sync
+    // =========================================================================
+
+    /**
+     * Add a single user to the Talk room connected to $teamId.
+     *
+     * Called from MemberService whenever a new member becomes active:
+     *  - direct invite accepted (inviteMembers, user_type=1)
+     *  - join request approved  (approveRequest)
+     *
+     * The room is identified by the circle attendee row already present in
+     * talk_attendees (actor_type='circles', actor_id=$teamId). If no such row
+     * exists the team has no Talk room — call is a no-op.
+     *
+     * Idempotent: if the user already has an attendee row, nothing is written.
+     *
+     * Non-fatal: any failure is logged but does not bubble up. The user can
+     * still access the room via the TeamHub tab (direct token link); they just
+     * won't see it in their own Talk sidebar until the next room reconnect.
+     *
+     * Note on groups: when an admin adds a *group* to a team (user_type=2/16),
+     * there is no single UID available at call time. Those members are covered
+     * by expandCircleMembersToTalk() at room-connection time, and will be
+     * synced on the next room reconnect. A dedicated group-expansion path is
+     * noted in HANDOFF open issues.
+     */
+    public function syncUserToTeamTalkRoom(string $teamId, string $uid): void {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return;
+        }
+
+        error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: teamId=' . $teamId . ' uid=' . $uid);
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // ── 1. Find the Talk room connected to this team ──────────────────
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('room_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: no Talk room for team — skip');
+                return;
+            }
+            $roomId = (int)$row['room_id'];
+
+            // ── 2. Skip if the user already has an attendee row ───────────────
+            $ckQb  = $db->getQueryBuilder();
+            $ckRes = $ckQb->select('id')
+                ->from('talk_attendees')
+                ->where($ckQb->expr()->eq('room_id',
+                    $ckQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($ckQb->expr()->eq('actor_type', $ckQb->createNamedParameter('users')))
+                ->andWhere($ckQb->expr()->eq('actor_id',   $ckQb->createNamedParameter($uid)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $existing = $ckRes->fetch();
+            $ckRes->closeCursor();
+
+            if ($existing) {
+                error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: uid=' . $uid . ' already has attendee row — skip');
+                return;
+            }
+
+            // ── 3. Insert individual user attendee row ────────────────────────
+            $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
+            $aqb = $db->getQueryBuilder();
+            $aqb->insert('talk_attendees')
+                ->setValue('room_id',          $aqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->setValue('actor_type',       $aqb->createNamedParameter('users'))
+                ->setValue('actor_id',         $aqb->createNamedParameter($uid))
+                ->setValue('display_name',     $aqb->createNamedParameter(''))
+                ->setValue('participant_type', $aqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)); // PARTICIPANT
+
+            foreach ([
+                'favorite'               => 0,
+                'notification_level'     => 0,
+                'notification_calls'     => 0,
+                'last_joined_call'       => 0,
+                'last_read_message'      => 0,
+                'last_mention_message'   => 0,
+                'last_mention_direct'    => 0,
+                'in_call'                => 0,
+                'permissions'            => 0,
+                'publishing_permissions' => 0,
+                'access_token'           => '',
+                'remote_id'              => '',
+                'phone_number'           => '',
+                'phone_states'           => '',
+            ] as $col => $val) {
+                if (in_array($col, $attendeeCols, true)) {
+                    $aqb->setValue($col, $aqb->createNamedParameter($val));
+                }
+            }
+            $aqb->executeStatement();
+
+            $this->logger->info('[TalkService] syncUserToTeamTalkRoom: user added to Talk room', [
+                'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
+                'app'    => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: inserted attendee uid=' . $uid . ' roomId=' . $roomId);
+
+        } catch (\Throwable $e) {
+            // Non-fatal — user can still reach the room via the TeamHub tab token link.
+            $this->logger->warning('[TalkService] syncUserToTeamTalkRoom failed', [
+                'teamId' => $teamId, 'uid' => $uid,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom FAILED: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Remove a single user's attendee row from the Talk room connected to $teamId.
+     *
+     * Called when a direct user member (user_type=1) leaves or is removed from the
+     * team. Talk does not watch for Circles membership changes, so TeamHub must
+     * explicitly remove the row to revoke access.
+     *
+     * Room OWNER rows (participant_type=1) are intentionally preserved to prevent
+     * orphaning a Talk room without an owner.
+     *
+     * Non-fatal: failure is logged but does not propagate.
+     */
+    public function removeUserFromTeamTalkRoom(string $teamId, string $uid): void {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return;
+        }
+
+        error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom: teamId=' . $teamId . ' uid=' . $uid);
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // Find the Talk room connected to this team.
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('room_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom: no Talk room — skip');
+                return;
+            }
+            $roomId = (int)$row['room_id'];
+
+            $dqb      = $db->getQueryBuilder();
+            $affected = $dqb->delete('talk_attendees')
+                ->where($dqb->expr()->eq('room_id',
+                    $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('users')))
+                ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
+                ->andWhere($dqb->expr()->neq('participant_type',
+                    $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))) // preserve OWNER
+                ->executeStatement();
+
+            $this->logger->info('[TalkService] removeUserFromTeamTalkRoom: done', [
+                'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
+                'affected' => $affected, 'app' => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom: deleted ' . $affected . ' row(s) uid=' . $uid);
+
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TalkService] removeUserFromTeamTalkRoom failed', [
+                'teamId' => $teamId, 'uid' => $uid,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom FAILED: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Reconcile the Talk room attendee list against current team membership.
+     *
+     * Called when a group or nested circle is removed from the team. In that case
+     * the set of affected users is not known at call time (no single UID), so we
+     * iterate all existing user attendees and evict anyone no longer a direct team
+     * member.
+     *
+     * Must be called AFTER MembershipService::onUpdate() so that
+     * circles_membership reflects the post-removal state.
+     *
+     * Direct membership only (circles_member user_type=1, status='Member').
+     * Room OWNER rows (participant_type=1) are preserved.
+     *
+     * Non-fatal: failure is logged but does not propagate.
+     */
+    public function reconcileTalkRoomMembers(string $teamId): void {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return;
+        }
+
+        error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: teamId=' . $teamId);
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // ── 1. Find the Talk room ─────────────────────────────────────────
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('room_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: no Talk room — skip');
+                return;
+            }
+            $roomId = (int)$row['room_id'];
+
+            // ── 2. Get all user attendees currently in the room ───────────────
+            $atQb  = $db->getQueryBuilder();
+            $atRes = $atQb->select('actor_id', 'participant_type')
+                ->from('talk_attendees')
+                ->where($atQb->expr()->eq('room_id',
+                    $atQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($atQb->expr()->eq('actor_type', $atQb->createNamedParameter('users')))
+                ->executeQuery();
+            $attendees = $atRes->fetchAll();
+            $atRes->closeCursor();
+
+            if (empty($attendees)) {
+                return;
+            }
+
+            // ── 3. Build the set of current direct team members ───────────────
+            $mQb  = $db->getQueryBuilder();
+            $mRes = $mQb->select('user_id')
+                ->from('circles_member')
+                ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
+                ->andWhere($mQb->expr()->eq('user_type',
+                    $mQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($mQb->expr()->eq('status', $mQb->createNamedParameter('Member')))
+                ->executeQuery();
+
+            $currentMembers = [];
+            while ($mRow = $mRes->fetch()) {
+                $currentMembers[(string)$mRow['user_id']] = true;
+            }
+            $mRes->closeCursor();
+
+            error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: attendees=' . count($attendees) . ' currentMembers=' . count($currentMembers));
+
+            // ── 4. Evict attendees no longer in the team ──────────────────────
+            $removed = 0;
+            foreach ($attendees as $attendee) {
+                $uid  = (string)($attendee['actor_id']        ?? '');
+                $type = (int)   ($attendee['participant_type'] ?? 0);
+
+                if ($uid === '' || $type === 1) {
+                    continue; // skip empty rows and room OWNERs
+                }
+
+                if (!isset($currentMembers[$uid])) {
+                    $dqb = $db->getQueryBuilder();
+                    $dqb->delete('talk_attendees')
+                        ->where($dqb->expr()->eq('room_id',
+                            $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('users')))
+                        ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
+                        ->andWhere($dqb->expr()->neq('participant_type',
+                            $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->executeStatement();
+                    $removed++;
+                    error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: evicted uid=' . $uid);
+                }
+            }
+
+            $this->logger->info('[TalkService] reconcileTalkRoomMembers: complete', [
+                'teamId' => $teamId, 'roomId' => $roomId,
+                'checked' => count($attendees), 'removed' => $removed,
+                'app'    => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: done removed=' . $removed);
+
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TalkService] reconcileTalkRoomMembers failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] reconcileTalkRoomMembers FAILED: ' . $e->getMessage());
+        }
+    }
+
+    // =========================================================================
+    // Member expansion helpers
+    // =========================================================================
+
+    /**
+     * Resolve a team's circle unique_id string to a Circles\Model\Circle object.
+     *
+     * ParticipantService::addCircle() in Talk 17+ requires a Circle object,
+     * not a circle ID string. This helper handles the FederatedUserService
+     * session setup that CirclesManager::getCircle() needs.
+     *
+     * Returns null if Circles is unavailable or the circle cannot be found —
+     * callers must fall back to the direct-DB path in that case.
+     *
+     * @param string $teamId Circle unique_id (= TeamHub team_id)
+     * @param string $uid    Acting NC user UID (needed for Circles session context)
+     */
+    private function resolveCircle(string $teamId, string $uid): ?\OCA\Circles\Model\Circle {
+        try {
+            error_log('[TeamHub][TalkService] resolveCircle: resolving teamId=' . $teamId . ' for uid=' . $uid);
+
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+            $userObj     = $userManager->get($uid);
+            if ($userObj === null) {
+                $this->logger->warning('[TalkService] resolveCircle: user not found', [
+                    'uid' => $uid, 'app' => Application::APP_ID,
+                ]);
+                return null;
+            }
+
+            // FederatedUserService::setLocalCurrentUser() sets up the Circles
+            // session context so getCircle() can see the circle regardless of
+            // whether its config bitmask hides it from unauthenticated lookups.
+            $fedUserSvc = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $fedUserSvc->setLocalCurrentUser($userObj);
+
+            $circlesMgr = $this->container->get(\OCA\Circles\CirclesManager::class);
+            $circle     = $circlesMgr->getCircle($teamId);
+
+            error_log('[TeamHub][TalkService] resolveCircle: resolved circle name=' . $circle->getName());
+            return $circle;
+
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TalkService] resolveCircle: could not resolve Circle object — will fall back to direct DB', [
+                'teamId' => $teamId,
+                'uid'    => $uid,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] resolveCircle: FAILED ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Expand the team's circle members into individual talk_attendees rows.
+     *
+     * WHY THIS IS NEEDED
+     * ------------------
+     * NC Talk's conversation list is built from talk_attendees rows where
+     * actor_type = 'users'. Having only a circle-type attendee row gives users
+     * *access* when they know the room token (and TeamHub opens it by token),
+     * but the conversation never appears in their own Talk sidebar because Talk
+     * only queries for direct user rows when building the list.
+     *
+     * When Talk's own UI adds a circle/group to a room it internally expands
+     * members into individual rows. TeamHub bypasses that UI path and must
+     * perform the expansion itself.
+     *
+     * SCOPE
+     * -----
+     * This method expands direct user members (circles_member.user_type = 1,
+     * status = 'Member') only. Members that reach the team indirectly via a
+     * nested group or sub-circle are a future improvement (see HANDOFF open
+     * issues). Direct membership covers the large majority of real teams.
+     *
+     * IDEMPOTENCY
+     * -----------
+     * Each user is checked for an existing attendee row before inserting.
+     * Re-running on an already-expanded room is safe — duplicates are skipped.
+     *
+     * PARTICIPANT TYPE
+     * ----------------
+     * Expanded members are inserted as PARTICIPANT (3). Their effective rights
+     * in the room are determined by Talk as the union of:
+     *   - their individual row (PARTICIPANT)
+     *   - the circle row (MODERATOR)
+     * so they inherit moderator rights from the circle. No separate promotion
+     * needed.
+     *
+     * @return int Number of new attendee rows actually inserted.
+     */
+    public function expandCircleMembersToTalk(int $roomId, string $teamId, \OCP\IDBConnection $db): int {
+        error_log('[TeamHub][TalkService] expandCircleMembersToTalk: start roomId=' . $roomId . ' teamId=' . $teamId);
+
+        try {
+            // ── 1. Fetch direct user members of the team circle ───────────────
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('user_id')
+                ->from('circles_member')
+                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('user_type',
+                    $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))) // 1 = NC user
+                ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+                ->executeQuery();
+
+            $uids = [];
+            while ($row = $res->fetch()) {
+                $uid = (string)($row['user_id'] ?? '');
+                if ($uid !== '') {
+                    $uids[] = $uid;
+                }
+            }
+            $res->closeCursor();
+
+            error_log('[TeamHub][TalkService] expandCircleMembersToTalk: found ' . count($uids) . ' direct members');
+
+            if (empty($uids)) {
+                return 0;
+            }
+
+            // ── 2. Detect which attendee columns exist on this Talk version ────
+            $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
+
+            // ── 3. Insert a user-level attendee row for each member ───────────
+            $added = 0;
+            foreach ($uids as $uid) {
+                // Idempotency: skip if row already exists.
+                $ckQb  = $db->getQueryBuilder();
+                $ckRes = $ckQb->select('id')
+                    ->from('talk_attendees')
+                    ->where($ckQb->expr()->eq('room_id',
+                        $ckQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($ckQb->expr()->eq('actor_type', $ckQb->createNamedParameter('users')))
+                    ->andWhere($ckQb->expr()->eq('actor_id',   $ckQb->createNamedParameter($uid)))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $exists = $ckRes->fetch();
+                $ckRes->closeCursor();
+
+                if ($exists) {
+                    error_log('[TeamHub][TalkService] expandCircleMembersToTalk: uid=' . $uid . ' already has attendee row — skip');
+                    continue;
+                }
+
+                $aqb = $db->getQueryBuilder();
+                $aqb->insert('talk_attendees')
+                    ->setValue('room_id',          $aqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->setValue('actor_type',       $aqb->createNamedParameter('users'))
+                    ->setValue('actor_id',         $aqb->createNamedParameter($uid))
+                    ->setValue('display_name',     $aqb->createNamedParameter(''))   // Talk resolves display name at runtime
+                    ->setValue('participant_type', $aqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)); // PARTICIPANT
+
+                // Optional columns — vary by Talk version, so only set when present.
+                foreach ([
+                    'favorite'               => 0,
+                    'notification_level'     => 0,
+                    'notification_calls'     => 0,
+                    'last_joined_call'       => 0,
+                    'last_read_message'      => 0,
+                    'last_mention_message'   => 0,
+                    'last_mention_direct'    => 0,
+                    'in_call'                => 0,
+                    'permissions'            => 0,
+                    'publishing_permissions' => 0,
+                    'access_token'           => '',  // not used for actor_type='users'
+                    'remote_id'              => '',
+                    'phone_number'           => '',
+                    'phone_states'           => '',
+                ] as $col => $val) {
+                    if (in_array($col, $attendeeCols, true)) {
+                        $aqb->setValue($col, $aqb->createNamedParameter($val));
+                    }
+                }
+
+                try {
+                    $aqb->executeStatement();
+                    $added++;
+                    error_log('[TeamHub][TalkService] expandCircleMembersToTalk: inserted attendee for uid=' . $uid);
+                } catch (\Throwable $e) {
+                    // Non-fatal: log and continue for remaining members.
+                    $this->logger->warning('[TalkService] expandCircleMembersToTalk: failed to insert attendee', [
+                        'uid'    => $uid,
+                        'roomId' => $roomId,
+                        'error'  => $e->getMessage(),
+                        'app'    => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            $this->logger->info('[TalkService] expandCircleMembersToTalk: complete', [
+                'teamId'    => $teamId,
+                'roomId'    => $roomId,
+                'expanded'  => $added,
+                'skipped'   => count($uids) - $added,
+                'app'       => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] expandCircleMembersToTalk: done — added=' . $added);
+
+            return $added;
+
+        } catch (\Throwable $e) {
+            $this->logger->error('[TalkService] expandCircleMembersToTalk failed', [
+                'teamId' => $teamId,
+                'roomId' => $roomId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+            error_log('[TeamHub][TalkService] expandCircleMembersToTalk: EXCEPTION ' . $e->getMessage());
+            return 0;
+        }
+    }
 
 }

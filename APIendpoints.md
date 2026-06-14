@@ -1672,6 +1672,124 @@ Remove a decision-decision link. **Requires `decisions_action_min_level`.**
 
 ---
 
+### Decisions module — approver meetings on a proposal (v3.75.0)
+
+Approvers can schedule a meeting with the other approvers of a proposal's category to discuss before deciding. The frontend calls `GET /approvers` to populate the suggest-meeting wizard, then the wizard posts the actual event via `POST /calendar/events` (response now includes `eventUid`), and finally `POST /meetings` records the back-reference here so the proposal detail panel can show the "Scheduled meetings" section.
+
+### GET `/teams/{teamId}/decisions/{decisionId}/approvers`
+Return the list of approver UIDs (with display names) for the decision's category. Used by the schedule-meeting flow to pre-fill the wizard's attendee step. Team admins are implicit approvers and are auto-added at category-creation time by `DecisionCategoryService`. **Team member required.**
+
+**Response 200:**
+```
+{
+  "approvers": [
+    { "userId": "alice",  "displayName": "Alice Smith" },
+    { "userId": "bob",    "displayName": "Bob Jones" }
+  ],
+  "categoryId":   42,
+  "categoryName": "Architecture"
+}
+```
+
+When the decision has no matched category (legacy free-text), `approvers` is an empty array, `categoryId` is `null`, and `categoryName` is whatever string was stored.
+
+**Errors:** `400` decision not found in this team; `403` not a team member.
+
+### GET `/teams/{teamId}/decisions/{decisionId}/meetings`
+List approver meetings scheduled for this proposal. **Team member required.**
+
+**Response 200:** `{ items: Meeting[] }`
+
+**Meeting shape:**
+```
+{
+  "id":                     int,
+  "eventUid":               "abc...",      // iCal VEVENT UID
+  "meetingTitle":           "Discuss proposal: ...",
+  "meetingStart":           unix-ts,
+  "scheduledBy":            "uid",
+  "scheduledByDisplayName": "Alice Smith",
+  "createdAt":              unix-ts
+}
+```
+
+Ordered by `meetingStart` ascending (next-upcoming first).
+
+### POST `/teams/{teamId}/decisions/{decisionId}/meetings`
+Record that a meeting was scheduled for this proposal. The caller must already have created the calendar event via `POST /calendar/events`, which now returns the `eventUid` needed here. **Caller must be an approver for the decision's category** (team admins are auto-included; falls back to admin-level check when the decision has no matched category).
+
+**Body:** `{ eventUid: string (1–255 chars), meetingTitle: string (truncated to 255), meetingStart: int (positive unix-ts) }`
+
+**Response 201:** the created Meeting object (same shape as above).
+
+**Errors:** `400` missing or invalid fields, decision not found in this team; `403` not an approver for the category.
+
+**Audit:** writes `approver_meeting_scheduled` to the decision's audit trail with `event_uid`, `meeting_title`, `meeting_start`.
+
+---
+
+### POST `/teams/{teamId}/calendar/events` — response shape changed in v3.75.0
+
+The endpoint behaviour is unchanged; only the success response was extended. Existing callers ignore the new fields.
+
+**Response 201 (was, still works):** `{ "success": true }`
+
+**Response 201 (now):**
+```
+{
+  "success":  true,
+  "eventUid": "abc...",
+  "start":    "2026-06-12T09:00:00.000Z",
+  "title":    "Discuss proposal: ..."
+}
+```
+
+The `eventUid` is the iCal VEVENT UID needed by `POST /decisions/{decisionId}/meetings` to record a back-reference from a proposal.
+
+---
+
+### Decisions module — external decision links (v3.75.2)
+
+Outbound URLs attached to a decision, pointing to decisions held in other tools (organisation-management systems, prior decisions in legacy tools). One-way only — the other end is outside TeamHub by definition.
+
+### GET `/teams/{teamId}/decisions/{decisionId}/external-links`
+List external URL links for a decision. **Team member required.**
+
+**Response 200:** `{ items: ExternalLink[] }`
+
+**ExternalLink shape:**
+```
+{
+  "id":        int,
+  "url":       "https://...",
+  "label":     "optional human-readable label",
+  "createdBy": "uid",
+  "createdAt": unix-ts
+}
+```
+
+### POST `/teams/{teamId}/decisions/{decisionId}/external-links`
+Attach an outbound URL to a decision. **Requires `decisions_action_min_level`.**
+
+**Body:** `{ url: string (http or https, ≤2048 chars), label?: string (≤255 chars) }`
+
+**Response 201:** the created ExternalLink.
+
+**Errors:** `400` URL malformed, wrong scheme, or too long; `403` insufficient team role.
+
+**Audit:** writes `external_link_added` with `host` and `label` (host only, not full URL — keeps the audit trail readable).
+
+### DELETE `/teams/{teamId}/decisions/{decisionId}/external-links/{linkId}`
+Remove an external link. **Requires `decisions_action_min_level`.**
+
+**Response 200:** `{ ok: true }`
+
+**Errors:** `400` link not found or not in this team; `403` insufficient team role.
+
+**Audit:** writes `external_link_removed` with `host` and `label`.
+
+---
+
 ### Decisions module — category management (v3.67.0, Session G)
 
 Per-team predefined categories with m:n approver lists. The team owner is auto-added as the default approver on category creation if the request omits an explicit list, preserving the never-empty-approvers invariant.

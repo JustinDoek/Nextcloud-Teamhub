@@ -537,11 +537,11 @@ class LayoutController extends Controller {
     // ----------------------------------------------------------------
 
     private function isPresenceModuleEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
+        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1';
     }
 
     private function isDecisionsModuleEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1';
+        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1';
     }
 
     private function currentUserId(): ?string {

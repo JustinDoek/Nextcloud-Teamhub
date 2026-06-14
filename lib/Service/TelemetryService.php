@@ -225,7 +225,7 @@ class TelemetryService {
      * per-team or per-user data — just the on/off state of the module.
      */
     private function isPresenceModuleEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1';
+        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1';
     }
 
     /**
@@ -233,7 +233,7 @@ class TelemetryService {
      * (decisions_module_enabled, '1' = on). Reported in telemetry for adoption tracking.
      */
     private function isDecisionsModuleEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1';
+        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1';
     }
 
     /**

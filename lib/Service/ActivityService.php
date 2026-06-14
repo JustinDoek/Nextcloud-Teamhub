@@ -480,7 +480,7 @@ class ActivityService {
         string $roomName = '',
         string $roomId = '',
         array  $attendeeUids = []
-    ): void {
+    ): string {
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -888,6 +888,10 @@ class ActivityService {
             ]);
             throw $e;
         }
+
+        // Return the iCal UID so callers (e.g. DecisionService::scheduleApproverMeeting)
+        // can record a back-reference from the proposal to the event.
+        return $uid;
     }
 
     /** Escape special characters in iCalendar text property values. */

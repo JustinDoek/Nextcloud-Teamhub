@@ -748,12 +748,17 @@ class TeamController extends Controller {
                 return new JSONResponse(['error' => 'title, start and end are required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $this->activityService->createCalendarEvent(
+            $uid = $this->activityService->createCalendarEvent(
                 $teamId, $title, $start, $end, $location, $description,
                 $calendarId ?: null, $includeTalk, $categories,
                 $roomEmail, $roomName, $roomId, $attendeeUids
             );
-            return new JSONResponse(['success' => true], Http::STATUS_CREATED);
+            return new JSONResponse([
+                'success'  => true,
+                'eventUid' => $uid,
+                'start'    => $start,
+                'title'    => $title,
+            ], Http::STATUS_CREATED);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }

@@ -912,12 +912,14 @@ class TeamService {
             'createTeamGroup'        => $rawGroups,         // legacy flat string — keep for canCreateTeam()
             'createTeamGroups'       => $createTeamGroups, // structured array for the picker
             'groupFoldersDelegation' => $this->safeGetDelegationStatus(),
-            // Presence module — default off. NC admin must explicitly enable.
-            'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '0') === '1',
-            // Decisions module — default off. NC admin must explicitly enable.
-            'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1',
-            // Decisions module — default off. NC admin must explicitly enable.
-            'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '0') === '1',
+            // Presence module — default ON (v3.75.4). NC admin can toggle off.
+            // Defaults to enabled to give the module visibility on fresh
+            // installs; existing installs that have ever explicitly set this
+            // key keep their stored value (getAppValue only uses the default
+            // when the key is unset).
+            'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',
+            // Decisions module — default ON (v3.75.4). Same rationale as above.
+            'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1',
             // RoomVox API token: never return the token value itself, only a
             // boolean indicating whether one is configured. The admin can
             // overwrite it (write field) but can't read it back (read field).

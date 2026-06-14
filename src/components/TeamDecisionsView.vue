@@ -28,51 +28,79 @@
                     <!-- Filters and sort — hidden when the detail panel is open
                          so only the breadcrumb + propose button remain visible. -->
                     <template v-if="!selected">
-                        <!-- Status chips -->
-                        <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by status')">
-                            <button
-                                v-for="chip in statusChips"
-                                :key="chip.value || 'all'"
-                                class="th-dv__chip"
-                                :class="{ 'th-dv__chip--active': filterStatus === chip.value }"
-                                :aria-pressed="filterStatus === chip.value"
-                                @click="setStatusFilter(chip.value)">
-                                {{ chip.label }}
-                            </button>
-                        </div>
-
-                        <!-- Impact chips -->
-                        <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by impact')">
-                            <button
-                                v-for="chip in impactChips"
-                                :key="chip.value || 'all-impact'"
-                                class="th-dv__chip"
-                                :class="{ 'th-dv__chip--active': filterImpact === chip.value }"
-                                :aria-pressed="filterImpact === chip.value"
-                                @click="setImpactFilter(chip.value)">
-                                {{ chip.label }}
-                            </button>
-                        </div>
-
-                        <!-- Level chips (only when level feature is on) -->
-                        <div v-if="decisionsLevelEnabled" class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by level')">
-                            <button
-                                v-for="chip in levelChips"
-                                :key="chip.value || 'all-level'"
-                                class="th-dv__chip"
-                                :class="{ 'th-dv__chip--active': filterLevel === chip.value }"
-                                :aria-pressed="filterLevel === chip.value"
-                                @click="setLevelFilter(chip.value)">
-                                {{ chip.label }}
-                            </button>
-                        </div>
-
-                        <!-- Sort -->
-                        <button class="th-dv__sort-btn" :aria-label="sortLabel" @click="toggleSort">
-                            <SortAscendingIcon v-if="sort === 'created'" :size="15" aria-hidden="true" />
-                            <SortDescendingIcon v-else :size="15" aria-hidden="true" />
-                            {{ sortLabel }}
+                        <!-- Mobile-only toggle: button rendered always, hidden
+                             on desktop by CSS. Tapping it reveals the chip
+                             groups (which are display:none on mobile by default). -->
+                        <button
+                            class="th-dv__filters-toggle"
+                            :class="{ 'th-dv__filters-toggle--open': mobileFiltersOpen }"
+                            :aria-expanded="mobileFiltersOpen"
+                            :aria-controls="'th-dv-filters-panel'"
+                            :aria-label="activeFilterCount > 0
+                                ? t('teamhub', 'Filters ({n} active)', { n: activeFilterCount })
+                                : t('teamhub', 'Filters')"
+                            @click="mobileFiltersOpen = !mobileFiltersOpen">
+                            <FilterVariantIcon :size="15" aria-hidden="true" />
+                            <span class="th-dv__filters-toggle-label">{{ t('teamhub', 'Filters') }}</span>
+                            <span
+                                v-if="activeFilterCount > 0"
+                                class="th-dv__filters-toggle-badge"
+                                aria-hidden="true">{{ activeFilterCount }}</span>
                         </button>
+
+                        <!-- Filter+sort panel. On desktop this always renders inline
+                             in the toolbar. On mobile (<720px) it collapses to a wrapped
+                             block below the toolbar, gated by mobileFiltersOpen. -->
+                        <div
+                            id="th-dv-filters-panel"
+                            class="th-dv__filters-panel"
+                            :class="{ 'th-dv__filters-panel--open': mobileFiltersOpen }">
+                            <!-- Status chips -->
+                            <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by status')">
+                                <button
+                                    v-for="chip in statusChips"
+                                    :key="chip.value || 'all'"
+                                    class="th-dv__chip"
+                                    :class="{ 'th-dv__chip--active': filterStatus === chip.value }"
+                                    :aria-pressed="filterStatus === chip.value"
+                                    @click="setStatusFilter(chip.value)">
+                                    {{ chip.label }}
+                                </button>
+                            </div>
+
+                            <!-- Impact chips -->
+                            <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by impact')">
+                                <button
+                                    v-for="chip in impactChips"
+                                    :key="chip.value || 'all-impact'"
+                                    class="th-dv__chip"
+                                    :class="{ 'th-dv__chip--active': filterImpact === chip.value }"
+                                    :aria-pressed="filterImpact === chip.value"
+                                    @click="setImpactFilter(chip.value)">
+                                    {{ chip.label }}
+                                </button>
+                            </div>
+
+                            <!-- Level chips (only when level feature is on) -->
+                            <div v-if="decisionsLevelEnabled" class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by level')">
+                                <button
+                                    v-for="chip in levelChips"
+                                    :key="chip.value || 'all-level'"
+                                    class="th-dv__chip"
+                                    :class="{ 'th-dv__chip--active': filterLevel === chip.value }"
+                                    :aria-pressed="filterLevel === chip.value"
+                                    @click="setLevelFilter(chip.value)">
+                                    {{ chip.label }}
+                                </button>
+                            </div>
+
+                            <!-- Sort -->
+                            <button class="th-dv__sort-btn" :aria-label="sortLabel" @click="toggleSort">
+                                <SortAscendingIcon v-if="sort === 'created'" :size="15" aria-hidden="true" />
+                                <SortDescendingIcon v-else :size="15" aria-hidden="true" />
+                                {{ sortLabel }}
+                            </button>
+                        </div>
                     </template>
                 </template>
 
@@ -351,7 +379,14 @@
                             <CheckCircleIcon :size="15" aria-hidden="true" />
                             {{ t('teamhub', 'Final proposal') }}
                         </span>
-                        <p class="th-dv__detail-answer-text">{{ selected.selectedAnswer }}</p>
+                        <!-- v3.75.5 — render the proposal body as markdown
+                             rather than raw text. selectedAnswer is the same
+                             markdown that the proposer wrote (and that the
+                             saved .md viewer renders identically). Sanitized
+                             via DOMPurify inside renderViewerMarkdown. -->
+                        <!-- eslint-disable-next-line vue/no-v-html -->
+                        <div class="th-dv__detail-answer-text th-dv__detail-answer-text--md"
+                             v-html="renderedSelectedAnswer" />
                     </div>
 
                     <!-- Withdrawal / denial reason block -->
@@ -484,6 +519,19 @@
                                 <template #icon><CloseIcon :size="16" /></template>
                                 {{ denying ? t('teamhub', 'Denying…') : t('teamhub', 'Deny') }}
                             </NcButton>
+                            <!-- v3.74.10 — Schedule approver meeting.
+                                 Only shown when team has Calendar configured AND user is approver.
+                                 Approve/Deny don't disable this button — discussing first is valid. -->
+                            <NcButton
+                                v-if="canScheduleApproverMeeting(selected)"
+                                variant="secondary"
+                                :disabled="openingMeetingWizard"
+                                :title="t('teamhub', 'Open the meeting wizard pre-filled with the other approvers in this category so you can discuss the proposal together before deciding.')"
+                                @click="openApproverMeetingWizard(selected)">
+                                <template #icon><CalendarPlusIcon :size="16" /></template>
+                                <!-- TRANSLATORS: short button label; hover-tooltip explains the action -->
+                                {{ t('teamhub', 'Schedule meeting') }}
+                            </NcButton>
                         </div>
                     </div>
 
@@ -507,6 +555,17 @@
                                     <OpenInNewIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ task.label || task.task_path }}</span>
                                 </a>
+                                <!-- Completion pill — only shown for Deck cards (isDone is non-null) -->
+                                <span
+                                    v-if="task.isDone !== null && task.isDone !== undefined"
+                                    class="th-dv__task-status-pill"
+                                    :class="task.isDone ? 'th-dv__task-status-pill--done' : 'th-dv__task-status-pill--open'"
+                                    :aria-label="task.isDone ? t('teamhub', 'Completed') : t('teamhub', 'Open')">
+                                    <!-- TRANSLATORS: pill label shown on a linked Deck card that has been completed/done -->
+                                    <template v-if="task.isDone">{{ t('teamhub', 'Complete') }}</template>
+                                    <!-- TRANSLATORS: pill label shown on a linked Deck card that is still open/in-progress -->
+                                    <template v-else>{{ t('teamhub', 'Open') }}</template>
+                                </span>
                                 <button
                                     v-if="canPerformDecisionActions"
                                     class="th-dv__link-remove"
@@ -566,66 +625,153 @@
                         </div>
                     </div>
 
-                    <!-- ── Linked decisions (Session C) ── -->
-                    <div class="th-dv__detail-dec-links">
-                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Linked decisions') }}</span>
+                    <!-- ── Scheduled meetings (v3.74.10) ──
+                         Shows approver meetings scheduled via "Schedule meeting".
+                         Hidden entirely when no meetings have been scheduled yet
+                         to keep the panel clean for proposals that don't need one. -->
+                    <div v-if="scheduledMeetings.length || scheduledMeetingsLoading" class="th-dv__detail-meetings">
+                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Scheduled meetings') }}</span>
 
-                        <div v-if="decLinksLoading" class="th-dv__dec-links-loading">
+                        <div v-if="scheduledMeetingsLoading" class="th-dv__meetings-loading">
                             <NcLoadingIcon :size="16" />
                         </div>
 
-                        <!-- Linked decision list -->
-                        <ul v-if="linkedDecisions.length"
+                        <ul v-else-if="scheduledMeetings.length" class="th-dv__link-list" aria-live="polite">
+                            <li
+                                v-for="m in scheduledMeetings"
+                                :key="m.id"
+                                class="th-dv__link-item">
+                                <div class="th-dv__link-row" :title="m.meetingTitle">
+                                    <CalendarClockIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <span class="th-dv__link-label">
+                                        {{ m.meetingTitle }}
+                                        <span class="th-dv__meeting-when">
+                                            · {{ formatMeetingTime(m.meetingStart) }}
+                                        </span>
+                                    </span>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- ── Linked decisions (Session C, unified with external in v3.75.3) ──
+                         Single section for both internal (decision↔decision)
+                         and external (outbound URL) links. Each row carries
+                         a small pill to distinguish the two kinds. -->
+                    <div class="th-dv__detail-dec-links">
+                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Linked decisions') }}</span>
+
+                        <div v-if="decLinksLoading || externalLinksLoading" class="th-dv__dec-links-loading">
+                            <NcLoadingIcon :size="16" />
+                        </div>
+
+                        <!-- Unified list. Each row dispatches on kind:
+                             internal → button that opens the linked decision
+                             external → anchor that opens the URL in a new tab -->
+                        <ul v-if="unifiedLinks.length"
                             class="th-dv__link-list"
                             aria-live="polite"
                             :aria-label="t('teamhub', 'Linked decisions')">
                             <li
-                                v-for="link in linkedDecisions"
-                                :key="link.id"
+                                v-for="row in unifiedLinks"
+                                :key="row.kind + ':' + row.id"
                                 class="th-dv__link-item">
+
+                                <!-- Internal link — opens the peer decision in this view -->
                                 <button
+                                    v-if="row.kind === 'internal'"
                                     class="th-dv__link-row"
-                                    :title="link.peer_title"
-                                    @click="selectDecisionById(link.peer_id)">
+                                    :title="row.peer_title"
+                                    @click="selectDecisionById(row.peer_id)">
                                     <LinkVariantIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
-                                    <span class="th-dv__link-label">{{ link.peer_title }}</span>
+                                    <span class="th-dv__link-label">{{ row.peer_title }}</span>
+                                    <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-internal">
+                                        <!-- TRANSLATORS: pill on a linked-decision row indicating it points to another decision in this TeamHub instance -->
+                                        {{ t('teamhub', 'Internal') }}
+                                    </span>
                                     <span
-                                        v-if="decisionsLevelEnabled && link.peer_level"
+                                        v-if="decisionsLevelEnabled && row.peer_level"
                                         class="th-dv__link-pill th-dv__link-pill--level"
-                                        :class="'th-dv__link-pill--level-' + link.peer_level">
-                                        {{ levelLabel(link.peer_level) }}
+                                        :class="'th-dv__link-pill--level-' + row.peer_level">
+                                        {{ levelLabel(row.peer_level) }}
                                     </span>
                                     <span
                                         class="th-dv__link-pill th-dv__link-pill--status"
-                                        :class="'th-dv__link-pill--status-' + link.peer_status">
-                                        {{ statusLabel(link.peer_status) }}
+                                        :class="'th-dv__link-pill--status-' + row.peer_status">
+                                        {{ statusLabel(row.peer_status) }}
                                     </span>
                                 </button>
+
+                                <!-- External link — opens an outbound URL -->
+                                <a
+                                    v-else
+                                    :href="row.url"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="th-dv__link-row"
+                                    :title="row.url">
+                                    <OpenInNewIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <span class="th-dv__link-label">{{ externalLinkDisplay(row) }}</span>
+                                    <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-external">
+                                        <!-- TRANSLATORS: pill on a linked-decision row indicating it points to a URL outside TeamHub -->
+                                        {{ t('teamhub', 'External') }}
+                                    </span>
+                                </a>
+
                                 <button
                                     v-if="canPerformDecisionActions"
                                     class="th-dv__link-remove"
-                                    :aria-label="t('teamhub', 'Remove decision link')"
-                                    :title="t('teamhub', 'Remove decision link')"
-                                    @click="removeDecisionLink(link.id)">
+                                    :aria-label="t('teamhub', 'Remove link')"
+                                    :title="t('teamhub', 'Remove link')"
+                                    @click="row.kind === 'internal' ? removeDecisionLink(row.id) : deleteExternalLink(row.id)">
                                     <CloseIcon :size="14" />
                                 </button>
                             </li>
                         </ul>
 
-                        <!-- Empty state: no links yet -->
-                        <p v-else-if="!decLinksLoading" class="th-dv__link-empty">
+                        <!-- Empty state: no links of either kind yet -->
+                        <p v-else-if="!decLinksLoading && !externalLinksLoading" class="th-dv__link-empty">
                             {{ t('teamhub', 'No linked decisions') }}
                         </p>
 
-                        <!-- Link button (gated) -->
-                        <div v-if="canPerformDecisionActions" class="th-dv__link-actions">
-                            <NcButton
-                                variant="secondary"
-                                @click="openDecisionPicker">
-                                <template #icon><LinkVariantIcon :size="16" /></template>
-                                <!-- TRANSLATORS: button to open a picker that links another decision to the current one -->
-                                {{ t('teamhub', 'Link decision') }}
-                            </NcButton>
+                        <!-- Action row — both link affordances side by side -->
+                        <div v-if="canPerformDecisionActions" class="th-dv__link-actions-row">
+                            <!-- Inline external-link form (replaces the action row when open) -->
+                            <div v-if="showLinkExternalForm" class="th-dv__tasks-link-form th-dv__tasks-link-form--ext">
+                                <input
+                                    v-model="linkExternalUrl"
+                                    type="url"
+                                    class="th-dv__tasks-link-input"
+                                    :placeholder="t('teamhub', 'Paste URL (https://…)')"
+                                    :aria-label="t('teamhub', 'External decision URL')"
+                                    @keydown.enter="submitLinkExternal">
+                                <input
+                                    v-model="linkExternalLabel"
+                                    type="text"
+                                    class="th-dv__tasks-link-input th-dv__tasks-link-input--label"
+                                    :placeholder="t('teamhub', 'Label (optional)')"
+                                    :aria-label="t('teamhub', 'External link label')">
+                                <div class="th-dv__tasks-link-btns">
+                                    <NcButton variant="primary" :disabled="!linkExternalUrl.trim() || linkingExternal" @click="submitLinkExternal">
+                                        {{ linkingExternal ? t('teamhub', 'Linking…') : t('teamhub', 'Link') }}
+                                    </NcButton>
+                                    <NcButton variant="tertiary" @click="showLinkExternalForm = false">
+                                        {{ t('teamhub', 'Cancel') }}
+                                    </NcButton>
+                                </div>
+                            </div>
+                            <div v-else class="th-dv__link-actions">
+                                <NcButton variant="secondary" @click="openDecisionPicker">
+                                    <template #icon><LinkVariantIcon :size="16" /></template>
+                                    <!-- TRANSLATORS: button to open a picker that links another decision (in this app) to the current one -->
+                                    {{ t('teamhub', 'Link decision') }}
+                                </NcButton>
+                                <NcButton variant="secondary" @click="showLinkExternalForm = true">
+                                    <template #icon><OpenInNewIcon :size="16" /></template>
+                                    <!-- TRANSLATORS: button to attach an outbound URL pointing to a decision held in a different tool -->
+                                    {{ t('teamhub', 'Link external decision') }}
+                                </NcButton>
+                            </div>
                         </div>
                     </div>
 
@@ -890,6 +1036,25 @@
             @close="showCreateTaskModal = false"
             @created="onTaskCreated" />
 
+        <!-- v3.74.10 — Schedule approver meeting wizard.
+             Mounted on demand from the "Schedule meeting" button in the
+             approval block. Pre-filled with the approvers for the proposal's
+             category, plus title/description/category. The wizard emits
+             `created` with {eventUid, start, title} which is then used to
+             record the back-reference on the proposal. -->
+        <SuggestMeetingWizard
+            v-if="showApproverMeetingWizard"
+            :team-id="currentTeamId"
+            :calendars="resources.calendar || []"
+            :prefilled-attendees="approverPrefill.attendees"
+            :prefilled-title="approverPrefill.title"
+            :prefilled-description="approverPrefill.description"
+            :prefilled-category="approverPrefill.category"
+            :prefill-banner="approverPrefill.banner"
+            :lock-attendees="true"
+            @created="onApproverMeetingCreated"
+            @close="showApproverMeetingWizard = false; schedulingMeetingForDecisionId = null" />
+
     </div>
 </template>
 
@@ -914,6 +1079,7 @@ import CloseIcon              from 'vue-material-design-icons/Close.vue'
 import CheckCircleIcon        from 'vue-material-design-icons/CheckCircle.vue'
 import SortAscendingIcon      from 'vue-material-design-icons/SortAscending.vue'
 import SortDescendingIcon     from 'vue-material-design-icons/SortDescending.vue'
+import FilterVariantIcon      from 'vue-material-design-icons/FilterVariant.vue'
 import MessageOutlineIcon     from 'vue-material-design-icons/MessageOutline.vue'
 import SwapHorizontalIcon     from 'vue-material-design-icons/SwapHorizontal.vue'
 import AlertCircleOutlineIcon from 'vue-material-design-icons/AlertCircleOutline.vue'
@@ -924,7 +1090,10 @@ import FolderOutlineIcon       from 'vue-material-design-icons/FolderOutline.vue
 import MagnifyIcon             from 'vue-material-design-icons/Magnify.vue'
 import LinkVariantIcon          from 'vue-material-design-icons/LinkVariant.vue'
 import FormatListBulletedIcon  from 'vue-material-design-icons/FormatListBulleted.vue'
+import CalendarPlusIcon        from 'vue-material-design-icons/CalendarPlus.vue'
+import CalendarClockIcon       from 'vue-material-design-icons/CalendarClock.vue'
 import AddTaskModal             from './AddTaskModal.vue'
+import SuggestMeetingWizard     from './SuggestMeetingWizard.vue'
 
 const PAGE_SIZE = 50
 
@@ -935,12 +1104,12 @@ export default {
         NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon,
         GavelIcon, PlusIcon, TagIcon, ChevronRightIcon, ChevronLeftIcon,
         CloseIcon, CheckCircleIcon,
-        SortAscendingIcon, SortDescendingIcon,
+        SortAscendingIcon, SortDescendingIcon, FilterVariantIcon,
         MessageOutlineIcon, SwapHorizontalIcon,
         AlertCircleOutlineIcon, OpenInNewIcon, FileDocumentOutlineIcon, DownloadIcon,
         FolderOutlineIcon, MagnifyIcon, FormatListBulletedIcon,
-        LinkVariantIcon,
-        AddTaskModal,
+        LinkVariantIcon, CalendarPlusIcon, CalendarClockIcon,
+        AddTaskModal, SuggestMeetingWizard,
     },
 
     emits: ['propose-decision', 'propose-decision-superseding'],
@@ -971,6 +1140,11 @@ export default {
             filterStatus: null,
             filterImpact: null,
             filterLevel:  null,
+            // v3.75.4 — mobile-only: collapsed-by-default filter panel toggle.
+            // Has no effect on desktop layout (CSS hides the button at ≥720px
+            // and always shows the chips). On mobile (<720px), chips are
+            // hidden by default and revealed when this flag is true.
+            mobileFiltersOpen: false,
             sort:         'recent',
 
             selected:        null,  // decision object currently shown in detail panel
@@ -986,6 +1160,26 @@ export default {
             approvalReason:    '',
             approvalReasonMax: 500,
             approvalForDecisionId: null,
+
+            // v3.74.10 — Schedule approver meeting flow.
+            // When showApproverMeetingWizard is true, SuggestMeetingWizard
+            // is mounted with the prefill data captured in approverPrefill.
+            showApproverMeetingWizard: false,
+            approverPrefill: {
+                attendees:   [],
+                title:       '',
+                description: '',
+                category:    '',
+                banner:      '',
+            },
+            // The decision the wizard is currently being opened for, so the
+            // success callback can record the meeting against it.
+            schedulingMeetingForDecisionId: null,
+            // Scheduled meetings for the currently-selected decision.
+            scheduledMeetings: [],
+            scheduledMeetingsLoading: false,
+            // Lock the schedule button while we fetch approvers + open wizard.
+            openingMeetingWizard: false,
 
             // Session J — audit trail for the currently-selected decision
             auditItems:    [],
@@ -1007,6 +1201,15 @@ export default {
             linkTaskLabel:       '',      // v-model for the label text input
             linkingTask:         false,   // saving indicator
             showCreateTaskModal: false,   // toggle AddTaskModal
+
+            // ── v3.75.2: External decision links ───────────────────────
+            externalLinks:        [],     // [{ id, url, label, createdBy, createdAt }]
+            externalLinksLoading: false,
+            externalLinksDecisionId: null, // tracks which decision the links belong to
+            showLinkExternalForm: false,
+            linkExternalUrl:      '',
+            linkExternalLabel:    '',
+            linkingExternal:      false,
 
             // ── Session C: Linked decisions ─────────────────────────────
             linkedDecisions:        [],     // [{ id, peer_id, peer_title, peer_status, peer_impact, created_by, created_at }]
@@ -1056,6 +1259,47 @@ export default {
             return userLevel >= minLevel
         },
 
+        /**
+         * v3.75.3 — Unified linked-decisions list for the detail panel.
+         *
+         * Combines internal decision↔decision links and external outbound
+         * URL links into one array. Each row carries `kind: 'internal'` or
+         * `kind: 'external'` so the template can dispatch on it (button vs
+         * anchor, which icon, which pills).
+         *
+         * Sort: internal first (chronological), external after (chronological).
+         * This keeps in-app navigation at the top — the most likely click
+         * target — and pushes outbound links below.
+         *
+         * Both kinds keep their own id space; the `:key` uses `kind:id`.
+         */
+        unifiedLinks() {
+            const out = []
+            // Internal links — already loaded by loadDecisionLinks.
+            for (const l of (this.linkedDecisions || [])) {
+                out.push({
+                    kind:        'internal',
+                    id:          l.id,
+                    peer_id:     l.peer_id,
+                    peer_title:  l.peer_title,
+                    peer_status: l.peer_status,
+                    peer_level:  l.peer_level,
+                    created_at:  l.created_at,
+                })
+            }
+            // External links — already loaded by loadExternalLinks.
+            for (const e of (this.externalLinks || [])) {
+                out.push({
+                    kind:       'external',
+                    id:         e.id,
+                    url:        e.url,
+                    label:      e.label,
+                    created_at: e.createdAt,
+                })
+            }
+            return out
+        },
+
         statusChips() {
             return [
                 { value: null,        label: t('teamhub', 'All') },
@@ -1089,6 +1333,37 @@ export default {
             return this.sort === 'created'
                 ? t('teamhub', 'Oldest first')
                 : t('teamhub', 'Newest first')
+        },
+
+        /**
+         * v3.75.4 — Count of active filter facets (status, impact, level)
+         * that are not "All". Displayed as a badge on the mobile "Filters"
+         * button so the user can see at a glance whether anything is
+         * narrowed down without having to expand the panel.
+         */
+        activeFilterCount() {
+            let n = 0
+            if (this.filterStatus) n++
+            if (this.filterImpact) n++
+            if (this.filterLevel)  n++
+            return n
+        },
+
+        /**
+         * v3.75.5 — Final proposal text rendered as sanitized HTML.
+         * selected.selectedAnswer holds the same markdown the proposer
+         * wrote (compose-modal direct proposals; or, for stream-based
+         * proposals, the comment selected as the final answer). Reuses
+         * renderViewerMarkdown which already handles headings, bold,
+         * italic, lists, links, code, blockquotes and runs the result
+         * through DOMPurify with a tight allowlist.
+         *
+         * Returns '' (empty string) when there's no selection, so the
+         * v-html binding renders nothing rather than 'undefined'.
+         */
+        renderedSelectedAnswer() {
+            if (!this.selected || !this.selected.selectedAnswer) return ''
+            return this.renderViewerMarkdown(this.selected.selectedAnswer)
         },
 
         grouped() {
@@ -1258,6 +1533,20 @@ export default {
                     this.linkedDecisions = []
                     this.decLinksLoading = false
                 }
+            }
+            // v3.74.10: load scheduled approver meetings whenever the
+            // selected decision changes. Clears when no decision is selected.
+            if (id) {
+                this.loadScheduledMeetings(id)
+            } else {
+                this.scheduledMeetings = []
+            }
+            // v3.75.2: load external links on the selected decision.
+            if (id) {
+                this.loadExternalLinks(id)
+            } else {
+                this.externalLinks = []
+                this.externalLinksDecisionId = null
             }
             // v3.71.3 — reset the inline approval textarea whenever the
             // selected decision changes, so a reason typed for one proposal
@@ -1809,6 +2098,87 @@ export default {
             }
         },
 
+        // ── v3.75.2: External decision links ────────────────────────
+
+        async loadExternalLinks(decisionId) {
+            this.externalLinksLoading = true
+            this.externalLinksDecisionId = decisionId
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decisionId}/external-links`),
+                )
+                if (this.externalLinksDecisionId !== decisionId) return
+                this.externalLinks = Array.isArray(data?.items) ? data.items : []
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] loadExternalLinks error:', err)
+                if (this.externalLinksDecisionId === decisionId) {
+                    this.externalLinks = []
+                }
+            } finally {
+                if (this.externalLinksDecisionId === decisionId) {
+                    this.externalLinksLoading = false
+                }
+            }
+        },
+
+        async submitLinkExternal() {
+            if (!this.linkExternalUrl.trim() || !this.selected) return
+            this.linkingExternal = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${this.selected.id}/external-links`),
+                    {
+                        url:   this.linkExternalUrl.trim(),
+                        label: this.linkExternalLabel.trim(),
+                    },
+                )
+                this.externalLinks.push(data)
+                this.linkExternalUrl = ''
+                this.linkExternalLabel = ''
+                this.showLinkExternalForm = false
+                showSuccess(t('teamhub', 'External link added'))
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] submitLinkExternal error:', err)
+                showError(t('teamhub', 'Failed to add external link: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.linkingExternal = false
+            }
+        },
+
+        async deleteExternalLink(linkId) {
+            if (!this.selected) return
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${this.selected.id}/external-links/${linkId}`),
+                )
+                this.externalLinks = this.externalLinks.filter(l => l.id !== linkId)
+                showSuccess(t('teamhub', 'External link removed'))
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] deleteExternalLink error:', err)
+                showError(t('teamhub', 'Failed to remove external link: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            }
+        },
+
+        /**
+         * Display helper — show the URL's host + path, with the scheme
+         * stripped, so long URLs don't blow out the row width. The full
+         * URL is in the href so the click still works.
+         */
+        externalLinkDisplay(link) {
+            if (link.label && link.label.trim() !== '') return link.label
+            try {
+                const u = new URL(link.url)
+                const path = (u.pathname && u.pathname !== '/') ? u.pathname : ''
+                return u.host + path
+            } catch (e) {
+                return link.url
+            }
+        },
+
         // ── Session C: Linked decisions ─────────────────────────────────
 
         /**
@@ -2250,6 +2620,185 @@ export default {
             return member?.displayName || userId
         },
 
+        // ── v3.74.10 — Schedule approver meeting flow ────────────────
+
+        /**
+         * True when the schedule-meeting button should be shown for `d`.
+         * Conditions: status is finalized (awaiting approval), the team has
+         * a Calendar resource (otherwise the wizard cannot create an event),
+         * the current user is an approver for the decision's category, AND
+         * the category has more than one approver (no point scheduling a
+         * meeting with yourself).
+         */
+        canScheduleApproverMeeting(d) {
+            if (!d || d.status !== 'finalized') return false
+            if (!(this.resources && this.resources.calendar && this.resources.calendar.length > 0)) return false
+            if (!this.canApprove(d)) return false
+            return this.approverCountFor(d) > 1
+        },
+
+        /**
+         * Look up the approver count for a decision's category from the
+         * already-loaded approverCategories cache. Returns 0 when the
+         * category is unknown — the canScheduleApproverMeeting gate then
+         * suppresses the button.
+         */
+        approverCountFor(d) {
+            if (!d || !d.category || !this.approverCategoriesLoaded) return 0
+            const cat = this.approverCategories.find(c => c.name === d.category)
+            return Array.isArray(cat?.approvers) ? cat.approvers.length : 0
+        },
+
+        /**
+         * Build the description block for a proposal meeting:
+         *   - Decision title
+         *   - First 400 chars of the body (selected.message?.message), trimmed
+         *   - A link back to the team home (Decisions tab) where the proposal
+         *     can be found.
+         * The link goes to the team home rather than directly to the decision
+         * — deep-linking to a specific decision is not yet wired through the
+         * app shell; tracked as an open item in HANDOFF.
+         */
+        buildMeetingDescription(d) {
+            const lines = []
+            if (d.question) lines.push(d.question)
+
+            const body = (d.message && d.message.message) ? String(d.message.message) : ''
+            if (body) {
+                const truncated = body.length > 400 ? body.slice(0, 400).trimEnd() + '…' : body
+                lines.push('')
+                lines.push(truncated)
+            }
+
+            // Deep link to the specific proposal — App.vue reads ?team=…&decision=…
+            // on mount and routes to the team's Decisions tab pre-selecting the
+            // referenced decision (uses the existing decisionsTargetMessageId
+            // pattern, which scrolls/selects the matching decision card).
+            //
+            // The placeholder is passed as { value, escape: false } because
+            // NC's t() defaults to HTML-escaping named placeholders — which
+            // turns `&` into `&amp;`, breaking the URL when calendar clients
+            // copy it. The output goes into a plain-text iCal DESCRIPTION
+            // field, not HTML, so escaping is wrong here.
+            try {
+                const deepUrl = window.location.origin
+                    + generateUrl('/apps/teamhub')
+                    + `?team=${encodeURIComponent(this.currentTeamId)}`
+                    + `&decision=${encodeURIComponent(d.id)}`
+                lines.push('')
+                lines.push(t('teamhub', 'Link: {url}', { url: { value: deepUrl, escape: false } }))
+            } catch (e) {
+                console.warn('[TeamHub][TeamDecisionsView] buildMeetingDescription link build failed', e?.message)
+            }
+
+            return lines.join('\n')
+        },
+
+        /**
+         * Open the SuggestMeetingWizard pre-filled with the approver list,
+         * title, description, and category for this proposal. Called from
+         * the "Schedule meeting" button in the approval block.
+         */
+        async openApproverMeetingWizard(d) {
+            if (!d || this.openingMeetingWizard) return
+            this.openingMeetingWizard = true
+            try {
+                // Fetch approver list from the new backend endpoint.
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${d.id}/approvers`),
+                )
+                const approverIds = Array.isArray(data?.approvers)
+                    ? data.approvers.map(a => a.userId).filter(Boolean)
+                    : []
+
+                this.approverPrefill = {
+                    attendees:   approverIds,
+                    // TRANSLATORS: prefilled meeting title for an approver-meeting on a proposal
+                    title:       t('teamhub', 'Proposal meeting'),
+                    description: this.buildMeetingDescription(d),
+                    category:    t('teamhub', 'Proposals'),
+                    banner:      t('teamhub', 'This meeting will be scheduled with all approvers of this category. The attendee list is locked.'),
+                }
+                this.schedulingMeetingForDecisionId = d.id
+                this.showApproverMeetingWizard = true
+            } catch (e) {
+                console.warn('[TeamHub][TeamDecisionsView] openApproverMeetingWizard: approvers fetch failed', e?.message)
+                showError(t('teamhub', 'Could not load approvers for this proposal'))
+            } finally {
+                this.openingMeetingWizard = false
+            }
+        },
+
+        /**
+         * Wizard `created` callback — receives { eventUid, start, title }.
+         * Records the back-reference so the proposal's Scheduled meetings
+         * section shows the new entry.
+         */
+        async onApproverMeetingCreated(payload) {
+            const decisionId = this.schedulingMeetingForDecisionId
+            this.schedulingMeetingForDecisionId = null
+            this.showApproverMeetingWizard = false
+            if (!decisionId || !payload || !payload.eventUid) {
+                console.warn('[TeamHub][TeamDecisionsView] onApproverMeetingCreated: missing decisionId or eventUid')
+                return
+            }
+            try {
+                const startMs = payload.start ? new Date(payload.start).getTime() : 0
+                const startSec = startMs > 0 ? Math.floor(startMs / 1000) : Math.floor(Date.now() / 1000)
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decisionId}/meetings`),
+                    {
+                        eventUid:     payload.eventUid,
+                        meetingTitle: payload.title || '',
+                        meetingStart: startSec,
+                    },
+                )
+                // Refresh the section if we're still viewing the same decision.
+                if (this.selected && this.selected.id === decisionId) {
+                    this.loadScheduledMeetings(decisionId)
+                }
+            } catch (e) {
+                console.warn('[TeamHub][TeamDecisionsView] onApproverMeetingCreated: record failed', e?.message)
+                showError(t('teamhub', 'Meeting created, but the link to the proposal could not be saved'))
+            }
+        },
+
+        /**
+         * Load scheduled meetings for the selected proposal. Called when the
+         * detail panel opens and after a new meeting is recorded.
+         */
+        async loadScheduledMeetings(decisionId) {
+            if (!decisionId) return
+            this.scheduledMeetingsLoading = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decisionId}/meetings`),
+                )
+                this.scheduledMeetings = Array.isArray(data?.items) ? data.items : []
+            } catch (e) {
+                console.warn('[TeamHub][TeamDecisionsView] loadScheduledMeetings failed:', e?.message)
+                this.scheduledMeetings = []
+            } finally {
+                this.scheduledMeetingsLoading = false
+            }
+        },
+
+        /**
+         * Format a scheduled meeting's start time for display.
+         */
+        formatMeetingTime(unixSeconds) {
+            if (!unixSeconds) return ''
+            const d = new Date(unixSeconds * 1000)
+            try {
+                return d.toLocaleString(undefined, {
+                    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit',
+                })
+            } catch (e) {
+                return d.toISOString()
+            }
+        },
+
         levelLabel(level) {
             return {
                 // TRANSLATORS: Decision level — day-to-day operational decisions
@@ -2406,6 +2955,82 @@ export default {
 
 .th-dv__sort-btn:hover        { background: var(--color-background-hover); color: var(--color-main-text); }
 .th-dv__sort-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 2px; }
+
+/* ── v3.75.4: Mobile filter toggle ─────────────────────────────────
+   On desktop the toggle button is hidden and the filters panel renders
+   inline as part of the toolbar flex row (contents-only display so its
+   children are direct flex items).
+   On mobile (<720px) the toggle becomes visible, the panel collapses
+   to a wrapped block below the toolbar, and the chips' default visibility
+   flips to hidden until the user taps the toggle. */
+
+.th-dv__filters-toggle {
+    /* Hidden on desktop; the chips render directly in the toolbar. */
+    display: none;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-main-text);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.th-dv__filters-toggle--open {
+    background: var(--color-background-hover);
+}
+.th-dv__filters-toggle:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+.th-dv__filters-toggle-label {
+    line-height: 1;
+}
+.th-dv__filters-toggle-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* On desktop: panel is invisible to layout (display:contents) so chips
+   sit directly in the toolbar's flex row, preserving the pre-3.75.4 look. */
+.th-dv__filters-panel {
+    display: contents;
+}
+
+@media (max-width: 720px) {
+    .th-dv__filters-toggle {
+        display: inline-flex;
+    }
+    /* Mobile: panel becomes a real wrapped block below the toolbar,
+       hidden by default, revealed when --open is set by the toggle. */
+    .th-dv__filters-panel {
+        display: none;
+        flex-basis: 100%;
+        flex-direction: column;
+        gap: 8px;
+        padding: 8px 0 0;
+        order: 999; /* push to the end of the toolbar flex row */
+    }
+    .th-dv__filters-panel--open {
+        display: flex;
+    }
+    /* On mobile each chip group + sort takes its own row so wrap is clean. */
+    .th-dv__filters-panel .th-dv__chips {
+        flex-wrap: wrap;
+    }
+}
 
 .th-dv__toolbar-spacer { flex: 1 }
 
@@ -3057,6 +3682,72 @@ export default {
     line-height: 1.5;
 }
 
+/* v3.75.5 — Markdown-rendered variant of the final proposal block.
+   Defaults are tightened so the rendered HTML (h*, ul/ol, p, hr, etc.)
+   sits well in the compact detail panel rather than expanding it. */
+.th-dv__detail-answer-text--md > :first-child { margin-top: 0; }
+.th-dv__detail-answer-text--md > :last-child  { margin-bottom: 0; }
+.th-dv__detail-answer-text--md p {
+    margin: 0 0 8px;
+}
+.th-dv__detail-answer-text--md h1,
+.th-dv__detail-answer-text--md h2,
+.th-dv__detail-answer-text--md h3,
+.th-dv__detail-answer-text--md h4,
+.th-dv__detail-answer-text--md h5,
+.th-dv__detail-answer-text--md h6 {
+    margin: 10px 0 4px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+.th-dv__detail-answer-text--md h1 { font-size: 16px; }
+.th-dv__detail-answer-text--md h2 { font-size: 15px; }
+.th-dv__detail-answer-text--md h3 { font-size: 14px; }
+.th-dv__detail-answer-text--md h4,
+.th-dv__detail-answer-text--md h5,
+.th-dv__detail-answer-text--md h6 { font-size: 13px; }
+.th-dv__detail-answer-text--md ul,
+.th-dv__detail-answer-text--md ol {
+    margin: 0 0 8px;
+    padding-left: 24px;
+}
+.th-dv__detail-answer-text--md li {
+    margin: 2px 0;
+}
+.th-dv__detail-answer-text--md a {
+    color: var(--color-primary-element);
+    text-decoration: underline;
+}
+.th-dv__detail-answer-text--md code {
+    font-family: var(--font-face-mono, monospace);
+    background: var(--color-background-dark);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+.th-dv__detail-answer-text--md pre {
+    background: var(--color-background-dark);
+    padding: 8px 10px;
+    border-radius: var(--border-radius);
+    overflow-x: auto;
+    margin: 0 0 8px;
+}
+.th-dv__detail-answer-text--md pre code {
+    background: transparent;
+    padding: 0;
+}
+.th-dv__detail-answer-text--md blockquote {
+    border-left: 3px solid var(--color-border);
+    margin: 0 0 8px;
+    padding: 2px 10px;
+    color: var(--color-text-maxcontrast);
+}
+.th-dv__detail-answer-text--md hr {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+    margin: 10px 0;
+}
+
 /* Withdrawn block */
 .th-dv__detail-withdrawn {
     margin: 0 0 14px;
@@ -3197,7 +3888,8 @@ export default {
 
 /* Container blocks reuse one shared geometry. */
 .th-dv__detail-tasks,
-.th-dv__detail-dec-links {
+.th-dv__detail-dec-links,
+.th-dv__detail-meetings {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -3216,7 +3908,37 @@ export default {
 .th-dv__link-item {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 6px;
+}
+
+/* ── Task completion status pill ─────────────────────────────────────────
+   Shown only for Deck card links where isDone is non-null.
+   "Open" = grey neutral; "Complete" = green success tone.
+   Hard-contrast text ensures WCAG AA against white pill backgrounds. */
+.th-dv__task-status-pill {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.6;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+}
+
+.th-dv__task-status-pill--open {
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+    border: 1px solid var(--color-border);
+}
+
+.th-dv__task-status-pill--done {
+    /* Matches the established success-pill pattern used elsewhere in the widget */
+    background: #e6f4ec;
+    color: #1a6633;
+    border: 1px solid #b3dcc4;
 }
 
 .th-dv__link-row {
@@ -3325,6 +4047,30 @@ export default {
     background: var(--th-color-success);
 }
 
+/* v3.75.3 — Kind pills distinguish internal-decision rows from
+   external-URL rows in the unified Linked decisions list. Neutral
+   palette so they don't compete with the status/level pills. */
+.th-dv__link-pill--kind-internal {
+    background: var(--color-primary-element);
+}
+.th-dv__link-pill--kind-external {
+    background: var(--color-text-maxcontrast);
+}
+
+/* Actions row in the Linked decisions section: holds both
+   "Link decision" and "Link external decision" side by side, and the
+   inline external-link form when open. */
+.th-dv__link-actions-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.th-dv__tasks-link-form--ext {
+    /* Visually grouped form used by the external-link inline editor.
+       Inherits geometry from .th-dv__tasks-link-form; this modifier
+       exists for future tweaks without touching the shared rule. */
+}
+
 /* Remove button — ghost; only visible on hover/focus of its parent row */
 .th-dv__link-remove {
     flex: 0 0 auto;
@@ -3378,12 +4124,20 @@ export default {
 
 /* Tasks-specific loading + inline form (Session B) — kept */
 .th-dv__tasks-loading,
-.th-dv__dec-links-loading {
+.th-dv__dec-links-loading,
+.th-dv__meetings-loading {
     display: flex;
     align-items: center;
     gap: 8px;
     color: var(--color-text-maxcontrast);
     font-size: 12px;
+}
+
+/* v3.74.10 — Scheduled meetings: time suffix on each meeting row */
+.th-dv__meeting-when {
+    color: var(--color-text-maxcontrast);
+    font-size: 11px;
+    margin-left: 4px;
 }
 
 .th-dv__tasks-link-form {

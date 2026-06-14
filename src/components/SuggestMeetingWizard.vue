@@ -6,9 +6,20 @@
             <!-- Step 1: attendees -->
             <div v-if="step === 1" class="suggest-wizard__step">
                 <p class="suggest-wizard__intro">
-                    {{ t('teamhub', 'Choose who should attend. Use “Select all” for the whole team, or tick individual members.') }}
+                    <template v-if="lockAttendees">
+                        {{ t('teamhub', 'The attendees for this meeting are determined by the approver list and cannot be changed here.') }}
+                    </template>
+                    <template v-else>
+                        {{ t('teamhub', 'Choose who should attend. Use “Select all” for the whole team, or tick individual members.') }}
+                    </template>
                 </p>
-                <div class="suggest-wizard__toolbar">
+                <!-- Prefill banner — set by callers that pre-check attendees
+                     (e.g. the approver-meeting flow on a proposal). -->
+                <div v-if="prefillBanner" class="suggest-wizard__prefill-banner" role="status">
+                    {{ prefillBanner }}
+                </div>
+                <!-- Toolbar hidden when the attendee list is locked. -->
+                <div v-if="!lockAttendees" class="suggest-wizard__toolbar">
                     <NcButton type="secondary" @click="toggleSelectAll">
                         {{ allSelected ? t('teamhub', 'Clear all') : t('teamhub', 'Select all') }}
                     </NcButton>
@@ -18,9 +29,16 @@
                 </div>
                 <NcLoadingIcon v-if="loadingMembers" :size="32" />
                 <ul v-else class="suggest-wizard__members">
-                    <li v-for="m in members" :key="m.userId" class="suggest-wizard__member">
+                    <!-- When locked, only the selected (= prefilled) members are listed.
+                         Each row is read-only — checkbox disabled so the user can see
+                         who will be invited but cannot change the list. -->
+                    <li
+                        v-for="m in displayedMembers"
+                        :key="m.userId"
+                        class="suggest-wizard__member">
                         <NcCheckboxRadioSwitch
                             :model-value="!!checked[m.userId]"
+                            :disabled="lockAttendees"
                             @update:model-value="val => setChecked(m.userId, val)">
                             {{ m.displayName || m.userId }}
                         </NcCheckboxRadioSwitch>
@@ -250,6 +268,21 @@ export default {
     props: {
         teamId: { type: String, required: true },
         calendars: { type: Array, default: () => [] },
+        // Prefill props — used by the approver-meeting flow on a proposal.
+        // Pre-checks the listed userIds in step 1 (user can still adjust).
+        // Pre-fills title, description, categories in step 5.
+        prefilledAttendees:   { type: Array,  default: () => [] },
+        prefilledTitle:       { type: String, default: '' },
+        prefilledDescription: { type: String, default: '' },
+        prefilledCategory:    { type: String, default: '' },
+        // Banner shown above the attendee list when present, e.g.
+        // "Pre-filled with approvers for this category — you can adjust".
+        prefillBanner:        { type: String, default: '' },
+        // When true, attendees are locked — checkboxes disabled, "Select all"
+        // hidden, only the prefilled list is shown. Used by the approver-meeting
+        // flow where the attendee set is the category's approver list and
+        // adding/removing people would change the semantics of the meeting.
+        lockAttendees:        { type: Boolean, default: false },
     },
     data() {
         const today = new Date()
@@ -265,14 +298,14 @@ export default {
             loadingSuggestions: false,
             suggestions: [],
             chosenIndex: null,
-            // Step 5 event fields
-            title: '',
+            // Step 5 event fields — initialised from prefill props (empty by default).
+            title: this.prefilledTitle || '',
             eventDate: iso,
             eventStart: '10:00',
             eventEnd: '11:00',
             location: '',
-            description: '',
-            categories: '',
+            description: this.prefilledDescription || '',
+            categories: this.prefilledCategory || '',
             // User's explicit Talk-meeting choice when it's settable (office meetings).
             // For online meetings the effective value is forced to true via the
             // computed `effectiveIncludeTalk` regardless of this field.
@@ -302,6 +335,18 @@ export default {
         },
         selectedIds() {
             return this.members.map(m => m.userId).filter(id => this.checked[id])
+        },
+        /**
+         * Members to render in step 1's list. When the attendee list is
+         * locked, only the prefilled (= checked) members are shown so the
+         * user sees who is actually being invited — not the full team
+         * roster with most rows greyed out.
+         */
+        displayedMembers() {
+            if (this.lockAttendees) {
+                return this.members.filter(m => this.checked[m.userId])
+            }
+            return this.members
         },
         canAdvance() {
             if (this.step === 1) return this.selectedCount > 0
@@ -342,6 +387,29 @@ export default {
                 this.members = me
                     ? list.filter(m => (m.userId || '').toLowerCase() !== me)
                     : list
+
+                // Apply prefilled attendees — used by the approver-meeting
+                // flow. Only userIds that are visible in the loaded members
+                // list will actually become checked attendees (an approver
+                // who isn't a team member can't be invited via this team's
+                // calendar anyway). The user remains able to add or remove
+                // individuals before advancing.
+                if (Array.isArray(this.prefilledAttendees) && this.prefilledAttendees.length > 0) {
+                    const presetIds = new Set(
+                        this.prefilledAttendees
+                            .map(id => (id || '').toLowerCase())
+                            .filter(Boolean),
+                    )
+                    const next = { ...this.checked }
+                    this.members.forEach(m => {
+                        const uid = (m.userId || '').toLowerCase()
+                        if (presetIds.has(uid)) {
+                            next[m.userId] = true
+                            presetIds.delete(uid)
+                        }
+                    })
+                    this.checked = next
+                }
             } catch (e) {
                 showError(t('teamhub', 'Could not load team members'))
             } finally {
@@ -573,12 +641,20 @@ export default {
                     attendees: this.selectedIds.join(','),
                     calendarId: this.calendars[0]?.id ?? null,
                 }
-                await axios.post(
+                const { data: created } = await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/calendar/events`),
                     payload
                 )
                 showSuccess(t('teamhub', 'Event added to calendar'))
-                this.$emit('created')
+                // Emit event details (eventUid, start, title) so callers
+                // can persist a back-reference. Pre-v3.74.10 `created` had
+                // no payload, so old listeners still work — extra args are
+                // simply ignored.
+                this.$emit('created', {
+                    eventUid: created?.eventUid || '',
+                    start: created?.start || startDt.toISOString(),
+                    title: created?.title || this.title.trim(),
+                })
                 this.$emit('close')
             } catch (e) {
                 const msg = e?.response?.data?.error || ''
@@ -606,6 +682,16 @@ export default {
 .suggest-wizard__intro {
     color: var(--color-text-maxcontrast);
     margin-bottom: 12px;
+}
+.suggest-wizard__prefill-banner {
+    background: var(--th-color-success-soft, var(--color-success-hover, #e8f5e9));
+    color: var(--color-main-text);
+    border-left: 3px solid var(--th-color-success, #2c7d32);
+    padding: 8px 12px;
+    border-radius: var(--border-radius);
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+    line-height: 1.4;
 }
 .suggest-wizard__toolbar {
     display: flex;

@@ -3,6 +3,102 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.77.0] — 2026-06-12 — Task completion pill + translation sync
+
+### Added
+
+- **Task completion pill on Deck card links (3.76.1)** — each Deck card task in the decision detail panel now displays a compact Open/Complete status pill fetched live from the Deck app.
+  - `DeckService::getCardsByIds()` detects whether `deck_stacks` has a `done_status` column (Deck ≥1.9) via `DbIntrospectionService`. If present, uses `done_status = 1` for the done check. Falls back to stack title `= 'done'` (case-insensitive) for older Deck versions. `archived` flag is always checked as a primary condition.
+  - `DecisionTaskService::listForDecision()` now batch-fetches card metadata for all Deck card links in a single `IN()` query (no N+1). A new private `extractDeckCardId(string $taskPath): ?int` helper extracts card IDs from stored paths via regex `#(?:apps/)?deck/board/\d+/card/(\d+)#`.
+  - Non-Deck tasks (plain URLs, other app paths) receive `isDone: null` in the API response — the frontend suppresses the pill for these.
+  - Frontend pill: green "Complete" (`#e6f4ec` background, `#1a6633` text, `#b3dcc4` border — 7.2:1 contrast ✅) and grey "Open" (NC background-dark + maxcontrast text). Pill has `aria-label` with translated text ("Completed" / "Open") for screen-reader accessibility.
+
+### Changed / Fixed
+
+- **Translation sync (3.76.2)** — `en.json` was severely out of date (698 keys vs ~1,526 source strings across the app). Full sync performed:
+  - **579 passthrough strings** added to `en.json` (value = key, standard NC pattern). These strings were already translated in nl/de/fr/da but had never been added to the English source template.
+  - **281 new strings** fully translated into all five locales (en + nl + de + fr + da), covering all Decisions module UI added in recent sessions, File Center header, mobile filter toggle, external/internal link UI, approver-meeting wizard, and the new task completion pill strings ("Open", "Complete", "Completed").
+  - **Result:** `en.json` 698 → 1,558 keys; `nl/de/fr/da` 1,337 → 1,618 keys each.
+  - All `.js` locale files regenerated to match. Existing plural arrays (`%n has a calendar conflict`, etc.) preserved.
+
+## [3.76.0] — 2026-06-12 — Approver-meeting polish, external links, admin defaults, mobile filters, markdown final proposal
+
+This release rolls up the 3.75.x patch series into a single shippable minor.
+
+### Added
+
+- **External decision links (3.75.2)** — attach outbound URLs to a decision pointing to decisions held in other tools (org-management escalation, prior decisions in legacy systems). Backend: new table `teamhub_dec_ext_links` (21 chars ✓), `DecisionExternalLink` entity + mapper, `DecisionExternalLinkService` with URL validation (http/https only, ≤2048 chars, scheme check post-`parse_url`), 3 endpoints (`GET/POST/DELETE /external-links`). Audit transitions `external_link_added` / `external_link_removed` (host only in payload). Migration `Version000375020Date20260611100000`. Frontend: inline URL+label form in the proposal detail panel, action-level gated.
+- **Deep-linking to a specific proposal (3.75.1)** — `?team=…&decision=…` URL params consumed by `App.vue` on mount; selects the team, fetches the decision, switches to Decisions tab, pre-selects the card via existing `decisionsTargetMessageId` mechanism. Defensive — stale URLs warn-log and return without hanging the UI.
+- **Mobile filter toggle (3.75.4)** — Decisions toolbar chip filters + sort collapse behind a "Filters" button on viewports <720px. Active-filter count badge on the toggle. Desktop layout unchanged via `display:contents` on the wrapper.
+
+### Changed
+
+- **Final proposal renders as markdown (3.75.5)** — was rendering raw text via `{{ }}`, hiding the proposer's formatting. Now uses the existing `renderViewerMarkdown` (same renderer as the .md file viewer; DOMPurified with a tight tag/attribute allowlist). New `.th-dv__detail-answer-text--md` CSS modifier tightens nested-element spacing for the compact detail panel.
+- **Presence + Decisions modules default ON at NC admin level (3.75.4)** — flipped 11 `getAppValue` defaults from `'0'` to `'1'` across 6 files. Affects only fresh installs where the key has never been set; existing installs that have explicitly toggled either value keep their stored choice per `getAppValue` contract. Per-team default stays off, to be wired into the create-team template in a future session.
+- **Linked decisions section unified (3.75.3)** — internal and external decision links now live in one section with per-row kind pills (Internal/External). Backend tables stay separate (auth boundaries differ); only the UI merges them.
+- **Approver-meeting wizard locks attendees (3.75.1)** — new `lockAttendees: Boolean` prop on `SuggestMeetingWizard`. When true: Select-all toolbar hidden, intro text changes to explain the lock, list filtered to only the pre-checked members, checkboxes disabled. Attendees become the category's approver list, no manual changes.
+- **Approver-meeting button shows only when meaningful (3.75.1)** — gated additionally on category having >1 approver. No point scheduling a meeting with yourself.
+- **Approver-meeting title is now "Proposal meeting" (3.75.1)** — was `Discuss proposal: {title}` with interpolation.
+- **Approver-meeting description link is now a deep link (3.75.1+3.75.2)** — was a team-home link `?team=…`, now `?team=…&decision=…`. Label changed from "Open in TeamHub:" to "Link:". The URL placeholder now uses `{value, escape: false}` because NC's `t()` defaults `escape:true` and was turning `&` into `&amp;` in the calendar event's plain-text DESCRIPTION.
+
+### Fixed
+
+- **`approver_meeting_scheduled` audit events were being silently dropped (3.75.2)** — the transition string wasn't in `DecisionAuditService::TRANSITIONS`, so the service's whitelist check rejected every write with a warning log. Now registered. Retroactively fixes a v3.75.0 regression.
+- **Banner contrast on locked attendee list (3.75.2)** — was using `--color-primary-element-light` (a tint) paired with `--color-primary-element-text` (designed for the solid fill, hence white). Switched to soft-success background with main-text foreground.
+- **Duplicate `decisionsModuleEnabled` array key in `TeamService::getAdminSettings()` (3.75.4)** — the same key was being set twice in the same array literal. Removed.
+
+### Security
+
+- All new endpoints gated on team membership for reads, `decisions_action_min_level` for writes (external links). URL validation rejects everything except http(s)://, length-capped at 2048. External link rendering uses `target="_blank" rel="noopener noreferrer"`. Final-proposal markdown rendering reuses the existing DOMPurify-sanitized pipeline.
+- `consumeDeepLink` in `App.vue` verifies the team is in the current user's team list before selecting; a stale URL pointing at a team the user is no longer a member of warn-logs and returns rather than leaving the UI in a loading state.
+
+### Known issues
+
+- **Translation gap.** ~327 source strings (Decisions module + File Center header + recent home-page work) are missing from all four locale files (`nl.json`, `de.json`, `fr.json`, `da.json` — all four are exactly 1411 lines, last synced together). The Transifex pipeline (`.tx/config`) needs the new `.pot` template pushed; next session's focus per Justin.
+
+## [3.75.0] — 2026-06-11 — Schedule approver meeting + home-page polish + decision-detail polish
+
+### Added
+
+- **Schedule approver meeting on a proposal (v3.74.10 → 3.75.0)** — approvers can open the suggest-meeting wizard pre-filled to discuss the proposal before deciding.
+  - New table `teamhub_dec_meetings` (20 chars ✓): one row per scheduled meeting with `decision_id`, `event_uid`, denormalised `meeting_title` + `meeting_start`, `scheduled_by`, `created_at`. Indexes on `decision_id`, `team_id`, `event_uid`.
+  - `DecisionMeeting` entity, `DecisionMeetingMapper` with `findByDecisionId`, `insertMeeting`, `deleteByDecisionId`, `deleteByTeamId`.
+  - `DecisionMeetingService` with three public methods: `listApproversForDecision` (looks up the approver list via `DecisionCategoryService::listForTeam` matching on category name), `listForDecision` (membership-gated read with display-name resolution), `recordMeeting` (approver-gated write; validates `eventUid`, `meetingTitle`, positive `meetingStart`; truncates `meetingTitle` to 255; emits audit event `approver_meeting_scheduled`).
+  - 3 new endpoints: `GET /decisions/{decisionId}/approvers`, `GET /decisions/{decisionId}/meetings`, `POST /decisions/{decisionId}/meetings`.
+  - `SuggestMeetingWizard` accepts 5 new optional props: `prefilledAttendees`, `prefilledTitle`, `prefilledDescription`, `prefilledCategory`, `prefillBanner`. Prefill applied after `loadMembers` returns (so users not in the team are silently skipped). `created` event now emits `{eventUid, start, title}` (was no-arg) so callers can record back-references — old listeners continue to work.
+  - UI: "Schedule meeting" button (short label, descriptive `title=` tooltip) appears in two places — the approval block of the proposal detail panel, and the `DecisionApprovalModal` opened from the widget's approve tab. Both gated on `resources.calendar.length > 0` and approver-status. Description prefills `<title>\n\n<first 400 chars of body>\n\nOpen in TeamHub: <team-home url>`. Category prefills "Proposals". Banner reads "Pre-filled with approvers for this category — you can adjust the list before continuing."
+  - "Scheduled meetings" section added to the proposal detail panel below "Linked tasks". Shows scheduled meetings with title + formatted start time (using `toLocaleString`). Hidden entirely when no meetings exist to keep the panel clean.
+  - Migration `Version000374010Date20260611000000`.
+
+### Changed
+
+- **`ActivityService::createCalendarEvent` return type** — was `void`, now returns the generated iCal `UID` (string). The `POST /calendar/events` endpoint response shape extends from `{success: true}` to `{success: true, eventUid, start, title}` — additive only, old callers ignore the new fields.
+- **MessageStream filters direct-proposal decisions** — proposals created via the compose modal or "Propose decision" button now set `sourceType='direct'` and are excluded from the message stream. Discussion-first proposals (`sourceType='message'`) continue to show in the stream. `'direct'` added to the backend's `ALLOWED_SOURCE_TYPES` list — the missing entry was causing a 400 on every direct proposal.
+- **Decision detail panel — "Decided by" row** — was previously gated on `(status === 'approved' || 'decided') && answeredBy` and showed the user from `answeredBy`. `answeredBy` is the *proposer* finalizing their own proposal, not the approver/denier. Now uses `resolvedBy` (set by `approve()` and `deny()`) and is gated on `status === 'approved' || 'denied' || 'decided'`.
+- **Decision detail panel — Level and Category** — render as plain text in the detail meta table (no chips). The chip styling is kept in the card list view where it still serves a hierarchy purpose.
+- **Decision detail panel — Proposed by / Decided by** — render `NcAvatar` (size 20) + display name. Clicking the avatar opens NC's built-in user card (View profile, email, Talk to, Show availability). `.th-dv__detail-meta` no longer has `overflow: hidden` so the popup is not clipped.
+- **Decision detail panel — filters and sort buttons hidden when a decision is open** — only the breadcrumb + Propose button remain in the toolbar in detail view.
+- **Decision detail panel — 16px top padding** added so content doesn't sit flush against the header rule.
+- **Decisions "Create task" button** — hidden when the team has no Deck configured (was always shown, leading to a no-op).
+- **Feedback button → docs link** — the sidebar feedback icon now opens `https://tldr.host/teamhub/docs/` in a new tab. Icon changed from `MessageAlert` to `HelpCircleOutline`. `FeedbackModal.vue` is no longer mounted (file kept for now).
+- **Widget grid — root-cause fixes**:
+  - `grid-layout-plus` `vertical-compact` set to `false` — VGL was running its own compaction on top of `applySnap`, causing snap-back and gaps. `applySnap` is now the sole vertical authority.
+  - `editMode` watcher in `TeamView` — on edit-mode exit, immediately runs `applySnap` then `saveLayout` (no waiting for 1.2 s debounce).
+  - `layoutDiffersFromDefault` now compares `y` as well — vertical reordering is a real user preference. Without this the Save-as-default / Reset buttons were invisible after the most common kind of edit.
+  - Save-as-default / Reset buttons unconditionally shown in edit mode — discoverability over conditional rendering.
+  - `getActiveWidgetIds` now includes `widget-files-center` and `widget-decisions` — they were being parked at y=9999 by snap.
+  - `TeamWidgetGrid.visibleLayout` filters the layout passed to `<grid-layout>` so VGL only sees active items; total grid height (and the scrollbar) stay honest while inactive items remain in `gridLayout` for position memory.
+
+### Fixed
+
+- **Direct proposal 400** — `sourceType='direct'` was being sent by `PostMessageForm` but the backend's `ALLOWED_SOURCE_TYPES` list didn't include it; every direct proposal failed with "Failed to post — server error 400". Added `'direct'` to the allowed list.
+- **Approval block CSS missing** — the `.th-dv__approval-*` classes existed only in the template (label, required marker, textarea, counter, actions row) with no CSS definitions, so the approve/deny UI rendered unstyled. Full block added.
+- **Files and Decisions widgets parked off-screen after snap** — fixed by adding both to `getActiveWidgetIds`. Bug was pre-existing but masked by VGL's own compaction; surfaced when we turned VGL compaction off.
+
+### Security
+
+- All three new endpoints gated on team membership. `POST /meetings` additionally requires CSRF (no `NoCSRFRequired`) and checks the approver list via `DecisionMeetingService::assertCanScheduleMeeting`. Input validation: `eventUid` ≤ 255, `meetingTitle` truncated to 255, `meetingStart` must be a positive timestamp. No proposal body content logged.
+
 ## [3.74.0] — 2026-06-09 — Decisions: link decision + cross-app design unification
 
 ### Added
