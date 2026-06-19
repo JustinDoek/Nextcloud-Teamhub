@@ -139,6 +139,24 @@
                     {{ t('teamhub', 'Decisions') }}
                 </button>
 
+                <!-- Timeline tab — unified visual timeline of Calendar, Deck and Decisions -->
+                <button
+                    v-else-if="tab.key === 'timeline'"
+                    id="tab-timeline"
+                    :key="'tab-timeline'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'timeline' }"
+                    :aria-selected="currentView === 'timeline' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('timeline')"
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
+                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <TimelineIcon :size="16" />
+                    {{ t('teamhub', 'Timeline') }}
+                </button>
+
                 <!-- External app tabs -->
                 <button
                     v-else-if="tab.key.startsWith('ext-')"
@@ -244,6 +262,7 @@ import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import Web from 'vue-material-design-icons/Web.vue'
 import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
 import GavelIcon          from 'vue-material-design-icons/Gavel.vue'
+import TimelineIcon       from 'vue-material-design-icons/TimelineCheckOutline.vue'
 
 export default {
     name: 'TeamTabBar',
@@ -253,6 +272,7 @@ export default {
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
         OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon,
+        TimelineIcon,
     },
 
     props: {
@@ -333,6 +353,8 @@ export default {
             case 'presence':
                 return true
             case 'decisions':
+                return true
+            case 'timeline':
                 return true
             default:
                 // ext-* and link-* tabs always render

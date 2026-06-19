@@ -3,6 +3,92 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.79.0] — 2026-06-19 — Timeline Milestones, connector overlays, Deck card dependencies
+
+### Added
+
+- **Timeline Milestones** — team admins can define named, optionally-dated markers from Manage Team → Integration settings → Timeline. Dated milestones render on the Timeline as a full-height red line with their label, always plotted (not a filterable source — admins who set a milestone want it visible unconditionally). Undated milestones are listed in the management UI but not plotted (no x-position to plot them at).
+  - New table `teamhub_milestones` (`id`, `team_id`, `label`, `milestone_date` nullable, `created_by`, `created_at`).
+  - Full CRUD: `lib/Db/Milestone.php`, `lib/Db/MilestoneMapper.php`, `lib/Service/MilestoneService.php` — all operations admin-gated via `MemberService::requireAdminLevel`.
+  - Display ordering (dated-ascending, undated last) computed in PHP, not SQL — cross-database NULL-ordering consistency (MySQL and PostgreSQL default NULL ordering differs).
+- **Manage Team "Decisions" tab renamed to "Integration settings"** — now always shown (previously hidden entirely when the Decisions module was off instance-wide). Contains a Decisions block (existing settings/categories, conditional on the module being enabled) followed by a Timeline block with full Milestone management.
+- **Timeline crowding count-badges** (3M/6M views) — when a single section has 4+ chips on the same calendar day, they collapse into one count-badge per section instead of stacking that many lanes deep. Click jumps to the 1-Week view, snapped to the week containing that day, via a `postMessage` bridge from the iframe to `TeamView.vue` (the iframe has no navigation state of its own). Threshold purely density-driven, not tied to zoom level.
+- **Timeline 1-Week view: full per-item Gantt mode for every section** — every distinct item (Deck card, decision, calendar event, message) gets its own row; connected lifecycle chips (created+due, proposed+decided) share a row with a connecting bar. Crowding badges are skipped entirely at this zoom level — the point of zooming in is to see everything.
+- **Three Timeline connector overlays**, opt-in toggles in the filter menu, all on by default:
+  - **Decision ↔ task links** (v3.78.5) — arrow from a decision's outcome chip (decided/withdrawn) to each Deck card linked via "Link tasks." Anchors on the outcome, not the proposal, so the arrow reads causally: decision → resulting task.
+  - **Deck card dependencies** (v3.78.8) — NC 34 / Deck 1.18+ only. Detects the new `deck_dependent_cards` table via `DbIntrospectionService`; the toggle is entirely absent from the filter menu on older installs rather than shown disabled. Arrow runs prerequisite card → blocked card, inferred from Deck's own `CardMapper::addDependency()` semantics and the "Assign dependent cards" UI (not officially documented by Nextcloud — flagged in code as reversible if it turns out backwards in practice).
+  - **Message ↔ decision links** (v3.78.9) — arrow from a `messageType='decision'` stream post to the decision's "proposed" chip it announced. Uses the decision row's existing `message_id` — no new schema or query needed.
+- **Share button on decision detail panel** — icon button next to the status pill copies a `?team=…&decision=…` deep-link to the clipboard (`TeamDecisionsView.vue`), matching the existing meeting-invite link pattern.
+
+### Changed
+
+- **Timeline section order**: Deck → Decisions → Messages → Calendar (top-to-bottom), was Deck → Calendar → Decisions → Messages. Filter menu item order updated to match.
+- **All Timeline sources, sub-filters, and connector overlays now default to enabled** — maximizes visible relationships out of the box. Previously Deck/Decisions "created"/"proposed" sub-filters and all three connector overlays defaulted off.
+- **`DecisionTaskService::extractDeckCardId`** changed from `private` to `public static` so `TimelineService` can resolve `task_path` → Deck card ID using the exact same logic as the decision-task link feature, rather than re-deriving the regex separately.
+
+### Fixed
+
+- **Activity widget showing literal `&quot;` instead of a quote mark** (`ActivityWidget.vue`, `ActivityFeedView.vue`) — `@nextcloud/l10n`'s `t()` HTML-escapes named placeholder values by default (safe for `v-html` insertion), but `formatSubject()`'s output is always rendered via plain `{{ }}` text interpolation, which Vue already escapes safely on its own. Double-escaping left raw entities visible. Fixed by wrapping every dynamic placeholder value (`user`, `card`, `board`, `file`, `detail`) with `{ value, escape: false }` in both files — the same workaround pattern already used elsewhere in this codebase for meeting-invite links.
+
+### Security & privacy
+
+No new authorisation gaps. Every new endpoint (`getMilestones`/`createMilestone`/`updateMilestone`/`deleteMilestone`) is gated through `MilestoneService`'s `requireAdminLevel` checks at the service layer, consistent with the controller-thin/service-fat pattern. The card-dependency and decision-task bulk lookups are scoped to card/decision IDs already derived from the requesting team's own resources — not user-suppliable IDs — so neither introduces a cross-team data exposure path. No raw SQL introduced; all new queries go through `OCP\DB\QueryBuilder` with parameterized binds.
+
+### Translations
+
+20 new strings (Milestones UI, Timeline filter-menu connector labels, decision share button) translated into all 5 locales (en/nl/de/fr/da); `.js` locale files regenerated to match. See `HANDOFF.md` for a separately-discovered, pre-existing 60-key discrepancy between `en.json` and the other four locales (unrelated to this session's strings) flagged for a future dedicated translation-sync session.
+
+## [3.78.1] — 2026-06-17 — Timeline translations
+
+### Added
+
+- **17 Timeline-related strings translated** into all 5 supported locales (en/nl/de/fr/da). Covers: `Timeline`, `Filter`, `Timeline period`, `Print timeline`, `Enable Timeline for this team`, the four period-length options (`1 week` / `1 month` / `3 months` / `6 months`), the two filter-menu captions (`Decisions events` / `Deck events`), the five sub-filter labels (`Proposed date` / `Approved date` / `Created date` / `Due date` / `Completed date`), and the Manage Team integration row description.
+- Locale `.js` files regenerated to match the updated `.json` sources. Existing plural arrays preserved untouched.
+
+### Known untranslated (deferred to next translation sync session)
+
+- A handful of pre-existing strings from earlier sessions are still missing from `en.json` and the matched locales — including `Show a Presence tab on the team home so members can see each other's schedules.`, `Show Operational / Tactical / Strategic level on decisions. ...`, `Image cache cleared (%n file removed)`, `Show %n ignored resource`, and `The team will be permanently deleted in {n} day.`. These pre-date 3.78.0 and are tracked in `HANDOFF.md` for a focused translation sync.
+
+## [3.78.0] — 2026-06-16 — Timeline tab (visual aggregate of team activity)
+
+### Added
+
+- **Timeline tab** — a new built-in team tab presenting a horizontal visual timeline of team activity. Four stacked source bands (Deck, Calendar, Decisions, Messages), each with its own background tint, label and dotted time-axis. Chips render at proportional x-positions; vertical lanes within a band auto-stack only where chips truly overlap horizontally.
+  - **Backend**: `lib/Service/TimelineService.php` — new service that aggregates events from Deck cards (uses TeamHub's `teamhub_team_app_resources` registry to locate team boards; ACL fallback for installs without registry rows), Calendar events (CalDAV principal scan for team-circle calendars), Decisions (`teamhub_decisions` with `created_at`/`decided_at`/`withdrawn_at` anchors), and Messages (`teamhub_messages`). Uses `SELECT *` on `deck_cards` with `?? null` field reads — robust against schema variance across Deck versions where DbIntrospectionService can silently return `[]`.
+  - **Iframe page**: `templates/timeline.php` renders the canvas as a standalone same-origin iframe (`PageController::timeline`). Uses inline `<script>` stamped with the per-request CSP nonce via `\OC::$server->getContentSecurityPolicyNonceManager()->getNonce()` — `RENDER_AS_BLANK` bypasses the `<jsfiles>` pipeline so `Util::addScript()` produces no output. Vanilla JS; no Vue.
+  - **View modes**: 1W (180 px/day), 1M (60), 3M (32), 6M (18). Period navigation always steps by exactly one month (or one week in 1W view), regardless of view width — clicking `›` in the 3M view advances by 1 month, not 3.
+  - **Per-source sub-filters**: Deck (created/due/completed) and Decisions (proposed/decided). Defaults emit only the "resolved" events (Deck due+completed, Decisions decided). Enabling "created" or "proposed" adds a second chip per item and the timeline draws a Gantt-style connecting bar between the lifecycle endpoints. Sub-filters grey out when their parent source is off.
+  - **Per-item Gantt mode**: when only one source is active (Deck only OR Decisions only), each distinct card/decision gets its own dedicated lane, ordered by earliest event. Combined with the connecting bar this turns the view into a true Gantt chart with one row per task.
+  - **Filter dropdown**: single Filter button in the embed bar opens an `NcActions` popover with grouped section captions and indented sub-checkboxes. Replaces the original inline toggle pills.
+  - **Clickable chips**: each chip carries an in-app deep-link (`target="_top"`). Calendar → edit sidebar, Deck → board+card detail, Decisions → `/apps/teamhub?team=…&decision=…` (existing TeamDecisionsView reads the query), Messages → team home.
+  - **Print button**: printer icon in the embed bar calls `frame.contentWindow.print()` on the same-origin iframe. Dedicated `@media print` rules in `templates/timeline.php` drop the loading overlay, lift overflow constraints so the full natural canvas width is printed, drop chip shadows, and use `print-color-adjust: exact` so chip colours survive.
+
+- **Per-team Timeline toggle** (Manage Team → Integrations → Internal integrations) — admins can enable or disable the Timeline tab per team via a standard `NcCheckboxRadioSwitch`. Default is on. Persisted as a single boolean via `IConfig::setAppValue('teamhub', 'timeline_enabled_<teamId>', '1'|'0')` — no migration needed.
+
+- **Generic `embedMenu` + `embedToggles` props** on `src/components/AppEmbed.vue` — reusable mechanisms for adding dropdown filter menus and inline toggle-state buttons to any AppEmbed-hosted iframe tab. Menu items support `isCaption: true` for grouping section headers using `NcActionCaption`, and `disabled` to grey out items when a parent is off.
+
+- **`mergeNewTabs()` helper** in `LayoutController` — mirrors `mergeNewWidgets()`. Appends any keys in `DEFAULT_TAB_ORDER` that are missing from a saved `tab_order_json` row, so existing teams pick up the new Timeline tab automatically without ever re-saving their layout. Applied in both the team-specific-row and cascade-to-personal-default response paths.
+
+### Changed
+
+- **Section order on the timeline canvas**: Deck → Calendar → Decisions → Messages (top-to-bottom). Reorderable via the `SECTIONS` array in `templates/timeline.php`.
+- **`fetchDeckEvents` board lookup is registry-first**: uses `TeamAppResourceMapper::findActiveByTeamAndApp($teamId, 'deck')` as the primary source (matches `ResourceService`'s approach), with the Deck ACL tables (`deck_board_acl` and `deck_acl`) as a fallback. Earlier code's ACL-only lookup found zero boards on installs where boards were connected via the resource flow but lacked corresponding circle ACL rows.
+- **Per-section axis lines** sit directly under the section's label row instead of through the section's vertical centre — chips visually read as "sits on the axis below the label".
+
+### Fixed
+
+- **Deck cards failing to appear on the timeline** — three independent bugs in `fetchDeckEvents`:
+  1. SQL was selecting `due_date` (with underscore) and `created_at`; Deck's actual columns are `duedate` (one word) and `last_modified` (no `created_at` exists). Queries threw at the DB level. Fixed.
+  2. Inner `join` to `deck_boards` with `b.archived = 0` filter silently dropped all stacks when `archived` was NULL rather than 0. Changed to a left-join and removed the redundant filter (registry already encodes "active for this team").
+  3. `DbIntrospectionService::getTableColumns('deck_cards')` returns `[]` on at least one production install, so the introspected SELECT list was missing the optional columns and the data wasn't fetched. Switched to `SELECT *` with `?? null` reads.
+- **TimelineService log output not appearing in `nextcloud.log`** — all `error_log()` calls converted to `$this->logger->info(...)`. PHP's `error_log` writes to the PHP error log (or stderr / syslog depending on config), not to `data/nextcloud.log`. Subsequently downgraded to `debug` level for production cleanliness — flip the per-app log level to debug to see them.
+- **Filter dropdown active state showing bold text** — added a `:deep()` selector targeting NcButton's internal `.button-vue__text` span to force `font-weight: 400`. The button itself uses 400 by default but the inner text span was inheriting a heavier weight.
+- **Timeline tab not appearing on existing teams** — two-part fix. Backend: new `mergeNewTabs()` ensures saved `tab_order_json` rows pick up new built-in tabs on every GET. Frontend: `TeamView.buildAllTabDescriptors()` is the authoritative frontend tab registry and silently drops any key not present; `'timeline'` was missing. Added the entry plus matching entries in `syncExtTabs`'s `builtinKeys` and the preload warm-up list.
+
+### Removed
+
+- **Deck cards `archived` filter** (board-side) — the registry-first lookup already encodes "active for this team", and an `archived` column with NULL values was incorrectly excluding live boards.
+
 ## [3.77.0] — 2026-06-12 — Task completion pill + translation sync
 
 ### Added

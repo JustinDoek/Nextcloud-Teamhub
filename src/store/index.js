@@ -50,6 +50,10 @@ export default createStore({
         decisionsConfig: { decisions_enabled: false, decisions_level_enabled: false, decisions_action_min_level: 1 },
         decisionsModuleEnabled: false,
         decisionsTargetMessageId: null, // set by widget/stream to highlight a decision in the tab
+        // Timeline integration: per-team toggle, default enabled. Mirrors the
+        // decisionsConfig shape so consumers can guard the Timeline tab the
+        // same way they guard the Decisions tab.
+        timelineConfig: { timeline_enabled: true },
         loading: {
             teams: false,
             messages: false,
@@ -241,6 +245,7 @@ export default createStore({
         SET_PRESENCE_CONFIG(state, config) { state.presenceConfig = config },
         SET_PRESENCE_MODULE_ENABLED(state, val) { state.presenceModuleEnabled = val },
         SET_DECISIONS_CONFIG(state, config) { state.decisionsConfig = config },
+        SET_TIMELINE_CONFIG(state, config) { state.timelineConfig = config },
         SET_DECISIONS_MODULE_ENABLED(state, val) { state.decisionsModuleEnabled = val },
         SET_DECISIONS_TARGET(state, messageId) { state.decisionsTargetMessageId = messageId },
         SET_LOADING(state, { key, value }) { state.loading[key] = value }, // Vue 3: direct assignment is reactive

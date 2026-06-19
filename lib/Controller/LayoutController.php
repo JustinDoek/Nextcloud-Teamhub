@@ -8,6 +8,7 @@ use OCA\TeamHub\Db\LayoutMapper;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
+use OCA\TeamHub\Service\TimelineService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -123,7 +124,7 @@ class LayoutController extends Controller {
         ],
     ];
 
-    private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck'];
+    private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck', 'timeline'];
 
     // Maximum allowed JSON payload size in bytes (64 KB).
     private const MAX_PAYLOAD_BYTES = 65536;
@@ -154,7 +155,7 @@ class LayoutController extends Controller {
     ];
 
     // Allowed built-in tab keys.
-    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'presence', 'decisions'];
+    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'presence', 'decisions', 'timeline'];
 
     public function __construct(
         string $appName,
@@ -167,6 +168,7 @@ class LayoutController extends Controller {
         private MemberService $memberService,
         private PresenceTeamService $presenceTeamService,
         private DecisionTeamService $decisionTeamService,
+        private TimelineService $timelineService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -209,6 +211,7 @@ class LayoutController extends Controller {
             // No team-specific row: cascade to user default (or system default).
             // Merge any new system-default widgets the user's default may not have yet.
             $mergedDefault = $this->mergeNewWidgets($userDefault['layout']);
+            $mergedTabOrder = $this->mergeNewTabs($userDefault['tabOrder']);
             $this->logger->debug('[TeamHub][LayoutController] getLayout — no team layout, cascading to default', [
                 'teamId' => $teamId, 'userId' => $userId,
                 'isSystemDefault' => $userDefault['isSystemDefault'],
@@ -217,22 +220,31 @@ class LayoutController extends Controller {
             ]);
         return new JSONResponse([
             'layout'                 => $mergedDefault,
-            'tabOrder'               => $userDefault['tabOrder'],
+            'tabOrder'               => $mergedTabOrder,
             'isDefault'              => true,
             'userDefault'            => $mergedDefault,
             'presenceConfig'         => $this->presenceTeamService->getConfig($teamId),
             'presenceModuleEnabled'  => $this->isPresenceModuleEnabled(),
             'decisionsConfig'        => $this->decisionTeamService->getConfig($teamId),
             'decisionsModuleEnabled' => $this->isDecisionsModuleEnabled(),
+            'timelineConfig'         => [
+                'timeline_enabled' => $this->config->getAppValue(Application::APP_ID, 'timeline_enabled_' . $teamId, '1') === '1',
+                // NC 34 / Deck 1.18+ only — gates the "Deck card dependencies"
+                // connector toggle on the Timeline tab (v3.78.8). Detected via
+                // DbIntrospectionService; absent on older Deck installs.
+                'card_dependencies_supported' => $this->timelineService->isCardDependencySupported(),
+            ],
         ]);
         }
 
         $layout   = json_decode($row['layout_json'],    true) ?? self::DEFAULT_LAYOUT;
         $tabOrder = json_decode($row['tab_order_json'], true) ?? self::DEFAULT_TAB_ORDER;
 
-        // Merge any new system-default widgets that are missing from the saved layout.
-        // This ensures users with existing saved layouts get new widgets automatically.
-        $layout = $this->mergeNewWidgets($layout);
+        // Merge any new system-default widgets/tabs that are missing from the saved
+        // layout/tabOrder. This ensures users with existing saved layouts get new
+        // widgets and tabs automatically — see mergeNewWidgets()/mergeNewTabs() docblocks.
+        $layout   = $this->mergeNewWidgets($layout);
+        $tabOrder = $this->mergeNewTabs($tabOrder);
 
         $this->logger->debug('[TeamHub][LayoutController] getLayout — found team layout', [
             'teamId' => $teamId, 'userId' => $userId, 'items' => count($layout),
@@ -247,6 +259,13 @@ class LayoutController extends Controller {
             'presenceModuleEnabled'  => $this->isPresenceModuleEnabled(),
             'decisionsConfig'        => $this->decisionTeamService->getConfig($teamId),
             'decisionsModuleEnabled' => $this->isDecisionsModuleEnabled(),
+            'timelineConfig'         => [
+                'timeline_enabled' => $this->config->getAppValue(Application::APP_ID, 'timeline_enabled_' . $teamId, '1') === '1',
+                // NC 34 / Deck 1.18+ only — gates the "Deck card dependencies"
+                // connector toggle on the Timeline tab (v3.78.8). Detected via
+                // DbIntrospectionService; absent on older Deck installs.
+                'card_dependencies_supported' => $this->timelineService->isCardDependencySupported(),
+            ],
         ]);
     }
 
@@ -319,14 +338,19 @@ class LayoutController extends Controller {
 
         $userDefault = $this->resolveUserDefault($userId);
 
+        // Same merge as getLayout() — a saved personal default predates new
+        // widgets/tabs just as easily as a team-specific layout does.
+        $mergedLayout   = $this->mergeNewWidgets($userDefault['layout']);
+        $mergedTabOrder = $this->mergeNewTabs($userDefault['tabOrder']);
+
         $this->logger->debug('[TeamHub][LayoutController] getDefaultLayout — fetched', [
             'userId' => $userId, 'isSystemDefault' => $userDefault['isSystemDefault'],
-            'items'  => count($userDefault['layout']),
+            'items'  => count($mergedLayout),
         ]);
 
         return new JSONResponse([
-            'layout'          => $userDefault['layout'],
-            'tabOrder'        => $userDefault['tabOrder'],
+            'layout'          => $mergedLayout,
+            'tabOrder'        => $mergedTabOrder,
             'isSystemDefault' => $userDefault['isSystemDefault'],
         ]);
     }
@@ -530,6 +554,42 @@ class LayoutController extends Controller {
         }
 
         return $layout;
+    }
+
+    /**
+     * Append any DEFAULT_TAB_ORDER keys that are missing from $tabOrder.
+     *
+     * Mirrors mergeNewWidgets() — same problem, same fix. A saved tab_order_json
+     * row (per-team or per-user-default) is a frozen snapshot from whenever it
+     * was last written. When a new built-in tab is introduced (e.g. 'timeline'
+     * in v3.77.8), every existing saved row predates it and would never show
+     * the new tab without this merge running on every GET.
+     *
+     * New keys are appended at the end, preserving the user's chosen order for
+     * everything else. Order among newly-added keys follows DEFAULT_TAB_ORDER.
+     */
+    private function mergeNewTabs(array $tabOrder): array {
+        $existing = array_flip($tabOrder);
+        $added    = false;
+
+        foreach (self::DEFAULT_TAB_ORDER as $key) {
+            if (isset($existing[$key])) {
+                continue;
+            }
+            $tabOrder[] = $key;
+            $added      = true;
+            $this->logger->debug('[TeamHub][LayoutController] mergeNewTabs — adding missing tab', [
+                'tabKey' => $key,
+            ]);
+        }
+
+        if ($added) {
+            $this->logger->debug('[TeamHub][LayoutController] mergeNewTabs — tabOrder updated with new tabs', [
+                'totalTabs' => count($tabOrder),
+            ]);
+        }
+
+        return $tabOrder;
     }
 
     // ----------------------------------------------------------------

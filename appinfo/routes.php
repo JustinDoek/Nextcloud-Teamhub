@@ -4,7 +4,9 @@ declare(strict_types=1);
 return [
     'routes' => [
         // Main page route
-        ['name' => 'page#index', 'url' => '/', 'verb' => 'GET'],
+        ['name' => 'page#index',    'url' => '/',                  'verb' => 'GET'],
+        // Standalone iframe page — visual timeline
+        ['name' => 'page#timeline', 'url' => '/timeline/{teamId}', 'verb' => 'GET'],
 
         // ----------------------------------------------------------------
         // Team routes
@@ -40,6 +42,7 @@ return [
         // Tasks (NC Tasks app — VTODO objects in the team calendar)
         ['name' => 'team#getTeamTasks',           'url' => '/api/v1/teams/{teamId}/tasks',                   'verb' => 'GET'],
         ['name' => 'team#createTeamTask',         'url' => '/api/v1/teams/{teamId}/tasks',                   'verb' => 'POST'],
+        ['name' => 'team#getTimeline',            'url' => '/api/v1/teams/{teamId}/timeline',                'verb' => 'GET'],
         ['name' => 'team#getTeamActivity',        'url' => '/api/v1/teams/{teamId}/activity',                'verb' => 'GET'],
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
@@ -290,6 +293,19 @@ return [
         // saveConfig additionally requires team admin.
         ['name' => 'decision#getConfig',  'url' => '/api/v1/teams/{teamId}/decisions/config', 'verb' => 'GET'],
         ['name' => 'decision#saveConfig', 'url' => '/api/v1/teams/{teamId}/decisions/config', 'verb' => 'PUT'],
+
+        // Timeline module — per-team enable flag (v3.77.20)
+        // Stored as app-config: timeline_enabled_<teamId> = "1" or "0".
+        // Default is enabled. Disabling hides the Timeline tab for that team.
+        ['name' => 'team#getTimelineConfig',  'url' => '/api/v1/teams/{teamId}/timeline/config', 'verb' => 'GET'],
+        ['name' => 'team#saveTimelineConfig', 'url' => '/api/v1/teams/{teamId}/timeline/config', 'verb' => 'PUT'],
+
+        // Timeline Milestones (v3.78.2) — admin-managed marker lines on the
+        // Timeline tab. Managed from Manage Team → Integration settings.
+        ['name' => 'team#getMilestones',    'url' => '/api/v1/teams/{teamId}/milestones',                'verb' => 'GET'],
+        ['name' => 'team#createMilestone',  'url' => '/api/v1/teams/{teamId}/milestones',                'verb' => 'POST'],
+        ['name' => 'team#updateMilestone',  'url' => '/api/v1/teams/{teamId}/milestones/{milestoneId}', 'verb' => 'PUT'],
+        ['name' => 'team#deleteMilestone',  'url' => '/api/v1/teams/{teamId}/milestones/{milestoneId}', 'verb' => 'DELETE'],
 
         // Decisions module — feature endpoints (v3.65.0, Session B)
         // All require global flag on, per-team flag on, and team membership.

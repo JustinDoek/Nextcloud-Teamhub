@@ -961,6 +961,36 @@
                             </NcCheckboxRadioSwitch>
                         </div>
 
+                        <!-- Timeline row — per-team toggle. No global module gate
+                             because the timeline is purely a read-only visual
+                             aggregation; nothing to disable at the system level. -->
+                        <div
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': timelineEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Timeline feature (a TeamHub built-in integration that shows calendar/deck/decisions/messages on a visual timeline) -->
+                                    {{ t('teamhub', 'Timeline') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Show a visual timeline tab combining calendar events, Deck cards, decisions, and message posts.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="timelineEnabled"
+                                :disabled="savingTimelineConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Timeline for this team')"
+                                @update:model-value="setTimelineEnabled($event)">
+                                {{ timelineEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
                     </div>
                 </div>
 
@@ -1023,22 +1053,24 @@
             </div>
         </div>
 
-        <!-- TAB: Decisions (only shown when decisionsModuleEnabled) -->
-        <div v-else-if="activeTab === 'decisions'" class="manage-tab-content">
+        <!-- TAB: Integration settings (Decisions block + Timeline/Milestones block) -->
+        <div v-else-if="activeTab === 'integration-settings'" class="manage-tab-content">
 
-            <!-- v3.71.9 — toggle moved out: lives only in Integrations tab now.
-                 If decisions is disabled here we still show this tab (it's
-                 conditional on the module-level enable), but with a hint
-                 directing the admin to flip it on under Integrations. -->
-            <div v-if="!decisionsEnabled" class="manage-section">
-                <p class="manage-section-desc manage-section-desc--inline">
-                    {{ t('teamhub', 'Decisions are disabled for this team. Enable the module under the Integrations tab to start managing categories.') }}
-                </p>
-            </div>
+            <!-- ── Decisions block — only rendered at all when the Decisions
+                 module is available instance-wide. Within that, shows a hint
+                 when this team hasn't toggled it on yet, or the full settings
+                 + categories once it has. ──────────────────────────────── -->
+            <template v-if="decisionsModuleEnabled">
+                <div v-if="!decisionsEnabled" class="manage-section">
+                    <h3>{{ t('teamhub', 'Decisions') }}</h3>
+                    <p class="manage-section-desc manage-section-desc--inline">
+                        {{ t('teamhub', 'Decisions are disabled for this team. Enable the module under the Integrations tab to start managing categories.') }}
+                    </p>
+                </div>
 
             <!-- Category management — only when decisions is enabled -->
             <div v-if="decisionsEnabled" class="manage-section">
-                <h3>{{ t('teamhub', 'Settings') }}</h3>
+                <h3>{{ t('teamhub', 'Decisions') }}</h3>
 
                 <!-- Decision level field toggle -->
                 <div class="manage-section__row">
@@ -1366,6 +1398,146 @@
                             </p>
                         </div>
                     </div>
+                </template>
+            </div>
+            </template>
+
+            <!-- ── Timeline block — heading always shown; Milestones
+                 management is gated on the per-team Timeline toggle. No
+                 instance-wide module flag exists for Timeline (it's a
+                 read-only visual aggregation), so unlike Decisions above
+                 the heading itself is unconditional. ─────────────────── -->
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Timeline') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Milestones appear as a red marker line on the Timeline tab, with the label you give them. Useful for tracking key dates such as launches or deadlines at a glance.') }}
+                </p>
+
+                <p v-if="!timelineEnabled" class="manage-section-desc manage-section-desc--inline">
+                    {{ t('teamhub', 'Timeline is disabled for this team. Enable it under the Integrations tab to manage milestones.') }}
+                </p>
+
+                <template v-else>
+                    <div v-if="loadingMilestones" class="section-loading">
+                        <NcLoadingIcon :size="32" />
+                    </div>
+
+                    <template v-else>
+                        <ul v-if="milestones.length" class="teamhub-milestones__list" aria-live="polite">
+                            <li
+                                v-for="m in milestones"
+                                :key="m.id"
+                                class="teamhub-milestones__row">
+
+                                <!-- Read mode -->
+                                <template v-if="milestoneEditing !== m.id">
+                                    <div class="teamhub-milestones__row-main">
+                                        <span class="teamhub-milestones__row-name">{{ m.label }}</span>
+                                        <span
+                                            class="teamhub-milestones__row-date"
+                                            :class="{ 'teamhub-milestones__row-date--unset': !m.date }">
+                                            {{ m.date ? formatMilestoneDate(m.date) : t('teamhub', 'No date set — not shown on Timeline') }}
+                                        </span>
+                                    </div>
+                                    <div class="teamhub-milestones__row-actions">
+                                        <NcButton
+                                            variant="tertiary"
+                                            :aria-label="t('teamhub', 'Edit milestone {name}', { name: m.label })"
+                                            @click="startEditMilestone(m)">
+                                            <template #icon><PencilIcon :size="16" /></template>
+                                        </NcButton>
+                                        <NcButton
+                                            variant="tertiary"
+                                            :aria-label="t('teamhub', 'Delete milestone {name}', { name: m.label })"
+                                            @click="confirmDeleteMilestone(m)">
+                                            <template #icon><Delete :size="16" /></template>
+                                        </NcButton>
+                                    </div>
+                                </template>
+
+                                <!-- Edit mode -->
+                                <template v-else>
+                                    <div class="teamhub-milestones__edit">
+                                        <label class="teamhub-milestones__edit-label" :for="`milestone-edit-name-${m.id}`">{{ t('teamhub', 'Name') }}</label>
+                                        <input
+                                            :id="`milestone-edit-name-${m.id}`"
+                                            v-model="milestoneForm.label"
+                                            type="text"
+                                            maxlength="255"
+                                            class="teamhub-milestones__edit-input">
+
+                                        <label class="teamhub-milestones__edit-label" :for="`milestone-edit-date-${m.id}`">{{ t('teamhub', 'Date (optional)') }}</label>
+                                        <input
+                                            :id="`milestone-edit-date-${m.id}`"
+                                            v-model="milestoneForm.date"
+                                            type="date"
+                                            class="teamhub-milestones__edit-input">
+
+                                        <div class="teamhub-milestones__edit-actions">
+                                            <NcButton variant="secondary" @click="cancelEditMilestone">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                            <NcButton
+                                                variant="primary"
+                                                :disabled="savingMilestone || !milestoneForm.label.trim()"
+                                                @click="saveMilestone">
+                                                {{ savingMilestone ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
+                                            </NcButton>
+                                        </div>
+
+                                        <p v-if="milestoneFormError" class="teamhub-milestones__edit-error" role="alert">
+                                            {{ milestoneFormError }}
+                                        </p>
+                                    </div>
+                                </template>
+                            </li>
+                        </ul>
+
+                        <p v-else-if="milestoneEditing !== 'new'" class="teamhub-milestones__empty-text">
+                            {{ t('teamhub', 'No milestones yet. Add the first one below.') }}
+                        </p>
+
+                        <!-- Add-new form -->
+                        <div class="teamhub-milestones__add-area">
+                            <NcButton
+                                v-if="milestoneEditing !== 'new'"
+                                variant="secondary"
+                                @click="startCreateMilestone">
+                                <template #icon><PlusIcon :size="16" /></template>
+                                {{ t('teamhub', 'Add milestone') }}
+                            </NcButton>
+
+                            <div v-else class="teamhub-milestones__edit">
+                                <label class="teamhub-milestones__edit-label" for="milestone-new-name">{{ t('teamhub', 'Name') }}</label>
+                                <input
+                                    id="milestone-new-name"
+                                    v-model="milestoneForm.label"
+                                    type="text"
+                                    maxlength="255"
+                                    class="teamhub-milestones__edit-input"
+                                    :placeholder="t('teamhub', 'e.g. Beta launch')">
+
+                                <label class="teamhub-milestones__edit-label" for="milestone-new-date">{{ t('teamhub', 'Date (optional)') }}</label>
+                                <input
+                                    id="milestone-new-date"
+                                    v-model="milestoneForm.date"
+                                    type="date"
+                                    class="teamhub-milestones__edit-input">
+
+                                <div class="teamhub-milestones__edit-actions">
+                                    <NcButton variant="secondary" @click="cancelEditMilestone">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                    <NcButton
+                                        variant="primary"
+                                        :disabled="savingMilestone || !milestoneForm.label.trim()"
+                                        @click="saveMilestone">
+                                        {{ savingMilestone ? t('teamhub', 'Saving…') : t('teamhub', 'Create') }}
+                                    </NcButton>
+                                </div>
+
+                                <p v-if="milestoneFormError" class="teamhub-milestones__edit-error" role="alert">
+                                    {{ milestoneFormError }}
+                                </p>
+                            </div>
+                        </div>
+                    </template>
                 </template>
             </div>
         </div>
@@ -1790,6 +1962,11 @@ export default {
             decisionsLevelEnabled: false,
             decisionsActionMinLevel: 1,  // Session B: default = Member
             savingDecisionsConfig: false,
+            // Timeline config (v3.77.20) — per-team enable flag. Default true
+            // matches the backend default so first paint doesn't flicker the
+            // toggle off before loadTimelineConfig() resolves.
+            timelineEnabled:       true,
+            savingTimelineConfig:  false,
 
             // Decision categories — Session G
             decCategories:          [],
@@ -1800,6 +1977,15 @@ export default {
             catIconSearch:          '',      // search filter inside the icon picker
             savingDecCategory:      false,
             decCatFormError:        '',
+
+            // Timeline Milestones (v3.78.2) — admin-managed marker lines
+            // shown on the Timeline tab. Mirrors the decCategories pattern.
+            milestones:             [],
+            loadingMilestones:      false,
+            milestoneEditing:       null,   // null | 'new' | <id>
+            milestoneForm:          { label: '', date: '' },
+            savingMilestone:        false,
+            milestoneFormError:     '',
         }
     },
     computed: {
@@ -1973,10 +2159,11 @@ export default {
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
                 { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
             ]
-            // Decisions tab — only shown when the module is globally enabled by the admin.
-            if (this.decisionsModuleEnabled) {
-                list.push({ key: 'decisions', label: t('teamhub', 'Decisions'), icon: 'GavelIcon' })
-            }
+            // Integration settings tab — Decisions config (when the module is
+            // enabled) plus Timeline Milestones (always available, gated only
+            // by the per-team Timeline toggle inside the tab itself). Unlike
+            // the old Decisions-only tab, this one is always shown.
+            list.push({ key: 'integration-settings', label: t('teamhub', 'Integration settings'), icon: 'GavelIcon' })
             list.push({ key: 'danger', label: t('teamhub', 'Maintenance'), icon: 'AlertIcon' })
             return list
         },
@@ -2121,13 +2308,16 @@ export default {
             if (tab === 'integrations') {
                 this.loadPresenceConfig()
                 this.loadDecisionsConfig()
+                this.loadTimelineConfig()
             }
-            if (tab === 'decisions') {
-                // Refresh decisions config and categories when switching to the decisions tab.
+            if (tab === 'integration-settings') {
+                // Refresh decisions config and categories when switching to
+                // this tab.
                 this.loadDecisionsConfig()
                 // v3.71.9 — ensure the approver picker has the full effective
                 // member list (incl. indirect via groups/sub-teams).
                 this.$store.dispatch('fetchAllEffectiveMembers', this.team.id)
+                this.loadMilestones()
             }
             // If the warning block sent us here with focus flag set, scroll to at-risk section.
             if (tab === 'settings' && this.resourceWarningFocus) {
@@ -2160,7 +2350,7 @@ export default {
     methods: {
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG']),
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG']),
 
         loadAll() {
             this.loadMembers()
@@ -2171,6 +2361,7 @@ export default {
             this.loadMeetingSettings()
             this.loadPresenceConfig()
             this.loadDecisionsConfig()
+            this.loadTimelineConfig()
         },
 
         getMemberRoleLabel(level) {
@@ -2893,6 +3084,142 @@ export default {
                 }))
             } finally {
                 this.savingDecisionsConfig = false
+            }
+        },
+
+        /**
+         * Timeline per-team toggle (v3.77.20). Mirrors the decisions pattern —
+         * fetch GET ?team/timeline/config, then PUT same URL with a 0/1 body.
+         * Store sync via SET_TIMELINE_CONFIG keeps TeamView's tab gate reactive
+         * so the Timeline tab appears/disappears immediately when the admin
+         * flips the switch (no team reload needed).
+         */
+        async loadTimelineConfig() {
+            if (!this.team?.id) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/timeline/config`)
+                )
+                this.timelineEnabled = !!data.timeline_enabled
+                this.SET_TIMELINE_CONFIG(data)
+            } catch (err) {
+                // Non-fatal — default of true stays in place.
+            }
+        },
+
+        async setTimelineEnabled(val) {
+            this.savingTimelineConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/timeline/config`),
+                    { timeline_enabled: val ? 1 : 0 }
+                )
+                this.timelineEnabled = !!data.timeline_enabled
+                this.SET_TIMELINE_CONFIG(data)
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingTimelineConfig = false
+            }
+        },
+
+        /**
+         * Timeline Milestones (v3.78.2) — admin-managed marker lines shown
+         * on the Timeline tab. CRUD mirrors the decision-categories pattern
+         * (loadX / startCreateX / startEditX / cancelEditX / saveX /
+         * confirmDeleteX) for consistency within this file.
+         */
+        async loadMilestones() {
+            if (!this.team?.id) return
+            this.loadingMilestones = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/milestones`)
+                )
+                this.milestones = Array.isArray(data.items) ? data.items : []
+            } catch (err) {
+                console.error('[TeamHub][ManageTeamView] loadMilestones error:', err)
+            } finally {
+                this.loadingMilestones = false
+            }
+        },
+
+        startCreateMilestone() {
+            this.milestoneEditing = 'new'
+            this.milestoneForm = { label: '', date: '' }
+            this.milestoneFormError = ''
+        },
+
+        startEditMilestone(m) {
+            this.milestoneEditing = m.id
+            this.milestoneForm = { label: m.label, date: m.date || '' }
+            this.milestoneFormError = ''
+        },
+
+        cancelEditMilestone() {
+            this.milestoneEditing = null
+            this.milestoneFormError = ''
+        },
+
+        async saveMilestone() {
+            const label = this.milestoneForm.label.trim()
+            if (!label) {
+                this.milestoneFormError = t('teamhub', 'Name is required')
+                return
+            }
+            this.savingMilestone = true
+            this.milestoneFormError = ''
+            try {
+                const payload = { label, date: this.milestoneForm.date || null }
+                if (this.milestoneEditing === 'new') {
+                    await axios.post(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/milestones`),
+                        payload
+                    )
+                } else {
+                    await axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/milestones/${this.milestoneEditing}`),
+                        payload
+                    )
+                }
+                this.milestoneEditing = null
+                await this.loadMilestones()
+            } catch (err) {
+                console.error('[TeamHub][ManageTeamView] saveMilestone error:', err)
+                this.milestoneFormError = err?.response?.data?.error || err.message
+            } finally {
+                this.savingMilestone = false
+            }
+        },
+
+        async confirmDeleteMilestone(m) {
+            // eslint-disable-next-line no-alert
+            if (!window.confirm(t('teamhub', 'Delete milestone "{name}"? This cannot be undone.', { name: m.label }))) {
+                return
+            }
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/milestones/${m.id}`)
+                )
+                await this.loadMilestones()
+            } catch (err) {
+                console.error('[TeamHub][ManageTeamView] deleteMilestone error:', err)
+                showError(t('teamhub', 'Failed to delete milestone: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            }
+        },
+
+        /** dateStr is 'YYYY-MM-DD' (as returned by MilestoneService::serialize). */
+        formatMilestoneDate(dateStr) {
+            try {
+                const d = new Date(dateStr + 'T00:00:00')
+                const locale = document.documentElement.lang || 'en'
+                return d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+            } catch (err) {
+                return dateStr
             }
         },
 
@@ -4926,6 +5253,118 @@ export default {
 /* Standalone variant — used in the dedicated Decisions tab (not nested inside widget-item) */
 .teamhub-dec-cats__list--standalone {
     margin-bottom: 12px;
+}
+
+/* ── Timeline Milestones (v3.78.2) — mirrors .teamhub-dec-cats__* above,
+   simplified (no icon picker, no approvers select). ──────────────────── */
+.teamhub-milestones__empty-text {
+    margin: 0;
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+    font-style: italic;
+}
+
+.teamhub-milestones__list {
+    list-style: none;
+    margin: 0 0 12px 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.teamhub-milestones__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    background: var(--color-main-background);
+    transition: background 0.1s;
+}
+.teamhub-milestones__row:hover { background: var(--color-background-hover); }
+
+.teamhub-milestones__row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.teamhub-milestones__row-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-main-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.teamhub-milestones__row-date {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.teamhub-milestones__row-date--unset {
+    color: var(--th-color-warning);
+}
+
+.teamhub-milestones__row-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.teamhub-milestones__edit {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    padding: 12px;
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+}
+
+.teamhub-milestones__edit-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    margin: 0;
+}
+
+.teamhub-milestones__edit-input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+}
+.teamhub-milestones__edit-input:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+
+.teamhub-milestones__edit-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.teamhub-milestones__edit-error {
+    font-size: 12px;
+    color: var(--color-error-text);
+    margin: 0;
+}
+
+.teamhub-milestones__add-area {
+    padding-top: 4px;
 }
 
 </style>

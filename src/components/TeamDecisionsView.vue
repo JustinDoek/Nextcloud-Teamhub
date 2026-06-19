@@ -299,16 +299,29 @@
                             <ChevronLeftIcon :size="18" aria-hidden="true" />
                             {{ t('teamhub', 'Back') }}
                         </button>
-                        <span class="th-dv__status-pill th-dv__detail-status" :class="`th-dv__status-pill--${selected.status}`">
-                            {{ statusLabel(selected.status) }}
-                        </span>
-                        <button
-                            class="th-dv__detail-close"
-                            :aria-label="t('teamhub', 'Close detail')"
-                            :title="t('teamhub', 'Close')"
-                            @click="selected = null">
-                            <CloseIcon :size="18" />
-                        </button>
+
+                        <!-- Right-side controls: status + share + close -->
+                        <div class="th-dv__detail-header-right">
+                            <span
+                                class="th-dv__status-pill th-dv__detail-status"
+                                :class="`th-dv__status-pill--${selected.status}`">
+                                {{ statusLabel(selected.status) }}
+                            </span>
+                            <button
+                                class="th-dv__detail-share"
+                                :aria-label="t('teamhub', 'Copy link to this decision')"
+                                :title="t('teamhub', 'Copy link')"
+                                @click="copyDecisionLink(selected)">
+                                <LinkVariantIcon :size="16" />
+                            </button>
+                            <button
+                                class="th-dv__detail-close"
+                                :aria-label="t('teamhub', 'Close detail')"
+                                :title="t('teamhub', 'Close')"
+                                @click="selected = null">
+                                <CloseIcon :size="18" />
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Two-column body: left = content, right = approval + audit -->
@@ -1786,6 +1799,31 @@ export default {
 
         selectDecision(d) {
             this.selected = this.selected?.id === d.id ? null : d
+        },
+
+        /**
+         * Copy a direct deep-link to this decision to the clipboard.
+         * The URL follows the same ?team=…&decision=… pattern used by the
+         * meeting-invite link body (buildMeetingDescription) and the
+         * Timeline's decision chip deep-link — so any existing handler that
+         * auto-opens the right decision on page load will catch it.
+         * Shown as an icon-button in the detail-panel header next to the
+         * status pill (v3.78.5).
+         */
+        async copyDecisionLink(d) {
+            try {
+                const url = window.location.origin
+                    + generateUrl('/apps/teamhub')
+                    + `?team=${encodeURIComponent(this.currentTeamId)}`
+                    + `&decision=${encodeURIComponent(d.id)}`
+                await navigator.clipboard.writeText(url)
+                showSuccess(t('teamhub', 'Decision link copied to clipboard'))
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] copyDecisionLink error:', err)
+                showError(t('teamhub', 'Failed to copy link: {error}', {
+                    error: err?.message || String(err),
+                }))
+            }
         },
 
         // ── Navigation ──────────────────────────────────────────────
@@ -3583,6 +3621,37 @@ export default {
 .th-dv__detail-back:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
 
 .th-dv__detail-status { margin-left: auto; }
+
+/* Right-side header controls: status pill + share + close, grouped
+   together so the status pill's margin-left: auto pushes the whole
+   group flush right (v3.78.5). */
+.th-dv__detail-header-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+.th-dv__detail-header-right .th-dv__detail-status {
+    margin-left: 0; /* spacing now handled by parent gap */
+}
+
+.th-dv__detail-share {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    color: var(--color-text-maxcontrast);
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s;
+}
+.th-dv__detail-share:hover        { background: var(--color-background-hover); color: var(--color-primary-element); }
+.th-dv__detail-share:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
 
 /* Question heading */
 .th-dv__detail-question {

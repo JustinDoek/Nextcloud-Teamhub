@@ -70,7 +70,7 @@ class DecisionTaskService {
         // Enrich Deck card rows with live done-status from Deck.
         $cardIds = [];
         foreach ($rows as $row) {
-            $cardId = $this->extractDeckCardId($row['task_path']);
+            $cardId = self::extractDeckCardId($row['task_path']);
             if ($cardId !== null) {
                 $cardIds[] = $cardId;
             }
@@ -82,7 +82,7 @@ class DecisionTaskService {
         }
 
         foreach ($rows as &$row) {
-            $cardId = $this->extractDeckCardId($row['task_path']);
+            $cardId = self::extractDeckCardId($row['task_path']);
             if ($cardId !== null && isset($cardInfo[$cardId])) {
                 $info            = $cardInfo[$cardId];
                 $row['isDone']    = $info['isDone'];
@@ -105,8 +105,12 @@ class DecisionTaskService {
      *   apps/deck/board/{boardId}/card/{cardId}
      *
      * Returns null for any path that does not match (plain URLs, other apps).
+     *
+     * Public + static (v3.78.5) so TimelineService can reuse the exact same
+     * pattern when building decision↔task connector metadata for the
+     * Timeline tab, rather than re-deriving the regex in a second place.
      */
-    private function extractDeckCardId(string $taskPath): ?int {
+    public static function extractDeckCardId(string $taskPath): ?int {
         if (preg_match('#(?:apps/)?deck/board/\\d+/card/(\\d+)#', $taskPath, $m)) {
             return (int)$m[1];
         }

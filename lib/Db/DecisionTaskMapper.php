@@ -43,6 +43,33 @@ class DecisionTaskMapper {
     }
 
     /**
+     * Find all task links for a set of decisions in one query — used by
+     * TimelineService (v3.78.5) to build decision↔task connector metadata
+     * for the Timeline tab without an N+1 query per decision.
+     *
+     * @param int[] $decisionIds
+     * @return array<int, array{ id: int, decision_id: int, team_id: string, task_path: string, label: ?string, created_by: string, created_at: int }>
+     */
+    public function findByDecisionIds(array $decisionIds): array {
+        if (empty($decisionIds)) {
+            return [];
+        }
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from('teamhub_dec_tasks')
+            ->where($qb->expr()->in('decision_id', $qb->createNamedParameter($decisionIds, IQueryBuilder::PARAM_INT_ARRAY)))
+            ->orderBy('created_at', 'ASC');
+
+        $result = $qb->executeQuery();
+        $rows   = [];
+        while ($row = $result->fetch()) {
+            $rows[] = $this->rowToArray($row);
+        }
+        $result->closeCursor();
+        return $rows;
+    }
+
+    /**
      * Find a single task link by its ID.
      */
     public function findById(int $id): ?array {

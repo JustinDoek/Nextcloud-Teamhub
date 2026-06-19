@@ -38,6 +38,55 @@
                         {{ action.icon ? '' : action.label }}
                     </NcButton>
                 </template>
+
+                <!-- Toggle buttons: pressed/active state, e.g. timeline source filters -->
+                <NcButton
+                    v-for="tog in embedToggles"
+                    :key="tog.id"
+                    variant="tertiary"
+                    :class="{ 'app-embed__bar-toggle--active': tog.active }"
+                    :aria-pressed="tog.active ? 'true' : 'false'"
+                    :aria-label="tog.label"
+                    :title="tog.label"
+                    @click="$emit('toggle', tog.id)">
+                    <template #icon>
+                        <component :is="tog.icon" :size="16" />
+                    </template>
+                    {{ tog.label }}
+                </NcButton>
+
+                <!--
+                    Filter menu: a single dropdown button that opens a popover
+                    with checkbox items. Used where there are too many filter
+                    options for inline toggle buttons to remain readable (e.g.
+                    Timeline's four sources). Emits 'menu-toggle' with the
+                    item id whenever the user toggles a checkbox.
+                -->
+                <NcActions
+                    v-if="embedMenu"
+                    :menu-name="embedMenu.label"
+                    :menu-title="embedMenu.label"
+                    type="tertiary"
+                    :force-menu="true">
+                    <template #icon>
+                        <component :is="embedMenu.icon" :size="16" />
+                    </template>
+                    <template v-for="item in embedMenu.items" :key="item.id">
+                        <!-- Captions render as section headers in the dropdown.
+                             Useful for grouping sub-filters (e.g. "Deck events")
+                             under their parent source. -->
+                        <NcActionCaption
+                            v-if="item.isCaption"
+                            :name="item.label" />
+                        <NcActionCheckbox
+                            v-else
+                            :model-value="item.active"
+                            :disabled="item.disabled === true"
+                            @update:model-value="$emit('menu-toggle', item.id)">
+                            {{ item.label }}
+                        </NcActionCheckbox>
+                    </template>
+                </NcActions>
                 <NcButton
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Reload')"
@@ -115,7 +164,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import { NcButton, NcLoadingIcon } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption } from '@nextcloud/vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import Refresh from 'vue-material-design-icons/Refresh.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
@@ -328,7 +377,7 @@ html, body {
 
 export default {
     name: 'AppEmbed',
-    components: { NcButton, NcLoadingIcon, OpenInNew, Refresh, AlertCircleOutline },
+    components: { NcButton, NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption, OpenInNew, Refresh, AlertCircleOutline },
 
     props: {
         url:   { type: String, required: true },
@@ -346,9 +395,31 @@ export default {
          * When the user changes the select, the component emits 'select' with { id, value }.
          */
         embedSelects: { type: Array, default: () => [] },
+        /**
+         * Optional array of toggle buttons rendered in the embed bar after
+         * embedActions. Each item: { id: string, label: string, icon: Component, active: boolean }
+         * Unlike embedActions, these carry a persistent pressed/active visual
+         * state (aria-pressed + highlight class) — used for filters like the
+         * Timeline source toggles (Calendar/Decisions/Deck) where the user
+         * needs to see which sources are currently shown.
+         * When clicked, the component emits 'toggle' with the id; the parent
+         * owns the active state and passes the updated array back down.
+         */
+        embedToggles: { type: Array, default: () => [] },
+        /**
+         * Optional single dropdown menu rendered as an NcActions popover in
+         * the embed bar. Shape:
+         *   { id: string, label: string, icon: Component,
+         *     items: [{ id: string, label: string, active: boolean }] }
+         * Each checkbox toggle emits 'menu-toggle' with the item's id. The
+         * parent owns the active state and re-passes the updated array.
+         * Used when there are too many filter options for inline toggle
+         * buttons to remain readable in the bar (Timeline with four sources).
+         */
+        embedMenu: { type: Object, default: null },
     },
 
-    emits: ['action', 'select'],
+    emits: ['action', 'select', 'toggle', 'menu-toggle'],
 
     data() {
         return {
@@ -568,6 +639,21 @@ export default {
     min-width: 110px;
     text-align: center;
     white-space: nowrap;
+}
+
+.app-embed__bar-toggle--active {
+    background-color: var(--color-primary-element-light) !important;
+    color: var(--color-primary-element) !important;
+}
+
+/* NcButton wraps the label text in a span with its own font weight; the active
+ * state inherits primary-element color which combined with NC's default button
+ * weight reads visually as bold. Force regular weight on both the button and
+ * its inner span so the active state matches inactive buttons' weight. */
+.app-embed__bar-toggle--active,
+.app-embed__bar-toggle--active :deep(span),
+.app-embed__bar-toggle--active :deep(.button-vue__text) {
+    font-weight: 400 !important;
 }
 
 .app-embed__label {

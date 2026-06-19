@@ -891,6 +891,22 @@ class ArchiveService {
                 ['teamhub/layouts.json',       [$this, 'readLayouts'],       ['user_id'],  false],
                 ['teamhub/integrations.json',  [$this, 'readIntegrations'],  [],           false],
                 ['teamhub/audit_log.json',     [$this, 'readAuditLog'],      ['actor_uid'], false],
+
+                // ── Decisions layer ─────────────────────────────────────────
+                // All nine tables that make up the Decisions module.
+                // Readers are deliberately flat (one file per table) so that
+                // the archive is self-contained and importable without relying
+                // on JOIN reconstruction. Decision participants is a JSON-encoded
+                // UID array handled by pseudonymizeDecisionParticipants() below.
+                ['teamhub/decisions.json',              [$this, 'readDecisions'],              ['proposed_by', 'answered_by', 'resolved_by'], false],
+                ['teamhub/decision_team_config.json',   [$this, 'readDecisionTeamConfig'],     [],                                           false],
+                ['teamhub/decision_categories.json',    [$this, 'readDecisionCategories'],     [],                                           false],
+                ['teamhub/decision_cat_approvers.json', [$this, 'readDecisionCatApprovers'],   ['user_id'],                                  false],
+                ['teamhub/decision_tasks.json',         [$this, 'readDecisionTasks'],          ['created_by'],                               false],
+                ['teamhub/decision_ext_links.json',     [$this, 'readDecisionExtLinks'],       [],                                           false],
+                ['teamhub/decision_links.json',         [$this, 'readDecisionLinks'],          [],                                           false],
+                ['teamhub/decision_meetings.json',      [$this, 'readDecisionMeetings'],       [],                                           false],
+                ['teamhub/decision_audit.json',         [$this, 'readDecisionAudit'],          ['actor'],                                    false],
             ];
 
             foreach ($teamhubWriters as [$path, $reader, $uidFields, $isObject]) {
@@ -915,6 +931,9 @@ class ArchiveService {
             // The writeJson call above replaced actor_uid; now process metadata blobs.
             if ($ps !== null) {
                 $this->pseudonymizeAuditMetadata($workDir, $ps);
+                // Decisions: participants is a JSON-encoded UID array — process it
+                // separately since writeJson() only handles flat string fields.
+                $this->pseudonymizeDecisionParticipants($workDir, $ps);
             }
 
             // ── 10b. Calendar layer ───────────────────────────────────────────
@@ -1296,6 +1315,258 @@ class ArchiveService {
         }
         $res->closeCursor();
         return $rows;
+    }
+
+    // =========================================================================
+    // Decisions readers (teamhub/ layer)
+    // =========================================================================
+
+    /**
+     * All decisions belonging to this team.
+     *
+     * UID fields pseudonymized by the caller: proposed_by, answered_by, resolved_by.
+     * The participants JSON array is handled separately by pseudonymizeDecisionParticipants().
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisions(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('*')
+            ->from('teamhub_decisions')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->orderBy('created_at', 'ASC')
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Per-team Decisions module configuration (decisions_enabled flag, etc.).
+     * Returns 0–1 rows.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionTeamConfig(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('*')
+            ->from('teamhub_decision_team')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Decision categories defined for this team.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionCategories(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('*')
+            ->from('teamhub_dec_categories')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->orderBy('name', 'ASC')
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Category approvers, filtered to this team via the categories JOIN.
+     * UID field: user_id (the NC uid of each approver).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionCatApprovers(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('a.*')
+            ->from('teamhub_dec_cat_apprs', 'a')
+            ->join('a', 'teamhub_dec_categories', 'c',
+                $qb->expr()->eq('a.category_id', 'c.id'))
+            ->where($qb->expr()->eq('c.team_id', $qb->createNamedParameter($teamId)))
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Decision tasks, scoped to the team via the decisions JOIN.
+     * UID field: created_by.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionTasks(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('t.*')
+            ->from('teamhub_dec_tasks', 't')
+            ->join('t', 'teamhub_decisions', 'd',
+                $qb->expr()->eq('t.decision_id', 'd.id'))
+            ->where($qb->expr()->eq('d.team_id', $qb->createNamedParameter($teamId)))
+            ->orderBy('t.created_at', 'ASC')
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * External links attached to team decisions.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionExtLinks(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('e.*')
+            ->from('teamhub_dec_ext_links', 'e')
+            ->join('e', 'teamhub_decisions', 'd',
+                $qb->expr()->eq('e.decision_id', 'd.id'))
+            ->where($qb->expr()->eq('d.team_id', $qb->createNamedParameter($teamId)))
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Decision-to-decision links where either end belongs to this team.
+     * We anchor on the source decision (decision_id) belonging to the team
+     * rather than trying a bidirectional join — the linked target may be from
+     * another team, which is acceptable data to include (it identifies the link
+     * but not the content of the remote decision).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionLinks(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('l.*')
+            ->from('teamhub_dec_links', 'l')
+            ->join('l', 'teamhub_decisions', 'd',
+                $qb->expr()->eq('l.decision_id', 'd.id'))
+            ->where($qb->expr()->eq('d.team_id', $qb->createNamedParameter($teamId)))
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Meeting references linked to team decisions.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionMeetings(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('m.*')
+            ->from('teamhub_dec_meetings', 'm')
+            ->join('m', 'teamhub_decisions', 'd',
+                $qb->expr()->eq('m.decision_id', 'd.id'))
+            ->where($qb->expr()->eq('d.team_id', $qb->createNamedParameter($teamId)))
+            ->orderBy('m.id', 'ASC')
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Decision audit/event trail for this team.
+     * UID field: actor.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function readDecisionAudit(string $teamId): array {
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('*')
+            ->from('teamhub_dec_audit')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->orderBy('created_at', 'ASC')
+            ->executeQuery();
+        $rows = [];
+        while ($row = $res->fetch()) {
+            $rows[] = $row;
+        }
+        $res->closeCursor();
+        return $rows;
+    }
+
+    /**
+     * Post-process teamhub/decisions.json to pseudonymize the participants field.
+     *
+     * The participants column is a JSON-encoded array of NC UIDs captured at
+     * proposal time (e.g. ["alice","bob"]). writeJson() only replaces flat
+     * string fields, so this field needs an extra pass — identical in approach
+     * to pseudonymizeAuditMetadata() for the audit log's metadata blob.
+     *
+     * Called only when $ps !== null (pseudonymization is enabled).
+     */
+    private function pseudonymizeDecisionParticipants(string $workDir, ArchivePseudonymizer $ps): void {
+        $path = $workDir . '/teamhub/decisions.json';
+        if (!file_exists($path)) {
+            return;
+        }
+        try {
+            $data = json_decode((string)file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($data)) {
+                return;
+            }
+            $changed = false;
+            foreach ($data as &$row) {
+                if (!empty($row['participants']) && is_string($row['participants'])) {
+                    $uids = json_decode($row['participants'], true);
+                    if (is_array($uids)) {
+                        $row['participants'] = json_encode(
+                            array_map(
+                                fn($uid) => is_string($uid) && $uid !== '' ? $ps->aliasFor($uid) : $uid,
+                                $uids
+                            ),
+                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                        );
+                        $changed = true;
+                    }
+                }
+            }
+            unset($row);
+            if ($changed) {
+                file_put_contents(
+                    $path,
+                    json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                );
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ArchiveService] pseudonymizeDecisionParticipants failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
     }
 
     // =========================================================================

@@ -94,6 +94,25 @@
                 @propose-decision="openCompose"
                 @propose-decision-superseding="openDecisionCompose" />
 
+            <!-- Timeline tab — visual timeline of Calendar, Deck and Decisions events.
+                 Uses the same AppEmbed iframe pattern as Talk/Files/Calendar/Deck, with
+                 controls (period nav, view-mode dropdown, source toggles) rendered in
+                 the embed bar exactly like Calendar's pattern — the iframe itself holds
+                 no control UI, only the rendered timeline canvas.
+                 preload=false: the page fetches its own data, no need to warm it up. -->
+            <AppEmbed
+                v-if="(preloadedViews.has('timeline') || currentView === 'timeline') && currentTeamId"
+                v-show="currentView === 'timeline'"
+                ref="timelineEmbed"
+                :url="timelineUrl"
+                :label="t('teamhub', 'Timeline')"
+                :embed-actions="timelineEmbedActions"
+                :embed-selects="timelineEmbedSelects"
+                :embed-menu="timelineEmbedMenu"
+                @action="onTimelineEmbedAction"
+                @select="onTimelineEmbedSelect"
+                @menu-toggle="onTimelineEmbedMenuToggle" />
+
             <!-- External menu_item integrations — preloaded by registry_id -->
             <template v-for="menuItem in externalMenuItems">
                 <AppEmbed
@@ -277,6 +296,11 @@ import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
 import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import CalendarToday from 'vue-material-design-icons/CalendarToday.vue'
+import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
+import GavelIcon from 'vue-material-design-icons/Gavel.vue'
+import CardTextIcon from 'vue-material-design-icons/CardText.vue'
+import FilterVariant from 'vue-material-design-icons/FilterVariant.vue'
+import Printer from 'vue-material-design-icons/Printer.vue'
 
 import TeamTabBar from './TeamTabBar.vue'
 import TeamWidgetGrid from './TeamWidgetGrid.vue'
@@ -302,6 +326,36 @@ function debounce(fn, delay) {
     }
 }
 
+// ── Timeline date helpers (module-level — needed in data() before `this` exists) ──
+function TeamView_startOfWeek(d) {
+    const r = new Date(d)
+    r.setHours(0, 0, 0, 0)
+    r.setDate(r.getDate() - ((r.getDay() + 6) % 7)) // Monday
+    return r
+}
+function TeamView_startOfMonth(d) {
+    return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0)
+}
+function TeamView_snapWindow(d, mode) {
+    return mode === '1W' ? TeamView_startOfWeek(d) : TeamView_startOfMonth(d)
+}
+function TeamView_addPeriod(d, mode) {
+    const r = new Date(d)
+    if (mode === '1W') r.setDate(r.getDate() + 7)
+    else if (mode === '1M') r.setMonth(r.getMonth() + 1)
+    else if (mode === '3M') r.setMonth(r.getMonth() + 3)
+    else r.setMonth(r.getMonth() + 6)
+    return r
+}
+function TeamView_subPeriod(d, mode) {
+    const r = new Date(d)
+    if (mode === '1W') r.setDate(r.getDate() - 7)
+    else if (mode === '1M') r.setMonth(r.getMonth() - 1)
+    else if (mode === '3M') r.setMonth(r.getMonth() - 3)
+    else r.setMonth(r.getMonth() - 6)
+    return r
+}
+
 export default {
     name: 'TeamView',
 
@@ -309,6 +363,7 @@ export default {
         NcButton, NcDialog, NcTextField, NcLoadingIcon,
         FileDocumentOutline, CalendarPlus, CalendarRemove, CalendarClock,
         ChevronLeft, ChevronRight, CalendarToday,
+        CalendarIcon, GavelIcon, CardTextIcon, FilterVariant, Printer,
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
         AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
@@ -352,6 +407,41 @@ export default {
             showDeleteEvents:    false,
             calendarView:        'dayGridMonth',  // current calendar view mode
             calendarDate:        new Date(),      // current navigation date for the calendar iframe
+
+            // Timeline tab state — mirrors the calendar pattern above. The
+            // iframe itself holds no control state; all of it lives here and
+            // drives timelineUrl, which the AppEmbed reload() call re-navigates to.
+            timelineViewMode:    '1W',             // '1W' | '1M' | '3M' | '6M'
+            timelineWindowStart: TeamView_startOfWeek(new Date()),
+            timelineSources:     { calendar: true, decisions: true, deck: true, messages: true },
+            // Connector overlays — all enabled by default (v3.78.9, per
+            // Justin): showing every connector line alongside every source
+            // and sub-filter maximizes how many dependencies/relationships
+            // are visible on the timeline at once.
+            //
+            // Decision↔task connector (v3.78.5).
+            timelineShowLinks:   true,
+            // Deck card-dependency connector (v3.78.8) — NC 34 / Deck 1.18+
+            // only. Harmless to default true on older installs: the toggle
+            // itself only ever appears in the filter menu when
+            // cardDependenciesSupported is true (see timelineEmbedMenu), and
+            // with no meta.blockedByCardIds present anywhere there's simply
+            // nothing for it to draw.
+            timelineShowDepLinks: true,
+            // Message↔decision connector (v3.78.9) — arrow from a
+            // messageType='decision' post's chip to the decision's
+            // "proposed" chip it announced.
+            timelineShowMsgLinks: true,
+            // Per-source sub-filter selections. All enabled by default
+            // (v3.78.9, per Justin) — showing every lifecycle event
+            // maximizes how many connector lines/dependencies are visible
+            // at once. When both ends of a card's or decision's lifecycle
+            // are visible the chips are connected with a thin bar so it
+            // reads like a Gantt chart.
+            timelineSubFilters: {
+                deck:      { created: true, due: true, completed: true },
+                decisions: { proposed: true, decided: true },
+            },
             showTeamMeeting:     false,
             showAddTask:         false,
             // Multi-resource picker state (§10.1)
@@ -377,8 +467,21 @@ export default {
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
+            'timelineConfig',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
+
+        /**
+         * NC 34 / Deck 1.18+ only — whether deck_dependent_cards exists on
+         * this install. Arrives bundled in timelineConfig (loaded once via
+         * loadLayout(), well before the Timeline tab is even opened) rather
+         * than a separate round-trip. Gates whether the "Deck card
+         * dependencies" connector toggle appears in timelineEmbedMenu at
+         * all (v3.78.8).
+         */
+        cardDependenciesSupported() {
+            return !!this.timelineConfig?.card_dependencies_supported
+        },
 
         talkUrl() {
             const token = this.resources.talk?.token
@@ -521,6 +624,228 @@ export default {
             const board = this.selectedDeckBoard || (this.resources.deck && this.resources.deck[0])
             return generateUrl('/apps/deck') + (board ? '/#/board/' + board.board_id : '/')
         },
+
+        /**
+         * URL of the standalone timeline iframe page served by PageController::timeline().
+         * Encodes the current view mode, window start, and active sources as query
+         * params so the page (and its external script, see vite entry 'timeline')
+         * can render the correct window without needing any control UI of its own —
+         * all controls live in the AppEmbed bar, exactly like the Calendar tab.
+         */
+        timelineUrl() {
+            if (!this.currentTeamId) return ''
+            const fromTs = Math.floor(this.timelineWindowStart.getTime() / 1000)
+            const activeSources = Object.keys(this.timelineSources).filter(k => this.timelineSources[k])
+
+            // Compute active sub-filters as a flat comma list of "<source>:<type>"
+            // pairs. The iframe parses this into the same nested boolean
+            // structure we have here and filters chips client-side.
+            const subPairs = []
+            for (const [src, types] of Object.entries(this.timelineSubFilters)) {
+                for (const [type, on] of Object.entries(types)) {
+                    if (on) subPairs.push(src + ':' + type)
+                }
+            }
+
+            const params = new URLSearchParams({
+                view: this.timelineViewMode,
+                from: String(fromTs),
+                sources: activeSources.join(','),
+                sub: subPairs.join(','),
+                links: this.timelineShowLinks ? '1' : '0',
+                depLinks: this.timelineShowDepLinks ? '1' : '0',
+                msgLinks: this.timelineShowMsgLinks ? '1' : '0',
+            })
+            return generateUrl('/apps/teamhub/timeline/' + this.currentTeamId) + '?' + params.toString()
+        },
+
+        /** Human-readable period label, mirroring calendarDateLabel's pattern. */
+        timelinePeriodLabel() {
+            const start = this.timelineWindowStart
+            const end   = new Date(TeamView_addPeriod(start, this.timelineViewMode).getTime() - 1)
+            const locale = document.documentElement.lang || 'en'
+            if (this.timelineViewMode === '1W') {
+                const startFmt = start.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
+                const endFmt   = end.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+                return `${startFmt} – ${endFmt}`
+            }
+            if (this.timelineViewMode === '1M') {
+                return start.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+            }
+            const startFmt = start.toLocaleDateString(locale, { month: 'short', year: 'numeric' })
+            const endFmt   = end.toLocaleDateString(locale, { month: 'short', year: 'numeric' })
+            return `${startFmt} – ${endFmt}`
+        },
+
+        /** Prev / date label / next / Today — identical pattern to calendarEmbedActions. */
+        timelineEmbedActions() {
+            return [
+                {
+                    id:    'tl-prev',
+                    // TRANSLATORS: button to navigate to the previous period in the timeline embed
+                    label: t('teamhub', 'Previous'),
+                    icon:  ChevronLeft,
+                },
+                {
+                    id:      'tl-date-label',
+                    label:   this.timelinePeriodLabel,
+                    icon:    null,
+                    isLabel: true,
+                },
+                {
+                    id:    'tl-next',
+                    // TRANSLATORS: button to navigate to the next period in the timeline embed
+                    label: t('teamhub', 'Next'),
+                    icon:  ChevronRight,
+                },
+                {
+                    id:    'tl-today',
+                    // TRANSLATORS: button to jump back to today in the timeline embed
+                    label: t('teamhub', 'Today'),
+                    icon:  CalendarToday,
+                },
+                {
+                    id:    'tl-print',
+                    // TRANSLATORS: button to print the timeline view only (without surrounding NC/TeamHub chrome)
+                    label: t('teamhub', 'Print timeline'),
+                    icon:  Printer,
+                },
+            ]
+        },
+
+        /** View-mode dropdown — same UI pattern as calendarEmbedSelects. */
+        timelineEmbedSelects() {
+            return [
+                {
+                    id:    'timeline-view',
+                    // TRANSLATORS: aria-label for the timeline period-length selector dropdown in the embed bar
+                    label: t('teamhub', 'Timeline period'),
+                    value: this.timelineViewMode,
+                    options: [
+                        { value: '1W', label: t('teamhub', '1 week') },
+                        { value: '1M', label: t('teamhub', '1 month') },
+                        { value: '3M', label: t('teamhub', '3 months') },
+                        { value: '6M', label: t('teamhub', '6 months') },
+                    ],
+                },
+            ]
+        },
+
+        /**
+         * Filter dropdown — single button in the embed bar that opens an
+         * NcActions popover. Two-level structure: top-level source toggles,
+         * each followed by sub-filter checkboxes for that source's event
+         * types. Sub-filters are visually grouped under an NcActionCaption
+         * showing the source name. Disabled when the parent source is off.
+         *
+         * Default sub-filter state (set in data()) emits only the "resolved"
+         * events: Deck due+completed, Decisions decided. Enabling created or
+         * proposed adds a second chip per item and the timeline draws a
+         * connecting bar between the two for Gantt-style readability.
+         *
+         * Each checkbox toggle emits 'menu-toggle' with the item id;
+         * onTimelineEmbedMenuToggle dispatches based on prefix
+         * (deck-*, decisions-*, or bare source name).
+         */
+        timelineEmbedMenu() {
+            const sub = this.timelineSubFilters
+            const items = [
+                // Deck + its sub-filters
+                { id: 'deck', label: t('teamhub', 'Deck'), active: this.timelineSources.deck },
+                {
+                    id: 'cap-deck', isCaption: true,
+                    // TRANSLATORS: caption above the sub-filter checkboxes for Deck in the timeline filter menu
+                    label: t('teamhub', '  Deck events'),
+                },
+                {
+                    id: 'deck-created',
+                    // TRANSLATORS: sub-filter — show "created" event chips for Deck cards on the timeline
+                    label: t('teamhub', '  Created date'),
+                    active: sub.deck.created,
+                    disabled: !this.timelineSources.deck,
+                },
+                {
+                    id: 'deck-due',
+                    // TRANSLATORS: sub-filter — show "due" event chips for Deck cards on the timeline
+                    label: t('teamhub', '  Due date'),
+                    active: sub.deck.due,
+                    disabled: !this.timelineSources.deck,
+                },
+                {
+                    id: 'deck-completed',
+                    // TRANSLATORS: sub-filter — show "completed" event chips for Deck cards on the timeline
+                    label: t('teamhub', '  Completed date'),
+                    active: sub.deck.completed,
+                    disabled: !this.timelineSources.deck,
+                },
+
+                // Decisions + its sub-filters
+                { id: 'decisions', label: t('teamhub', 'Decisions'), active: this.timelineSources.decisions },
+                {
+                    id: 'cap-decisions', isCaption: true,
+                    // TRANSLATORS: caption above the sub-filter checkboxes for Decisions in the timeline filter menu
+                    label: t('teamhub', '  Decisions events'),
+                },
+                {
+                    id: 'decisions-proposed',
+                    // TRANSLATORS: sub-filter — show "proposed" event chips for decisions on the timeline
+                    label: t('teamhub', '  Proposed date'),
+                    active: sub.decisions.proposed,
+                    disabled: !this.timelineSources.decisions,
+                },
+                {
+                    id: 'decisions-decided',
+                    // TRANSLATORS: sub-filter — show "decided/approved" event chips for decisions on the timeline
+                    label: t('teamhub', '  Approved date'),
+                    active: sub.decisions.decided,
+                    disabled: !this.timelineSources.decisions,
+                },
+
+                // Top-level source toggles — Messages and Calendar have no
+                // sub-filters of their own (every post / every event always
+                // shows), so they're bare checkboxes.
+                { id: 'messages',  label: t('teamhub', 'Messages'),  active: this.timelineSources.messages  },
+                { id: 'calendar',  label: t('teamhub', 'Calendar'),  active: this.timelineSources.calendar  },
+
+                // Connector overlays — all on by default (v3.78.9). None of
+                // these filter which chips appear; each draws a line between
+                // two related chips that are already visible.
+                {
+                    id: 'cap-links', isCaption: true,
+                    // TRANSLATORS: caption above the connector-overlay checkboxes in the timeline filter menu
+                    label: t('teamhub', '  Connections'),
+                },
+                {
+                    id: 'links',
+                    // TRANSLATORS: toggle — draws an arrow between a decision and any Deck cards linked to it as tasks
+                    label: t('teamhub', '  Decision ↔ task links'),
+                    active: this.timelineShowLinks,
+                },
+                {
+                    id: 'msgLinks',
+                    // TRANSLATORS: toggle — draws an arrow from a decision-proposal stream post to the decision it announced
+                    label: t('teamhub', '  Message ↔ decision links'),
+                    active: this.timelineShowMsgLinks,
+                },
+                // Deck card-dependency connector overlay (v3.78.8) — NC 34 /
+                // Deck 1.18+ only. Entirely absent from the menu (not just
+                // disabled) on installs where Deck doesn't have this field,
+                // so there's never a dead toggle to wonder about.
+                ...(this.cardDependenciesSupported ? [{
+                    id: 'depLinks',
+                    // TRANSLATORS: toggle — draws an arrow from a Deck card to other cards it depends on (a Deck 1.18+ feature)
+                    label: t('teamhub', '  Deck card dependencies'),
+                    active: this.timelineShowDepLinks,
+                }] : []),
+            ]
+            return {
+                id:    'timeline-filter',
+                // TRANSLATORS: button label in the timeline embed bar — opens a dropdown of source filter checkboxes
+                label: t('teamhub', 'Filter'),
+                icon:  FilterVariant,
+                items,
+            }
+        },
         externalMenuItems() {
             return (this.teamMenuItems || []).filter(item => !item.is_builtin)
         },
@@ -604,6 +929,12 @@ export default {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
             },
         },
+        timelineConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
         webLinks() { this.syncLinkTabs() },
         externalMenuItems() { this.syncExtTabs() },
 
@@ -677,7 +1008,7 @@ export default {
         if (this.currentTeamId) {
             this.loadLayout(this.currentTeamId)
         }
-        const builtinViews = ['talk', 'files', 'calendar', 'deck']
+        const builtinViews = ['talk', 'files', 'calendar', 'deck', 'timeline']
         builtinViews.forEach((view, i) => {
             setTimeout(() => {
                 if (!this.preloadedViews.has(view)) {
@@ -687,6 +1018,24 @@ export default {
                 }
             }, 1500 + i * 800)
         })
+
+        // Timeline crowding-badge navigation (v3.78.4) — the timeline.php
+        // iframe has no navigation state of its own (view mode + window
+        // start live here, in timelineViewMode/timelineWindowStart, exactly
+        // like the Calendar tab). When a count-badge inside the iframe is
+        // clicked, it can't just navigate itself; it posts a message up to
+        // this window instead, and we react by switching the view here —
+        // which then flows back down through the timelineUrl computed
+        // property and reloads the iframe at the new view/window.
+        this._onTimelineMessage = (event) => {
+            if (event.origin !== window.location.origin) return
+            const data = event.data
+            if (!data || data.app !== 'teamhub' || data.type !== 'timeline-navigate') return
+            if (typeof data.from !== 'number') return
+            this.timelineViewMode = '1W'
+            this.timelineWindowStart = TeamView_snapWindow(new Date(data.from * 1000), '1W')
+        }
+        window.addEventListener('message', this._onTimelineMessage)
     },
 
     beforeDestroy() {
@@ -703,12 +1052,16 @@ export default {
             this[key] = null
             this[key.replace('Mql', 'MqlHandler')] = null
         }
+        if (this._onTimelineMessage) {
+            window.removeEventListener('message', this._onTimelineMessage)
+            this._onTimelineMessage = null
+        }
     },
 
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG']),
 
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
@@ -771,6 +1124,9 @@ export default {
                 }
                 if (data.decisionsConfig) {
                     this.SET_DECISIONS_CONFIG(data.decisionsConfig)
+                }
+                if (data.timelineConfig) {
+                    this.SET_TIMELINE_CONFIG(data.timelineConfig)
                 }
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
@@ -969,6 +1325,14 @@ export default {
             if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
                 tabs.push({ key: 'decisions', label: t('teamhub', 'Decisions'), icon: 'Gavel' })
             }
+            // Timeline tab — per-team toggle (managed in Manage Team →
+            // Integrations → Internal). Default is on; admins can disable it
+            // for teams that don't need a timeline view. Empty state inside
+            // the iframe handles the no-data case when enabled but no source
+            // has events yet.
+            if (this.timelineConfig && this.timelineConfig.timeline_enabled !== false) {
+                tabs.push({ key: 'timeline', label: t('teamhub', 'Timeline'), icon: 'TimelineCheckOutline' })
+            }
             ;(this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
             ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
@@ -996,7 +1360,7 @@ export default {
         syncExtTabs() {
             const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence', 'decisions'])
+            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence', 'decisions', 'timeline'])
             this.orderedTabs = [
                 ...this.orderedTabs.filter(t => builtinKeys.has(t.key)),
                 ...extTabs,
@@ -1096,6 +1460,92 @@ export default {
                 this.calendarDate = new Date()
                 // calendarUrl recomputes automatically; reload the iframe with the new URL.
                 this.$nextTick(() => this.$refs.calendarEmbed?.reload())
+            }
+        },
+
+        onTimelineEmbedAction(actionId) {
+            if (actionId === 'tl-today') {
+                this.timelineWindowStart = TeamView_snapWindow(new Date(), this.timelineViewMode)
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+            } else if (actionId === 'tl-prev' || actionId === 'tl-next') {
+                // Step by one unit at a time, regardless of view width:
+                //   1W view → step 1 week
+                //   1M / 3M / 6M views → step 1 month
+                // This makes the wider views feel like a sliding window
+                // ("show me what was happening one month earlier/later") rather
+                // than jumping by the full view span (which would skip 3 or 6
+                // months in one click).
+                const stepMode = (this.timelineViewMode === '1W') ? '1W' : '1M'
+                this.timelineWindowStart = actionId === 'tl-next'
+                    ? TeamView_addPeriod(this.timelineWindowStart, stepMode)
+                    : TeamView_subPeriod(this.timelineWindowStart, stepMode)
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+            } else if (actionId === 'tl-print') {
+                // Print the iframe's own document, not the parent NC window.
+                // The iframe is same-origin (we serve it from /apps/teamhub/
+                // ourselves), so contentWindow is fully accessible. Calling
+                // print() on the iframe window respects its own @media print
+                // rules, which we use in templates/timeline.php to hide
+                // section labels' tinted backgrounds for ink saving and to
+                // make the canvas span its full natural width regardless of
+                // the current iframe viewport.
+                try {
+                    const frame = this.$refs.timelineEmbed?.$el?.querySelector('iframe')
+                    if (frame && frame.contentWindow) {
+                        frame.contentWindow.focus()
+                        frame.contentWindow.print()
+                    } else {
+                        console.warn('[TeamHub][TeamView] timeline print: iframe not ready')
+                    }
+                } catch (err) {
+                    console.error('[TeamHub][TeamView] timeline print failed', err)
+                }
+            }
+        },
+
+        onTimelineEmbedSelect({ id, value }) {
+            if (id === 'timeline-view') {
+                this.timelineViewMode    = value
+                this.timelineWindowStart = TeamView_snapWindow(new Date(), value)
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+            }
+        },
+
+        /**
+         * Filter checkbox toggled. Two id shapes are handled:
+         *   • bare source name ('calendar', 'deck', ...) → toggles top-level
+         *   • '<source>-<type>' ('deck-due', 'decisions-decided') → sub-filter
+         * Iframe is reloaded with the updated URL each time.
+         */
+        onTimelineEmbedMenuToggle(itemId) {
+            if (itemId === 'links') {
+                this.timelineShowLinks = !this.timelineShowLinks
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+                return
+            }
+            if (itemId === 'depLinks') {
+                this.timelineShowDepLinks = !this.timelineShowDepLinks
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+                return
+            }
+            if (itemId === 'msgLinks') {
+                this.timelineShowMsgLinks = !this.timelineShowMsgLinks
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+                return
+            }
+            if (itemId in this.timelineSources) {
+                this.timelineSources[itemId] = !this.timelineSources[itemId]
+                this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+                return
+            }
+            const dash = itemId.indexOf('-')
+            if (dash > 0) {
+                const src  = itemId.slice(0, dash)
+                const type = itemId.slice(dash + 1)
+                if (this.timelineSubFilters[src] && type in this.timelineSubFilters[src]) {
+                    this.timelineSubFilters[src][type] = !this.timelineSubFilters[src][type]
+                    this.$nextTick(() => this.$refs.timelineEmbed?.reload())
+                }
             }
         },
 

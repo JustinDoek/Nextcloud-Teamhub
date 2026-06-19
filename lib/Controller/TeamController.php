@@ -10,14 +10,17 @@ use OCA\TeamHub\Service\IntravoxService;
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
+use OCA\TeamHub\Service\MilestoneService;
 use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TaskService;
 use OCA\TeamHub\Service\TeamService;
+use OCA\TeamHub\Service\TimelineService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\IConfig;
 use OCP\IGroupManager;
 use OCP\IRequest;
 use OCP\IUserSession;
@@ -36,6 +39,9 @@ class TeamController extends Controller {
         private FilesService $filesService,
         private MaintenanceService $maintenanceService,
         private TaskService $taskService,
+        private TimelineService $timelineService,
+        private MilestoneService $milestoneService,
+        private IConfig $config,
         private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
@@ -488,6 +494,202 @@ class TeamController extends Controller {
             ]);
             return new JSONResponse(['error' => $e->getMessage()], $status);
         }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/timeline
+     *
+     * Returns date-anchored events from Calendar, Decisions, and Deck
+     * for a given time window.
+     *
+     * Query params:
+     *   from (int, required) — window start as Unix timestamp
+     *   to   (int, required) — window end   as Unix timestamp
+     *
+     * Returns: { events: [...] }
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTimeline(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            $from = (int)$this->request->getParam('from', 0);
+            $to   = (int)$this->request->getParam('to',   0);
+
+            if ($from <= 0 || $to <= 0 || $to < $from) {
+                return new JSONResponse(
+                    ['error' => 'from and to must be valid Unix timestamps with to >= from'],
+                    Http::STATUS_BAD_REQUEST
+                );
+            }
+
+            // Cap window to 1 year to prevent runaway queries.
+            $maxWindow = 366 * 24 * 60 * 60;
+            if (($to - $from) > $maxWindow) {
+                $to = $from + $maxWindow;
+            }
+
+            $events = $this->timelineService->getEvents($teamId, $from, $to);
+            return new JSONResponse(['events' => $events]);
+
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->warning('[TeamHub][TeamController] getTimeline failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/timeline/config
+     *
+     * Returns the timeline enabled state for this team.
+     *
+     * Storage: NC app-config keyed `timeline_enabled_<teamId>` = "1"|"0".
+     * Default is "1" (enabled) — teams that have never touched the setting
+     * see the Timeline tab. App-config is used (rather than a dedicated
+     * table) because the data is a single team-scoped boolean with no
+     * other associated state; adding a table for that would be overkill.
+     */
+    #[NoAdminRequired]
+    public function getTimelineConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $stored = $this->config->getAppValue(Application::APP_ID, 'timeline_enabled_' . $teamId, '1');
+            return new JSONResponse([
+                'timeline_enabled' => $stored === '1',
+            ]);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/timeline/config
+     *
+     * Updates the timeline enabled state. Body: { timeline_enabled: 0|1 }.
+     * Team admin required (mirrors the DecisionController saveConfig auth).
+     */
+    #[NoAdminRequired]
+    public function saveTimelineConfig(string $teamId): JSONResponse {
+        try {
+            // Same admin gate as DecisionController::saveConfig — only team
+            // admins can toggle a built-in integration on/off for the team.
+            $this->memberService->requireAdminLevel($teamId);
+
+            $raw = $this->request->getParam('timeline_enabled');
+            // Accept bool, 0/1, "0"/"1" — coerce to a strict 0/1 string for storage.
+            $enabled = (string)((int)(bool)$raw);
+            $this->config->setAppValue(Application::APP_ID, 'timeline_enabled_' . $teamId, $enabled);
+
+            return new JSONResponse([
+                'timeline_enabled' => $enabled === '1',
+            ]);
+        } catch (\Exception $e) {
+            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'admin')
+                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+            $this->logger->warning('[TeamHub][TeamController] saveTimelineConfig failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/milestones
+     *
+     * List Timeline milestones for a team — Manage Team → Integration
+     * settings → Timeline block. Admin-gated (MilestoneService enforces
+     * this); regular members see milestones rendered on the Timeline tab
+     * itself via getTimeline(), not through this endpoint.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getMilestones(string $teamId): JSONResponse {
+        try {
+            return new JSONResponse(['items' => $this->milestoneService->listForTeam($teamId)]);
+        } catch (\Exception $e) {
+            return $this->milestoneErrorResponse($e, 'getMilestones');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/milestones
+     * Body: { label: string (required, ≤255), date?: string 'YYYY-MM-DD' }
+     */
+    #[NoAdminRequired]
+    public function createMilestone(string $teamId): JSONResponse {
+        try {
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            $label = (string)$this->request->getParam('label', '');
+            $date  = $this->request->getParam('date');
+
+            $this->logger->debug('[TeamHub][TeamController] createMilestone', [
+                'teamId' => $teamId, 'label' => $label, 'date' => $date, 'app' => Application::APP_ID,
+            ]);
+
+            $row = $this->milestoneService->create($teamId, $label, $date, $user->getUID());
+            return new JSONResponse($row, Http::STATUS_CREATED);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Exception $e) {
+            return $this->milestoneErrorResponse($e, 'createMilestone');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/milestones/{milestoneId}
+     * Body: { label: string (required, ≤255), date?: string 'YYYY-MM-DD' }
+     */
+    #[NoAdminRequired]
+    public function updateMilestone(string $teamId, int $milestoneId): JSONResponse {
+        try {
+            $label = (string)$this->request->getParam('label', '');
+            $date  = $this->request->getParam('date');
+
+            $this->logger->debug('[TeamHub][TeamController] updateMilestone', [
+                'teamId' => $teamId, 'milestoneId' => $milestoneId, 'app' => Application::APP_ID,
+            ]);
+
+            $row = $this->milestoneService->update($teamId, $milestoneId, $label, $date);
+            return new JSONResponse($row);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Exception $e) {
+            return $this->milestoneErrorResponse($e, 'updateMilestone');
+        }
+    }
+
+    /**
+     * DELETE /api/v1/teams/{teamId}/milestones/{milestoneId}
+     */
+    #[NoAdminRequired]
+    public function deleteMilestone(string $teamId, int $milestoneId): JSONResponse {
+        try {
+            $this->milestoneService->delete($teamId, $milestoneId);
+            return new JSONResponse(['ok' => true]);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Exception $e) {
+            return $this->milestoneErrorResponse($e, 'deleteMilestone');
+        }
+    }
+
+    private function milestoneErrorResponse(\Exception $e, string $context): JSONResponse {
+        $status = (str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'admin'))
+            ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
+        $this->logger->warning('[TeamHub][TeamController] ' . $context . ' failed', [
+            'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        ]);
+        return new JSONResponse(['error' => $e->getMessage()], $status);
     }
 
     /**
