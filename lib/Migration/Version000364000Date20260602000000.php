@@ -54,6 +54,14 @@ class Version000364000Date20260602000000 extends SimpleMigrationStep {
                 'notnull' => true,
                 'default' => 0,
             ]);
+            $table->addColumn('decisions_level_enabled', Types::SMALLINT, [
+                'notnull' => true,
+                'default' => 0,
+            ]);
+            $table->addColumn('decisions_action_min_level', Types::SMALLINT, [
+                'notnull' => true,
+                'default' => 1,
+            ]);
             $table->addColumn('created_at', Types::BIGINT, [
                 'notnull' => true,
                 'default' => 0,
@@ -105,6 +113,11 @@ class Version000364000Date20260602000000 extends SimpleMigrationStep {
             $table->addColumn('impact', Types::STRING, [
                 'length'  => 8,  // 'low' | 'medium' | 'high'
                 'notnull' => true,
+            ]);
+            $table->addColumn('level', Types::STRING, [
+                'length'  => 16,
+                'notnull' => false,
+                'default' => 'operational',
             ]);
             $table->addColumn('question', Types::TEXT, [
                 'notnull' => true,
@@ -182,8 +195,13 @@ class Version000364000Date20260602000000 extends SimpleMigrationStep {
                 'notnull' => true,
             ]);
             $table->addColumn('deck_card_id', Types::BIGINT, [
-                // No DB-enforced FK — Deck owns oc_deck_cards.
-                'notnull' => true,
+                'notnull' => false,
+                'default' => null,
+            ]);
+            $table->addColumn('team_id', Types::STRING, [
+                'length'  => 64,
+                'notnull' => false,
+                'default' => null,
             ]);
             $table->addColumn('created_at', Types::BIGINT, [
                 'notnull' => true,

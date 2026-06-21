@@ -1655,6 +1655,8 @@ OC.L10N.register(
     "Copy link" : "Link kopieren",
     "Decision link copied to clipboard" : "Entscheidungslink in die Zwischenablage kopiert",
     "Failed to copy link: {error}" : "Link konnte nicht kopiert werden: {error}",
-    "Delete milestone \"{name}\"? This cannot be undone." : "Meilenstein '{name}' löschen? Dies kann nicht rückgängig gemacht werden."
+    "Delete milestone \"{name}\"? This cannot be undone." : "Meilenstein '{name}' löschen? Dies kann nicht rückgängig gemacht werden.",
+    "More…" : "Mehr…",
+    "More tabs" : "Weitere Tabs"
 },
     "nplurals=2; plural=(n != 1);");

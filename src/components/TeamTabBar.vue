@@ -20,7 +20,7 @@
             Keyboard: Tab/Shift+Tab to focus a tab, then Left/Right arrow to reorder.
         -->
         <draggable
-            v-model="renderableTabs"
+            v-model="visibleTabs"
             :animation="150"
             ghost-class="teamhub-tab-ghost"
             drag-class="teamhub-tab-dragging"
@@ -218,6 +218,55 @@
             </template>
         </draggable>
 
+        <!-- Overflow "More" menu — shown when tabs exceed available width -->
+        <div v-if="hasOverflow"
+             ref="moreContainer"
+             class="teamhub-tab-more"
+             @mouseenter="moreMenuOpen = true"
+             @mouseleave="moreMenuOpen = false">
+            <button
+                class="teamhub-tab teamhub-tab-more-trigger"
+                :class="{ active: activeInOverflow }"
+                :aria-expanded="String(moreMenuOpen)"
+                aria-haspopup="true"
+                @click="moreMenuOpen = !moreMenuOpen"
+                @keydown.escape="moreMenuOpen = false">
+                <ChevronDown :size="16" />
+                {{ t('teamhub', 'More…') }}
+            </button>
+            <div v-show="moreMenuOpen"
+                 class="teamhub-tab-more-menu"
+                 role="menu"
+                 :aria-label="t('teamhub', 'More tabs')">
+                <template v-for="tab in overflowTabs">
+                    <a v-if="tab.key.startsWith('link-') && !tab.isNcRelative"
+                       :key="'more-' + tab.key"
+                       :href="tab.url"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       class="teamhub-tab-more-item"
+                       role="menuitem"
+                       @click="moreMenuOpen = false">
+                        <OpenInNew :size="16" />
+                        {{ tab.label }}
+                    </a>
+                    <button v-else
+                            :key="'more-' + tab.key"
+                            class="teamhub-tab-more-item"
+                            :class="{ active: currentView === tab.key }"
+                            role="menuitem"
+                            @click="onOverflowTabClick(tab)">
+                        <img v-if="tab.key.startsWith('ext-') && tab.appId"
+                             :src="appIconUrl(tab.appId)"
+                             :alt="tab.label"
+                             class="teamhub-tab-app-icon" />
+                        <component v-else :is="getTabIconName(tab)" :size="16" />
+                        {{ tab.label }}
+                    </button>
+                </template>
+            </div>
+        </div>
+
         <NcButton
             v-if="canManageLinks"
             class="teamhub-tab-add"
@@ -263,6 +312,7 @@ import Web from 'vue-material-design-icons/Web.vue'
 import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
 import GavelIcon          from 'vue-material-design-icons/Gavel.vue'
 import TimelineIcon       from 'vue-material-design-icons/TimelineCheckOutline.vue'
+import ChevronDown        from 'vue-material-design-icons/ChevronDown.vue'
 
 export default {
     name: 'TeamTabBar',
@@ -272,7 +322,7 @@ export default {
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
         OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon,
-        TimelineIcon,
+        TimelineIcon, ChevronDown,
     },
 
     props: {
@@ -288,6 +338,46 @@ export default {
     },
 
     emits: ['update:modelValue', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker'],
+
+    data() {
+        return {
+            overflowStartIndex: -1,
+            moreMenuOpen: false,
+        }
+    },
+
+    created() {
+        this._tabWidthCache = {}
+        this._resizeObserver = null
+    },
+
+    mounted() {
+        this._resizeObserver = new ResizeObserver(() => this.calcOverflow())
+        this._resizeObserver.observe(this.$el)
+        this.$nextTick(() => {
+            this.measureTabWidths()
+            this.calcOverflow()
+        })
+        document.addEventListener('click', this._onDocumentClick)
+    },
+
+    beforeDestroy() {
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect()
+            this._resizeObserver = null
+        }
+        document.removeEventListener('click', this._onDocumentClick)
+    },
+
+    watch: {
+        renderableTabKeys() {
+            this.overflowStartIndex = -1
+            this.$nextTick(() => {
+                this.measureTabWidths()
+                this.calcOverflow()
+            })
+        },
+    },
 
     computed: {
         ...mapState(['currentView', 'resources']),
@@ -326,6 +416,40 @@ export default {
                 }
                 this.$emit('update:modelValue', result)
             },
+        },
+
+        renderableTabKeys() {
+            return this.renderableTabs.map(t => t.key).join(',')
+        },
+
+        visibleTabs: {
+            get() {
+                const renderable = this.renderableTabs
+                if (this.overflowStartIndex === -1 || this.overflowStartIndex >= renderable.length) {
+                    return renderable
+                }
+                return renderable.slice(0, this.overflowStartIndex)
+            },
+            set(reordered) {
+                const renderable = this.renderableTabs
+                const overflow = this.overflowStartIndex === -1 || this.overflowStartIndex >= renderable.length
+                    ? []
+                    : renderable.slice(this.overflowStartIndex)
+                this.renderableTabs = [...reordered, ...overflow]
+            },
+        },
+
+        overflowTabs() {
+            if (this.overflowStartIndex === -1) return []
+            return this.renderableTabs.slice(this.overflowStartIndex)
+        },
+
+        hasOverflow() {
+            return this.overflowStartIndex > -1 && this.overflowTabs.length > 0
+        },
+
+        activeInOverflow() {
+            return this.overflowTabs.some(t => this.currentView === t.key)
         },
     },
 
@@ -430,6 +554,96 @@ export default {
                 tab.appId = null
             }
         },
+
+        measureTabWidths() {
+            for (const tab of this.renderableTabs) {
+                const el = document.getElementById('tab-' + tab.key)
+                if (el) {
+                    this._tabWidthCache[tab.key] = el.offsetWidth
+                }
+            }
+        },
+
+        calcOverflow() {
+            const renderable = this.renderableTabs
+            if (!renderable.length) {
+                this.overflowStartIndex = -1
+                return
+            }
+            const bar = this.$el
+            if (!bar) return
+
+            const barWidth = bar.clientWidth
+            const gap = 4
+            const paddingLeft = 44
+            const paddingRight = 16
+
+            const homeTab = document.getElementById('tab-msgstream')
+            const homeWidth = homeTab ? homeTab.offsetWidth : 0
+
+            let rightWidth = 0
+            const addBtn = bar.querySelector('.teamhub-tab-add')
+            if (addBtn) rightWidth += addBtn.offsetWidth + gap
+            const editBtn = bar.querySelector('.teamhub-edit-layout-btn')
+            if (editBtn) rightWidth += editBtn.offsetWidth + gap
+
+            const available = barWidth - paddingLeft - paddingRight - homeWidth - gap - rightWidth
+
+            let totalWidth = 0
+            for (let i = 0; i < renderable.length; i++) {
+                totalWidth += (this._tabWidthCache[renderable[i].key] || 90) + gap
+            }
+            if (totalWidth <= available) {
+                this.overflowStartIndex = -1
+                return
+            }
+
+            const moreWidth = 100
+            const availableWithMore = available - moreWidth - gap
+
+            let used = 0
+            for (let i = 0; i < renderable.length; i++) {
+                const w = (this._tabWidthCache[renderable[i].key] || 90) + gap
+                if (used + w > availableWithMore) {
+                    this.overflowStartIndex = Math.max(0, i)
+                    return
+                }
+                used += w
+            }
+            this.overflowStartIndex = -1
+        },
+
+        onOverflowTabClick(tab) {
+            this.moreMenuOpen = false
+            if (tab.key === 'calendar') {
+                this.onCalendarTabClick()
+            } else if (tab.key === 'deck') {
+                this.onDeckTabClick()
+            } else {
+                this.setView(tab.key)
+            }
+        },
+
+        getTabIconName(tab) {
+            switch (tab.key) {
+            case 'talk': return 'Chat'
+            case 'files': return 'Folder'
+            case 'calendar': return 'Calendar'
+            case 'deck': return 'CardText'
+            case 'presence': return 'OfficeBuildingIcon'
+            case 'decisions': return 'GavelIcon'
+            case 'timeline': return 'TimelineIcon'
+            default:
+                if (tab.key.startsWith('link-')) return 'Web'
+                return 'Puzzle'
+            }
+        },
+
+        _onDocumentClick(e) {
+            if (this.moreMenuOpen && this.$refs.moreContainer && !this.$refs.moreContainer.contains(e.target)) {
+                this.moreMenuOpen = false
+            }
+        },
     },
 }
 </script>
@@ -444,11 +658,8 @@ export default {
     flex-shrink: 0;
     align-items: center;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+    overflow: hidden;
 }
-
-.teamhub-tab-bar::-webkit-scrollbar { display: none; }
 
 /* Draggable wrapper is invisible to the tab bar's flex layout */
 .teamhub-tab-draggable {
@@ -550,5 +761,64 @@ export default {
     flex-shrink: 0;
     margin-left: auto;
     white-space: nowrap;
+}
+
+/* Overflow "More…" dropdown */
+.teamhub-tab-more {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.teamhub-tab-more-trigger .material-design-icon {
+    transition: transform 0.15s;
+}
+
+.teamhub-tab-more-trigger[aria-expanded="true"] .material-design-icon {
+    transform: rotate(180deg);
+}
+
+.teamhub-tab-more-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 1000;
+    min-width: 180px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+}
+
+.teamhub-tab-more-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--color-main-text);
+    cursor: pointer;
+    font-size: 14px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.teamhub-tab-more-item:hover {
+    background: var(--color-background-hover);
+}
+
+.teamhub-tab-more-item.active {
+    background: var(--color-primary-element-light);
+    color: var(--color-primary-element);
+    font-weight: 600;
+}
+
+.teamhub-tab-more-item:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: -2px;
 }
 </style>

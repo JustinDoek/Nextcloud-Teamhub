@@ -1655,6 +1655,8 @@ OC.L10N.register(
     "Copy link" : "Kopiér link",
     "Decision link copied to clipboard" : "Beslutningslink kopieret til udklipsholder",
     "Failed to copy link: {error}" : "Kunne ikke kopiere link: {error}",
-    "Delete milestone \"{name}\"? This cannot be undone." : "Slet milepælen \"{name}\"? Dette kan ikke fortrydes."
+    "Delete milestone \"{name}\"? This cannot be undone." : "Slet milepælen \"{name}\"? Dette kan ikke fortrydes.",
+    "More…" : "Mere…",
+    "More tabs" : "Flere faner"
 },
     "nplurals=2; plural=(n != 1);");

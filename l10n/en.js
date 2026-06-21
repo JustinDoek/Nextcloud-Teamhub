@@ -1595,6 +1595,8 @@ OC.L10N.register(
     "Copy link" : "Copy link",
     "Decision link copied to clipboard" : "Decision link copied to clipboard",
     "Failed to copy link: {error}" : "Failed to copy link: {error}",
-    "Delete milestone \"{name}\"? This cannot be undone." : "Delete milestone \"{name}\"? This cannot be undone."
+    "Delete milestone \"{name}\"? This cannot be undone." : "Delete milestone \"{name}\"? This cannot be undone.",
+    "More…" : "More…",
+    "More tabs" : "More tabs"
 },
     "nplurals=2; plural=(n != 1);");

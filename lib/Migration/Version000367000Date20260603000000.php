@@ -61,6 +61,16 @@ class Version000367000Date20260603000000 extends SimpleMigrationStep {
             // The user who created the category. Display-only; not used for
             // authorisation. Authoritative permission list lives in
             // teamhub_dec_cat_apprs.
+            $table->addColumn('icon', Types::STRING, [
+                'length'  => 64,
+                'notnull' => false,
+                'default' => null,
+            ]);
+            $table->addColumn('description', Types::STRING, [
+                'length'  => 500,
+                'notnull' => false,
+                'default' => null,
+            ]);
             $table->addColumn('created_by', Types::STRING, [
                 'length'  => 64,
                 'notnull' => true,

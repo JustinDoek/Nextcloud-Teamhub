@@ -3,6 +3,25 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.80.0] — 2026-06-20 — Tab bar overflow, decision search, proposal filenames, PostgreSQL fix
+
+### Added
+
+- **Tab bar responsive overflow** — when tabs exceed available bar width, excess tabs are collected into a "More…" dropdown. Uses ResizeObserver + cached tab widths for flicker-free recalculation. Supports hover and click, handles all tab types (built-in, ext-*, link-* NC-relative, link-* external). Active-tab highlighting in overflow dropdown.
+- **Decision unified search** — decisions are now searchable via Nextcloud's unified search bar. New `DecisionSearchProvider` searches across question and selected_answer text, membership-filtered. Results show decision question as title, status/impact/team name as subline, with deep link to the team view.
+
+### Changed
+
+- **Proposal filenames** (GitHub Issue #37) — proposal documents in `.proposals/{id}/` now use a sanitized slug of the decision question (e.g. `Should-we-migrate-to-PostgreSQL.md`) instead of `{id}.md`. Slugs are truncated to 80 chars, with ID fallback for empty questions. Old `.md` files are cleaned up on regen. Legacy flat layout (`{id}.md` at `.proposals/` root) unchanged.
+
+### Fixed
+
+- **PostgreSQL migration error** — fresh installs on PostgreSQL failed with `SQLSTATE[42703]: Undefined column: 7 ERROR: column "level"` when creating a decision. Root cause: ALTER migrations added columns (`level`, `decisions_level_enabled`, `decisions_action_min_level`, `team_id`, `icon`, `description`) but the base createTable migrations weren't updated to include them. Fixed by updating `Version000364000Date20260602000000.php` and `Version000367000Date20260603000000.php` per SKILLS.md §2.17 migration discipline.
+
+### Security & privacy
+
+No new authorisation gaps. `DecisionSearchProvider` enforces team membership via `MemberService::getMemberLevelFromDb()` per result — same enforcement pattern as `MessageSearchProvider`. Search uses prepared statements via QueryBuilder. `proposalFilename()` sanitizes input with regex before filesystem use.
+
 ## [3.79.0] — 2026-06-19 — Timeline Milestones, connector overlays, Deck card dependencies
 
 ### Added

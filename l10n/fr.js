@@ -1655,6 +1655,8 @@ OC.L10N.register(
     "Copy link" : "Copier le lien",
     "Decision link copied to clipboard" : "Lien de la décision copié dans le presse-papiers",
     "Failed to copy link: {error}" : "Impossible de copier le lien : {error}",
-    "Delete milestone \"{name}\"? This cannot be undone." : "Supprimer le jalon « {name} » ? Cette action est irréversible."
+    "Delete milestone \"{name}\"? This cannot be undone." : "Supprimer le jalon « {name} » ? Cette action est irréversible.",
+    "More…" : "Plus…",
+    "More tabs" : "Plus d'onglets"
 },
     "nplurals=2; plural=(n > 1);");

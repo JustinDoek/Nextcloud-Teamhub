@@ -13,6 +13,7 @@ use OCP\App\Events\AppDisabledEvent;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
+use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
 use OCA\TeamHub\Service\Suggestion\MeetingSuggestionService;
 use OCA\TeamHub\Service\Suggestion\PersonalAndTeamBusyProvider;
@@ -61,8 +62,9 @@ class Application extends App implements IBootstrap {
             );
         }
 
-        // Register TeamHub messages with NC unified search.
+        // Register TeamHub messages and decisions with NC unified search.
         $context->registerSearchProvider(MessageSearchProvider::class);
+        $context->registerSearchProvider(DecisionSearchProvider::class);
 
         // MeetingSuggestionService is the STAGE-1 scorer. It picks half-days
         // based on PRESENCE only (which team members are at-the-office /

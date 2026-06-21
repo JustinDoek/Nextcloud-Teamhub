@@ -853,17 +853,17 @@ class DecisionService {
             $proposalsFolder = $teamFolder->newFolder(self::PROPOSALS_FOLDER);
         }
 
-        // 4. Decide layout: new finalizations use {decisionId}/{decisionId}.md
+        // 4. Decide layout: new finalizations use {decisionId}/{subject}.md
         //    (subfolder per decision, so attachments can be copied alongside).
         //    Legacy decisions finalized before v3.71.2 wrote {decisionId}.md
         //    flat at the .proposals/ root — if such a flat file exists for
         //    this decision, keep using the flat layout on regen so we never
         //    orphan content. New decisions always use the subfolder layout.
-        $filename = $d->getId() . '.md';
-        $legacyFlatPath = self::PROPOSALS_FOLDER . '/' . $filename;
+        $legacyFilename = $d->getId() . '.md';
+        $legacyFlatPath = self::PROPOSALS_FOLDER . '/' . $legacyFilename;
         $legacyFlatExists = false;
         try {
-            $proposalsFolder->get($filename);
+            $proposalsFolder->get($legacyFilename);
             $legacyFlatExists = true;
         } catch (\OCP\Files\NotFoundException) {
             // No legacy flat file — use subfolder layout.
@@ -879,10 +879,10 @@ class DecisionService {
 
         if ($legacyFlatExists) {
             // Legacy layout: write/overwrite .proposals/{id}.md flat.
-            return $this->writeFileInto($proposalsFolder, $filename, $markdown, $legacyFlatPath);
+            return $this->writeFileInto($proposalsFolder, $legacyFilename, $markdown, $legacyFlatPath);
         }
 
-        // New layout: .proposals/{id}/{id}.md
+        // New layout: .proposals/{id}/{subject-slug}.md
         $subfolderName = (string)$d->getId();
         try {
             $subfolder = $proposalsFolder->get($subfolderName);
@@ -891,6 +891,26 @@ class DecisionService {
             }
         } catch (\OCP\Files\NotFoundException) {
             $subfolder = $proposalsFolder->newFolder($subfolderName);
+        }
+
+        $filename = $this->proposalFilename($d);
+
+        // On regen the question may have changed, producing a new filename.
+        // Remove any previous proposal .md so we don't orphan the old file.
+        // Attachments (images, PDFs) are left untouched.
+        foreach ($subfolder->getDirectoryListing() as $node) {
+            if ($node instanceof \OCP\Files\File
+                && $node->getName() !== $filename
+                && str_ends_with($node->getName(), '.md')) {
+                try {
+                    $node->delete();
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][DecisionService] Could not remove old proposal file', [
+                        'old_name' => $node->getName(),
+                        'error'    => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         $cachePath = self::PROPOSALS_FOLDER . '/' . $subfolderName . '/' . $filename;
@@ -941,6 +961,18 @@ class DecisionService {
         ];
     }
 
+    private function proposalFilename(Decision $d): string {
+        $question = $d->getQuestion() ?? '';
+        $slug = preg_replace('/[^\p{L}\p{N}\s\-_]/u', '', $question);
+        $slug = preg_replace('/[\s_]+/', '-', trim($slug));
+        $slug = mb_substr($slug, 0, 80);
+        $slug = rtrim($slug, '-');
+        if ($slug === '') {
+            $slug = (string)$d->getId();
+        }
+        return $slug . '.md';
+    }
+
     /**
      * Copy each attachment registered against the decision's parent message
      * into the given target folder. Idempotent: if a file with the same name
@@ -986,10 +1018,11 @@ class DecisionService {
                     continue;
                 }
                 // Use the stored display name to avoid collisions with the .md
-                // file (decisionId.md) and to preserve the user's intended name.
+                // proposal file and to preserve the user's intended name.
                 $destName = $this->sanitizeAttachmentName($row->getFileName() ?: ('attachment-' . $fileId));
                 // Don't ever overwrite the proposal markdown.
-                if ($destName === ($d->getId() . '.md')) {
+                $proposalName = $this->proposalFilename($d);
+                if ($destName === $proposalName) {
                     $destName = 'attachment-' . $fileId . '-' . $destName;
                 }
                 $content = $source->getContent();
@@ -1434,7 +1467,8 @@ class DecisionService {
      * in the Decisions detail panel.
      *
      * Returns an array of { file_id, name, mime, size, is_proposal }
-     * where is_proposal=true marks the canonical {decisionId}.md.
+     * where is_proposal=true marks the canonical .md proposal file
+     * (named by sanitised question since v3.79.1, or {decisionId}.md before).
      *
      * If the decision predates the subfolder layout (v3.71.2) and only a
      * flat .proposals/{decisionId}.md exists, returns a single-item list
@@ -1478,10 +1512,12 @@ class DecisionService {
             return [];
         }
 
-        $proposalFilename = $decisionId . '.md';
+        $legacyFilename = $decisionId . '.md';
         $out = [];
 
         // Subfolder layout (preferred — new finalizations).
+        // The canonical proposal is the single .md file in the subfolder
+        // (named by sanitised question since v3.79.1, or {id}.md before).
         try {
             $subfolder = $proposalsFolder->get((string)$decisionId);
             if ($subfolder instanceof \OCP\Files\Folder) {
@@ -1495,7 +1531,7 @@ class DecisionService {
                         'name'        => $name,
                         'mime'        => $node->getMimeType() ?: 'application/octet-stream',
                         'size'        => $node->getSize(),
-                        'is_proposal' => ($name === $proposalFilename),
+                        'is_proposal' => str_ends_with($name, '.md'),
                     ];
                 }
                 return $out;
@@ -1506,7 +1542,7 @@ class DecisionService {
 
         // Legacy flat layout (pre-v3.71.2): .proposals/{decisionId}.md only.
         try {
-            $flat = $proposalsFolder->get($proposalFilename);
+            $flat = $proposalsFolder->get($legacyFilename);
             if ($flat instanceof \OCP\Files\File) {
                 $out[] = [
                     'file_id'     => $flat->getId(),

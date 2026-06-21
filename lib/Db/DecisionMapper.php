@@ -231,4 +231,51 @@ class DecisionMapper extends QBMapper {
         $r->closeCursor();
         return $out;
     }
+
+    /**
+     * Full-text search across question and selected_answer, with team_name join.
+     *
+     * Used by DecisionSearchProvider for NC unified search.
+     * Returns raw associative rows (not entities) — the search provider only
+     * needs a subset of columns plus the joined team_name.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function search(string $term, int $limit = 30, int $offset = 0): array {
+        $qb = $this->db->getQueryBuilder();
+
+        $qb->select('d.id', 'd.team_id', 'd.question', 'd.selected_answer',
+                     'd.status', 'd.impact', 'd.proposed_by', 'd.created_at')
+            ->addSelect($qb->createFunction("COALESCE(cc.display_name, '') AS team_name"))
+            ->from('teamhub_decisions', 'd')
+            ->leftJoin(
+                'd',
+                'circles_circle',
+                'cc',
+                $qb->expr()->eq('d.team_id', 'cc.unique_id')
+            )
+            ->where(
+                $qb->expr()->orX(
+                    $qb->expr()->like(
+                        $qb->createFunction('LOWER(d.question)'),
+                        $qb->createNamedParameter('%' . strtolower($term) . '%')
+                    ),
+                    $qb->expr()->like(
+                        $qb->createFunction('LOWER(COALESCE(d.selected_answer, \'\'))'),
+                        $qb->createNamedParameter('%' . strtolower($term) . '%')
+                    )
+                )
+            )
+            ->orderBy('d.created_at', 'DESC')
+            ->setMaxResults($limit)
+            ->setFirstResult($offset);
+
+        $result = $qb->executeQuery();
+        $rows   = [];
+        while ($row = $result->fetch()) {
+            $rows[] = $row;
+        }
+        $result->closeCursor();
+        return $rows;
+    }
 }

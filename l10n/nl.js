@@ -1655,6 +1655,8 @@ OC.L10N.register(
     "Copy link" : "Koppeling kopiëren",
     "Decision link copied to clipboard" : "Beslissingslink gekopieerd naar klembord",
     "Failed to copy link: {error}" : "Kon link niet kopiëren: {error}",
-    "Delete milestone \"{name}\"? This cannot be undone." : "Mijlpaal '{name}' verwijderen? Dit kan niet ongedaan worden gemaakt."
+    "Delete milestone \"{name}\"? This cannot be undone." : "Mijlpaal '{name}' verwijderen? Dit kan niet ongedaan worden gemaakt.",
+    "More…" : "Meer…",
+    "More tabs" : "Meer tabbladen"
 },
     "nplurals=2; plural=(n != 1);");
