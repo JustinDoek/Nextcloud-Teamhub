@@ -1816,6 +1816,34 @@ export default {
     text-decoration: underline;
 }
 
+/* NC's global styles reset font-style/list-style on these tags — restore them
+   so markdown italics and bullet lists render as users expect. */
+.message-card__body :deep(em) {
+    font-style: italic;
+}
+
+.message-card__body :deep(strong) {
+    font-weight: 700;
+}
+
+.message-card__body :deep(ul),
+.message-card__body :deep(ol) {
+    margin: 8px 0;
+    padding-left: 28px;
+}
+
+.message-card__body :deep(ul) {
+    list-style: disc outside;
+}
+
+.message-card__body :deep(ol) {
+    list-style: decimal outside;
+}
+
+.message-card__body :deep(li) {
+    margin: 2px 0;
+}
+
 /* @mention rendered pill in message body */
 .message-card__body :deep(.teamhub-mention) {
     display: inline-block;

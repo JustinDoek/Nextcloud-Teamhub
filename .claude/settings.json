@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "mcp__ccd_session__mark_chapter"
-    ]
-  }
-}

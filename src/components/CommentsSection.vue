@@ -742,6 +742,34 @@ export default {
     border-radius: 3px;
 }
 
+/* NC's global styles reset font-style/list-style on these tags — restore them
+   so markdown italics and bullet lists render as users expect. */
+.comment__body :deep(em) {
+    font-style: italic;
+}
+
+.comment__body :deep(strong) {
+    font-weight: 700;
+}
+
+.comment__body :deep(ul),
+.comment__body :deep(ol) {
+    margin: 6px 0;
+    padding-left: 24px;
+}
+
+.comment__body :deep(ul) {
+    list-style: disc outside;
+}
+
+.comment__body :deep(ol) {
+    list-style: decimal outside;
+}
+
+.comment__body :deep(li) {
+    margin: 2px 0;
+}
+
 .comment--solved .comment__body :deep(code) {
     background: rgba(255, 255, 255, 0.2);
     color: var(--color-main-background);
