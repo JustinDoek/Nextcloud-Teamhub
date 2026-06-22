@@ -637,12 +637,14 @@ class ResourceService {
     public function checkInstalledApps(): array {
         $config = $this->container->get(\OCP\IConfig::class);
         return [
-            'talk'               => $this->appManager->isInstalled('spreed'),
-            'calendar'           => $this->appManager->isInstalled('calendar'),
-            'deck'               => $this->appManager->isInstalled('deck'),
-            'intravox'           => $this->appManager->isInstalled('intravox'),
-            'groupfolders'       => $this->groupFolderService->isGroupFoldersAvailable(),
-            'intravoxParentPath' => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
+            'talk'                   => $this->appManager->isInstalled('spreed'),
+            'calendar'               => $this->appManager->isInstalled('calendar'),
+            'deck'                   => $this->appManager->isInstalled('deck'),
+            'intravox'               => $this->appManager->isInstalled('intravox'),
+            'groupfolders'           => $this->groupFolderService->isGroupFoldersAvailable(),
+            'intravoxParentPath'     => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
+            'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',
+            'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1',
         ];
     }
 

@@ -222,14 +222,14 @@
         <div v-if="hasOverflow"
              ref="moreContainer"
              class="teamhub-tab-more"
-             @mouseenter="moreMenuOpen = true"
+             @mouseenter="openMoreMenu"
              @mouseleave="moreMenuOpen = false">
             <button
                 class="teamhub-tab teamhub-tab-more-trigger"
                 :class="{ active: activeInOverflow }"
                 :aria-expanded="String(moreMenuOpen)"
                 aria-haspopup="true"
-                @click="moreMenuOpen = !moreMenuOpen"
+                @click="toggleMoreMenu"
                 @keydown.escape="moreMenuOpen = false">
                 <ChevronDown :size="16" />
                 {{ t('teamhub', 'More…') }}
@@ -237,7 +237,8 @@
             <div v-show="moreMenuOpen"
                  class="teamhub-tab-more-menu"
                  role="menu"
-                 :aria-label="t('teamhub', 'More tabs')">
+                 :aria-label="t('teamhub', 'More tabs')"
+                 :style="{ top: moreMenuTop + 'px', left: moreMenuLeft + 'px' }">
                 <template v-for="tab in overflowTabs">
                     <a v-if="tab.key.startsWith('link-') && !tab.isNcRelative"
                        :key="'more-' + tab.key"
@@ -343,12 +344,15 @@ export default {
         return {
             overflowStartIndex: -1,
             moreMenuOpen: false,
+            moreMenuTop: 0,
+            moreMenuLeft: 0,
         }
     },
 
     created() {
         this._tabWidthCache = {}
         this._resizeObserver = null
+        this._onMoreReposition = () => this.repositionMoreMenu()
     },
 
     mounted() {
@@ -367,6 +371,8 @@ export default {
             this._resizeObserver = null
         }
         document.removeEventListener('click', this._onDocumentClick)
+        window.removeEventListener('resize', this._onMoreReposition)
+        window.removeEventListener('scroll', this._onMoreReposition, true)
     },
 
     watch: {
@@ -376,6 +382,15 @@ export default {
                 this.measureTabWidths()
                 this.calcOverflow()
             })
+        },
+        moreMenuOpen(open) {
+            if (open) {
+                window.addEventListener('resize', this._onMoreReposition)
+                window.addEventListener('scroll', this._onMoreReposition, true)
+            } else {
+                window.removeEventListener('resize', this._onMoreReposition)
+                window.removeEventListener('scroll', this._onMoreReposition, true)
+            }
         },
     },
 
@@ -624,6 +639,32 @@ export default {
             }
         },
 
+        /**
+         * Compute the dropdown's screen coordinates from the trigger's
+         * bounding rect. Needed because the menu is position:fixed to escape
+         * the tab bar's `overflow: hidden` clip.
+         */
+        repositionMoreMenu() {
+            const container = this.$refs.moreContainer
+            if (!container) return
+            const rect = container.getBoundingClientRect()
+            this.moreMenuTop = rect.bottom + 4
+            this.moreMenuLeft = rect.left
+        },
+
+        openMoreMenu() {
+            this.repositionMoreMenu()
+            this.moreMenuOpen = true
+        },
+
+        toggleMoreMenu() {
+            if (this.moreMenuOpen) {
+                this.moreMenuOpen = false
+            } else {
+                this.openMoreMenu()
+            }
+        },
+
         getTabIconName(tab) {
             switch (tab.key) {
             case 'talk': return 'Chat'
@@ -778,9 +819,7 @@ export default {
 }
 
 .teamhub-tab-more-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
+    position: fixed;
     z-index: 1000;
     min-width: 180px;
     max-height: 300px;

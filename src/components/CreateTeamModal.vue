@@ -27,7 +27,7 @@
                         id="ctm-team-name"
                         v-model="form.name"
                         label-outside
-                        :placeholder="t('teamhub', 'e.g. Marketing Team')"
+                        :placeholder="namePlaceholder"
                         :error="!!nameError"
                         :helper-text="nameError || ''" />
                 </div>
@@ -48,7 +48,7 @@
                         <div
                             v-for="type in teamTypes"
                             :key="type.id"
-                            :class="['ctm__type', { 'ctm__type--selected': form.teamType === type.id }]"
+                            :class="['ctm__type', 'ctm__type--' + type.accent, { 'ctm__type--selected': form.teamType === type.id }]"
                             @click="form.teamType = type.id">
                             <component :is="type.icon" :size="28" class="ctm__type-icon" />
                             <span class="ctm__type-name">{{ type.label }}</span>
@@ -160,6 +160,10 @@ export default {
             memberSearch: '',
             userResults: [],
             searchTimer: null,
+            talkAvailable: true,
+            calendarAvailable: true,
+            deckAvailable: true,
+            groupfoldersAvailable: false,
             form: {
                 name: '',
                 description: '',
@@ -177,32 +181,91 @@ export default {
                     label: t('teamhub', 'Project'),
                     description: t('teamhub', 'Time-bound work with clear goals'),
                     icon: 'Briefcase',
+                    accent: 'project',
                 },
                 {
                     id: 'collaboration',
                     label: t('teamhub', 'Collaboration'),
                     description: t('teamhub', 'Ongoing knowledge sharing'),
                     icon: 'AccountMultiple',
+                    accent: 'collaboration',
                 },
                 {
                     id: 'department',
                     label: t('teamhub', 'Department'),
                     description: t('teamhub', 'Organizational unit'),
                     icon: 'OfficeBuildingOutline',
+                    accent: 'department',
                 },
             ]
         },
-        appOptions() {
-            return [
-                { id: 'talk', label: t('teamhub', 'Talk — create a group conversation'), icon: 'Chat' },
-                { id: 'files', label: t('teamhub', 'Files — create a shared folder'), icon: 'Folder' },
-                { id: 'calendar', label: t('teamhub', 'Calendar — create a team calendar'), icon: 'Calendar' },
-                { id: 'deck', label: t('teamhub', 'Deck — create a task board'), icon: 'CardText' },
-            ]
+        templateProfile() {
+            const profiles = {
+                project: {
+                    apps: { talk: false, files: true, calendar: true, deck: true },
+                    placeholder: t('teamhub', 'e.g. Website Redesign'),
+                },
+                collaboration: {
+                    apps: { talk: true, files: true, calendar: false, deck: false },
+                    placeholder: t('teamhub', 'e.g. Design Guild'),
+                },
+                department: {
+                    apps: { talk: true, files: true, calendar: true, deck: false },
+                    placeholder: t('teamhub', 'e.g. Human Resources'),
+                },
+            }
+            return profiles[this.form.teamType] || profiles.collaboration
         },
+        namePlaceholder() {
+            return this.templateProfile.placeholder
+        },
+        appOptions() {
+            const filesLabel = this.groupfoldersAvailable
+                ? t('teamhub', 'Files — create a group folder')
+                : t('teamhub', 'Files — create a shared folder')
+            const all = [
+                { id: 'talk', label: t('teamhub', 'Talk — create a group conversation'), icon: 'Chat', available: this.talkAvailable },
+                { id: 'files', label: filesLabel, icon: 'Folder', available: true },
+                { id: 'calendar', label: t('teamhub', 'Calendar — create a team calendar'), icon: 'Calendar', available: this.calendarAvailable },
+                { id: 'deck', label: t('teamhub', 'Deck — create a task board'), icon: 'CardText', available: this.deckAvailable },
+            ]
+            return all.filter(a => a.available)
+        },
+    },
+    watch: {
+        'form.teamType': {
+            handler() {
+                this.applyTemplateDefaults()
+            },
+            immediate: true,
+        },
+    },
+    async mounted() {
+        await this.checkApps()
+        this.applyTemplateDefaults()
     },
     methods: {
         t,
+
+        applyTemplateDefaults() {
+            const profile = this.templateProfile
+            const availableIds = new Set(this.appOptions.map(a => a.id))
+            for (const [appId, checked] of Object.entries(profile.apps)) {
+                this.form.apps[appId] = availableIds.has(appId) ? checked : false
+            }
+        },
+
+        async checkApps() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/apps/check'))
+                this.talkAvailable          = !!data.talk
+                this.calendarAvailable      = !!data.calendar
+                this.deckAvailable          = !!data.deck
+                this.groupfoldersAvailable  = !!data.groupfolders
+            } catch {
+                // Defaults remain
+            }
+        },
 
         goToStep2() {
             this.nameError = ''
@@ -388,9 +451,18 @@ export default {
     transition: border-color 0.15s, background 0.15s;
 }
 
+/* Accent colors per template type */
+.ctm__type--project .ctm__type-icon { color: var(--color-warning); }
+.ctm__type--collaboration .ctm__type-icon { color: var(--color-primary-element); }
+.ctm__type--department .ctm__type-icon { color: var(--color-success); }
+
 .ctm__type:hover { border-color: var(--color-primary-element); background: var(--color-background-hover); }
-.ctm__type--selected { border-color: var(--color-primary-element); background: var(--color-primary-element-light); }
-.ctm__type-icon { color: var(--color-primary-element); }
+.ctm__type--project:hover,
+.ctm__type--project.ctm__type--selected { border-color: var(--color-warning); background: var(--color-warning-hover, rgba(232, 131, 16, 0.08)); }
+.ctm__type--collaboration:hover,
+.ctm__type--collaboration.ctm__type--selected { border-color: var(--color-primary-element); background: var(--color-primary-element-light); }
+.ctm__type--department:hover,
+.ctm__type--department.ctm__type--selected { border-color: var(--color-success); background: var(--color-success-hover, rgba(46, 181, 43, 0.08)); }
 .ctm__type-name { font-weight: 600; font-size: 13px; }
 .ctm__type-desc { font-size: 11px; color: var(--color-text-maxcontrast); line-height: 1.3; }
 

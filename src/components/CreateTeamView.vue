@@ -3,7 +3,7 @@
         <div class="ctv__inner">
             <div class="ctv__header">
                 <h2 class="ctv__title">{{ t('teamhub', 'Create new team') }}</h2>
-                <p class="ctv__subtitle">{{ wizardDescription || t('teamhub', 'Set up your team in a few steps') }}</p>
+                <p class="ctv__subtitle">{{ wizardDescription || templateProfile.subtitle }}</p>
             </div>
 
             <!-- Step indicator -->
@@ -23,7 +23,7 @@
                     <NcTextField
                         v-model="form.name"
                         :label="t('teamhub', 'Team name')"
-                        :placeholder="t('teamhub', 'e.g. Marketing Team')"
+                        :placeholder="namePlaceholder"
                         :error="!!nameError"
                         :helper-text="nameError || ''" />
                 </div>
@@ -42,7 +42,7 @@
                         <div
                             v-for="type in teamTypes"
                             :key="type.id"
-                            :class="['ctv__type', { 'ctv__type--selected': form.teamType === type.id }]"
+                            :class="['ctv__type', 'ctv__type--' + type.accent, { 'ctv__type--selected': form.teamType === type.id }]"
                             @click="form.teamType = type.id">
                             <component :is="type.icon" :size="32" class="ctv__type-icon" />
                             <span class="ctv__type-name">{{ type.label }}</span>
@@ -134,47 +134,75 @@
                 <div class="ctv__field">
                     <p class="ctv__hint">{{ t('teamhub', 'For each app, choose whether to create a new resource for this team or connect one you already own.') }}</p>
                     <div class="ctv__apps">
-                        <div v-for="app in appOptions" :key="app.id" class="ctv__app ctv__app--tri">
-                            <label class="ctv__app-header">
-                                <input
-                                    type="checkbox"
-                                    :checked="form.apps[app.id].mode !== null"
-                                    class="ctv__app-check"
-                                    :aria-label="t('teamhub', 'Enable {app}', { app: app.label })"
-                                    @change="onAppToggle(app.id, $event)" />
-                                <component :is="app.icon" :size="24" class="ctv__app-icon" aria-hidden="true" />
-                                <div class="ctv__app-text">
-                                    <span class="ctv__app-name">{{ app.label }}</span>
-                                    <span class="ctv__app-desc">{{ app.description }}</span>
-                                </div>
-                            </label>
-
-                            <div v-if="form.apps[app.id].mode !== null" class="ctv__app-modes">
-                                <label class="ctv__app-mode">
+                        <div v-for="app in appOptions" :key="app.id" class="ctv__app ctv__app--compact">
+                            <div class="ctv__app-row">
+                                <label class="ctv__app-header">
                                     <input
-                                        v-model="form.apps[app.id].mode"
-                                        type="radio"
-                                        value="create"
-                                        :name="'mode-' + app.id" />
-                                    <span>{{ t('teamhub', 'Create new for this team') }}</span>
+                                        type="checkbox"
+                                        :checked="form.apps[app.id].mode !== null"
+                                        class="ctv__app-check"
+                                        :aria-label="t('teamhub', 'Enable {app}', { app: app.label })"
+                                        @change="onAppToggle(app.id, $event)" />
+                                    <component :is="app.icon" :size="24" class="ctv__app-icon" aria-hidden="true" />
+                                    <div class="ctv__app-text">
+                                        <span class="ctv__app-name">{{ app.label }}</span>
+                                        <span class="ctv__app-desc">{{ app.description }}</span>
+                                        <span v-if="app.id === 'files' && !groupfoldersAvailable" class="ctv__app-hint">
+                                            {{ t('teamhub', 'Group Folders not available — using shared folder') }}
+                                        </span>
+                                    </div>
                                 </label>
-                                <label class="ctv__app-mode">
-                                    <input
-                                        v-model="form.apps[app.id].mode"
-                                        type="radio"
-                                        value="connect"
-                                        :name="'mode-' + app.id" />
-                                    <!-- TRANSLATORS: radio option label — picker for an existing resource follows on the next line -->
-                                    <span>{{ t('teamhub', 'Connect one I already own') }}</span>
-                                </label>
-                                <div v-if="form.apps[app.id].mode === 'connect'" class="ctv__app-picker">
-                                    <ResourcePicker
-                                        :app="app.id"
-                                        v-model="form.apps[app.id].resourceId"
-                                        @selected-name="form.apps[app.id].name = $event" />
+                                <div v-if="form.apps[app.id].mode !== null" class="ctv__app-toggle">
+                                    <button
+                                        type="button"
+                                        :class="['ctv__toggle-btn', { 'ctv__toggle-btn--active': form.apps[app.id].mode === 'create' }]"
+                                        :aria-pressed="form.apps[app.id].mode === 'create' ? 'true' : 'false'"
+                                        @click="form.apps[app.id].mode = 'create'; form.apps[app.id].resourceId = null; form.apps[app.id].name = ''">
+                                        {{ t('teamhub', 'New') }}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        :class="['ctv__toggle-btn', { 'ctv__toggle-btn--active': form.apps[app.id].mode === 'connect' }]"
+                                        :aria-pressed="form.apps[app.id].mode === 'connect' ? 'true' : 'false'"
+                                        @click="form.apps[app.id].mode = 'connect'">
+                                        {{ t('teamhub', 'Existing') }}
+                                    </button>
                                 </div>
                             </div>
+                            <div v-if="form.apps[app.id].mode === 'connect'" class="ctv__app-picker">
+                                <ResourcePicker
+                                    :app="app.id"
+                                    v-model="form.apps[app.id].resourceId"
+                                    @selected-name="form.apps[app.id].name = $event" />
+                            </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- TeamHub modules -->
+                <div class="ctv__field">
+                    <label class="ctv__label">{{ t('teamhub', 'Team modules') }}</label>
+                    <p class="ctv__hint">{{ t('teamhub', 'Enable additional features for this team.') }}</p>
+                    <div class="ctv__modules">
+                        <label
+                            v-for="mod in moduleOptions"
+                            :key="mod.id"
+                            :class="['ctv__module', { 'ctv__module--disabled': !mod.available }]">
+                            <input
+                                v-model="form.modules[mod.id]"
+                                type="checkbox"
+                                class="ctv__module-check"
+                                :disabled="!mod.available"
+                                :aria-label="mod.label" />
+                            <component :is="mod.icon" :size="20" class="ctv__module-icon" aria-hidden="true" />
+                            <div class="ctv__module-text">
+                                <span class="ctv__module-name">{{ mod.label }}</span>
+                                <span class="ctv__module-desc">{{ mod.description }}</span>
+                                <span v-if="!mod.available" class="ctv__module-unavailable">
+                                    {{ t('teamhub', 'Not available — disabled by your administrator') }}
+                                </span>
+                            </div>
+                        </label>
                     </div>
                 </div>
             </div>
@@ -237,6 +265,10 @@ import Briefcase from 'vue-material-design-icons/Briefcase.vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutline.vue'
+import Gavel from 'vue-material-design-icons/Gavel.vue'
+import AccountClock from 'vue-material-design-icons/AccountClock.vue'
+import TimelineClockOutline from 'vue-material-design-icons/TimelineClockOutline.vue'
+import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import ResourcePicker from './ResourcePicker.vue'
 
 // Canonical Circles config bit values — see src/constants/circlesConfig.js
@@ -254,6 +286,7 @@ export default {
         NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
         Check, Close, CheckCircle, AlertCircle,
         Chat, Folder, Calendar, CardText, Briefcase, AccountMultiple, AccountGroup, OfficeBuildingOutline,
+        Gavel, AccountClock, TimelineClockOutline, FileDocumentOutline,
         ResourcePicker,
     },
     emits: ['created', 'cancel'],
@@ -269,6 +302,9 @@ export default {
             talkAvailable: true,
             calendarAvailable: true,
             deckAvailable: true,
+            groupfoldersAvailable: false,
+            presenceModuleEnabled: false,
+            decisionsModuleEnabled: false,
             wizardDescription: '',
             creationDone: false,
             createdTeam: null,
@@ -282,6 +318,12 @@ export default {
                     files:    { mode: null, resourceId: null, name: '' },
                     calendar: { mode: null, resourceId: null, name: '' },
                     deck:     { mode: null, resourceId: null, name: '' },
+                },
+                modules: {
+                    decisions: true,
+                    presence: false,
+                    timeline: false,
+                    pages: true,
                 },
                 config: {
                     open: false,         // anyone can join
@@ -299,19 +341,83 @@ export default {
         },
         teamTypes() {
             return [
-                { id: 'project', label: t('teamhub', 'Project'), description: t('teamhub', 'Time-bound work with clear goals'), icon: 'Briefcase' },
-                { id: 'collaboration', label: t('teamhub', 'Collaboration'), description: t('teamhub', 'Ongoing team knowledge sharing'), icon: 'AccountMultiple' },
-                { id: 'department', label: t('teamhub', 'Department'), description: t('teamhub', 'Organizational department or unit'), icon: 'OfficeBuildingOutline' },
+                { id: 'project', label: t('teamhub', 'Project'), description: t('teamhub', 'Time-bound work with clear goals'), icon: 'Briefcase', accent: 'project' },
+                { id: 'collaboration', label: t('teamhub', 'Collaboration'), description: t('teamhub', 'Ongoing team knowledge sharing'), icon: 'AccountMultiple', accent: 'collaboration' },
+                { id: 'department', label: t('teamhub', 'Department'), description: t('teamhub', 'Organizational department or unit'), icon: 'OfficeBuildingOutline', accent: 'department' },
             ]
         },
         appOptions() {
+            const filesDesc = this.groupfoldersAvailable
+                ? t('teamhub', 'Create a group folder for this team')
+                : t('teamhub', 'Create a shared folder for this team')
             const all = [
                 { id: 'talk',     label: 'Talk',     description: t('teamhub', 'Create a group conversation for this team'), icon: Chat,     available: this.talkAvailable },
-                { id: 'files',    label: 'Files',    description: t('teamhub', 'Create a shared folder for this team'),       icon: Folder,   available: true },
+                { id: 'files',    label: 'Files',    description: filesDesc,                                                  icon: Folder,   available: true },
                 { id: 'calendar', label: 'Calendar', description: t('teamhub', 'Create a shared calendar for this team'),     icon: Calendar, available: this.calendarAvailable },
                 { id: 'deck',     label: 'Deck',     description: t('teamhub', 'Create a task board for this team'),          icon: CardText, available: this.deckAvailable },
             ]
             return all.filter(a => a.available)
+        },
+        moduleOptions() {
+            return [
+                {
+                    id: 'decisions',
+                    label: t('teamhub', 'Decisions'),
+                    description: t('teamhub', 'Track and record team decisions'),
+                    icon: Gavel,
+                    available: this.decisionsModuleEnabled,
+                },
+                {
+                    id: 'presence',
+                    label: t('teamhub', 'Presence'),
+                    description: t('teamhub', 'Track team member availability'),
+                    icon: AccountClock,
+                    available: this.presenceModuleEnabled,
+                },
+                {
+                    id: 'timeline',
+                    label: t('teamhub', 'Timeline'),
+                    description: t('teamhub', 'Visualize team activity over time'),
+                    icon: TimelineClockOutline,
+                    available: true,
+                },
+                {
+                    id: 'pages',
+                    label: t('teamhub', 'Pages'),
+                    description: t('teamhub', 'Team documentation and knowledge base'),
+                    icon: FileDocumentOutline,
+                    available: this.intravoxAvailable,
+                },
+            ]
+        },
+        templateProfile() {
+            const profiles = {
+                project: {
+                    apps: { talk: null, files: 'create', calendar: 'create', deck: 'create' },
+                    config: { open: false, invite: true, request: false, visible: false, protected: false },
+                    modules: { decisions: true, presence: false, timeline: true, pages: true },
+                    subtitle: t('teamhub', 'Set up a project team in a few steps'),
+                    placeholder: t('teamhub', 'e.g. Website Redesign'),
+                },
+                collaboration: {
+                    apps: { talk: 'create', files: 'create', calendar: null, deck: null },
+                    config: { open: false, invite: true, request: false, visible: true, protected: false },
+                    modules: { decisions: true, presence: false, timeline: false, pages: true },
+                    subtitle: t('teamhub', 'Set up a collaboration space in a few steps'),
+                    placeholder: t('teamhub', 'e.g. Design Guild'),
+                },
+                department: {
+                    apps: { talk: 'create', files: 'create', calendar: 'create', deck: null },
+                    config: { open: false, invite: false, request: false, visible: true, protected: false },
+                    modules: { decisions: true, presence: true, timeline: false, pages: true },
+                    subtitle: t('teamhub', 'Set up a department team in a few steps'),
+                    placeholder: t('teamhub', 'e.g. Human Resources'),
+                },
+            }
+            return profiles[this.form.teamType] || profiles.collaboration
+        },
+        namePlaceholder() {
+            return this.templateProfile.placeholder
         },
         // Pre-grouped views of configOptions so the template's two v-for loops
         // don't re-allocate a filtered array on every render (perf pass V6).
@@ -344,12 +450,42 @@ export default {
             return v
         },
     },
+    watch: {
+        'form.teamType': {
+            handler() {
+                this.applyTemplateDefaults()
+            },
+            immediate: true,
+        },
+    },
     async mounted() {
         await this.checkIntravox()
+        this.applyTemplateDefaults()
         await this.loadWizardDescription()
     },
     methods: {
         t,
+
+        applyTemplateDefaults() {
+            const profile = this.templateProfile
+            const availableIds = new Set(this.appOptions.map(a => a.id))
+            for (const [appId, mode] of Object.entries(profile.apps)) {
+                if (this.form.apps[appId]) {
+                    this.form.apps[appId].mode = availableIds.has(appId) ? mode : null
+                    if (this.form.apps[appId].mode === null) {
+                        this.form.apps[appId].resourceId = null
+                        this.form.apps[appId].name = ''
+                    }
+                }
+            }
+            for (const [key, val] of Object.entries(profile.config)) {
+                this.form.config[key] = val
+            }
+            for (const [modId, val] of Object.entries(profile.modules)) {
+                const mod = this.moduleOptions.find(m => m.id === modId)
+                this.form.modules[modId] = mod && mod.available ? val : false
+            }
+        },
 
         nextStep() {
             this.nameError = ''
@@ -434,7 +570,9 @@ export default {
             if (this.form.members.length > 0) tasks.push({ label: t('teamhub', 'Inviting members'), status: 'waiting' })
             if (appsToCreate.length > 0) tasks.push({ label: t('teamhub', 'Creating new app resources'), status: 'waiting' })
             if (appsToConnect.length > 0) tasks.push({ label: t('teamhub', 'Connecting existing app resources'), status: 'waiting' })
-            if (this.intravoxAvailable) tasks.push({ label: t('teamhub', 'Creating documentation page'), status: 'waiting' })
+            if (this.intravoxAvailable && this.form.modules.pages) tasks.push({ label: t('teamhub', 'Creating documentation page'), status: 'waiting' })
+            const hasModuleConfig = this.form.modules.presence || this.form.modules.decisions || !this.form.modules.timeline
+            if (hasModuleConfig) tasks.push({ label: t('teamhub', 'Configuring team modules'), status: 'waiting' })
 
             // Build the full app-state payload for ALL known apps so the backend can
             // persist enabled/disabled in teamhub_team_apps immediately after team creation.
@@ -446,9 +584,8 @@ export default {
                 app_id: wizardToAppId[k] || k,
                 enabled: v.mode !== null,
             }))
-            // Intravox is always enabled if installed — page is created unconditionally in step 6.
             if (this.intravoxAvailable) {
-                appStates.push({ app_id: 'intravox', enabled: true })
+                appStates.push({ app_id: 'intravox', enabled: this.form.modules.pages })
             }
 
             this.progressTasks = tasks
@@ -557,11 +694,20 @@ export default {
                     this.setTask(i++, connectErrors > 0 ? 'error' : 'done')
                 }
 
-                // 6. IntraVox page (only if installed)
-                if (this.intravoxAvailable) {
+                // 6. IntraVox page (only if installed and pages module enabled)
+                if (this.intravoxAvailable && this.form.modules.pages) {
                     this.setTask(i, 'running')
                     try {
                         await this.createIntravoxPage(team)
+                        this.setTask(i++, 'done')
+                    } catch { this.setTask(i++, 'error') }
+                }
+
+                // 7. Configure team modules (presence, decisions, timeline)
+                if (hasModuleConfig) {
+                    this.setTask(i, 'running')
+                    try {
+                        await this.saveModuleConfig(team.id)
                         this.setTask(i++, 'done')
                     } catch { this.setTask(i++, 'error') }
                 }
@@ -584,14 +730,15 @@ export default {
 
         async checkIntravox() {
             try {
-                // Server-side check — reliable, uses IAppManager::isInstalled()
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/apps/check'))
-                this.intravoxAvailable = !!data.intravox
-                this.talkAvailable     = !!data.talk
-                this.calendarAvailable = !!data.calendar
-                this.deckAvailable     = !!data.deck
+                this.intravoxAvailable        = !!data.intravox
+                this.talkAvailable            = !!data.talk
+                this.calendarAvailable        = !!data.calendar
+                this.deckAvailable            = !!data.deck
+                this.groupfoldersAvailable    = !!data.groupfolders
+                this.presenceModuleEnabled    = !!data.presenceModuleEnabled
+                this.decisionsModuleEnabled   = !!data.decisionsModuleEnabled
             } catch (e) {
-                // Fallback: assume nothing — user can still create team without integrations
                 this.intravoxAvailable = false
             }
         },
@@ -603,6 +750,35 @@ export default {
             } catch {
                 this.wizardDescription = ''
             }
+        },
+
+        async saveModuleConfig(teamId) {
+            const calls = []
+            if (this.form.modules.presence && this.presenceModuleEnabled) {
+                calls.push(
+                    axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/presence/config`),
+                        { presence_enabled: 1 }
+                    )
+                )
+            }
+            if (this.form.modules.decisions && this.decisionsModuleEnabled) {
+                calls.push(
+                    axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/decisions/config`),
+                        { decisions_enabled: 1 }
+                    )
+                )
+            }
+            if (!this.form.modules.timeline) {
+                calls.push(
+                    axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/timeline/config`),
+                        { timeline_enabled: 0 }
+                    )
+                )
+            }
+            await Promise.all(calls)
         },
 
         async createIntravoxPage(team) {
@@ -739,9 +915,18 @@ export default {
     transition: border-color 0.15s, background 0.15s;
 }
 
+/* Accent colors per template type */
+.ctv__type--project .ctv__type-icon { color: var(--color-warning); }
+.ctv__type--collaboration .ctv__type-icon { color: var(--color-primary-element); }
+.ctv__type--department .ctv__type-icon { color: var(--color-success); }
+
 .ctv__type:hover { border-color: var(--color-primary-element); background: var(--color-background-hover); }
-.ctv__type--selected { border-color: var(--color-primary-element); background: var(--color-primary-element-light); }
-.ctv__type-icon { color: var(--color-primary-element); }
+.ctv__type--project:hover,
+.ctv__type--project.ctv__type--selected { border-color: var(--color-warning); background: var(--color-warning-hover, rgba(232, 131, 16, 0.08)); }
+.ctv__type--collaboration:hover,
+.ctv__type--collaboration.ctv__type--selected { border-color: var(--color-primary-element); background: var(--color-primary-element-light); }
+.ctv__type--department:hover,
+.ctv__type--department.ctv__type--selected { border-color: var(--color-success); background: var(--color-success-hover, rgba(46, 181, 43, 0.08)); }
 .ctv__type-name { font-weight: 600; font-size: 14px; }
 .ctv__type-desc { font-size: 12px; color: var(--color-text-maxcontrast); line-height: 1.4; }
 
@@ -850,14 +1035,19 @@ export default {
 .ctv__app-name { font-size: 14px; font-weight: 600; }
 .ctv__app-desc { font-size: 12px; color: var(--color-text-maxcontrast); }
 
-/* Tri-control variant: column layout so the create/connect modes can sit
-   below the header row. The header row keeps its original flex layout. */
-.ctv__app--tri {
+/* Compact variant: header row with inline toggle, picker below only when needed */
+.ctv__app--compact {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: 0;
     cursor: default;
+}
+
+.ctv__app-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .ctv__app-header {
@@ -865,33 +1055,46 @@ export default {
     align-items: center;
     gap: 14px;
     cursor: pointer;
+    flex: 1;
+    min-width: 0;
 }
 
-.ctv__app-modes {
+/* Segmented New/Existing toggle */
+.ctv__app-toggle {
     display: flex;
-    flex-direction: column;
-    margin-left: 32px; /* indent under the checkbox */
-    padding-top: 4px;
-    border-top: 1px solid var(--color-border);
-    padding-top: 10px;
+    flex-shrink: 0;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius-pill);
+    overflow: hidden;
 }
 
-.ctv__app-mode {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
+.ctv__toggle-btn {
+    background: transparent;
+    border: none;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
+    color: var(--color-text-maxcontrast);
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
 }
 
-.ctv__app-mode input[type="radio"] {
-    accent-color: var(--color-primary-element);
-    cursor: pointer;
+.ctv__toggle-btn:hover { background: var(--color-background-hover); }
+
+.ctv__toggle-btn--active {
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+
+.ctv__toggle-btn--active:hover {
+    background: var(--color-primary-element-hover);
 }
 
 .ctv__app-picker {
-    margin-left: 24px;
-    margin-top: 2px;
+    margin-left: 56px;
+    margin-top: 8px;
+    margin-bottom: 4px;
     max-width: 360px;
 }
 
@@ -974,4 +1177,62 @@ export default {
 
 .ctv__setting-name { font-size: 14px; font-weight: 500; line-height: 1.3; display: block; }
 .ctv__setting-desc { font-size: 12px; color: var(--color-text-maxcontrast); line-height: 1.4; display: block; }
+
+/* Files — group folders hint */
+.ctv__app-hint {
+    font-size: 11px;
+    color: var(--color-text-maxcontrast);
+    font-style: italic;
+    display: block;
+    margin-top: 2px;
+}
+
+/* Team modules */
+.ctv__modules { display: flex; flex-direction: column; gap: 8px; }
+
+.ctv__module {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.ctv__module:hover { background: var(--color-background-hover); }
+.ctv__module:has(.ctv__module-check:checked) {
+    border-color: var(--color-primary-element);
+    background: var(--color-primary-element-light);
+}
+
+.ctv__module--disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ctv__module--disabled:hover { background: transparent; }
+
+.ctv__module-check {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    accent-color: var(--color-primary-element);
+    flex-shrink: 0;
+    cursor: inherit;
+}
+
+.ctv__module-icon { color: var(--color-primary-element); flex-shrink: 0; margin-top: 1px; }
+.ctv__module--disabled .ctv__module-icon { color: var(--color-text-maxcontrast); }
+.ctv__module-text { display: flex; flex-direction: column; gap: 2px; }
+.ctv__module-name { font-size: 14px; font-weight: 600; }
+.ctv__module-desc { font-size: 12px; color: var(--color-text-maxcontrast); }
+
+.ctv__module-unavailable {
+    font-size: 11px;
+    color: var(--color-warning-text);
+    font-style: italic;
+    margin-top: 2px;
+}
 </style>
