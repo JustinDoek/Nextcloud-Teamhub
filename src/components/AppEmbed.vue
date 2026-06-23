@@ -20,40 +20,46 @@
                     </option>
                 </select>
 
-                <!-- Custom action buttons injected by the parent (e.g. calendar add/delete) -->
+                <!-- Custom action buttons injected by the parent (e.g. calendar
+                     add/delete). Stacked icon-above-label layout — see DESIGN.md
+                     §2.23: small icon-only buttons in this bar were reported as
+                     indistinguishable, so every button now shows its label
+                     directly below the icon. -->
                 <template v-for="action in embedActions" :key="action.id">
                     <!-- Date label between prev/next — plain text, not a button -->
                     <span v-if="action.isLabel" class="app-embed__bar-date-label">
                         {{ action.label }}
                     </span>
-                    <NcButton
+                    <button
                         v-else
-                        variant="tertiary"
+                        type="button"
+                        class="app-embed__bar-btn"
                         :aria-label="action.label"
                         :title="action.label"
                         @click="$emit('action', action.id)">
-                        <template #icon>
-                            <component :is="action.icon" :size="16" />
-                        </template>
-                        {{ action.icon ? '' : action.label }}
-                    </NcButton>
+                        <component :is="action.icon" :size="20" class="app-embed__bar-btn-icon" />
+                        <!-- shortLabel is a one-or-two-word verb shown under the icon
+                             (e.g. "Add"); label is the full descriptive name kept for
+                             tooltip + screen reader (e.g. "Add event"). Falls back to
+                             label when shortLabel isn't set. -->
+                        <span class="app-embed__bar-btn-label">{{ action.shortLabel || action.label }}</span>
+                    </button>
                 </template>
 
                 <!-- Toggle buttons: pressed/active state, e.g. timeline source filters -->
-                <NcButton
+                <button
                     v-for="tog in embedToggles"
                     :key="tog.id"
-                    variant="tertiary"
-                    :class="{ 'app-embed__bar-toggle--active': tog.active }"
+                    type="button"
+                    class="app-embed__bar-btn"
+                    :class="{ 'app-embed__bar-btn--active': tog.active }"
                     :aria-pressed="tog.active ? 'true' : 'false'"
                     :aria-label="tog.label"
                     :title="tog.label"
                     @click="$emit('toggle', tog.id)">
-                    <template #icon>
-                        <component :is="tog.icon" :size="16" />
-                    </template>
-                    {{ tog.label }}
-                </NcButton>
+                    <component :is="tog.icon" :size="20" class="app-embed__bar-btn-icon" />
+                    <span class="app-embed__bar-btn-label">{{ tog.shortLabel || tog.label }}</span>
+                </button>
 
                 <!--
                     Filter menu: a single dropdown button that opens a popover
@@ -87,25 +93,31 @@
                         </NcActionCheckbox>
                     </template>
                 </NcActions>
-                <NcButton
-                    variant="tertiary"
+                <button
+                    type="button"
+                    class="app-embed__bar-btn"
                     :aria-label="t('teamhub', 'Reload')"
                     :title="t('teamhub', 'Reload')"
                     :disabled="!iframeSrc"
                     @click="reload">
-                    <template #icon><Refresh :size="16" /></template>
-                </NcButton>
-                <NcButton
+                    <Refresh :size="20" class="app-embed__bar-btn-icon" />
+                    <span class="app-embed__bar-btn-label">{{ t('teamhub', 'Reload') }}</span>
+                </button>
+                <a
                     v-if="url"
-                    variant="tertiary"
-                    tag="a"
+                    class="app-embed__bar-btn"
                     :href="url"
                     target="_blank"
                     rel="noopener noreferrer"
-                    :aria-label="t('teamhub', 'Open in new tab')">
-                    <template #icon><OpenInNew :size="16" /></template>
-                    {{ t('teamhub', 'Open in new tab') }}
-                </NcButton>
+                    :title="t('teamhub', 'Open in new tab')">
+                    <OpenInNew :size="20" class="app-embed__bar-btn-icon" />
+                    <!-- Kept as the full phrase rather than abbreviated to a single
+                         verb: 'Open' alone collides with the existing decision-status
+                         "Open" translation in nl/de/fr/da (which is the adjective
+                         "Offen"/"Ouvert"/"Åben"). Disambiguating costs more than the
+                         label width buys. -->
+                    <span class="app-embed__bar-btn-label">{{ t('teamhub', 'Open in new tab') }}</span>
+                </a>
             </div>
         </div>
 
@@ -164,7 +176,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import { NcButton, NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption } from '@nextcloud/vue'
+import { NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption } from '@nextcloud/vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import Refresh from 'vue-material-design-icons/Refresh.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
@@ -377,7 +389,7 @@ html, body {
 
 export default {
     name: 'AppEmbed',
-    components: { NcButton, NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption, OpenInNew, Refresh, AlertCircleOutline },
+    components: { NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption, OpenInNew, Refresh, AlertCircleOutline },
 
     props: {
         url:   { type: String, required: true },
@@ -612,6 +624,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
+    /* Stacked icon+label buttons take more horizontal room — allow wrap to
+       a second row on narrow viewports rather than horizontally overflow. */
+    flex-wrap: wrap;
+    row-gap: 6px;
+    justify-content: flex-end;
 }
 
 .app-embed__bar-select {
@@ -641,19 +658,69 @@ export default {
     white-space: nowrap;
 }
 
-.app-embed__bar-toggle--active {
-    background-color: var(--color-primary-element-light) !important;
-    color: var(--color-primary-element) !important;
+/*
+ * Stacked icon-above-label bar buttons. Reported in 3.81.x as the next
+ * usability issue after the upcoming-events widget rework: the bar was
+ * full of similar-looking 16px icon-only buttons (prev/next, today,
+ * add event, delete events, reload, open in new tab) and users couldn't
+ * tell them apart at a glance. Each button now carries its own short
+ * label directly under its icon.
+ *
+ * Density trade-off: the bar grows ~14px taller. Acceptable — losing
+ * a sliver of viewport beats forcing the user to hover-test every icon.
+ */
+.app-embed__bar-btn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 56px;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    color: var(--color-main-text);
+    cursor: pointer;
+    text-decoration: none;
+    font-family: inherit;
+    line-height: 1.1;
+}
+.app-embed__bar-btn:hover {
+    background: var(--color-background-hover);
+}
+.app-embed__bar-btn:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+.app-embed__bar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.app-embed__bar-btn-icon {
+    color: var(--color-main-text);
+    flex-shrink: 0;
+}
+.app-embed__bar-btn-label {
+    font-size: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+    color: var(--color-text-maxcontrast);
 }
 
-/* NcButton wraps the label text in a span with its own font weight; the active
- * state inherits primary-element color which combined with NC's default button
- * weight reads visually as bold. Force regular weight on both the button and
- * its inner span so the active state matches inactive buttons' weight. */
-.app-embed__bar-toggle--active,
-.app-embed__bar-toggle--active :deep(span),
-.app-embed__bar-toggle--active :deep(.button-vue__text) {
-    font-weight: 400 !important;
+/* Active state for toggle buttons (e.g. Timeline source filters).
+ * Uses the full-saturation primary token per SKILLS.md design rules. */
+.app-embed__bar-btn--active {
+    background: var(--color-primary-element);
+    border-color: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+.app-embed__bar-btn--active .app-embed__bar-btn-icon,
+.app-embed__bar-btn--active .app-embed__bar-btn-label {
+    color: var(--color-primary-element-text);
+}
+.app-embed__bar-btn--active:hover {
+    background: var(--color-primary-element-hover, var(--color-primary-element));
 }
 
 .app-embed__label {

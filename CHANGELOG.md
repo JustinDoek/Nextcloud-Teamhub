@@ -3,6 +3,144 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.82.0] — 2026-06-23 — Add Meeting consolidation, AppEmbed labelled toolbar, design rules
+
+Session rollup of 3.81.2 through 3.81.10. See those entries for the per-change detail; this row marks the session boundary per SKILLS.md.
+
+### Headline changes
+
+- **Upcoming Events widget actions: 3 → 2** (Add event + Add Meeting). The Meeting Wizard and Team Meeting modal merged into a 2-step wizard.
+- **Add Meeting wizard** writes meeting notes plus calendar event in one go; optional `## Tasks` (overdue + unscheduled Deck cards) and `## Proposals` (open/finalized decisions) sections rendered into the notes file. Category multi-select to scope which proposals get included. Group-folder-backed teams supported. Manual date/start/end fallback when the Presence module is off. Talk agenda-request message localised to the meeting organiser's UI language.
+- **AppEmbed toolbar** — every button now shows a short label (Today/Add/Remove/Suggest/Reload/Open in new tab) under the icon. Fixed the "all icons look alike" complaint.
+- **Team-list unread badge** — fixed the literal "NaN" output from `NcCounterBubble` (prop-driven, not slot-driven in `@nextcloud/vue 8.x`).
+
+### Security & privacy
+
+- Redacted four `logger->debug` lines in `MeetingService.php` that were logging Talk-room tokens and share tokens (pre-existing; in-scope this session). Now log `tokenLen` only.
+- `MeetingController` adds bound-checks on all new free-text fields (title ≤200, location ≤200, description ≤4000, categories ≤500, attendees ≤500, proposalCategories ≤200) to limit payload abuse.
+- All new queries (deck cards, decisions for proposals) use `OCP\DB\QueryBuilder` only.
+- User-supplied text rendered into the notes Markdown goes through a new `mdEscape()` helper that escapes `[`, `]`, `(`, `)`, backslash and friends.
+- Group-folder team-folder resolution delegates to `ResourceService::getTeamResources()` which performs its own membership check — adds defence-in-depth on top of `MeetingService::enforceMinLevel`.
+
+### Design
+
+- **SKILLS.md** — new rule: state-coloured backgrounds use full saturation paired with the matching `-text` token. Soft variants (`-light`, `-hover`, `color-mix(... transparent)`) reserved for non-state surfaces.
+- **DESIGN.md §2.22** — two calendar widget actions, one shared wizard component, `MeetingService` delegates calendar writes to `ActivityService`, agenda lives in the notes file rather than the iCal record.
+- **DESIGN.md §2.23** — AppEmbed toolbar buttons are stacked icon + label (custom `<button>` instead of `NcButton`, bar wraps rather than scrolls).
+
+## [3.81.10] — 2026-06-23 — Shorter visible labels on calendar toolbar buttons
+
+### Changed
+
+- **Calendar toolbar visible labels shortened to a single verb.** "Add event" → "Add", "Delete events" → "Remove", "Suggest meeting times" → "Suggest". Tooltip + accessible name keep the full descriptive label so hover and screen readers still read "Add event" / "Delete events" / "Suggest meeting times". New `shortLabel` field on the action descriptor for this; falls back to the full label when not set (Previous / Next / Today were already short enough to skip).
+
+### Translations
+
+- New strings `Add` and `Suggest` added to en/nl/de/fr/da (`.json` + `.js`). `Remove` and `Today` reused from existing strings.
+- "Open in new tab" deliberately kept full-length: the existing `Open` translation in nl/de/fr/da is the **adjective** ("open status" — Offen/Ouvert/Åben), used elsewhere for decision status pills. Reusing it as a verb would cause a context collision. Single-word shortening costs more than the row width buys.
+
+## [3.81.9] — 2026-06-23 — Unread badge "NaN" fix
+
+### Fixed
+
+- **Team-list unread badge showed "NaN" instead of the count.** `NcCounterBubble` in `@nextcloud/vue 8.x` reads its value from the `count` prop, not from its default slot. We were passing the count via slot interpolation (`<NcCounterBubble>{{ team.unread }}</NcCounterBubble>`) — the prop stayed undefined, and `Intl.NumberFormat.format(undefined)` rendered the literal string "NaN". Switched to `:count="team.unread"`.
+
+## [3.81.8] — 2026-06-23 — AppEmbed toolbar: icon + label buttons
+
+### Changed
+
+- **AppEmbed toolbar buttons now show a small label under each icon.** Prev/Next/Today/Add event/Delete events/Suggest meeting times on the Calendar tab were reported as indistinguishable when icon-only at 16px. Buttons now stack a 20px icon over an 11px secondary-coloured label. Reload and Open-in-new-tab follow the same pattern. The bar wraps to a second row on narrow viewports rather than overflow. Toggle buttons (Timeline source filters) use the full-saturation primary background per the SKILLS.md state-colour rule when active.
+
+### Removed
+
+- `NcButton` use inside the AppEmbed toolbar — replaced by lightweight `<button>` / `<a>` elements styled directly. NcButton's horizontal icon+label layout fought against the stacked design.
+
+### Design
+
+- New §2.23 in DESIGN.md: *"AppEmbed toolbar buttons are stacked icon + label, not icon-only."* Records the trade-off (~14px taller bar) and the reasoning (icon-only was unreadable).
+
+## [3.81.7] — 2026-06-23 — Talk agenda-request message is translated
+
+### Fixed
+
+- **"Ask team for agenda items" Talk message was always English.** `MeetingService::postAgendaRequest` now resolves the meeting organizer's UI language via `IConfig::getUserValue($uid, 'core', 'lang')` and renders the message through `IFactory::get('teamhub', $language)->t(...)`. Falls back to the instance `default_language`, then English. A Talk channel is a single string surface (can't be per-recipient), so the organizer's own language is the natural choice — matches what they'd have typed themselves.
+
+### Translations
+
+- New translation unit `📅 Team meeting scheduled: **%1$s** on %2$s at %3$s.\nPlease add your agenda items to the meeting notes: %4$s` added to en/nl/de/fr/da (`.json` + `.js`). Numbered placeholders so translators can reorder the title/date/time/URL slots if their grammar requires it.
+
+## [3.81.6] — 2026-06-23 — Wizard uses full-saturation state colours
+
+### Changed
+
+- **Wizard state surfaces no longer use soft-tint backgrounds.** Active step pill, selected meeting-type pill, selected category chip, presence-off info hint, and approver-meeting prefill banner now use the regular `--color-X` background paired with `--color-X-text` — per the new SKILLS.md rule. Soft variants (`--color-X-light`, `--color-X-hover`, `color-mix(... transparent)`) wash out against the canvas and were obscuring what was actually selected.
+
+### Docs
+
+- **SKILLS.md** — added the *"State-coloured backgrounds use full saturation"* rule under Nextcloud design guidelines, with the do/don't list and the carve-out for neutral grouping panels.
+
+## [3.81.5] — 2026-06-23 — Manual date/time fallback when Presence is off
+
+### Added
+
+- **Manual schedule pickers** in the Add Meeting wizard when the Presence module is disabled (globally or for this team). Date, start time, and end time inputs replace the half-day suggestion block. A primary-coloured info hint reads "Enable the Presence module for date/time suggestions." pointing at the team setting.
+
+### Fixed
+
+- **Noisy "Cannot retrieve suggestions: Presence module is not enabled" toast** that fired every time the wizard opened on a Presence-disabled team. The wizard now short-circuits the suggestion fetch when `presenceModuleEnabled && presenceConfig.presence_enabled` is false.
+
+## [3.81.4] — 2026-06-23 — Add Meeting: group folder + category multiselect fixes
+
+### Fixed
+
+- **"Team files folder not found" on group-folder-backed teams.** `MeetingService::resolveTeamFolder` only checked `oc_share` for `share_type=7` shares, so teams whose Files resource is a Group Folder (not a circle share) couldn't create meeting notes. Now delegates to `ResourceService::getTeamResources()` and `IRootFolder::getById()` — the same canonical pattern as `DecisionService::writeProposalDocument` — which handles both shared-folder and Group Folder cases per DESIGN.md §2.19.
+- **Proposal category multiselect didn't appear.** `SuggestMeetingWizard.loadProposalCategories` parsed `data.items` but the `/decisions/categories` endpoint returns `{categories: [strings]}`. Switched to that shape with a fallback for the `{items: [{name}]}` shape so a future endpoint swap doesn't silently break the UI. Chips are deduped and sorted by locale.
+
+## [3.81.3] — 2026-06-23 — Proposal category multi-select in the wizard
+
+### Added
+
+- **Proposal category filter** in the Add Meeting wizard. When `Discuss proposals awaiting a decision` is on, a chip list of the team's decision categories appears below it. Default: every category ticked. Selecting a subset narrows the rendered `## Proposals` section to those categories only. Selecting all or none falls back to "no filter" (every awaiting proposal).
+
+### API
+
+- **`POST /api/v1/teams/{teamId}/meetings`** — new optional field `proposalCategories` (comma-separated string or array of category names, ≤200 items). Empty means no filter.
+
+## [3.81.2] — 2026-06-23 — Upcoming Events widget actions consolidated
+
+### Added
+
+- **`Add Meeting` action** — replaces both `Meeting wizard` and `Team meeting` in the Upcoming Events widget (desktop, tablet, mobile). The wizard always creates a meeting-notes file plus calendar event, with optional agenda sources.
+- **Agenda checkboxes in the wizard** — four new toggles render extra sections inside the meeting-notes file:
+  - `Ask team for agenda items` (posts a request in the team Talk room — gated on Talk being on)
+  - `Add overdue Deck tasks` — `## Tasks` section, format `[title](deck card url) — due {date}`
+  - `Add unscheduled Deck tasks` — same section, `no due date`
+  - `Discuss proposals awaiting a decision` — `## Proposals` section, format `[question](deep-link) — {category}`, status open/finalized
+- **Wizard `description` and `categories` in notes** — the wizard's description is now woven into the notes file as a preamble block, and `CATEGORIES` is set on the calendar event.
+
+### Changed
+
+- **Wizard compacted to two steps** — Step 1 "Who & When" (title, attendees, online/office, target date, half-day suggestions, timeslot picker — all inline). Step 2 "Setup" (description, room/location, category, Talk toggle, meeting-notes block with the four agenda toggles). Suggestions auto-fetch on attendee/date/type change; first timeslot auto-selected. Default selection in step 1: all team members ticked (was: none).
+- **Meeting-notes template** — adds `{tasksSection}` and `{proposalsSection}` placeholders between `## Agenda` and `## Notes`. Existing on-disk `template.md` files are not rewritten; the PHP render uses the constant.
+- **`MeetingService.createTeamMeeting`** — now delegates calendar-event creation to `ActivityService.createCalendarEvent`, picking up its room-booking (RoomVox + CRM), per-attendee invite, and ORGANIZER/ATTENDEE iTIP-correct shape. Removed the duplicate VEVENT writer.
+
+### Removed
+
+- **`TeamMeetingModal.vue`** — its functionality is fully merged into the wizard. The component file and the `showTeamMeeting`/`team-meeting` state and emit chain are gone.
+
+### API
+
+- **`POST /api/v1/teams/{teamId}/meetings`** — accepts additional optional fields:
+  - `description`, `categories` — applied to both calendar event and notes
+  - `roomEmail`, `roomName`, `roomId` — RoomVox / CRM room booking
+  - `attendees` — comma-separated user ids (or array); previously the service auto-invited all team members
+  - `includeOverdueTasks`, `includeUnscheduledTasks`, `includeProposals` — agenda toggles
+  - Response now also includes `eventUid`.
+
+### Security & privacy
+
+- New PHP queries (deck cards, decisions for proposals) use `OCP\DB\QueryBuilder` only, all parameter-bound. Membership/min-level checks reuse `MemberService` via `MeetingService::enforceMinLevel` (unchanged). User-supplied text rendered into Markdown links is escaped through a new `mdEscape()` helper. Free-text payload fields are bound-checked at the controller (title ≤200, location ≤200, description ≤4000, categories ≤500, attendees ≤500).
+
 ## [3.80.0] — 2026-06-20 — Tab bar overflow, decision search, proposal filenames, PostgreSQL fix
 
 ### Added

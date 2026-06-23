@@ -274,7 +274,7 @@ export default {
 
     emits: [
         'manage-team', 'copy-link', 'invite', 'leave-team',
-        'schedule-meeting', 'add-event', 'team-meeting',
+        'schedule-meeting', 'add-event', 'add-meeting',
         'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded',
         'set-view',
@@ -493,16 +493,10 @@ export default {
                             handler: () => this.$emit('add-event'),
                         },
                         {
-                            key: 'schedule-meeting',
-                            label: t('teamhub', 'Schedule meeting'),
-                            icon: 'VideoIcon',
-                            handler: () => this.$emit('schedule-meeting'),
-                        },
-                        {
-                            key: 'team-meeting',
-                            label: t('teamhub', 'Team meeting'),
+                            key: 'add-meeting',
+                            label: t('teamhub', 'Add Meeting'),
                             icon: 'AccountGroup',
-                            handler: () => this.$emit('team-meeting'),
+                            handler: () => this.$emit('add-meeting'),
                         },
                     ]
 
@@ -798,9 +792,9 @@ export default {
     background: var(--color-background-dark);
     color: var(--color-main-text);
 }
-.teamhub-mobile-team-label--info    { background: color-mix(in srgb, var(--color-primary-element) 14%, transparent); color: var(--color-primary-element); }
-.teamhub-mobile-team-label--warn    { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning-text); }
-.teamhub-mobile-team-label--success { background: color-mix(in srgb, var(--color-success) 14%, transparent); color: var(--color-success-text); }
+.teamhub-mobile-team-label--info    { background: var(--color-primary-element); color: var(--color-primary-element-text); }
+.teamhub-mobile-team-label--warn    { background: var(--color-warning); color: var(--color-warning-text); }
+.teamhub-mobile-team-label--success { background: var(--color-success); color: var(--color-success-text); }
 
 .teamhub-mobile-teaminfo__owner {
     display: flex;
@@ -989,8 +983,8 @@ export default {
 }
 
 .teamhub-mobile-icon-bar__item--active {
-    color: var(--color-primary-element);
-    background: color-mix(in srgb, var(--color-primary-element) 8%, transparent);
+    color: var(--color-primary-element-text);
+    background: var(--color-primary-element);
 }
 
 .teamhub-mobile-icon-bar__item:focus-visible {

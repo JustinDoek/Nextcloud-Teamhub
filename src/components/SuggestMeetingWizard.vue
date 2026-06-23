@@ -1,179 +1,272 @@
 <template>
     <NcModal size="normal" @close="$emit('close')">
         <div class="suggest-wizard">
-            <h2 class="suggest-wizard__heading">{{ t('teamhub', 'Meeting wizard') }}</h2>
+            <h2 class="suggest-wizard__heading">
+                <AccountGroupIcon v-if="!lockAttendees" :size="20" aria-hidden="true" />
+                <CalendarClock v-else :size="20" aria-hidden="true" />
+                {{ headingLabel }}
+            </h2>
 
-            <!-- Step 1: attendees -->
+            <!-- Step indicator — two compact pills -->
+            <ol class="suggest-wizard__stepbar" aria-label="meeting wizard progress">
+                <li :class="['suggest-wizard__stepbar-item', { 'suggest-wizard__stepbar-item--active': step === 1 }]">
+                    {{ t('teamhub', '1. Who & When') }}
+                </li>
+                <li :class="['suggest-wizard__stepbar-item', { 'suggest-wizard__stepbar-item--active': step === 2 }]">
+                    {{ t('teamhub', '2. Setup') }}
+                </li>
+            </ol>
+
+            <!-- ────────────────────────────────────────────────────────────────
+                 STEP 1 — Who & When
+                 Combines the legacy steps 1 (attendees), 2 (meeting type),
+                 3 (target date), and 4 (suggestions) into a single screen.
+                 Suggestions auto-load when date or meeting-type changes.
+            ──────────────────────────────────────────────────────────────── -->
             <div v-if="step === 1" class="suggest-wizard__step">
-                <p class="suggest-wizard__intro">
-                    <template v-if="lockAttendees">
-                        {{ t('teamhub', 'The attendees for this meeting are determined by the approver list and cannot be changed here.') }}
-                    </template>
-                    <template v-else>
-                        {{ t('teamhub', 'Choose who should attend. Use “Select all” for the whole team, or tick individual members.') }}
-                    </template>
-                </p>
-                <!-- Prefill banner — set by callers that pre-check attendees
-                     (e.g. the approver-meeting flow on a proposal). -->
-                <div v-if="prefillBanner" class="suggest-wizard__prefill-banner" role="status">
-                    {{ prefillBanner }}
-                </div>
-                <!-- Toolbar hidden when the attendee list is locked. -->
-                <div v-if="!lockAttendees" class="suggest-wizard__toolbar">
-                    <NcButton type="secondary" @click="toggleSelectAll">
-                        {{ allSelected ? t('teamhub', 'Clear all') : t('teamhub', 'Select all') }}
-                    </NcButton>
-                    <span class="suggest-wizard__count">
-                        {{ n('teamhub', '%n member selected', '%n members selected', selectedCount, { n: selectedCount }) }}
-                    </span>
-                </div>
-                <NcLoadingIcon v-if="loadingMembers" :size="32" />
-                <ul v-else class="suggest-wizard__members">
-                    <!-- When locked, only the selected (= prefilled) members are listed.
-                         Each row is read-only — checkbox disabled so the user can see
-                         who will be invited but cannot change the list. -->
-                    <li
-                        v-for="m in displayedMembers"
-                        :key="m.userId"
-                        class="suggest-wizard__member">
-                        <NcCheckboxRadioSwitch
-                            :model-value="!!checked[m.userId]"
-                            :disabled="lockAttendees"
-                            @update:model-value="val => setChecked(m.userId, val)">
-                            {{ m.displayName || m.userId }}
-                        </NcCheckboxRadioSwitch>
-                    </li>
-                </ul>
-            </div>
 
-            <!-- Step 2: meeting type -->
-            <div v-else-if="step === 2" class="suggest-wizard__step">
-                <p class="suggest-wizard__intro">{{ t('teamhub', 'What kind of meeting is this?') }}</p>
-                <NcCheckboxRadioSwitch
-                    type="radio"
-                    value="online"
-                    :model-value="meetingType"
-                    name="meeting-type"
-                    @update:model-value="v => meetingType = v">
-                    <!-- TRANSLATORS: meeting type — meeting held over video conferencing rather than in a physical room -->
-                    {{ t('teamhub', 'Online') }}
-                </NcCheckboxRadioSwitch>
-                <NcCheckboxRadioSwitch
-                    type="radio"
-                    value="office"
-                    :model-value="meetingType"
-                    name="meeting-type"
-                    @update:model-value="v => meetingType = v">
-                    <!-- TRANSLATORS: meeting type — meeting held in a physical office location -->
-                    {{ t('teamhub', 'Office') }}
-                </NcCheckboxRadioSwitch>
-            </div>
-
-            <!-- Step 3: pick a date -->
-            <div v-else-if="step === 3" class="suggest-wizard__step">
-                <p class="suggest-wizard__intro">
-                    {{ t('teamhub', 'Pick a target date. We’ll suggest the best half-days within three working days of it.') }}
-                </p>
-                <label class="suggest-wizard__label" for="suggest-date">{{ t('teamhub', 'Target date') }}</label>
-                <input
-                    id="suggest-date"
-                    v-model="pickedDate"
-                    type="date"
-                    :min="todayDate"
-                    class="suggest-wizard__input">
-            </div>
-
-            <!-- Step 4: suggestions -->
-            <div v-else-if="step === 4" class="suggest-wizard__step" aria-live="polite">
-                <NcLoadingIcon v-if="loadingSuggestions" :size="32" />
-                <template v-else>
-                    <p v-if="suggestions.length === 0" class="suggest-wizard__empty">
-                        {{ t('teamhub', 'No suitable times found near that date. Try another date or a different meeting type.') }}
-                    </p>
-                    <ul v-else class="suggest-wizard__suggestions">
-                        <li v-for="(s, i) in suggestions" :key="i">
-                            <button
-                                type="button"
-                                class="suggest-wizard__suggestion"
-                                :class="{ 'suggest-wizard__suggestion--active': chosenIndex === i }"
-                                @click="chooseSuggestion(i)">
-                                <span class="suggest-wizard__suggestion-when">{{ formatSuggestion(s) }}</span>
-                                <span class="suggest-wizard__suggestion-why">{{ describeSuggestion(s) }}</span>
-                            </button>
-                        </li>
-                    </ul>
-                </template>
-            </div>
-
-            <!-- Step 5: details + create -->
-            <div v-else-if="step === 5" class="suggest-wizard__step">
-                <!-- Fine-grained timeslot suggestions for the half-day the
-                     user picked in step 4. Loads asynchronously when step 5
-                     is entered; user may pick one to pre-fill the time
-                     fields, or ignore and set times manually. -->
-                <div class="suggest-wizard__timeslots" aria-live="polite">
-                    <div class="suggest-wizard__timeslots-header">
-                        <span class="suggest-wizard__label">{{ t('teamhub', 'Suggested times') }}</span>
-                        <label class="suggest-wizard__duration">
-                            {{ t('teamhub', 'Duration') }}
-                            <select
-                                v-model.number="durationMinutes"
-                                class="suggest-wizard__input"
-                                @change="fetchTimeslots">
-                                <option :value="30">{{ t('teamhub', '30 min') }}</option>
-                                <option :value="45">{{ t('teamhub', '45 min') }}</option>
-                                <option :value="60">{{ t('teamhub', '1 hour') }}</option>
-                                <option :value="90">{{ t('teamhub', '1.5 hours') }}</option>
-                                <option :value="120">{{ t('teamhub', '2 hours') }}</option>
-                            </select>
-                        </label>
-                    </div>
-                    <NcLoadingIcon v-if="loadingTimeslots" :size="24" />
-                    <template v-else>
-                        <p v-if="timeslots.length === 0" class="suggest-wizard__empty">
-                            {{ t('teamhub', 'No conflict-free windows found in that half-day. Go back and pick a different half-day.') }}
-                        </p>
-                        <ul v-else class="suggest-wizard__suggestions">
-                            <li v-for="(ts, i) in timeslots" :key="`ts-${i}`">
-                                <button
-                                    type="button"
-                                    class="suggest-wizard__suggestion"
-                                    :class="{ 'suggest-wizard__suggestion--active': chosenTimeslotIndex === i }"
-                                    @click="chooseTimeslot(i)">
-                                    <span class="suggest-wizard__suggestion-when">{{ ts.start }}–{{ ts.end }}</span>
-                                    <span class="suggest-wizard__suggestion-why">{{ describeTimeslot(ts) }}</span>
-                                </button>
-                            </li>
-                        </ul>
-                    </template>
-                </div>
-
-                <!-- Step 5 fields all use the same label-on-top pattern
-                     so the description block doesn't visually stand out
-                     against the others (the NcTextArea component renders
-                     with a different label style than NcTextField, which
-                     was the source of the previous inconsistency). -->
+                <!-- Title — moved up so it carries through the whole flow -->
                 <div class="suggest-wizard__field">
-                    <label class="suggest-wizard__label" for="meeting-title">{{ t('teamhub', 'Title') }}</label>
+                    <label class="suggest-wizard__label" for="meeting-title">
+                        {{ t('teamhub', 'Title') }}
+                    </label>
                     <input
                         id="meeting-title"
                         v-model="title"
                         type="text"
                         class="suggest-wizard__input"
-                        :class="{ 'suggest-wizard__input--error': !!titleError }">
+                        :class="{ 'suggest-wizard__input--error': !!titleError }"
+                        :placeholder="t('teamhub', 'e.g. Weekly sync')" />
                     <p v-if="titleError" class="suggest-wizard__error">{{ titleError }}</p>
                 </div>
 
-                <!-- Room picker swap: when RoomVox is enabled and has rooms,
-                     pick from the room list (which actually books the room
-                     by adding it as a CalDAV ATTENDEE on the event). When
-                     no rooms are discoverable, fall back to the free-text
-                     location input. -->
+                <!-- Two-column row: attendees on the left, schedule controls on the right -->
+                <div class="suggest-wizard__two-col">
+                    <!-- Left: attendees -->
+                    <section class="suggest-wizard__col" :aria-label="t('teamhub', 'Attendees')">
+                        <div v-if="prefillBanner" class="suggest-wizard__prefill-banner" role="status">
+                            {{ prefillBanner }}
+                        </div>
+                        <div class="suggest-wizard__col-header">
+                            <span class="suggest-wizard__label">{{ t('teamhub', 'Attendees') }}</span>
+                            <button
+                                v-if="!lockAttendees && members.length > 0"
+                                type="button"
+                                class="suggest-wizard__toolbtn"
+                                @click="toggleSelectAll">
+                                {{ allSelected ? t('teamhub', 'Clear all') : t('teamhub', 'Select all') }}
+                            </button>
+                        </div>
+                        <p v-if="!lockAttendees" class="suggest-wizard__hint suggest-wizard__count">
+                            {{ n('teamhub', '%n member selected', '%n members selected', selectedCount, { n: selectedCount }) }}
+                        </p>
+                        <NcLoadingIcon v-if="loadingMembers" :size="24" />
+                        <ul v-else class="suggest-wizard__members">
+                            <li
+                                v-for="m in displayedMembers"
+                                :key="m.userId"
+                                class="suggest-wizard__member">
+                                <NcCheckboxRadioSwitch
+                                    :model-value="!!checked[m.userId]"
+                                    :disabled="lockAttendees"
+                                    @update:model-value="val => setChecked(m.userId, val)">
+                                    {{ m.displayName || m.userId }}
+                                </NcCheckboxRadioSwitch>
+                            </li>
+                        </ul>
+                    </section>
+
+                    <!-- Right: schedule (type + date + suggestions) -->
+                    <section class="suggest-wizard__col" :aria-label="t('teamhub', 'Schedule')">
+                        <span class="suggest-wizard__label">{{ t('teamhub', 'Meeting type') }}</span>
+                        <div class="suggest-wizard__pills" role="radiogroup" :aria-label="t('teamhub', 'Meeting type')">
+                            <button
+                                v-for="opt in [
+                                    { v: 'online', label: t('teamhub', 'Online') },
+                                    { v: 'office', label: t('teamhub', 'Office') },
+                                ]"
+                                :key="opt.v"
+                                type="button"
+                                class="suggest-wizard__pill"
+                                :class="{ 'suggest-wizard__pill--selected': meetingType === opt.v }"
+                                :aria-pressed="meetingType === opt.v ? 'true' : 'false'"
+                                @click="onMeetingTypeChange(opt.v)">
+                                {{ opt.label }}
+                            </button>
+                        </div>
+
+                        <!-- Presence-driven suggestion flow (default) -->
+                        <template v-if="presenceAvailable">
+                            <label class="suggest-wizard__label" for="suggest-date">
+                                {{ t('teamhub', 'Target date') }}
+                            </label>
+                            <input
+                                id="suggest-date"
+                                v-model="pickedDate"
+                                type="date"
+                                :min="todayDate"
+                                class="suggest-wizard__input"
+                                @change="onTargetDateChange" />
+                            <p class="suggest-wizard__hint">
+                                {{ t('teamhub', 'We’ll suggest the best half-days within three working days of this date.') }}
+                            </p>
+                        </template>
+
+                        <!-- Manual schedule fallback — when the presence module
+                             is off (globally or for this team) we can't compute
+                             suggestions, so the user picks date/start/end by
+                             hand. eventDate / eventStart / eventEnd are the
+                             same fields the submit path reads from, so no
+                             extra plumbing is needed. -->
+                        <template v-else>
+                            <label class="suggest-wizard__label" for="manual-date">
+                                {{ t('teamhub', 'Date') }}
+                            </label>
+                            <input
+                                id="manual-date"
+                                v-model="eventDate"
+                                type="date"
+                                :min="todayDate"
+                                class="suggest-wizard__input" />
+                            <div class="suggest-wizard__time-row">
+                                <div class="suggest-wizard__time-col">
+                                    <label class="suggest-wizard__label" for="manual-start">
+                                        {{ t('teamhub', 'Start time') }}
+                                    </label>
+                                    <input
+                                        id="manual-start"
+                                        v-model="eventStart"
+                                        type="time"
+                                        class="suggest-wizard__input" />
+                                </div>
+                                <div class="suggest-wizard__time-col">
+                                    <label class="suggest-wizard__label" for="manual-end">
+                                        {{ t('teamhub', 'End time') }}
+                                    </label>
+                                    <input
+                                        id="manual-end"
+                                        v-model="eventEnd"
+                                        type="time"
+                                        class="suggest-wizard__input"
+                                        :class="{ 'suggest-wizard__input--error': eventEnd && eventStart && eventEnd <= eventStart }" />
+                                </div>
+                            </div>
+                            <p v-if="eventEnd && eventStart && eventEnd <= eventStart" class="suggest-wizard__error">
+                                {{ t('teamhub', 'End time must be after start time') }}
+                            </p>
+                            <p class="suggest-wizard__hint suggest-wizard__hint--info">
+                                {{ t('teamhub', 'Enable the Presence module for date/time suggestions.') }}
+                            </p>
+                        </template>
+
+                        <!-- Suggestions list — auto-loaded. Only relevant in
+                             the presence-driven flow. -->
+                        <div v-if="presenceAvailable && selectedCount > 0" class="suggest-wizard__suggest-block" aria-live="polite">
+                            <NcLoadingIcon v-if="loadingSuggestions" :size="20" />
+                            <template v-else>
+                                <p v-if="suggestions.length === 0" class="suggest-wizard__empty">
+                                    {{ t('teamhub', 'No suitable half-days near that date. Try another date or meeting type.') }}
+                                </p>
+                                <ul v-else class="suggest-wizard__suggestions">
+                                    <li v-for="(s, i) in suggestions" :key="`half-${i}`">
+                                        <button
+                                            type="button"
+                                            class="suggest-wizard__suggestion"
+                                            :class="{ 'suggest-wizard__suggestion--active': chosenIndex === i }"
+                                            @click="chooseSuggestion(i)">
+                                            <span class="suggest-wizard__suggestion-when">{{ formatSuggestion(s) }}</span>
+                                            <span class="suggest-wizard__suggestion-why">{{ describeSuggestion(s) }}</span>
+                                        </button>
+                                    </li>
+                                </ul>
+
+                                <!-- Inline timeslot picker, shown after a half-day is selected -->
+                                <div v-if="chosenIndex !== null" class="suggest-wizard__timeslots-inline" aria-live="polite">
+                                    <div class="suggest-wizard__timeslots-header">
+                                        <span class="suggest-wizard__label">{{ t('teamhub', 'Pick a time') }}</span>
+                                        <label class="suggest-wizard__duration">
+                                            {{ t('teamhub', 'Duration') }}
+                                            <select
+                                                v-model.number="durationMinutes"
+                                                class="suggest-wizard__input suggest-wizard__input--inline"
+                                                @change="fetchTimeslots">
+                                                <option :value="30">{{ t('teamhub', '30 min') }}</option>
+                                                <option :value="45">{{ t('teamhub', '45 min') }}</option>
+                                                <option :value="60">{{ t('teamhub', '1 hour') }}</option>
+                                                <option :value="90">{{ t('teamhub', '1.5 hours') }}</option>
+                                                <option :value="120">{{ t('teamhub', '2 hours') }}</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <NcLoadingIcon v-if="loadingTimeslots" :size="20" />
+                                    <template v-else>
+                                        <p v-if="timeslots.length === 0" class="suggest-wizard__empty">
+                                            {{ t('teamhub', 'No conflict-free windows in that half-day.') }}
+                                        </p>
+                                        <ul v-else class="suggest-wizard__suggestions">
+                                            <li v-for="(ts, i) in timeslots" :key="`ts-${i}`">
+                                                <button
+                                                    type="button"
+                                                    class="suggest-wizard__suggestion suggest-wizard__suggestion--compact"
+                                                    :class="{ 'suggest-wizard__suggestion--active': chosenTimeslotIndex === i }"
+                                                    @click="chooseTimeslot(i)">
+                                                    <span class="suggest-wizard__suggestion-when">{{ ts.start }}–{{ ts.end }}</span>
+                                                    <span class="suggest-wizard__suggestion-why">{{ describeTimeslot(ts) }}</span>
+                                                </button>
+                                            </li>
+                                        </ul>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                        <p v-else-if="presenceAvailable" class="suggest-wizard__hint">
+                            {{ t('teamhub', 'Pick at least one attendee to see suggested times.') }}
+                        </p>
+                    </section>
+                </div>
+            </div>
+
+            <!-- ────────────────────────────────────────────────────────────────
+                 STEP 2 — Setup
+                 Description, room, Talk, notes, agenda options. Submit.
+            ──────────────────────────────────────────────────────────────── -->
+            <div v-if="step === 2" class="suggest-wizard__step">
+
+                <!-- Summary banner: what we already have from step 1 -->
+                <div class="suggest-wizard__summary">
+                    <div class="suggest-wizard__summary-row">
+                        <strong>{{ title || t('teamhub', '(untitled)') }}</strong>
+                    </div>
+                    <div class="suggest-wizard__summary-row">
+                        <CalendarClock :size="14" aria-hidden="true" />
+                        {{ formatChosenWhen() }}
+                    </div>
+                    <div class="suggest-wizard__summary-row">
+                        <AccountGroupIcon :size="14" aria-hidden="true" />
+                        {{ n('teamhub', '%n attendee', '%n attendees', selectedCount, { n: selectedCount }) }}
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="suggest-wizard__field">
+                    <label class="suggest-wizard__label" for="meeting-description">
+                        {{ t('teamhub', 'Description (optional)') }}
+                    </label>
+                    <textarea
+                        id="meeting-description"
+                        v-model="description"
+                        rows="3"
+                        class="suggest-wizard__input suggest-wizard__textarea"></textarea>
+                </div>
+
+                <!-- Room picker — only when RoomVox / CRM rooms are available -->
                 <div v-if="loadingRooms" class="suggest-wizard__field">
                     <NcLoadingIcon :size="18" /> {{ t('teamhub', 'Looking up rooms…') }}
                 </div>
                 <div v-else-if="rooms.length > 0" class="suggest-wizard__field">
-                    <label class="suggest-wizard__label" for="meeting-room">{{ t('teamhub', 'Meeting room') }}</label>
+                    <label class="suggest-wizard__label" for="meeting-room">
+                        {{ t('teamhub', 'Meeting room') }}
+                    </label>
                     <select
                         id="meeting-room"
                         v-model="selectedRoomId"
@@ -183,38 +276,34 @@
                             {{ r.displayName }}
                         </option>
                     </select>
-                    <p class="suggest-wizard__hint">
+                    <p v-if="selectedRoomId" class="suggest-wizard__hint">
                         {{ t('teamhub', 'Picking a room books it via RoomVox.') }}
                     </p>
                 </div>
                 <div v-else class="suggest-wizard__field">
-                    <label class="suggest-wizard__label" for="meeting-location">{{ t('teamhub', 'Location (optional)') }}</label>
+                    <label class="suggest-wizard__label" for="meeting-location">
+                        {{ t('teamhub', 'Location (optional)') }}
+                    </label>
                     <input
                         id="meeting-location"
                         v-model="location"
                         type="text"
-                        class="suggest-wizard__input">
+                        class="suggest-wizard__input" />
                 </div>
 
+                <!-- Category — kept for the legacy approver-meeting flow; optional otherwise -->
                 <div class="suggest-wizard__field">
-                    <label class="suggest-wizard__label" for="meeting-description">{{ t('teamhub', 'Description (optional)') }}</label>
-                    <textarea
-                        id="meeting-description"
-                        v-model="description"
-                        rows="3"
-                        class="suggest-wizard__input suggest-wizard__textarea"></textarea>
-                </div>
-
-                <div class="suggest-wizard__field">
-                    <label class="suggest-wizard__label" for="meeting-category">{{ t('teamhub', 'Category (optional)') }}</label>
+                    <label class="suggest-wizard__label" for="meeting-category">
+                        {{ t('teamhub', 'Category (optional)') }}
+                    </label>
                     <input
                         id="meeting-category"
                         v-model="categories"
                         type="text"
-                        class="suggest-wizard__input">
-                    <p class="suggest-wizard__hint">{{ t('teamhub', 'Comma-separated, e.g. Sprint planning, Retro') }}</p>
+                        class="suggest-wizard__input" />
                 </div>
 
+                <!-- Talk toggle -->
                 <div class="suggest-wizard__field">
                     <NcCheckboxRadioSwitch
                         type="checkbox"
@@ -227,6 +316,98 @@
                         {{ t('teamhub', 'Always included for online meetings.') }}
                     </p>
                 </div>
+
+                <!-- Meeting notes section — only in the new Add Meeting flow.
+                     The approver-meeting flow (lockAttendees=true) keeps the
+                     simpler /calendar/events path with no notes file. -->
+                <div v-if="!lockAttendees" class="suggest-wizard__notes-block">
+                    <div class="suggest-wizard__notes-header">
+                        <FileDocumentIcon :size="16" aria-hidden="true" />
+                        <h3 class="suggest-wizard__notes-title">{{ t('teamhub', 'Meeting notes') }}</h3>
+                    </div>
+                    <p class="suggest-wizard__hint suggest-wizard__hint--block">
+                        {{ t('teamhub', 'A notes file is created in the team Meetings folder and linked from the calendar event.') }}
+                    </p>
+
+                    <div class="suggest-wizard__field">
+                        <label class="suggest-wizard__label" for="meeting-filename">
+                            {{ t('teamhub', 'Notes filename') }}
+                        </label>
+                        <input
+                            id="meeting-filename"
+                            v-model="filename"
+                            type="text"
+                            class="suggest-wizard__input" />
+                        <p class="suggest-wizard__hint">
+                            {{ t('teamhub', 'Saved as {filename}.md', { filename: filename || '…' }) }}
+                        </p>
+                    </div>
+
+                    <!-- Agenda sources -->
+                    <div class="suggest-wizard__agenda-grid">
+                        <NcCheckboxRadioSwitch
+                            v-model="askAgenda"
+                            type="checkbox"
+                            :disabled="!effectiveIncludeTalk">
+                            {{ t('teamhub', 'Ask team for agenda items') }}
+                        </NcCheckboxRadioSwitch>
+                        <NcCheckboxRadioSwitch
+                            v-model="includeOverdueTasks"
+                            type="checkbox">
+                            {{ t('teamhub', 'Add overdue Deck tasks') }}
+                        </NcCheckboxRadioSwitch>
+                        <NcCheckboxRadioSwitch
+                            v-model="includeUnscheduledTasks"
+                            type="checkbox">
+                            {{ t('teamhub', 'Add unscheduled Deck tasks') }}
+                        </NcCheckboxRadioSwitch>
+                        <NcCheckboxRadioSwitch
+                            v-model="includeProposals"
+                            type="checkbox">
+                            {{ t('teamhub', 'Discuss proposals awaiting a decision') }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+
+                    <!-- Category multi-select for proposals. Only shown when
+                         the master toggle is on AND we successfully loaded a
+                         non-empty list of categories. Default selection =
+                         all categories ticked. Empty selection sends no
+                         filter — UI hint makes that explicit. -->
+                    <div v-if="includeProposals && proposalCategories.length > 0" class="suggest-wizard__cat-block">
+                        <div class="suggest-wizard__cat-header">
+                            <span class="suggest-wizard__label suggest-wizard__label--inline">
+                                {{ t('teamhub', 'From categories') }}
+                            </span>
+                            <button
+                                type="button"
+                                class="suggest-wizard__toolbtn"
+                                @click="toggleAllProposalCategories">
+                                {{ selectedProposalCategories.length === proposalCategories.length
+                                    ? t('teamhub', 'Clear all')
+                                    : t('teamhub', 'Select all') }}
+                            </button>
+                        </div>
+                        <div class="suggest-wizard__cat-chips" role="group" :aria-label="t('teamhub', 'Proposal categories')">
+                            <button
+                                v-for="cat in proposalCategories"
+                                :key="cat"
+                                type="button"
+                                class="suggest-wizard__chip"
+                                :class="{ 'suggest-wizard__chip--selected': selectedProposalCategories.includes(cat) }"
+                                :aria-pressed="selectedProposalCategories.includes(cat) ? 'true' : 'false'"
+                                @click="toggleProposalCategory(cat)">
+                                {{ cat }}
+                            </button>
+                        </div>
+                        <p class="suggest-wizard__hint">
+                            {{ proposalCategoryHint }}
+                        </p>
+                    </div>
+
+                    <p v-if="askAgenda && !effectiveIncludeTalk" class="suggest-wizard__hint suggest-wizard__hint--warn">
+                        {{ t('teamhub', 'Ask-for-agenda needs Talk — enable “Add Talk meeting” above.') }}
+                    </p>
+                </div>
             </div>
 
             <!-- Footer nav -->
@@ -236,7 +417,7 @@
                 </NcButton>
                 <span class="suggest-wizard__spacer" />
                 <NcButton
-                    v-if="step < 5"
+                    v-if="step < 2"
                     type="primary"
                     :disabled="!canAdvance || busy"
                     @click="next">
@@ -246,8 +427,11 @@
                     v-else
                     type="primary"
                     :disabled="busy"
-                    @click="createEvent">
-                    {{ t('teamhub', 'Create event') }}
+                    @click="submit">
+                    <template #icon>
+                        <NcLoadingIcon v-if="busy" :size="18" />
+                    </template>
+                    {{ busy ? t('teamhub', 'Creating…') : submitLabel }}
                 </NcButton>
             </div>
         </div>
@@ -255,33 +439,37 @@
 </template>
 
 <script>
+import { mapState } from 'vuex'
 import { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch } from '@nextcloud/vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import axios from '@nextcloud/axios'
+import AccountGroupIcon from 'vue-material-design-icons/AccountGroup.vue'
+import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
+import FileDocumentIcon from 'vue-material-design-icons/FileDocument.vue'
 
 export default {
     name: 'SuggestMeetingWizard',
-    components: { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch },
+    components: { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch,
+        AccountGroupIcon, CalendarClock, FileDocumentIcon },
     props: {
         teamId: { type: String, required: true },
         calendars: { type: Array, default: () => [] },
+        // Resources object — used to read the team Talk room token so the
+        // /meetings call can post the agenda-request message without a
+        // second lookup, and so the Talk toggle has accurate room info.
+        resources: { type: Object, default: () => ({}) },
         // Prefill props — used by the approver-meeting flow on a proposal.
-        // Pre-checks the listed userIds in step 1 (user can still adjust).
-        // Pre-fills title, description, categories in step 5.
         prefilledAttendees:   { type: Array,  default: () => [] },
         prefilledTitle:       { type: String, default: '' },
         prefilledDescription: { type: String, default: '' },
         prefilledCategory:    { type: String, default: '' },
-        // Banner shown above the attendee list when present, e.g.
-        // "Pre-filled with approvers for this category — you can adjust".
         prefillBanner:        { type: String, default: '' },
-        // When true, attendees are locked — checkboxes disabled, "Select all"
-        // hidden, only the prefilled list is shown. Used by the approver-meeting
-        // flow where the attendee set is the category's approver list and
-        // adding/removing people would change the semantics of the meeting.
+        // When true (approver-meeting flow): attendees locked, notes block
+        // hidden, submits to /calendar/events. When false (Add Meeting):
+        // notes always created, submits to /meetings.
         lockAttendees:        { type: Boolean, default: false },
     },
     data() {
@@ -298,7 +486,7 @@ export default {
             loadingSuggestions: false,
             suggestions: [],
             chosenIndex: null,
-            // Step 5 event fields — initialised from prefill props (empty by default).
+            // Step-2 event fields — initialised from prefill props (empty by default).
             title: this.prefilledTitle || '',
             eventDate: iso,
             eventStart: '10:00',
@@ -306,27 +494,52 @@ export default {
             location: '',
             description: this.prefilledDescription || '',
             categories: this.prefilledCategory || '',
-            // User's explicit Talk-meeting choice when it's settable (office meetings).
-            // For online meetings the effective value is forced to true via the
-            // computed `effectiveIncludeTalk` regardless of this field.
+            filename: '',
             includeTalkChoice: false,
             titleError: '',
             busy: false,
-            // Stage-two: fine-grained timeslot suggestions within the
-            // half-day picked at step 4. Loaded when entering step 5.
             durationMinutes: 60,
             loadingTimeslots: false,
             timeslots: [],
             chosenTimeslotIndex: null,
-            // Room picker (step 5). Loaded once when the wizard mounts;
-            // if RoomVox isn't installed the endpoint returns [] and the
-            // wizard transparently falls back to the free-text location.
             loadingRooms: false,
             rooms: [],
             selectedRoomId: '',
+            // New Add-Meeting features (not surfaced in approver-meeting flow):
+            askAgenda: false,
+            includeOverdueTasks: false,
+            includeUnscheduledTasks: false,
+            includeProposals: false,
+            // Proposal category filter — list of category names loaded from
+            // the decisions/categories endpoint; selectedProposalCategories
+            // is the user's pick (empty = no filter = all categories).
+            loadingProposalCategories: false,
+            proposalCategories: [],
+            selectedProposalCategories: [],
         }
     },
     computed: {
+        ...mapState(['presenceModuleEnabled', 'presenceConfig']),
+        /**
+         * Presence-driven suggestions only make sense when the module is
+         * enabled globally AND for this team. Otherwise we silently skip
+         * the suggestion API and fall back to a manual date/start/end
+         * picker, with a one-line hint pointing the user at the setting.
+         */
+        presenceAvailable() {
+            return !!this.presenceModuleEnabled
+                && !!(this.presenceConfig && this.presenceConfig.presence_enabled)
+        },
+        headingLabel() {
+            return this.lockAttendees
+                ? t('teamhub', 'Meeting wizard')
+                : t('teamhub', 'Add Meeting')
+        },
+        submitLabel() {
+            return this.lockAttendees
+                ? t('teamhub', 'Create event')
+                : t('teamhub', 'Create meeting')
+        },
         selectedCount() {
             return Object.values(this.checked).filter(Boolean).length
         },
@@ -336,12 +549,6 @@ export default {
         selectedIds() {
             return this.members.map(m => m.userId).filter(id => this.checked[id])
         },
-        /**
-         * Members to render in step 1's list. When the attendee list is
-         * locked, only the prefilled (= checked) members are shown so the
-         * user sees who is actually being invited — not the full team
-         * roster with most rows greyed out.
-         */
         displayedMembers() {
             if (this.lockAttendees) {
                 return this.members.filter(m => this.checked[m.userId])
@@ -349,25 +556,81 @@ export default {
             return this.members
         },
         canAdvance() {
-            if (this.step === 1) return this.selectedCount > 0
-            if (this.step === 3) return !!this.pickedDate
-            if (this.step === 4) return this.chosenIndex !== null
+            if (this.step === 1) {
+                if (!this.title.trim()) return false
+                // Approver-meeting and full Add Meeting both need at least
+                // one attendee on the invite list.
+                if (this.selectedCount === 0) return false
+                if (this.presenceAvailable) {
+                    // Suggestion-driven flow: user must have picked a
+                    // half-day AND a concrete timeslot inside it.
+                    return this.chosenIndex !== null
+                        && this.chosenTimeslotIndex !== null
+                }
+                // Manual schedule fallback: user typed date + valid times.
+                if (!this.eventDate) return false
+                if (!this.eventStart || !this.eventEnd) return false
+                return this.eventEnd > this.eventStart
+            }
             return true
         },
-        // For online meetings the Talk meeting checkbox is forced on and disabled —
-        // an online meeting without a Talk room is conceptually inconsistent.
-        // For office meetings the user's explicit choice is honoured.
         effectiveIncludeTalk() {
             return this.meetingType === 'online' ? true : !!this.includeTalkChoice
         },
+        /**
+         * Helper text below the proposal category chips. We surface three
+         * states explicitly so "no proposals will appear" doesn't surprise
+         * anyone after they've ticked the master toggle.
+         */
+        /**
+         * True when the user has narrowed the selection to a real subset.
+         * We only send the filter in that case — "all" and "none" both fall
+         * back to the no-filter default on the backend (every awaiting
+         * proposal). This keeps the payload small and the intent explicit.
+         */
+        shouldSendProposalCategoryFilter() {
+            const total  = this.proposalCategories.length
+            const picked = this.selectedProposalCategories.length
+            return picked > 0 && picked < total
+        },
+        proposalCategoryHint() {
+            const total = this.proposalCategories.length
+            const picked = this.selectedProposalCategories.length
+            if (picked === total) {
+                return t('teamhub', 'All categories — every awaiting proposal will be added.')
+            }
+            if (picked === 0) {
+                return t('teamhub', 'No categories picked — every awaiting proposal will be added.')
+            }
+            return n(
+                'teamhub',
+                'Only proposals in the %n selected category will be added.',
+                'Only proposals in the %n selected categories will be added.',
+                picked,
+                { n: picked }
+            )
+        },
+    },
+    watch: {
+        // Auto-derive filename from title + meeting date until the user
+        // touches it directly (any manual edit detaches it from the title).
+        title() { this.updateFilename() },
+        eventDate() { this.updateFilename() },
     },
     mounted() {
         this.loadMembers()
         this.loadRooms()
+        this.updateFilename()
+        // Only the full Add Meeting flow can use the proposal category
+        // filter; the approver-meeting flow has no notes block at all.
+        if (!this.lockAttendees) {
+            this.loadProposalCategories()
+        }
     },
     methods: {
         t,
         n,
+
         async loadMembers() {
             this.loadingMembers = true
             try {
@@ -375,25 +638,11 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/members/all`)
                 )
                 const list = Array.isArray(data) ? data : (Array.isArray(data?.members) ? data.members : [])
-                // The organiser is on the event by definition (we emit them
-                // as ROLE=CHAIR server-side). Removing them from the picker
-                // prevents self-invite — both a UX footgun and the root of
-                // a real Sabre UID-collision when the organiser is also an
-                // ATTENDEE on a calendar their principal can write to.
-                // Case-insensitive match because external user backends
-                // (LDAP) have been known to return different casings between
-                // the users table and the wizard's member list.
                 const me = (getCurrentUser()?.uid || '').toLowerCase()
                 this.members = me
                     ? list.filter(m => (m.userId || '').toLowerCase() !== me)
                     : list
 
-                // Apply prefilled attendees — used by the approver-meeting
-                // flow. Only userIds that are visible in the loaded members
-                // list will actually become checked attendees (an approver
-                // who isn't a team member can't be invited via this team's
-                // calendar anyway). The user remains able to add or remove
-                // individuals before advancing.
                 if (Array.isArray(this.prefilledAttendees) && this.prefilledAttendees.length > 0) {
                     const presetIds = new Set(
                         this.prefilledAttendees
@@ -409,6 +658,20 @@ export default {
                         }
                     })
                     this.checked = next
+                } else if (!this.lockAttendees) {
+                    // Default for the new Add Meeting flow: pre-select everyone
+                    // so the common case ("invite the whole team") doesn't need
+                    // the user to click "Select all" first.
+                    const next = {}
+                    for (const m of this.members) next[m.userId] = true
+                    this.checked = next
+                }
+                // Trigger an initial suggestions fetch now that we have
+                // members + the default date + meeting type. Skipped when
+                // presence isn't available — the manual schedule pickers
+                // already have sensible defaults from data().
+                if (this.selectedCount > 0 && this.presenceAvailable) {
+                    this.fetchSuggestions()
                 }
             } catch (e) {
                 showError(t('teamhub', 'Could not load team members'))
@@ -416,11 +679,8 @@ export default {
                 this.loadingMembers = false
             }
         },
+
         async loadRooms() {
-            // Best-effort: the rooms endpoint always succeeds (returning
-            // [] when RoomVox isn't installed), so failure here only
-            // happens on transport errors. In that case stay silent and
-            // fall back to the free-text location field.
             this.loadingRooms = true
             try {
                 const { data } = await axios.get(
@@ -433,34 +693,118 @@ export default {
                 this.loadingRooms = false
             }
         },
+
+        /**
+         * Load the team's decision categories so the user can scope the
+         * proposals agenda section. Default selection is all categories
+         * ticked. Two endpoints can satisfy this — accept either shape:
+         *  - /decisions/categories returns { categories: [string, …] }
+         *    (the distinct set already present on the team's decisions —
+         *    matches the natural source of truth for the filter).
+         *  - /decisions/manage/categories returns { items: [{name, …}, …] }
+         *    (the predefined-category list — kept as a fallback shape so
+         *    a future endpoint swap doesn't silently break this UI).
+         * Endpoint failure (404 when the module isn't enabled for this
+         * team, network errors, etc.) degrades silently: the chip block
+         * just doesn't render.
+         */
+        async loadProposalCategories() {
+            this.loadingProposalCategories = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/decisions/categories`)
+                )
+                let names = []
+                if (Array.isArray(data?.categories)) {
+                    names = data.categories
+                        .map(c => String(c || '').trim())
+                        .filter(Boolean)
+                } else if (Array.isArray(data?.items)) {
+                    names = data.items
+                        .map(c => String(c?.name || '').trim())
+                        .filter(Boolean)
+                }
+                // Dedupe + stable sort so the chip order doesn't shuffle
+                // between calls.
+                this.proposalCategories = [...new Set(names)].sort((a, b) =>
+                    a.localeCompare(b, undefined, { sensitivity: 'base' }))
+                // Default: all ticked. Reapplied every load (re-mounting
+                // the modal resets the user's previous selection — that's
+                // intentional, the default-all expectation outweighs the
+                // remembered subset).
+                this.selectedProposalCategories = [...this.proposalCategories]
+            } catch (e) {
+                this.proposalCategories = []
+                this.selectedProposalCategories = []
+            } finally {
+                this.loadingProposalCategories = false
+            }
+        },
+
+        toggleProposalCategory(name) {
+            const idx = this.selectedProposalCategories.indexOf(name)
+            if (idx === -1) {
+                this.selectedProposalCategories = [...this.selectedProposalCategories, name]
+            } else {
+                this.selectedProposalCategories = this.selectedProposalCategories.filter(c => c !== name)
+            }
+        },
+        toggleAllProposalCategories() {
+            if (this.selectedProposalCategories.length === this.proposalCategories.length) {
+                this.selectedProposalCategories = []
+            } else {
+                this.selectedProposalCategories = [...this.proposalCategories]
+            }
+        },
+
         setChecked(userId, val) {
             this.checked = { ...this.checked, [userId]: !!val }
+            this.refetchSuggestionsSoon()
         },
         toggleSelectAll() {
             const target = !this.allSelected
             const next = {}
-            for (const m of this.members) {
-                next[m.userId] = target
-            }
+            for (const m of this.members) next[m.userId] = target
             this.checked = next
+            this.refetchSuggestionsSoon()
         },
+        onMeetingTypeChange(v) {
+            this.meetingType = v
+            this.refetchSuggestionsSoon()
+        },
+        onTargetDateChange() {
+            this.refetchSuggestionsSoon()
+        },
+        // Debounce auto-fetch so rapid checkbox toggles don't fire a request
+        // per click. 250 ms is a comfortable interaction window. No-op when
+        // presence isn't available — the manual schedule pickers are the
+        // only source of truth in that case.
+        refetchSuggestionsSoon() {
+            if (!this.presenceAvailable) return
+            if (this.selectedCount === 0) {
+                this.suggestions = []
+                this.chosenIndex = null
+                this.timeslots = []
+                this.chosenTimeslotIndex = null
+                return
+            }
+            clearTimeout(this._suggestTimer)
+            this._suggestTimer = setTimeout(() => this.fetchSuggestions(), 250)
+        },
+
         back() {
             if (this.step > 1) this.step -= 1
         },
-        async next() {
-            if (!this.canAdvance) return
-            if (this.step === 3) {
-                // Moving into suggestions — fetch them.
-                this.step = 4
-                await this.fetchSuggestions()
-                return
-            }
-            this.step += 1
+        next() {
+            if (this.canAdvance) this.step = 2
         },
+
         async fetchSuggestions() {
             this.loadingSuggestions = true
             this.suggestions = []
             this.chosenIndex = null
+            this.timeslots = []
+            this.chosenTimeslotIndex = null
             try {
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/presence/suggest-times`),
@@ -482,14 +826,11 @@ export default {
                 this.loadingSuggestions = false
             }
         },
+
         chooseSuggestion(i) {
             this.chosenIndex = i
             const s = this.suggestions[i]
             if (!s) return
-            // Default a sensible 1-hour block within the chosen half-day:
-            // morning -> 10:00-11:00, afternoon -> 14:00-15:00, organiser-local.
-            // The stage-two timeslot fetcher (below) may overwrite these with
-            // a conflict-free window the user explicitly picks.
             this.eventDate = s.date
             if (s.half === 0) {
                 this.eventStart = '10:00'
@@ -498,15 +839,10 @@ export default {
                 this.eventStart = '14:00'
                 this.eventEnd = '15:00'
             }
-            this.step = 5
-            // Fire-and-forget the stage-two fetch; the step renders
-            // immediately and the suggestions populate when they arrive.
             this.fetchTimeslots()
         },
+
         async fetchTimeslots() {
-            // Stage-two fetch: requires step 4 to have produced a chosen
-            // suggestion. Guard so a manual durationMinutes change before
-            // a half-day is chosen is a no-op.
             const s = this.suggestions[this.chosenIndex]
             if (!s) {
                 this.timeslots = []
@@ -525,19 +861,19 @@ export default {
                             half: s.half,
                             duration: this.durationMinutes,
                             attendees: this.selectedIds.join(','),
-                            // Pass the picked half-day's meeting context down so
-                            // each timeslot can be labelled with the best
-                            // building (no recomputation needed — the half-day
-                            // scorer already worked this out).
                             type: this.meetingType,
                             buildingName: (this.meetingType === 'office' && s.bestBuildingName) ? s.bestBuildingName : '',
                         },
                     }
                 )
                 this.timeslots = Array.isArray(data?.suggestions) ? data.suggestions : []
+                // Auto-select the first timeslot — users overwhelmingly pick
+                // it, and pre-selecting lets canAdvance gate on chosenTimeslotIndex
+                // without forcing an extra click.
+                if (this.timeslots.length > 0) {
+                    this.chooseTimeslot(0)
+                }
             } catch (e) {
-                // Non-blocking: timeslot suggestions are an aid, not a
-                // gate. On failure the user simply sets times manually.
                 const msg = e?.response?.data?.error || ''
                 showError(msg
                     ? t('teamhub', 'Could not get timeslot suggestions: {error}', { error: msg })
@@ -546,6 +882,7 @@ export default {
                 this.loadingTimeslots = false
             }
         },
+
         chooseTimeslot(i) {
             this.chosenTimeslotIndex = i
             const ts = this.timeslots[i]
@@ -553,8 +890,8 @@ export default {
             this.eventStart = ts.start
             this.eventEnd = ts.end
         },
+
         describeTimeslot(ts) {
-            // TRANSLATORS: {available} of {total} attendees available in this concrete time window
             let line = t('teamhub', '{available} of {total} available', {
                 available: ts.availableCount,
                 total: ts.attendeeCount,
@@ -568,16 +905,17 @@ export default {
             }
             return line
         },
+
         formatSuggestion(s) {
             const d = new Date(`${s.date}T00:00:00`)
-            const dayLabel = d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+            const dayLabel = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
             const half = s.half === 0 ? t('teamhub', 'morning') : t('teamhub', 'afternoon')
             return `${dayLabel} — ${half}`
         },
+
         describeSuggestion(s) {
             if (this.meetingType === 'office') {
                 const building = s.bestBuildingName || t('teamhub', 'an office')
-                // TRANSLATORS: {available}/{total} attendees free, {count} at the same building (named {building})
                 let line = t('teamhub', '{available} of {total} available, {count} at {building}', {
                     available: s.availableCount,
                     total: s.attendeeCount,
@@ -598,7 +936,36 @@ export default {
             }
             return line
         },
-        async createEvent() {
+
+        formatChosenWhen() {
+            // Manual-schedule mode reads straight from the form fields,
+            // since there is no suggestion to anchor against.
+            const haveTimes = this.eventDate && this.eventStart && this.eventEnd
+            if (!haveTimes) return t('teamhub', '— not chosen yet —')
+            if (!this.presenceAvailable || this.chosenIndex !== null) {
+                const d = new Date(`${this.eventDate}T00:00:00`)
+                const dayLabel = d.toLocaleDateString(undefined,
+                    { weekday: 'long', day: 'numeric', month: 'long' })
+                return `${dayLabel} · ${this.eventStart}–${this.eventEnd}`
+            }
+            return t('teamhub', '— not chosen yet —')
+        },
+
+        updateFilename() {
+            if (!this.title) {
+                this.filename = ''
+                return
+            }
+            const slug = this.title
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')
+                .trim()
+                .replace(/\s+/g, '-')
+                .substring(0, 60)
+            this.filename = `${this.eventDate}-${slug}`
+        },
+
+        async submit() {
             this.titleError = ''
             if (!this.title.trim()) {
                 this.titleError = t('teamhub', 'Title is required')
@@ -606,38 +973,37 @@ export default {
             }
             this.busy = true
             try {
-                // eventDate/eventStart/eventEnd are set by chooseSuggestion (step 4)
-                // and refined by chooseTimeslot (step 5). The user no longer edits
-                // them directly — the wizard locks them to the workflow.
+                const picked = this.rooms.find(r => r.id === this.selectedRoomId)
+                if (this.lockAttendees) {
+                    // Legacy approver-meeting path — write a calendar event,
+                    // no notes file. Matches pre-3.81 behaviour exactly.
+                    await this.submitCalendarOnly(picked)
+                } else {
+                    // New Add Meeting path — write notes file + calendar event
+                    // + optional agenda sections.
+                    await this.submitFullMeeting(picked)
+                }
+            } finally {
+                this.busy = false
+            }
+        },
+
+        async submitCalendarOnly(picked) {
+            try {
                 const startDt = new Date(`${this.eventDate}T${this.eventStart}:00`)
                 const endDt = new Date(`${this.eventDate}T${this.eventEnd}:00`)
-                // Resolve the picked room (if any). When the picker isn't
-                // visible (no rooms), selectedRoomId stays empty and the
-                // free-text location field is used instead.
-                const picked = this.rooms.find(r => r.id === this.selectedRoomId)
                 const payload = {
                     title: this.title.trim(),
                     start: startDt.toISOString(),
                     end: endDt.toISOString(),
-                    // When a room is picked, the free-text location field
-                    // wasn't shown — its value should not be sent. The
-                    // backend derives LOCATION from roomName.
                     location: picked ? '' : this.location.trim(),
                     description: this.description.trim(),
                     categories: this.categories.trim(),
                     includeTalk: this.effectiveIncludeTalk ? 1 : 0,
                     roomEmail: picked ? picked.email : '',
                     roomName: picked ? picked.displayName : '',
-                    // roomId is the RoomVox-internal id used for the booking
-                    // call. Only send it for RoomVox rooms (source === 'roomvox'
-                    // or 'mixed') — CRM-only rooms don't support auto-booking
-                    // and should go in as NEEDS-ACTION ATTENDEEs instead.
                     roomId: (picked && (picked.source === 'roomvox' || picked.source === 'mixed'))
                         ? picked.id : '',
-                    // The wizard's selected-members list becomes the
-                    // attendee list on the event so the meeting lands in
-                    // each invitee's personal calendar with a 15-min
-                    // reminder (handled server-side).
                     attendees: this.selectedIds.join(','),
                     calendarId: this.calendars[0]?.id ?? null,
                 }
@@ -646,13 +1012,9 @@ export default {
                     payload
                 )
                 showSuccess(t('teamhub', 'Event added to calendar'))
-                // Emit event details (eventUid, start, title) so callers
-                // can persist a back-reference. Pre-v3.74.10 `created` had
-                // no payload, so old listeners still work — extra args are
-                // simply ignored.
                 this.$emit('created', {
                     eventUid: created?.eventUid || '',
-                    start: created?.start || startDt.toISOString(),
+                    start: created?.start || '',
                     title: created?.title || this.title.trim(),
                 })
                 this.$emit('close')
@@ -661,8 +1023,62 @@ export default {
                 showError(msg
                     ? t('teamhub', 'Failed to add event: {error}', { error: msg })
                     : t('teamhub', 'Failed to add event'))
-            } finally {
-                this.busy = false
+            }
+        },
+
+        async submitFullMeeting(picked) {
+            try {
+                const payload = {
+                    title: this.title.trim(),
+                    date: this.eventDate,
+                    startTime: this.eventStart,
+                    endTime: this.eventEnd,
+                    location: picked ? '' : this.location.trim(),
+                    description: this.description.trim(),
+                    categories: this.categories.trim(),
+                    filename: this.filename.trim() || this.title.trim(),
+                    includeTalk: this.effectiveIncludeTalk ? 1 : 0,
+                    talkToken: (this.effectiveIncludeTalk && this.resources?.talk?.token)
+                        ? this.resources.talk.token : '',
+                    askAgenda: (this.effectiveIncludeTalk && this.askAgenda) ? 1 : 0,
+                    attendees: this.selectedIds.join(','),
+                    roomEmail: picked ? picked.email : '',
+                    roomName: picked ? picked.displayName : '',
+                    roomId: (picked && (picked.source === 'roomvox' || picked.source === 'mixed'))
+                        ? picked.id : '',
+                    includeOverdueTasks: this.includeOverdueTasks ? 1 : 0,
+                    includeUnscheduledTasks: this.includeUnscheduledTasks ? 1 : 0,
+                    includeProposals: this.includeProposals ? 1 : 0,
+                    // Only send a category filter when the user has narrowed
+                    // the selection to a real subset; empty payload means
+                    // "no filter" (all categories), matching the default.
+                    proposalCategories: this.shouldSendProposalCategoryFilter
+                        ? this.selectedProposalCategories.join(',')
+                        : '',
+                }
+                const { data: created } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/meetings`),
+                    payload
+                )
+                showSuccess(t('teamhub', 'Meeting created'))
+                this.$emit('created', {
+                    eventUid: created?.eventUid || '',
+                    start: `${this.eventDate}T${this.eventStart}:00`,
+                    title: this.title.trim(),
+                })
+                this.$emit('close')
+            } catch (e) {
+                const status = e?.response?.status
+                const msg = e?.response?.data?.error || ''
+                if (status === 403) {
+                    showError(t('teamhub', 'You do not have permission to create team meetings.'))
+                } else if (status === 422) {
+                    showError(t('teamhub', 'Team setup incomplete: {error}', { error: msg }))
+                } else {
+                    showError(msg
+                        ? t('teamhub', 'Failed to create meeting: {error}', { error: msg })
+                        : t('teamhub', 'Failed to create meeting'))
+                }
             }
         },
     },
@@ -671,52 +1087,97 @@ export default {
 
 <style scoped>
 .suggest-wizard {
-    padding: 24px;
-    max-width: 560px;
+    padding: 20px 24px 24px;
+    max-width: 760px;
     min-width: 360px;
 }
+@media (max-width: 768px) {
+    .suggest-wizard {
+        min-width: 0;
+        padding: 12px;
+    }
+}
 .suggest-wizard__heading {
-    margin: 0 0 16px;
-    font-size: 1.25rem;
-}
-.suggest-wizard__intro {
-    color: var(--color-text-maxcontrast);
-    margin-bottom: 12px;
-}
-.suggest-wizard__prefill-banner {
-    background: var(--th-color-success-soft, var(--color-success-hover, #e8f5e9));
-    color: var(--color-main-text);
-    border-left: 3px solid var(--th-color-success, #2c7d32);
-    padding: 8px 12px;
-    border-radius: var(--border-radius);
-    margin-bottom: 12px;
-    font-size: 0.9rem;
-    line-height: 1.4;
-}
-.suggest-wizard__toolbar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin: 0 0 12px;
+    font-size: 1.2rem;
 }
-.suggest-wizard__count {
+.suggest-wizard__stepbar {
+    display: flex;
+    gap: 8px;
+    list-style: none;
+    padding: 0;
+    margin: 0 0 16px;
+}
+.suggest-wizard__stepbar-item {
+    flex: 1;
+    padding: 6px 10px;
+    border-radius: var(--border-radius-pill);
+    background: var(--color-background-dark);
     color: var(--color-text-maxcontrast);
-    font-size: 0.9rem;
+    font-size: 0.85rem;
+    text-align: center;
 }
-.suggest-wizard__members {
-    max-height: 320px;
-    overflow-y: auto;
-}
-.suggest-wizard__label {
-    display: block;
-    margin: 8px 0 4px;
+.suggest-wizard__stepbar-item--active {
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     font-weight: 600;
 }
+.suggest-wizard__step { display: flex; flex-direction: column; gap: 12px; }
+.suggest-wizard__two-col {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 16px;
+}
+@media (max-width: 700px) {
+    .suggest-wizard__two-col { grid-template-columns: 1fr; }
+}
+.suggest-wizard__col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+.suggest-wizard__col-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.suggest-wizard__toolbtn {
+    background: transparent;
+    border: none;
+    color: var(--color-primary-element);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 4px;
+}
+.suggest-wizard__toolbtn:hover { text-decoration: underline; }
+.suggest-wizard__toolbtn:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+.suggest-wizard__count { margin: 0; }
+.suggest-wizard__members {
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+.suggest-wizard__member { padding: 2px 0; }
+.suggest-wizard__label {
+    display: block;
+    margin: 4px 0 4px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.suggest-wizard__field { margin-top: 4px; }
 .suggest-wizard__input {
     width: 100%;
     box-sizing: border-box;
-    /* NC-native control look — match NcTextField's resting state so the
-       step-5 fields read as a single, consistent group. */
     padding: 7px 10px;
     border: 2px solid var(--color-border-maxcontrast);
     border-radius: var(--border-radius-large);
@@ -725,104 +1186,224 @@ export default {
     font: inherit;
     line-height: 1.4;
 }
+.suggest-wizard__input--inline { width: auto; padding: 4px 8px; }
 .suggest-wizard__input:focus,
 .suggest-wizard__input:focus-visible {
     outline: none;
     border-color: var(--color-primary-element);
 }
-.suggest-wizard__input--error {
-    border-color: var(--color-error);
-}
+.suggest-wizard__input--error { border-color: var(--color-error); }
 .suggest-wizard__textarea {
     resize: vertical;
-    min-height: 72px;
+    min-height: 64px;
     font-family: inherit;
 }
+.suggest-wizard__pills {
+    display: flex;
+    gap: 6px;
+    margin: 4px 0 8px;
+}
+.suggest-wizard__pill {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--color-main-background);
+    border: 2px solid var(--color-border-maxcontrast);
+    border-radius: var(--border-radius-pill);
+    color: var(--color-main-text);
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.suggest-wizard__pill:hover { background: var(--color-background-hover); }
+.suggest-wizard__pill:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+.suggest-wizard__pill--selected {
+    background: var(--color-primary-element);
+    border-color: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    font-weight: 600;
+}
+.suggest-wizard__hint {
+    color: var(--color-text-maxcontrast);
+    font-size: 0.85rem;
+    margin: 4px 0 0;
+}
+.suggest-wizard__hint--block { margin: 0 0 8px; }
+.suggest-wizard__hint--warn {
+    color: var(--color-warning-text);
+}
+.suggest-wizard__hint--info {
+    padding: 6px 10px;
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    border-radius: var(--border-radius);
+    margin-top: 8px;
+}
+.suggest-wizard__time-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+.suggest-wizard__time-col { flex: 1; min-width: 0; }
 .suggest-wizard__error {
     color: var(--color-error-text);
     font-size: 0.85rem;
     margin: 4px 0 0;
 }
-.suggest-wizard__times {
-    display: flex;
-    gap: 12px;
-}
-.suggest-wizard__times > div {
-    flex: 1;
-}
+.suggest-wizard__suggest-block { margin-top: 8px; }
 .suggest-wizard__suggestions {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
+    padding: 0;
+    margin: 0;
+    list-style: none;
 }
 .suggest-wizard__suggestion {
     width: 100%;
     text-align: left;
-    padding: 12px;
+    padding: 10px 12px;
     border: 2px solid var(--color-border);
     border-radius: var(--border-radius-large);
     background: var(--color-main-background);
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
-.suggest-wizard__suggestion:hover {
-    background: var(--color-background-hover);
-}
+.suggest-wizard__suggestion--compact { padding: 6px 10px; }
+.suggest-wizard__suggestion:hover { background: var(--color-background-hover); }
 .suggest-wizard__suggestion:focus-visible {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
 }
-.suggest-wizard__suggestion--active {
-    border-color: var(--color-primary-element);
-}
-.suggest-wizard__suggestion-when {
-    font-weight: 600;
-}
+.suggest-wizard__suggestion--active { border-color: var(--color-primary-element); }
+.suggest-wizard__suggestion-when { font-weight: 600; }
 .suggest-wizard__suggestion-why {
     color: var(--color-text-maxcontrast);
-    font-size: 0.9rem;
+    font-size: 0.85rem;
 }
 .suggest-wizard__empty {
     color: var(--color-text-maxcontrast);
+    margin: 8px 0;
 }
-.suggest-wizard__timeslots {
-    margin-bottom: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--color-border);
+.suggest-wizard__timeslots-inline {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border);
 }
 .suggest-wizard__timeslots-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 .suggest-wizard__duration {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.9rem;
-    color: var(--color-text-maxcontrast);
-}
-.suggest-wizard__duration select {
-    width: auto;
-}
-.suggest-wizard__field {
-    margin-top: 12px;
-}
-.suggest-wizard__hint {
-    color: var(--color-text-maxcontrast);
+    gap: 6px;
     font-size: 0.85rem;
-    margin: 4px 0 0 24px;
+    color: var(--color-text-maxcontrast);
+}
+.suggest-wizard__prefill-banner {
+    background: var(--color-success);
+    color: var(--color-success-text);
+    padding: 6px 10px;
+    border-radius: var(--border-radius);
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.suggest-wizard__summary {
+    background: var(--color-background-dark);
+    border-radius: var(--border-radius-large);
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.suggest-wizard__summary-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: var(--color-main-text);
+}
+.suggest-wizard__notes-block {
+    margin-top: 10px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-hover);
+}
+.suggest-wizard__notes-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+.suggest-wizard__notes-title {
+    margin: 0;
+    font-size: 1rem;
+}
+.suggest-wizard__agenda-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 16px;
+    margin-top: 8px;
+}
+@media (max-width: 540px) {
+    .suggest-wizard__agenda-grid { grid-template-columns: 1fr; }
+}
+.suggest-wizard__cat-block {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+}
+.suggest-wizard__cat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+.suggest-wizard__label--inline { margin: 0; }
+.suggest-wizard__cat-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+.suggest-wizard__chip {
+    padding: 4px 10px;
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border-maxcontrast);
+    border-radius: var(--border-radius-pill);
+    color: var(--color-text-maxcontrast);
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.suggest-wizard__chip:hover { background: var(--color-background-hover); }
+.suggest-wizard__chip:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+.suggest-wizard__chip--selected {
+    background: var(--color-primary-element);
+    border-color: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    font-weight: 600;
 }
 .suggest-wizard__footer {
     display: flex;
     align-items: center;
-    margin-top: 24px;
+    margin-top: 18px;
+    gap: 8px;
 }
-.suggest-wizard__spacer {
-    flex: 1;
-}
+.suggest-wizard__spacer { flex: 1; }
 </style>

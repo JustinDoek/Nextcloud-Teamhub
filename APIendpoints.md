@@ -217,4 +217,47 @@ Also added `mergeNewTabs()` post-processing on `tabOrder` — saved `tab_order_j
 
 ---
 
+## Meeting endpoints (extended 3.81.2)
+
+### `POST /api/v1/teams/{teamId}/meetings`
+
+Create a team meeting — writes a notes file in the team's `Meetings/` folder, then writes a calendar event linked to that notes file. The wizard's Add Meeting button is the primary caller. Existing fields are unchanged; the additions below are all optional and default to safe behaviour.
+
+**Auth**: caller must meet the team's `meeting_min_level` (1/4/8). Enforced inside `MeetingService::enforceMinLevel`.
+
+**Body (additions in 3.81.2 — bold fields are new):**
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `title` | string | Required. ≤200 chars. |
+| `date` | string | `YYYY-MM-DD`. |
+| `startTime`/`endTime` | string | `HH:MM` 24h. |
+| `location` | string | Free-text. ≤200. |
+| `filename` | string | Base filename, no extension. |
+| `includeTalk` | bool/int | Link the team Talk room into the calendar event. |
+| `talkToken` | string | Pre-resolved Talk token; skips DB lookup. |
+| `askAgenda` | bool/int | Post a one-shot message in the Talk room with the notes link (requires `includeTalk`). |
+| **`attendees`** | string/array | Comma-separated user ids, or array. Empty = no per-attendee invitations (event lives only in the team calendar). ≤500. |
+| **`description`** | string | Inserted as a preamble in the notes file and stored on the calendar event. ≤4000. |
+| **`categories`** | string | CSV CATEGORIES on the calendar event. ≤500. |
+| **`roomEmail` / `roomName` / `roomId`** | string | Room booking. Same shape as `POST /calendar/events`. RoomVox rooms send `roomId`; CRM rooms leave it empty. |
+| **`includeOverdueTasks`** | bool/int | Render `## Tasks` section with Deck cards whose `duedate < meetingStart`, `done=0`, `archived=0`, not deleted. |
+| **`includeUnscheduledTasks`** | bool/int | Same `## Tasks` section, cards with no duedate. |
+| **`includeProposals`** | bool/int | Render `## Proposals` section with team decisions in status `open` or `finalized`. Each link uses `?team={teamId}&decision={id}`. |
+| **`proposalCategories`** | string/array | Optional. Comma-separated list of category names (or array). When non-empty, narrows the Proposals section to decisions in those categories. Empty = no filter (all). ≤200 items. *(3.81.3)* |
+
+**Response 201**:
+```json
+{
+  "notesUrl":             "https://nc/index.php/s/abc",
+  "talkUrl":              "https://nc/call/xyz" /* or null */,
+  "calendarEventCreated": true,
+  "eventUid":             "ABCDEF..."          /* new in 3.81.2 */
+}
+```
+
+**Failures**: `400` validation, `403` not a member / insufficient level, `422` setup incomplete (e.g. no team folder), `500` other.
+
+---
+
 *Update this file in place at the end of any session that adds, removes, or changes an endpoint.*

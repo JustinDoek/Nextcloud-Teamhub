@@ -256,15 +256,9 @@
                                 <template #icon><CalendarPlus :size="20" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
-                            <NcActionButton
-                                v-if="presenceModuleEnabled && presenceConfig.presence_enabled"
-                                @click="$emit('suggest-meeting')">
-                                <template #icon><CalendarClock :size="20" /></template>
-                                {{ t('teamhub', 'Meeting wizard') }}
-                            </NcActionButton>
-                            <NcActionButton @click="$emit('team-meeting')">
+                            <NcActionButton @click="$emit('add-meeting')">
                                 <template #icon><AccountGroup :size="20" /></template>
-                                {{ t('teamhub', 'Team meeting') }}
+                                {{ t('teamhub', 'Add Meeting') }}
                             </NcActionButton>
                         </NcActions>
                         <button
@@ -659,15 +653,9 @@
                                 <template #icon><CalendarPlus :size="20" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
-                            <NcActionButton
-                                v-if="presenceModuleEnabled && presenceConfig.presence_enabled"
-                                @click="$emit('suggest-meeting')">
-                                <template #icon><CalendarClock :size="20" /></template>
-                                {{ t('teamhub', 'Meeting wizard') }}
-                            </NcActionButton>
-                            <NcActionButton @click="$emit('team-meeting')">
+                            <NcActionButton @click="$emit('add-meeting')">
                                 <template #icon><AccountGroup :size="20" /></template>
-                                {{ t('teamhub', 'Team meeting') }}
+                                {{ t('teamhub', 'Add Meeting') }}
                             </NcActionButton>
                         </NcActions>
                     </div>
@@ -810,7 +798,7 @@
             @leave-team="onLeaveTeamClick"
             @schedule-meeting="$emit('schedule-meeting')"
             @add-event="$emit('add-event')"
-            @team-meeting="$emit('team-meeting')"
+            @add-meeting="$emit('add-meeting')"
             @add-deck-task="$emit('add-deck-task')"
             @add-personal-task="$emit('add-personal-task')"
             @create-page="$emit('create-page')"
@@ -834,7 +822,6 @@ import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
-import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -895,7 +882,7 @@ export default {
     components: {
         NcAvatar, NcActions, NcActionButton, NcButton,
         GridLayout, GridItem,
-        MessageOutline, Folder, Calendar, CalendarPlus, CalendarClock, CardText,
+        MessageOutline, Folder, Calendar, CalendarPlus, CardText,
         CheckboxMarkedOutline, InformationOutline, AccountGroup,
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus, PlusIcon,
         Cog, Puzzle, GavelIcon, ViewDashboardEdit, DragVariant,
@@ -931,7 +918,7 @@ export default {
 
     emits: [
         'layout-updated', 'manage-team', 'copy-link', 'invite',
-        'schedule-meeting', 'add-event', 'suggest-meeting', 'team-meeting', 'add-deck-task', 'add-personal-task',
+        'schedule-meeting', 'add-event', 'add-meeting', 'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded', 'set-view',
         'widget-actions-loaded',
         'set-as-default',
@@ -1583,9 +1570,9 @@ export default {
 }
 
 .teamhub-team-label--primary {
-    background-color: var(--color-primary-element-light, var(--color-background-hover));
-    color: var(--color-primary-element, var(--color-main-text));
-    border-color: var(--color-primary-element-light, var(--color-border));
+    background-color: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    border-color: var(--color-primary-element);
 }
 
 .teamhub-team-label--warning {
@@ -1703,7 +1690,8 @@ export default {
 }
 
 .teamhub-home-view--editing :deep(.vgl-item__resizer:hover) {
-    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
 /* The diagonal-arrows icon rendered as an inline SVG via ::after. */
@@ -1723,11 +1711,12 @@ export default {
 
 .teamhub-home-view--editing :deep(.vgl-item__resizer:hover)::after {
     opacity: 1;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230082c9' d='M5 3h4V1H3a2 2 0 0 0-2 2v6h2V5.4l5.3 5.3 1.4-1.4L4.4 4H5V3zm14 16h-.6l-5.3-5.3-1.4 1.4 5.3 5.3V19h2v-6h-2v4zM19 3h-.6l-5.3 5.3 1.4 1.4L19.6 4H21V3h-4V1h6v6h-2V3zM5 19v-4H3v6h6v-2H5.4l5.3-5.3-1.4-1.4L4 19.6V19H5z'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23ffffff' d='M5 3h4V1H3a2 2 0 0 0-2 2v6h2V5.4l5.3 5.3 1.4-1.4L4.4 4H5V3zm14 16h-.6l-5.3-5.3-1.4 1.4 5.3 5.3V19h2v-6h-2v4zM19 3h-.6l-5.3 5.3 1.4 1.4L19.6 4H21V3h-4V1h6v6h-2V3zM5 19v-4H3v6h6v-2H5.4l5.3-5.3-1.4-1.4L4 19.6V19H5z'/%3E%3C/svg%3E");
 }
 
 :deep(.vgl-item--placeholder) {
-    background: var(--color-primary-element-light, var(--color-background-hover));
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     border: 2px dashed var(--color-primary-element);
     border-radius: var(--border-radius-large);
     opacity: 0.4;

@@ -4,6 +4,10 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\DecisionMapper;
+use OCA\TeamHub\Db\TeamAppResourceMapper;
+use OCP\App\IAppManager;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Files\IRootFolder;
 use OCP\IDBConnection;
 use OCP\IUserSession;
@@ -32,16 +36,28 @@ use Psr\Log\LoggerInterface;
  */
 class MeetingService {
 
-    /** Meeting notes template. Placeholders use {key} syntax. */
-    private const TEMPLATE_CONTENT = "# {title}\n\n**Date:** {date}  \n**Time:** {startTime} – {endTime}  \n**Location:** {location}  \n**Talk:** {talkUrl}  \n\n## Attendees\n{attendees}\n\n## Agenda\n\n## Notes\n\n## Action items\n";
+    /**
+     * Meeting notes template. Placeholders use {key} syntax.
+     *
+     * {tasksSection} and {proposalsSection} are filled with rendered markdown
+     * when the corresponding wizard checkboxes are set, or with an empty
+     * string when not. They sit between Agenda and Notes so they read as
+     * pre-populated agenda items.
+     */
+    private const TEMPLATE_CONTENT = "# {title}\n\n**Date:** {date}  \n**Time:** {startTime} – {endTime}  \n**Location:** {location}  \n**Talk:** {talkUrl}  \n\n## Attendees\n{attendees}\n\n## Agenda\n{tasksSection}{proposalsSection}\n## Notes\n\n## Action items\n";
 
     public function __construct(
-        private IUserSession     $userSession,
-        private IDBConnection    $db,
-        private MemberService    $memberService,
-        private TalkService      $talkService,
-        private ContainerInterface $container,
-        private LoggerInterface  $logger,
+        private IUserSession            $userSession,
+        private IDBConnection           $db,
+        private MemberService           $memberService,
+        private TalkService             $talkService,
+        private ActivityService         $activityService,
+        private ResourceService         $resourceService,
+        private DecisionMapper          $decisionMapper,
+        private TeamAppResourceMapper   $resourceMapper,
+        private IAppManager             $appManager,
+        private ContainerInterface      $container,
+        private LoggerInterface         $logger,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -56,9 +72,26 @@ class MeetingService {
      * @param string $date      Date string YYYY-MM-DD
      * @param string $startTime Time string HH:MM
      * @param string $endTime   Time string HH:MM
-     * @param string $location  Optional free-text location
+     * @param string $location  Free-text location (used when no room booked)
      * @param string $filename  Desired base filename (without .md extension)
-     * @return array{notesUrl:string,talkUrl:string|null,calendarEventCreated:bool}
+     * @param bool   $includeTalk Add Talk meeting and link in calendar event
+     * @param string $talkToken Pre-resolved Talk token (skips lookup)
+     * @param bool   $askAgenda Post an agenda-request message to Talk after creation
+     * @param string[] $attendeeUids User ids to invite as ATTENDEEs. Empty
+     *                              means "all team members" (legacy default).
+     * @param string $description Body text — included in the calendar event
+     *                            description AND the meeting notes preamble
+     * @param string $categories  Comma-separated CATEGORIES for the calendar event
+     * @param string $roomEmail   Picked room's mail address (CalDAV ATTENDEE) or ''
+     * @param string $roomName    Picked room's display name (LOCATION) or ''
+     * @param string $roomId      RoomVox-internal id (booking call) or ''
+     * @param bool   $includeOverdueTasks Render overdue Deck cards in Tasks section
+     * @param bool   $includeUnscheduledTasks Render undated Deck cards in Tasks section
+     * @param bool   $includeProposals Render open/finalized decisions in Proposals section
+     * @param string[] $proposalCategories When `$includeProposals` is true and
+     *                 this array is non-empty, only proposals whose category
+     *                 is in the list are included. Empty = no filter.
+     * @return array{notesUrl:string,talkUrl:string|null,calendarEventCreated:bool,eventUid:string}
      * @throws \Exception on permission failure or unrecoverable error
      */
     public function createTeamMeeting(
@@ -69,12 +102,27 @@ class MeetingService {
         string $endTime,
         string $location,
         string $filename,
-        bool   $includeTalk = true,
-        string $talkToken   = '',
-        bool   $askAgenda   = false
+        bool   $includeTalk             = true,
+        string $talkToken               = '',
+        bool   $askAgenda               = false,
+        array  $attendeeUids            = [],
+        string $description             = '',
+        string $categories              = '',
+        string $roomEmail               = '',
+        string $roomName                = '',
+        string $roomId                  = '',
+        bool   $includeOverdueTasks     = false,
+        bool   $includeUnscheduledTasks = false,
+        bool   $includeProposals        = false,
+        array  $proposalCategories      = []
     ): array {
         $this->logger->debug('[TeamHub][MeetingService] createTeamMeeting — start', [
-            'teamId' => $teamId, 'title' => $title, 'date' => $date, 'app' => Application::APP_ID,
+            'teamId' => $teamId, 'title' => $title, 'date' => $date,
+            'attendeeCount' => count($attendeeUids),
+            'includeOverdueTasks' => $includeOverdueTasks,
+            'includeUnscheduledTasks' => $includeUnscheduledTasks,
+            'includeProposals' => $includeProposals,
+            'app' => Application::APP_ID,
         ]);
 
         // 1. Permission check
@@ -86,8 +134,27 @@ class MeetingService {
         }
         $uid = $user->getUID();
 
+        // Resolve agenda content first — it's woven into the notes file.
+        // Meeting start datetime is the cut-off for "overdue" so a card
+        // due *during* the meeting still counts as scheduled, not overdue.
+        $meetingStartTs = strtotime("{$date}T{$startTime}:00") ?: time();
+        $tasksSection = '';
+        if ($includeOverdueTasks || $includeUnscheduledTasks) {
+            $tasksSection = $this->renderTasksSection(
+                $teamId, $meetingStartTs,
+                $includeOverdueTasks, $includeUnscheduledTasks
+            );
+        }
+        $proposalsSection = '';
+        if ($includeProposals) {
+            $proposalsSection = $this->renderProposalsSection($teamId, $proposalCategories);
+        }
+
         // 2–5. Notes file
-        $notesUrl = $this->provisionNotesFile($teamId, $uid, $title, $date, $startTime, $endTime, $location, $filename);
+        $notesUrl = $this->provisionNotesFile(
+            $teamId, $uid, $title, $date, $startTime, $endTime,
+            $location, $filename, $description, $tasksSection, $proposalsSection
+        );
 
         // 6. Talk URL — only if user opted in
         $talkUrl = null;
@@ -95,23 +162,27 @@ class MeetingService {
             $talkUrl = $this->resolveTalkUrl($teamId, $talkToken);
         }
 
-        // 7. Attendees
-        $attendees = $this->resolveAttendees($teamId);
-
-        // 8. Calendar event
+        // 7. Calendar event — delegate to ActivityService.createCalendarEvent
+        // so room booking, per-attendee invites, ORGANIZER/ATTENDEE iTIP shape,
+        // and RoomVox booking are all handled by the canonical implementation.
         $calendarCreated = false;
+        $eventUid = '';
         try {
-            $this->createCalendarEvent(
-                teamId:    $teamId,
-                uid:       $uid,
-                title:     $title,
-                date:      $date,
-                startTime: $startTime,
-                endTime:   $endTime,
-                location:  $location,
-                talkUrl:   $talkUrl,
-                notesUrl:  $notesUrl,
-                attendees: $attendees,
+            $startIso = (new \DateTime("{$date}T{$startTime}:00"))
+                ->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
+            $endIso = (new \DateTime("{$date}T{$endTime}:00"))
+                ->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
+
+            // Fold the notes URL into the calendar event description so
+            // attendees can reach the file from their calendar client.
+            $eventDescription = $description;
+            $eventDescription = ($eventDescription !== '' ? $eventDescription . "\n\n" : '')
+                . 'Meeting notes: ' . $notesUrl;
+
+            $eventUid = $this->activityService->createCalendarEvent(
+                $teamId, $title, $startIso, $endIso, $location, $eventDescription,
+                null, $includeTalk, $categories,
+                $roomEmail, $roomName, $roomId, $attendeeUids
             );
             $calendarCreated = true;
         } catch (\Throwable $e) {
@@ -121,7 +192,7 @@ class MeetingService {
             ]);
         }
 
-        // 9. Optional: post agenda request to Talk chat
+        // 8. Optional: post agenda request to Talk chat
         if ($includeTalk && $askAgenda && $talkUrl !== null && $talkToken !== '') {
             $this->postAgendaRequest($talkToken, $title, $date, $startTime, $notesUrl, $uid);
         }
@@ -134,9 +205,10 @@ class MeetingService {
         ]);
 
         return [
-            'notesUrl'            => $notesUrl,
-            'talkUrl'             => $talkUrl,
+            'notesUrl'             => $notesUrl,
+            'talkUrl'              => $talkUrl,
             'calendarEventCreated' => $calendarCreated,
+            'eventUid'             => $eventUid,
         ];
     }
 
@@ -250,17 +322,21 @@ class MeetingService {
         string $startTime,
         string $endTime,
         string $location,
-        string $filename
+        string $filename,
+        string $description      = '',
+        string $tasksSection     = '',
+        string $proposalsSection = ''
     ): string {
-        $rootFolder = $this->container->get(IRootFolder::class);
-        $userFolder = $rootFolder->getUserFolder($uid);
-
         $this->logger->debug('[TeamHub][MeetingService] provisionNotesFile — resolving team folder', [
             'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
         ]);
 
-        // Resolve team folder ID from oc_share (the share with the circle)
-        $teamFolderNode = $this->resolveTeamFolder($teamId, $userFolder);
+        // Use the canonical team-folder resolution path so both
+        // shared-folder-backed and Group Folder-backed teams work the same
+        // way (DESIGN.md §2.19). The resolution returns the filecache ID for
+        // GF resources too; IRootFolder::getById() then resolves it through
+        // the caller's mountpoints exactly like a normal share.
+        $teamFolderNode = $this->resolveTeamFolder($teamId);
 
         if ($teamFolderNode === null) {
             throw new \Exception('Team files folder not found — please set up Files for this team first.');
@@ -288,7 +364,10 @@ class MeetingService {
             $counter++;
         }
 
-        $content = $this->renderTemplate($title, $date, $startTime, $endTime, $location);
+        $content = $this->renderTemplate(
+            $title, $date, $startTime, $endTime, $location,
+            $description, $tasksSection, $proposalsSection
+        );
 
         $this->logger->debug('[TeamHub][MeetingService] provisionNotesFile — writing notes file', [
             'path' => $finalPath, 'app' => Application::APP_ID,
@@ -302,32 +381,41 @@ class MeetingService {
     }
 
     /**
-     * Find the team's shared folder node via oc_share → file_source.
-     * Returns null if no share is found.
+     * Resolve the team's files-folder node for the current user. Handles
+     * both Group Folder-backed and legacy shared-folder-backed teams by
+     * delegating folder-id resolution to ResourceService and then loading
+     * the node via IRootFolder::getById on the caller's mountpoints —
+     * the same pattern DecisionService::writeProposalDocument uses.
+     *
+     * Returns null when this team has no Files resource registered.
      */
-    private function resolveTeamFolder(string $teamId, \OCP\Files\Folder $userFolder): ?\OCP\Files\Folder {
-        $qb  = $this->db->getQueryBuilder();
-        $res = $qb->select('file_source')
-            ->from('share')
-            ->where($qb->expr()->eq('share_type',  $qb->createNamedParameter(7)))  // TYPE_CIRCLE
-            ->andWhere($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-            ->andWhere($qb->expr()->eq('item_type',  $qb->createNamedParameter('folder')))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $row = $res->fetch();
-        $res->closeCursor();
+    private function resolveTeamFolder(string $teamId): ?\OCP\Files\Folder {
+        try {
+            $resources = $this->resourceService->getTeamResources($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MeetingService] resolveTeamFolder — getTeamResources failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
 
-        if (!$row) {
-            $this->logger->warning('[TeamHub][MeetingService] resolveTeamFolder — no share found', [
+        if (empty($resources['files']) || empty($resources['files']['folder_id'])) {
+            $this->logger->warning('[TeamHub][MeetingService] resolveTeamFolder — team has no Files resource', [
                 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
             return null;
         }
 
-        $nodes = $userFolder->getById((int)$row['file_source']);
+        $folderId   = (int)$resources['files']['folder_id'];
+        $folderType = (string)($resources['files']['folder_type'] ?? '');
+
+        $rootFolder = $this->container->get(IRootFolder::class);
+        $nodes      = $rootFolder->getById($folderId);
+
         if (empty($nodes)) {
-            $this->logger->warning('[TeamHub][MeetingService] resolveTeamFolder — file_source not found', [
-                'fileSource' => $row['file_source'], 'app' => Application::APP_ID,
+            $this->logger->warning('[TeamHub][MeetingService] resolveTeamFolder — folder id not visible to user', [
+                'teamId' => $teamId, 'folderId' => $folderId, 'folderType' => $folderType,
+                'app' => Application::APP_ID,
             ]);
             return null;
         }
@@ -336,6 +424,11 @@ class MeetingService {
         if (!($node instanceof \OCP\Files\Folder)) {
             return null;
         }
+
+        $this->logger->debug('[TeamHub][MeetingService] resolveTeamFolder — resolved', [
+            'teamId' => $teamId, 'folderId' => $folderId, 'folderType' => $folderType,
+            'path' => $node->getPath(), 'app' => Application::APP_ID,
+        ]);
 
         return $node;
     }
@@ -384,25 +477,45 @@ class MeetingService {
     /**
      * Render the meeting notes template with actual values.
      * Talk URL is added later in the calendar event step — left as placeholder for now.
+     *
+     * tasksSection / proposalsSection are pre-rendered markdown blocks (or
+     * empty strings) inserted between the Agenda heading and the Notes
+     * heading. The template constant already includes a leading newline
+     * before the section blocks so empty sections collapse cleanly.
      */
     private function renderTemplate(
         string $title,
         string $date,
         string $startTime,
         string $endTime,
-        string $location
+        string $location,
+        string $description      = '',
+        string $tasksSection     = '',
+        string $proposalsSection = ''
     ): string {
         // Render without talkUrl — Talk URL is resolved after file creation.
         // A second pass fills it in if available; otherwise the placeholder remains editable.
-        return strtr(self::TEMPLATE_CONTENT, [
-            '{title}'     => $title,
-            '{date}'      => $date,
-            '{startTime}' => $startTime,
-            '{endTime}'   => $endTime,
-            '{location}'  => $location !== '' ? $location : '—',
-            '{talkUrl}'   => '_(will be added to calendar event)_',
-            '{attendees}' => '_(see calendar event attendees)_',
+        $rendered = strtr(self::TEMPLATE_CONTENT, [
+            '{title}'            => $title,
+            '{date}'             => $date,
+            '{startTime}'        => $startTime,
+            '{endTime}'          => $endTime,
+            '{location}'         => $location !== '' ? $location : '—',
+            '{talkUrl}'          => '_(will be added to calendar event)_',
+            '{attendees}'        => '_(see calendar event attendees)_',
+            '{tasksSection}'     => $tasksSection,
+            '{proposalsSection}' => $proposalsSection,
         ]);
+
+        // Prepend an organiser-supplied description as a quick context block
+        // ahead of the structured sections. Kept out of the template constant
+        // so existing template.md files on disk stay unchanged.
+        if ($description !== '') {
+            $rendered = "# {$title}\n\n> " . str_replace("\n", "\n> ", $description) . "\n\n"
+                . substr($rendered, strlen("# {$title}\n\n"));
+        }
+
+        return $rendered;
     }
 
     /**
@@ -425,7 +538,7 @@ class MeetingService {
         $url          = $urlGenerator->linkToRouteAbsolute('files_sharing.sharecontroller.showShare', ['token' => $token]);
 
         $this->logger->debug('[TeamHub][MeetingService] createShareLink — created', [
-            'token' => $token, 'app' => Application::APP_ID,
+            'tokenLen' => strlen($token), 'app' => Application::APP_ID,
         ]);
 
         return $url;
@@ -439,7 +552,7 @@ class MeetingService {
         // Fast path: frontend passed us the token from resources.talk.token
         if ($suppliedToken !== '') {
             $this->logger->debug('[TeamHub][MeetingService] resolveTalkUrl — using supplied token', [
-                'token' => $suppliedToken, 'app' => Application::APP_ID,
+                'tokenLen' => strlen($suppliedToken), 'app' => Application::APP_ID,
             ]);
             return $this->buildTalkUrl($suppliedToken);
         }
@@ -472,7 +585,7 @@ class MeetingService {
 
             if ($roomRow) {
                 $this->logger->debug('[TeamHub][MeetingService] resolveTalkUrl — found existing room', [
-                    'token' => $roomRow['token'], 'app' => Application::APP_ID,
+                    'roomId' => $roomId, 'app' => Application::APP_ID,
                 ]);
                 return $this->buildTalkUrl($roomRow['token']);
             }
@@ -526,170 +639,221 @@ class MeetingService {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Agenda content — Tasks and Proposals sections
+    // -------------------------------------------------------------------------
+
     /**
-     * Fetch display names of all direct team members for ATTENDEE lines.
-     * Returns array of ['displayName' => string, 'email' => string|null].
+     * Render the `## Tasks` markdown block for the meeting notes.
+     *
+     * Pulls Deck cards across all boards connected to this team and groups
+     * them as Overdue (duedate < meeting start, not done, not archived) and
+     * Unscheduled (no duedate, not done, not archived). Returns an empty
+     * string when neither toggle is requested or no cards match — callers
+     * pass the result verbatim into the template's {tasksSection} slot.
      */
-    private function resolveAttendees(string $teamId): array {
-        $this->logger->debug('[TeamHub][MeetingService] resolveAttendees — start', [
-            'teamId' => $teamId, 'app' => Application::APP_ID,
-        ]);
-
+    private function renderTasksSection(
+        string $teamId,
+        int    $meetingStartTs,
+        bool   $includeOverdue,
+        bool   $includeUnscheduled
+    ): string {
+        if (!$this->appManager->isInstalled('deck')) {
+            return '';
+        }
         try {
-            // Mirror MemberService: join oc_users for displayname (not oc_accounts)
-            $qb  = $this->db->getQueryBuilder();
-            $res = $qb->select('m.user_id', 'u.displayname')
-                ->from('circles_member', 'm')
-                ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
-                ->where($qb->expr()->eq('m.circle_id',  $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('m.status',   $qb->createNamedParameter('Member')))
-                ->andWhere($qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->executeQuery();
-
-            $attendees = [];
-            while ($row = $res->fetch()) {
-                $uid         = (string)$row['user_id'];
-                $displayName = !empty($row['displayname']) ? $row['displayname'] : $uid;
-                $attendees[] = [
-                    'displayName' => $displayName,
-                    'uid'         => $uid,
-                    'email'       => $this->resolveUserEmail($uid),
-                ];
-            }
-            $res->closeCursor();
-
-            $this->logger->debug('[TeamHub][MeetingService] resolveAttendees — found ' . count($attendees), [
-                'app' => Application::APP_ID,
-            ]);
-
-            return $attendees;
+            [$overdue, $unscheduled] = $this->fetchAgendaCards($teamId, $meetingStartTs);
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][MeetingService] resolveAttendees failed — using empty list', [
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            $this->logger->warning('[TeamHub][MeetingService] renderTasksSection — fetch failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            return [];
+            return '';
         }
+
+        $lines = [];
+        if ($includeOverdue && !empty($overdue)) {
+            foreach ($overdue as $c) {
+                $due = $c['duedate']
+                    ? date('Y-m-d', $c['duedate'])
+                    : '—';
+                $lines[] = sprintf('- [%s](%s) — due %s', $this->mdEscape($c['title']), $c['url'], $due);
+            }
+        }
+        if ($includeUnscheduled && !empty($unscheduled)) {
+            foreach ($unscheduled as $c) {
+                $lines[] = sprintf('- [%s](%s) — no due date', $this->mdEscape($c['title']), $c['url']);
+            }
+        }
+        if (empty($lines)) {
+            return '';
+        }
+        return "\n## Tasks\n" . implode("\n", $lines) . "\n\n";
     }
 
     /**
-     * Build and write a VEVENT to the team calendar via CalDavBackend.
-     * Includes ATTACH (notes share link), LOCATION, DESCRIPTION (Talk URL), and ATTENDEE lines.
+     * Fetch Deck cards for this team's boards, split into [overdue, unscheduled].
+     * Mirrors TimelineService's board lookup (registry primary, ACL fallback).
+     *
+     * @return array{0:list<array{title:string,duedate:int,url:string}>, 1:list<array{title:string,duedate:int,url:string}>}
      */
-    private function createCalendarEvent(
-        string  $teamId,
-        string  $uid,
-        string  $title,
-        string  $date,
-        string  $startTime,
-        string  $endTime,
-        string  $location,
-        ?string $talkUrl,
-        string  $notesUrl,
-        array   $attendees
-    ): void {
-        $this->logger->debug('[TeamHub][MeetingService] createCalendarEvent — start', [
-            'teamId' => $teamId, 'app' => Application::APP_ID,
-        ]);
-
-        // Resolve calendar ID via dav_shares
-        $qb  = $this->db->getQueryBuilder();
-        $res = $qb->select('resourceid')
-            ->from('dav_shares')
-            ->where($qb->expr()->eq('type',         $qb->createNamedParameter('calendar')))
-            ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter('principals/circles/' . $teamId)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $row = $res->fetch();
-        $res->closeCursor();
-
-        if (!$row) {
-            throw new \Exception('No calendar connected to this team');
-        }
-        $calendarId = (int)$row['resourceid'];
-
-        // Build iCalendar VEVENT
-        $eventUid = strtoupper(bin2hex(random_bytes(16)));
-        $startDt  = new \DateTime("{$date}T{$startTime}:00");
-        $endDt    = new \DateTime("{$date}T{$endTime}:00");
-        $now      = new \DateTime();
-
-        $dtStamp = $now->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z');
-        $dtStart = (clone $startDt)->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z');
-        $dtEnd   = (clone $endDt)->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z');
-
-        // Build description: Talk URL + notes link
-        $descParts = [];
-        if ($talkUrl !== null) {
-            $descParts[] = 'Talk: ' . $talkUrl;
-        }
-        $descParts[] = 'Meeting notes: ' . $notesUrl;
-        $description = implode('\n', $descParts);
-
-        $ical  = "BEGIN:VCALENDAR\r\n";
-        $ical .= "VERSION:2.0\r\n";
-        $ical .= "PRODID:-//TeamHub//TeamHub//EN\r\n";
-        $ical .= "BEGIN:VEVENT\r\n";
-        $ical .= "UID:{$eventUid}@teamhub\r\n";
-        $ical .= "DTSTAMP:{$dtStamp}\r\n";
-        $ical .= "DTSTART:{$dtStart}\r\n";
-        $ical .= "DTEND:{$dtEnd}\r\n";
-        $ical .= "SUMMARY:" . $this->escapeIcal($title) . "\r\n";
-
-        if ($talkUrl !== null) {
-            // Talk's calendar integration detects scheduled meetings by reading LOCATION.
-            // If user also provided a physical location, combine them.
-            if ($location !== '') {
-                $ical .= "LOCATION:" . $this->escapeIcal($location . ' | ' . $talkUrl) . "\r\n";
-            } else {
-                $ical .= "LOCATION:" . $this->escapeIcal($talkUrl) . "\r\n";
+    private function fetchAgendaCards(string $teamId, int $meetingStartTs): array {
+        // 1. Find board IDs — registry primary, deck_board_acl/deck_acl fallback
+        $boardIds = [];
+        try {
+            foreach ($this->resourceMapper->findActiveByTeamAndApp($teamId, 'deck') as $r) {
+                $boardIds[(int)$r->getResourceId()] = true;
             }
-            // URL field for calendar apps that render a dedicated Join button
-            $ical .= "URL:{$talkUrl}\r\n";
-        } elseif ($location !== '') {
-            $ical .= "LOCATION:" . $this->escapeIcal($location) . "\r\n";
+        } catch (\Throwable) {}
+        foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+            try {
+                $aqb = $this->db->getQueryBuilder();
+                $ares = $aqb->select('board_id')
+                    ->from($aclTable)
+                    ->where($aqb->expr()->eq('type', $aqb->createNamedParameter(7, IQueryBuilder::PARAM_INT)))
+                    ->andWhere($aqb->expr()->eq('participant', $aqb->createNamedParameter($teamId)))
+                    ->executeQuery();
+                while ($arow = $ares->fetch()) {
+                    $boardIds[(int)$arow['board_id']] = true;
+                }
+                $ares->closeCursor();
+            } catch (\Throwable) {}
+        }
+        if (empty($boardIds)) {
+            return [[], []];
         }
 
-        $ical .= "DESCRIPTION:" . $this->escapeIcal(implode("\n", array_map(
-            fn(string $p) => str_replace('\n', "\n", $p), $descParts
-        ))) . "\r\n";
-
-        // ATTACH — notes file share link
-        $ical .= "ATTACH;VALUE=URI:{$notesUrl}\r\n";
-
-        // ORGANIZER — current user
-        $organiserEmail = $this->resolveUserEmail($uid);
-        if ($organiserEmail !== null) {
-            $ical .= "ORGANIZER;CN=" . $this->escapeIcal($uid) . ":MAILTO:{$organiserEmail}\r\n";
+        // 2. Fetch stacks → board_id mapping for URL construction
+        $sqb = $this->db->getQueryBuilder();
+        $sres = $sqb->select('id', 'board_id')
+            ->from('deck_stacks')
+            ->where($sqb->expr()->in('board_id',
+                $sqb->createNamedParameter(array_keys($boardIds), IQueryBuilder::PARAM_INT_ARRAY)))
+            ->executeQuery();
+        $stackToBoard = [];
+        while ($srow = $sres->fetch()) {
+            $stackToBoard[(int)$srow['id']] = (int)$srow['board_id'];
+        }
+        $sres->closeCursor();
+        if (empty($stackToBoard)) {
+            return [[], []];
         }
 
-        // ATTENDEE lines — one per team member
-        foreach ($attendees as $attendee) {
-            $cn    = $this->escapeIcal($attendee['displayName']);
-            $email = $attendee['email'] ?? ($attendee['uid'] . '@noreply.local');
-            $ical .= "ATTENDEE;CN={$cn};PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:{$email}\r\n";
+        // 3. Fetch cards (SELECT * to bypass column introspection — see TimelineService.php
+        // for context on why deck_cards introspection has burned us before)
+        $cqb = $this->db->getQueryBuilder();
+        $cres = $cqb->select('*')
+            ->from('deck_cards')
+            ->where($cqb->expr()->in('stack_id',
+                $cqb->createNamedParameter(array_keys($stackToBoard), IQueryBuilder::PARAM_INT_ARRAY)))
+            ->executeQuery();
+
+        $overdue = [];
+        $unscheduled = [];
+        while ($crow = $cres->fetch()) {
+            // Skip deleted / archived / done cards
+            if (!empty($crow['deleted_at'])) continue;
+            if (!empty($crow['archived']) && (int)$crow['archived'] === 1) continue;
+            $done = $crow['done'] ?? null;
+            if ($done !== null && $done !== '' && $done !== 0 && $done !== '0') continue;
+
+            $cardId  = (int)$crow['id'];
+            $stackId = (int)$crow['stack_id'];
+            $boardId = $stackToBoard[$stackId] ?? 0;
+            $title   = (string)($crow['title'] ?? '');
+            $url     = '/apps/deck/board/' . $boardId . '/card/' . $cardId;
+
+            $dueRaw = $crow['duedate'] ?? null;
+            $dueTs  = 0;
+            if ($dueRaw !== null && $dueRaw !== '' && $dueRaw !== 0 && $dueRaw !== '0') {
+                // Deck stores duedate as Unix int or datetime string. Parse both.
+                $dueTs = is_numeric($dueRaw) ? (int)$dueRaw : (int)strtotime((string)$dueRaw);
+            }
+
+            if ($dueTs > 0) {
+                if ($dueTs < $meetingStartTs) {
+                    $overdue[] = ['title' => $title, 'duedate' => $dueTs, 'url' => $url];
+                }
+                // Cards with a future due date are not flagged at all.
+            } else {
+                $unscheduled[] = ['title' => $title, 'duedate' => 0, 'url' => $url];
+            }
         }
+        $cres->closeCursor();
 
-        $ical .= "END:VEVENT\r\n";
-        $ical .= "END:VCALENDAR\r\n";
+        // Stable order: overdue → most-overdue first; unscheduled → alpha by title
+        usort($overdue, fn($a, $b) => $a['duedate'] <=> $b['duedate']);
+        usort($unscheduled, fn($a, $b) => strcasecmp($a['title'], $b['title']));
 
-        $caldav = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
-        $objUri = strtolower($eventUid) . '.ics';
-        $caldav->createCalendarObject($calendarId, $objUri, $ical);
-
-        $this->logger->debug('[TeamHub][MeetingService] createCalendarEvent — done', [
-            'calendarId' => $calendarId, 'objUri' => $objUri, 'app' => Application::APP_ID,
-        ]);
+        return [$overdue, $unscheduled];
     }
 
-    /** Resolve email address for a user ID from oc_accounts. */
-    private function resolveUserEmail(string $uid): ?string {
-        try {
-            $config = $this->container->get(\OCP\IConfig::class);
-            $email  = $config->getUserValue($uid, 'settings', 'email', '');
-            return $email !== '' ? $email : null;
-        } catch (\Throwable) {
-            return null;
+    /**
+     * Render the `## Proposals` markdown block — decisions still awaiting a
+     * decision (status open or finalized) for this team. Returns '' when
+     * none match.
+     *
+     * $proposalCategories — when non-empty, only proposals whose category
+     * name is in this list are included. Empty means "no filter" (all
+     * categories, including null/uncategorised).
+     *
+     * @param string[] $proposalCategories
+     */
+    private function renderProposalsSection(string $teamId, array $proposalCategories = []): string {
+        $filters = ['status' => ['open', 'finalized']];
+        if (!empty($proposalCategories)) {
+            // DecisionMapper::list uses an IN(...) filter on category, which
+            // excludes NULL rows. That's deliberate here: the user picked
+            // specific named categories, so uncategorised proposals would not
+            // belong in the result set.
+            $filters['category'] = array_values(array_map('strval', $proposalCategories));
         }
+
+        try {
+            $decisions = $this->decisionMapper->list(
+                $teamId,
+                $filters,
+                'recent',
+                null,
+                100
+            );
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MeetingService] renderProposalsSection — fetch failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return '';
+        }
+        if (empty($decisions)) {
+            return '';
+        }
+
+        $urlGenerator = $this->container->get(\OCP\IURLGenerator::class);
+        $base = $urlGenerator->linkToRouteAbsolute('teamhub.page.index');
+
+        $lines = [];
+        foreach ($decisions as $d) {
+            $category = $d->getCategory() ?: '—';
+            $url = $base . '?team=' . rawurlencode($teamId) . '&decision=' . $d->getId();
+            $lines[] = sprintf(
+                '- [%s](%s) — %s',
+                $this->mdEscape($d->getQuestion()),
+                $url,
+                $this->mdEscape($category)
+            );
+        }
+        return "\n## Proposals\n" . implode("\n", $lines) . "\n\n";
+    }
+
+    /**
+     * Escape markdown-significant characters in inline text. Keeps content
+     * inside `[...]` link labels from breaking the link, and prevents user
+     * input like `[abc]` or `_x_` from rendering unexpectedly.
+     */
+    private function mdEscape(string $s): string {
+        return str_replace(
+            ['\\', '[', ']', '(', ')', '`', '*', '_', '<', '>', "\r", "\n"],
+            ['\\\\', '\\[', '\\]', '\\(', '\\)', '\\`', '\\*', '\\_', '\\<', '\\>', ' ', ' '],
+            $s
+        );
     }
 
     /** Sanitize a user-provided filename: strip path separators and dangerous chars. */
@@ -710,6 +874,13 @@ class MeetingService {
     /**
      * Post an agenda request message to the Talk room chat.
      * Uses Talk's internal ChatManager — no loopback HTTP.
+     *
+     * Language: a Talk channel has many members with potentially different
+     * UI languages, so we can't render the message "for each recipient"
+     * (single message, single string). We use the **organizer's** language —
+     * the user who triggered the meeting creation — matching what they'd
+     * have typed themselves. Falls back to the instance default language,
+     * then to English, when no preference is set.
      */
     private function postAgendaRequest(
         string $talkToken,
@@ -720,16 +891,24 @@ class MeetingService {
         string $uid
     ): void {
         $this->logger->debug('[TeamHub][MeetingService] postAgendaRequest — start', [
-            'token' => $talkToken, 'app' => Application::APP_ID,
+            'tokenLen' => strlen($talkToken), 'app' => Application::APP_ID,
         ]);
 
-        $message = sprintf(
-            "📅 Team meeting scheduled: **%s** on %s at %s.\n" .
-            "Please add your agenda items to the meeting notes: %s",
-            $title,
-            $date,
-            $startTime,
-            $notesUrl
+        $config       = $this->container->get(\OCP\IConfig::class);
+        $l10nFactory  = $this->container->get(\OCP\L10N\IFactory::class);
+        $language     = $config->getUserValue($uid, 'core', 'lang', '');
+        if ($language === '') {
+            $language = $config->getSystemValue('default_language', 'en');
+        }
+        $l = $l10nFactory->get(Application::APP_ID, $language);
+
+        // One translation unit so the rendered Markdown structure stays
+        // intact across languages. Numbered placeholders let translators
+        // reorder if their grammar needs to (e.g. "on %2$s at %3$s the
+        // meeting **%1$s** is scheduled" reads naturally in some locales).
+        $message = $l->t(
+            "📅 Team meeting scheduled: **%1\$s** on %2\$s at %3\$s.\nPlease add your agenda items to the meeting notes: %4\$s",
+            [$title, $date, $startTime, $notesUrl]
         );
 
         $posted = $this->talkService->postChatMessage($talkToken, $uid, $message);
@@ -739,14 +918,5 @@ class MeetingService {
                 'app' => Application::APP_ID,
             ]);
         }
-    }
-
-    /** Escape special characters in iCalendar text property values. */
-    private function escapeIcal(string $text): string {
-        return str_replace(
-            ["\r\n", "\n",  "\r",  ',',   ';',   '\\'],
-            ['\\n',  '\\n', '\\n', '\\,', '\\;', '\\\\'],
-            $text
-        );
     }
 }

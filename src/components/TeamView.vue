@@ -34,8 +34,7 @@
                 @invite="showInviteModal = true"
                 @schedule-meeting="showAddEvent = true"
                 @add-event="showAddEvent = true"
-                @suggest-meeting="showSuggestMeeting = true"
-                @team-meeting="showTeamMeeting = true"
+                @add-meeting="showAddMeeting = true"
                 @add-deck-task="showAddTask = true"
                 @add-personal-task="showAddPersonalTask = true"
                 @create-page="openCreatePage"
@@ -244,20 +243,18 @@
             :calendars="resources.calendar || []"
             @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()" />
 
-        <SuggestMeetingWizard v-if="showSuggestMeeting"
+        <SuggestMeetingWizard v-if="showAddMeeting || showSuggestMeeting"
             :team-id="currentTeamId"
             :calendars="resources.calendar || []"
+            :resources="resources"
             @created="$refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()"
-            @close="showSuggestMeeting = false" />
+            @close="showAddMeeting = false; showSuggestMeeting = false" />
 
         <DeleteEventsModal v-if="showDeleteEvents"
             :team-id="currentTeamId"
             :calendars="resources.calendar || []"
             @close="showDeleteEvents = false"
             @deleted="$refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()" />
-
-        <TeamMeetingModal v-if="showTeamMeeting" :team-id="currentTeamId" :resources="resources"
-            @close="showTeamMeeting = false; $refs.widgetGrid?.refreshCalendar()" />
 
         <AddTaskModal v-if="showAddTask"
             :boards="resources.deck || []"
@@ -310,7 +307,6 @@ import InviteMemberModal from './InviteMemberModal.vue'
 import AddEventModal from './AddEventModal.vue'
 import SuggestMeetingWizard from './SuggestMeetingWizard.vue'
 import DeleteEventsModal from './DeleteEventsModal.vue'
-import TeamMeetingModal from './TeamMeetingModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
@@ -367,7 +363,6 @@ export default {
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
         AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
-        TeamMeetingModal,
         TeamPresenceView,
         TeamDecisionsView,
         ComposeDecisionModal,
@@ -403,7 +398,12 @@ export default {
             deletePageTarget:   null,
             showInviteModal:     false,
             showAddEvent:        false,
+            // showSuggestMeeting is the legacy approver-meeting flow
+            // (TeamDecisionsView opens the wizard with lockAttendees=true).
+            // showAddMeeting is the new widget action (full Add Meeting wizard).
+            // Both render the same SuggestMeetingWizard component.
             showSuggestMeeting:  false,
+            showAddMeeting:      false,
             showDeleteEvents:    false,
             calendarView:        'dayGridMonth',  // current calendar view mode
             calendarDate:        new Date(),      // current navigation date for the calendar iframe
@@ -442,7 +442,6 @@ export default {
                 deck:      { created: true, due: true, completed: true },
                 decisions: { proposed: true, decided: true },
             },
-            showTeamMeeting:     false,
             showAddTask:         false,
             // Multi-resource picker state (§10.1)
             showDeckPicker:      false,
@@ -550,6 +549,11 @@ export default {
          * Prev / date label / next / Today, then Add event, Delete events, optionally Suggest.
          */
         calendarEmbedActions() {
+            // Each action provides:
+            //   label      — full descriptive name; used for tooltip + aria-label
+            //   shortLabel — one-verb visible label under the icon (3.81.10).
+            //                Defaults to label when not set (Previous/Next/Today —
+            //                already single words).
             return [
                 {
                     id:    'cal-prev',
@@ -576,23 +580,29 @@ export default {
                     icon:  CalendarToday,
                 },
                 {
-                    id:    'add-event',
-                    // TRANSLATORS: button label in the calendar embed toolbar — opens the add-event modal
-                    label: t('teamhub', 'Add event'),
-                    icon:  CalendarPlus,
+                    id:         'add-event',
+                    // TRANSLATORS: tooltip / accessible name for the add-event button in the calendar toolbar
+                    label:      t('teamhub', 'Add event'),
+                    // TRANSLATORS: short visible label under the add-event icon; single verb (full label is on hover/screen-reader)
+                    shortLabel: t('teamhub', 'Add'),
+                    icon:       CalendarPlus,
                 },
                 {
-                    id:    'delete-events',
-                    // TRANSLATORS: button label in the calendar embed toolbar — opens a modal to select and delete events
-                    label: t('teamhub', 'Delete events'),
-                    icon:  CalendarRemove,
+                    id:         'delete-events',
+                    // TRANSLATORS: tooltip / accessible name for the delete-events button in the calendar toolbar
+                    label:      t('teamhub', 'Delete events'),
+                    // TRANSLATORS: short visible label under the delete-events icon; single verb (full label is on hover/screen-reader)
+                    shortLabel: t('teamhub', 'Remove'),
+                    icon:       CalendarRemove,
                 },
                 ...(this.presenceModuleEnabled && this.presenceConfig.presence_enabled
                     ? [{
-                        id:    'suggest-meeting',
-                        // TRANSLATORS: button label in the calendar embed toolbar — opens the suggest-meeting-times wizard
-                        label: t('teamhub', 'Suggest meeting times'),
-                        icon:  CalendarClock,
+                        id:         'suggest-meeting',
+                        // TRANSLATORS: tooltip / accessible name for the suggest-meeting-times button in the calendar toolbar
+                        label:      t('teamhub', 'Suggest meeting times'),
+                        // TRANSLATORS: short visible label under the suggest-meeting-times icon; single verb (full label is on hover/screen-reader)
+                        shortLabel: t('teamhub', 'Suggest'),
+                        icon:       CalendarClock,
                     }]
                     : []),
             ]
@@ -1758,7 +1768,8 @@ export default {
 
 .teamhub-page-delete-option--selected {
     border-color: var(--color-error);
-    background: color-mix(in srgb, var(--color-error) 6%, transparent);
+    background: var(--color-error);
+    color: var(--color-error-text);
 }
 
 .teamhub-page-delete-radio { display: none; }

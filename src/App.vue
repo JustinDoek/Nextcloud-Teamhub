@@ -34,7 +34,11 @@
                         <AccountGroup :size="20" />
                     </template>
                     <template v-if="team.unread > 0" #counter>
-                        <NcCounterBubble type="highlighted">{{ team.unread }}</NcCounterBubble>
+                        <!-- NcCounterBubble reads its number from the `count` prop, NOT
+                             from the default slot. Passing it via `{{ }}` silently sets
+                             the prop to undefined → Intl.NumberFormat formats it as
+                             the literal string "NaN" (root cause of the 3.81.x bug). -->
+                        <NcCounterBubble type="highlighted" :count="team.unread" />
                     </template>
                 </NcAppNavigationItem>
 
