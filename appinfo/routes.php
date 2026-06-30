@@ -148,6 +148,8 @@ return [
         ['name' => 'maintenance#removeGhostMember',         'url' => '/api/v1/admin/maintenance/ghost-members/{userId}',            'verb' => 'DELETE'],
         ['name' => 'maintenance#resetTeamConfig',           'url' => '/api/v1/admin/maintenance/reset-team-config/{teamId}',        'verb' => 'POST'],
         ['name' => 'maintenance#checkConfigIntegrity',      'url' => '/api/v1/admin/maintenance/config-check',                      'verb' => 'GET'],
+        ['name' => 'maintenance#listTeamsForUser',          'url' => '/api/v1/admin/maintenance/users/{userId}/teams',              'verb' => 'GET'],
+        ['name' => 'maintenance#removeUserFromTeams',       'url' => '/api/v1/admin/maintenance/users/{userId}/remove-from-teams', 'verb' => 'POST'],
 
         // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver

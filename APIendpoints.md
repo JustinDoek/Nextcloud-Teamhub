@@ -260,4 +260,90 @@ Create a team meeting — writes a notes file in the team's `Meetings/` folder, 
 
 ---
 
+## Audit-tab "Find teams for a user" endpoints (added 3.84.1)
+
+Drives the new admin panel that finds every team a user belongs to and supports bulk removal. Backed by `MaintenanceService::listTeamsForUser` and `MaintenanceService::adminRemoveUserFromTeam`.
+
+### `GET /api/v1/admin/maintenance/users/{userId}/teams`
+
+Return every user-created team the given NC user is a member of (direct or via group / sub-team), with role, owner, and source classification.
+
+**Auth**: NC admin required. Gated twice — `#[AuthorizedAdminSetting(settings: AdminSettings::class)]` attribute + `MaintenanceService::requireNcAdmin()` inside the service.
+
+**Path params**: `userId` — the NC uid of the user to look up.
+
+**Response 200**:
+```json
+{
+  "teams": [
+    {
+      "teamId":           "abc123...",
+      "teamName":         "Sugar",
+      "teamDescription":  "Honey ice tea",
+      "ownerUid":         "JDoek",
+      "ownerDisplayName": "Doek, Justin",
+      "role":             "Member",
+      "level":            1,
+      "isOwner":          false,
+      "source":           "group",
+      "sourceName":       "Sugar 2",
+      "removable":        false
+    }
+  ]
+}
+```
+
+Field reference:
+- `source` — `"direct"` (direct member row in `circles_member` user_type=1), `"group"` (inherited via a group attached to the team), `"team"` (inherited via a sub-team), or `"inherited"` (cache says they belong but the source can't be traced — rare).
+- `sourceName` — display name of the granting group or sub-team. `null` for direct memberships.
+- `removable` — `true` only when `source === "direct"` AND `!isOwner`. The UI uses this to enable / disable the per-row checkbox.
+
+**Failures**: `400` empty `userId`, `404` user not found in NC, `500` other.
+
+### `POST /api/v1/admin/maintenance/users/{userId}/remove-from-teams`
+
+Remove the user from each of the given teams (direct memberships only, non-owner only). Per-row result so partial successes are visible.
+
+**Auth**: NC admin required, same dual gate as the GET above.
+
+**Path params**: `userId`.
+
+**Body** (form-encoded — the audit-tab UI sends `URLSearchParams` with repeated `teamIds[]` entries):
+```
+teamIds[]=abc123...&teamIds[]=def456...
+```
+
+**Response 200**:
+```json
+{
+  "results": [
+    { "teamId": "abc123...", "ok": true },
+    { "teamId": "def456...", "ok": false, "error": "Cannot remove the team owner — reassign ownership first in the Maintenance tab" }
+  ]
+}
+```
+
+Per-team behaviour:
+- Refuses to remove the team owner (level≥9) with the message above.
+- Refuses to remove a non-direct member (no row in `circles_member` user_type=1) with "User is not a direct member of this team — remove them from the source group or sub-team instead".
+- On success: deletes the row, rebuilds `circles_membership` via `MembershipService::onUpdate`, emits a `member.removed_by_admin` audit event with the admin's UID as actor.
+
+**Failures**: `400` empty `userId` / empty `teamIds`, `404` user not found. Per-team failures land in `results[].error` rather than as an HTTP error so the batch can keep going.
+
+---
+
+## Unified-search providers (added 3.84.3 / pre-existing)
+
+NC's unified search calls `IProvider::search` on every registered provider. TeamHub registers three:
+
+| Provider | ID | `getOrder` | Surfaces |
+|---|---|---|---|
+| `TeamSearchProvider` (new in 3.84.3) | `teamhub-teams` | 49 | Teams the searcher is a member of (direct or via group / sub-team), filtered to user-created teams (`circles_circle.source=16`), pending-deletion excluded. Result entry deep-links to `/apps/teamhub/#/team/{teamId}`. |
+| `MessageSearchProvider` (pre-existing) | `teamhub-messages` | 50 | Messages in teams the searcher belongs to. |
+| `DecisionSearchProvider` (pre-existing) | `teamhub-decisions` | 51 | Decisions in teams the searcher belongs to. |
+
+Order values are hardcoded in each provider's `getOrder()`. NC has no admin UI to reorder providers — to change ordering, edit the values in source.
+
+---
+
 *Update this file in place at the end of any session that adds, removes, or changes an endpoint.*

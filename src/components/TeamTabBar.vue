@@ -223,7 +223,7 @@
              ref="moreContainer"
              class="teamhub-tab-more"
              @mouseenter="openMoreMenu"
-             @mouseleave="moreMenuOpen = false">
+             @mouseleave="scheduleMoreMenuClose">
             <button
                 class="teamhub-tab teamhub-tab-more-trigger"
                 :class="{ active: activeInOverflow }"
@@ -238,7 +238,9 @@
                  class="teamhub-tab-more-menu"
                  role="menu"
                  :aria-label="t('teamhub', 'More tabs')"
-                 :style="{ top: moreMenuTop + 'px', left: moreMenuLeft + 'px' }">
+                 :style="{ top: moreMenuTop + 'px', left: moreMenuLeft + 'px' }"
+                 @mouseenter="openMoreMenu"
+                 @mouseleave="scheduleMoreMenuClose">
                 <template v-for="tab in overflowTabs">
                     <a v-if="tab.key.startsWith('link-') && !tab.isNcRelative"
                        :key="'more-' + tab.key"
@@ -369,6 +371,10 @@ export default {
         if (this._resizeObserver) {
             this._resizeObserver.disconnect()
             this._resizeObserver = null
+        }
+        if (this._moreMenuCloseTimer) {
+            clearTimeout(this._moreMenuCloseTimer)
+            this._moreMenuCloseTimer = null
         }
         document.removeEventListener('click', this._onDocumentClick)
         window.removeEventListener('resize', this._onMoreReposition)
@@ -653,8 +659,29 @@ export default {
         },
 
         openMoreMenu() {
+            // Cancel any pending close — the cursor came back over the
+            // trigger or onto the menu after starting to leave.
+            if (this._moreMenuCloseTimer) {
+                clearTimeout(this._moreMenuCloseTimer)
+                this._moreMenuCloseTimer = null
+            }
             this.repositionMoreMenu()
             this.moreMenuOpen = true
+        },
+
+        scheduleMoreMenuClose() {
+            // 4px gap between the trigger and the position:fixed menu means
+            // the cursor briefly leaves both elements while moving from one
+            // to the other. A short delay lets the menu's own @mouseenter
+            // cancel this close. 180ms is enough for normal cursor speeds
+            // without feeling laggy on intentional dismiss.
+            if (this._moreMenuCloseTimer) {
+                clearTimeout(this._moreMenuCloseTimer)
+            }
+            this._moreMenuCloseTimer = setTimeout(() => {
+                this.moreMenuOpen = false
+                this._moreMenuCloseTimer = null
+            }, 180)
         },
 
         toggleMoreMenu() {

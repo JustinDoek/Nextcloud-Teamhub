@@ -395,4 +395,75 @@ class MaintenanceController extends Controller {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Per-user team overview (Audit tab — "Find teams for a user")
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/v1/admin/maintenance/users/{userId}/teams
+     * Return every user-team the given NC user belongs to, with role, owner,
+     * and the source of membership (direct / group / sub-team).
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function listTeamsForUser(string $userId): JSONResponse {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return new JSONResponse(['error' => 'userId is required'], Http::STATUS_BAD_REQUEST);
+        }
+        if ($this->userManager->get($userId) === null) {
+            return new JSONResponse(['error' => 'User not found'], Http::STATUS_NOT_FOUND);
+        }
+
+        try {
+            $rows = $this->maintenanceService->listTeamsForUser($userId);
+            return new JSONResponse(['teams' => $rows]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[MaintenanceController] listTeamsForUser failed', [
+                'userId' => $userId, 'error' => $e->getMessage(),
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/users/{userId}/remove-from-teams
+     * Body: { teamIds: string[] }
+     * Removes the user from each given team (direct memberships only,
+     * non-owner only). Returns per-team outcome so the UI can show partial
+     * successes and per-row failure messages.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function removeUserFromTeams(string $userId, array $teamIds = []): JSONResponse {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return new JSONResponse(['error' => 'userId is required'], Http::STATUS_BAD_REQUEST);
+        }
+        if ($this->userManager->get($userId) === null) {
+            return new JSONResponse(['error' => 'User not found'], Http::STATUS_NOT_FOUND);
+        }
+        if (empty($teamIds)) {
+            return new JSONResponse(['error' => 'teamIds is required'], Http::STATUS_BAD_REQUEST);
+        }
+
+        $results = [];
+        foreach ($teamIds as $teamId) {
+            $teamId = is_string($teamId) ? trim($teamId) : '';
+            if ($teamId === '') {
+                continue;
+            }
+            try {
+                $this->maintenanceService->adminRemoveUserFromTeam($teamId, $userId);
+                $results[] = ['teamId' => $teamId, 'ok' => true];
+            } catch (\Throwable $e) {
+                $this->logger->warning('[MaintenanceController] removeUserFromTeams: per-team failure', [
+                    'teamId' => $teamId, 'userId' => $userId, 'error' => $e->getMessage(),
+                ]);
+                $results[] = ['teamId' => $teamId, 'ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        return new JSONResponse(['results' => $results]);
+    }
 }

@@ -1683,4 +1683,350 @@ class MaintenanceService {
 
         return $issues;
     }
+
+    // -------------------------------------------------------------------------
+    // Per-user team overview (Audit tab — "Find teams for a user")
+    // -------------------------------------------------------------------------
+
+    /**
+     * Resolve the NC user's personal "single" circle unique_id, which is what
+     * circles_membership keys effective access by. Returns null if the user
+     * has no single circle (very rare — usually only system users).
+     */
+    private function resolveUserSingleId(string $userId): ?string {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('m.single_id')
+            ->from('circles_member', 'm')
+            ->innerJoin('m', 'circles_circle', 'c', $qb->expr()->eq('c.unique_id', 'm.circle_id'))
+            ->where($qb->expr()->eq('m.user_id',  $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('c.source',    $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1);
+        $res = $qb->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+        return $row && !empty($row['single_id']) ? (string)$row['single_id'] : null;
+    }
+
+    /**
+     * Return every user-created team the given NC user belongs to, with role,
+     * owner, and how membership is established (direct vs. via group/sub-team).
+     *
+     * Used by the Audit tab "Find teams for a user" panel to support offboarding
+     * and role-change workflows. Inherited memberships are returned but flagged
+     * as not removable from this UI — admin must remove the user from the source
+     * group/team instead.
+     *
+     * Result shape per row:
+     *   teamId, teamName, teamDescription, ownerUid, ownerDisplayName,
+     *   role ('Owner'|'Admin'|'Moderator'|'Member'), level (int),
+     *   isOwner (bool), source ('direct'|'group'|'team'),
+     *   sourceName (string|null — only when source != 'direct'),
+     *   removable (bool — true only when direct AND !isOwner)
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listTeamsForUser(string $userId): array {
+        $this->requireNcAdmin();
+
+        if ($userId === '') {
+            throw new \InvalidArgumentException('userId is required');
+        }
+
+        // Verify the user exists in NC so we fail fast with a clear error
+        if ($this->userManager->get($userId) === null) {
+            throw new \Exception('User not found: ' . $userId);
+        }
+
+        $singleId = $this->resolveUserSingleId($userId);
+        if ($singleId === null) {
+            // No single circle = no effective memberships
+            return [];
+        }
+
+        // Step 1: all user-teams the user has effective access to.
+        // circles_membership.single_id = the user's single_id when they have access
+        // to circles_membership.circle_id.
+        $qb = $this->db->getQueryBuilder();
+        $qb->select(
+                'c.unique_id AS team_id',
+                'c.name AS team_name',
+                'c.display_name AS team_display_name',
+                'c.sanitized_name AS team_sanitized_name',
+                'c.description AS team_description',
+            )
+            ->from('circles_membership', 'ms')
+            ->innerJoin('ms', 'circles_circle', 'c', $qb->expr()->eq('c.unique_id', 'ms.circle_id'))
+            ->where($qb->expr()->eq('ms.single_id', $qb->createNamedParameter($singleId)))
+            // source=16 = user-created team. Excludes personal, group, system,
+            // mail-share and app circles in one shot.
+            ->andWhere($qb->expr()->eq('c.source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+        $res = $qb->executeQuery();
+        $teams = [];
+        while ($row = $res->fetch()) {
+            $teamId = (string)$row['team_id'];
+            $teams[$teamId] = [
+                'team_id'          => $teamId,
+                'name'             => (string)$row['team_name'],
+                'display_name'     => (string)($row['team_display_name'] ?? ''),
+                'sanitized_name'   => (string)($row['team_sanitized_name'] ?? ''),
+                'description'      => (string)($row['team_description'] ?? ''),
+            ];
+        }
+        $res->closeCursor();
+
+        if (empty($teams)) {
+            return [];
+        }
+
+        $teamIds = array_keys($teams);
+
+        // Step 2: owner per team (level=9, user_type=1)
+        $oQb = $this->db->getQueryBuilder();
+        $oRes = $oQb->select('circle_id', 'user_id')
+            ->from('circles_member')
+            ->where($oQb->expr()->in('circle_id', $oQb->createNamedParameter($teamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+            ->andWhere($oQb->expr()->eq('level',     $oQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($oQb->expr()->eq('user_type', $oQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($oQb->expr()->eq('status',    $oQb->createNamedParameter('Member')))
+            ->executeQuery();
+        $owners = [];
+        while ($row = $oRes->fetch()) {
+            $cid = (string)$row['circle_id'];
+            if (!isset($owners[$cid])) {
+                $owners[$cid] = (string)$row['user_id'];
+            }
+        }
+        $oRes->closeCursor();
+
+        // Resolve owner display names once
+        $ownerUids  = array_unique(array_values($owners));
+        $ownerNames = [];
+        foreach ($ownerUids as $uid) {
+            $u = $this->userManager->get($uid);
+            $ownerNames[$uid] = $u !== null ? ($u->getDisplayName() ?: $uid) : $uid;
+        }
+
+        // Step 3: direct membership row for THIS user, per team (gives role/level)
+        $dQb  = $this->db->getQueryBuilder();
+        $dRes = $dQb->select('circle_id', 'level')
+            ->from('circles_member')
+            ->where($dQb->expr()->in('circle_id', $dQb->createNamedParameter($teamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+            ->andWhere($dQb->expr()->eq('user_id',  $dQb->createNamedParameter($userId)))
+            ->andWhere($dQb->expr()->eq('user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($dQb->expr()->eq('status',    $dQb->createNamedParameter('Member')))
+            ->executeQuery();
+        $directLevels = [];
+        while ($row = $dRes->fetch()) {
+            $directLevels[(string)$row['circle_id']] = (int)$row['level'];
+        }
+        $dRes->closeCursor();
+
+        // Step 4: for teams where membership is inherited, find the source.
+        // For each such team, list group (user_type=2) and sub-team (user_type=16)
+        // members of the team and check whether the user is in any of them via
+        // circles_membership.
+        $inheritedTeamIds = array_values(array_diff($teamIds, array_keys($directLevels)));
+        $sourcesPerTeam = []; // teamId => [['kind' => 'group'|'team', 'name' => str], ...]
+
+        if (!empty($inheritedTeamIds)) {
+            // Get every group/sub-team member row for these teams
+            $sQb  = $this->db->getQueryBuilder();
+            $sRes = $sQb->select('m.circle_id', 'm.single_id', 'm.user_id', 'm.user_type',
+                                 'c.name', 'c.display_name', 'c.sanitized_name')
+                ->from('circles_member', 'm')
+                ->leftJoin('m', 'circles_circle', 'c', $sQb->expr()->eq('c.unique_id', 'm.single_id'))
+                ->where($sQb->expr()->in('m.circle_id', $sQb->createNamedParameter($inheritedTeamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                ->andWhere($sQb->expr()->in('m.user_type', $sQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)))
+                ->andWhere($sQb->expr()->eq('m.status',    $sQb->createNamedParameter('Member')))
+                ->executeQuery();
+
+            $candidates = []; // teamId => [['single_id' => ..., 'kind' => ..., 'name' => ...], ...]
+            $candidateSingleIds = [];
+            while ($row = $sRes->fetch()) {
+                $tid       = (string)$row['circle_id'];
+                $singleIdC = (string)($row['single_id'] ?? '');
+                if ($singleIdC === '') {
+                    continue;
+                }
+                $kind = ((int)$row['user_type'] === 2) ? 'group' : 'team';
+                // Prefer the sub-circle's resolved display name; for groups,
+                // circles_member.user_id holds the human label used by Circles.
+                $name = '';
+                if (!empty($row['display_name'])) {
+                    $name = (string)$row['display_name'];
+                } elseif (!empty($row['sanitized_name'])) {
+                    $name = (string)$row['sanitized_name'];
+                } elseif (!empty($row['user_id'])) {
+                    $name = (string)$row['user_id'];
+                } elseif (!empty($row['name'])) {
+                    $name = (string)$row['name'];
+                }
+                $candidates[$tid][] = ['single_id' => $singleIdC, 'kind' => $kind, 'name' => $name];
+                $candidateSingleIds[$singleIdC] = true;
+            }
+            $sRes->closeCursor();
+
+            // Which of those sub-circles does the user actually belong to?
+            if (!empty($candidateSingleIds)) {
+                $cQb  = $this->db->getQueryBuilder();
+                $cRes = $cQb->select('circle_id')
+                    ->from('circles_membership')
+                    ->where($cQb->expr()->eq('single_id', $cQb->createNamedParameter($singleId)))
+                    ->andWhere($cQb->expr()->in('circle_id', $cQb->createNamedParameter(array_keys($candidateSingleIds), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                    ->executeQuery();
+                $userInSubCircles = [];
+                while ($row = $cRes->fetch()) {
+                    $userInSubCircles[(string)$row['circle_id']] = true;
+                }
+                $cRes->closeCursor();
+
+                foreach ($candidates as $tid => $list) {
+                    foreach ($list as $cand) {
+                        if (isset($userInSubCircles[$cand['single_id']])) {
+                            $sourcesPerTeam[$tid][] = ['kind' => $cand['kind'], 'name' => $cand['name']];
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 5: assemble
+        $out = [];
+        foreach ($teams as $tid => $t) {
+            $displayName = $t['display_name'] !== ''
+                ? $t['display_name']
+                : ($t['sanitized_name'] !== ''
+                    ? $t['sanitized_name']
+                    : (str_starts_with($t['name'], 'app:circles:')
+                        ? substr($t['name'], strlen('app:circles:'))
+                        : $t['name']));
+
+            $ownerUid = $owners[$tid] ?? null;
+            $isOwner  = $ownerUid !== null && $ownerUid === $userId;
+
+            if (isset($directLevels[$tid])) {
+                $level = $directLevels[$tid];
+                $role  = match (true) {
+                    $level >= 9 => 'Owner',
+                    $level >= 8 => 'Admin',
+                    $level >= 4 => 'Moderator',
+                    default     => 'Member',
+                };
+                $source     = 'direct';
+                $sourceName = null;
+                $removable  = !$isOwner;
+            } else {
+                // Inherited — pick the first identified source (most teams will
+                // have exactly one). UI only needs a hint of why the row exists.
+                $first = $sourcesPerTeam[$tid][0] ?? null;
+                $level = 1; // Member-equivalent for display purposes
+                $role  = 'Member';
+                if ($first !== null) {
+                    $source     = $first['kind']; // 'group' or 'team'
+                    $sourceName = $first['name'];
+                } else {
+                    // Cache says they're in but we couldn't trace the source —
+                    // very rare. Mark as unknown-inherited so UI still grays it out.
+                    $source     = 'inherited';
+                    $sourceName = null;
+                }
+                $removable  = false;
+            }
+
+            $out[] = [
+                'teamId'           => $tid,
+                'teamName'         => $displayName,
+                'teamDescription'  => $t['description'],
+                'ownerUid'         => $ownerUid,
+                'ownerDisplayName' => $ownerUid !== null ? ($ownerNames[$ownerUid] ?? $ownerUid) : null,
+                'role'             => $role,
+                'level'            => $level,
+                'isOwner'          => $isOwner,
+                'source'           => $source,
+                'sourceName'       => $sourceName,
+                'removable'        => $removable,
+            ];
+        }
+
+        usort($out, fn ($a, $b) => strcasecmp($a['teamName'], $b['teamName']));
+
+        return $out;
+    }
+
+    /**
+     * Remove a user's DIRECT membership from a single team, from NC admin context.
+     *
+     * Differs from MemberService::removeMember in that the caller is gated by
+     * NC admin (not team admin/moderator). Refuses to remove the team owner —
+     * the admin must reassign ownership in the Maintenance tab first. Refuses
+     * to remove inherited memberships — those have no direct row to delete; the
+     * user must be removed from the granting group or sub-team instead.
+     *
+     * Rebuilds the circles_membership cache for the team (so share pickers
+     * reflect the change immediately) and writes a teamhub-internal audit event
+     * so the action shows up in the per-team audit log.
+     *
+     * @throws \Exception when the user is the owner, not a direct member, or
+     *                    the caller is not an NC admin.
+     */
+    public function adminRemoveUserFromTeam(string $teamId, string $userId): void {
+        $this->requireNcAdmin();
+
+        if ($teamId === '' || $userId === '') {
+            throw new \InvalidArgumentException('teamId and userId are required');
+        }
+
+        // Look up the direct member row to get level (and verify it exists)
+        $mQb  = $this->db->getQueryBuilder();
+        $mRes = $mQb->select('level')
+            ->from('circles_member')
+            ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
+            ->andWhere($mQb->expr()->eq('user_id',  $mQb->createNamedParameter($userId)))
+            ->andWhere($mQb->expr()->eq('user_type', $mQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $mRow = $mRes->fetch();
+        $mRes->closeCursor();
+
+        if (!$mRow) {
+            throw new \Exception('User is not a direct member of this team — remove them from the source group or sub-team instead');
+        }
+        if ((int)$mRow['level'] >= 9) {
+            throw new \Exception('Cannot remove the team owner — reassign ownership first in the Maintenance tab');
+        }
+
+        // Delete the direct member row
+        $delQb = $this->db->getQueryBuilder();
+        $delQb->delete('circles_member')
+            ->where($delQb->expr()->eq('circle_id', $delQb->createNamedParameter($teamId)))
+            ->andWhere($delQb->expr()->eq('user_id',  $delQb->createNamedParameter($userId)))
+            ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeStatement();
+
+        // Rebuild the circles_membership cache so share pickers update.
+        try {
+            $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
+            $membershipService->onUpdate($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[MaintenanceService] adminRemoveUserFromTeam: cache rebuild failed', [
+                'teamId' => $teamId, 'userId' => $userId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // Audit log — surfaces in the per-team audit log shown elsewhere in this tab.
+        $actor = $this->userSession->getUser();
+        $this->auditService->log(
+            $teamId,
+            'member.removed_by_admin',
+            $actor !== null ? $actor->getUID() : null,
+            'user',
+            $userId,
+            ['source' => 'admin_audit_panel'],
+        );
+
+        $this->logger->info('[MaintenanceService] adminRemoveUserFromTeam: removed', [
+            'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
+        ]);
+    }
 }

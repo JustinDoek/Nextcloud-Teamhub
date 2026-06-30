@@ -70,36 +70,59 @@
 
                 <!-- Actions always pinned to card bottom -->
                 <div class="team-card__actions">
-                    <!-- Direct member: can leave -->
-                    <NcButton
-                        v-if="team.isMember && team.isDirectMember"
-                        variant="error"
-                        :disabled="actionInProgress[team.id]"
-                        @click="leaveTeam(team)">
-                        <template #icon>
-                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
-                            <ExitToApp v-else :size="20" />
-                        </template>
-                        {{
-                            // TRANSLATORS: button label to leave (depart from) a team the user is currently a member of
-                            t('teamhub', 'Leave')
-                        }}
-                    </NcButton>
-
-                    <!-- Indirect member (via group/team): Leave disabled with tooltip -->
-                    <span
-                        v-else-if="team.isMember && !team.isDirectMember"
-                        class="team-card__indirect-label"
-                        :title="t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.')">
-                        <NcButton variant="tertiary" :disabled="true">
-                            <template #icon><ExitToApp :size="20" /></template>
+                    <!-- Direct member: Open + Leave -->
+                    <template v-if="team.isMember && team.isDirectMember">
+                        <NcButton
+                            variant="secondary"
+                            :disabled="actionInProgress[team.id]"
+                            @click="openTeam(team)">
+                            <template #icon>
+                                <OpenInApp :size="20" />
+                            </template>
                             {{
-                                // TRANSLATORS: disabled button label; user cannot leave because they were added via a group
+                                // TRANSLATORS: button label to open this team and view its content
+                                t('teamhub', 'Open')
+                            }}
+                        </NcButton>
+                        <NcButton
+                            variant="error"
+                            :disabled="actionInProgress[team.id]"
+                            @click="leaveTeam(team)">
+                            <template #icon>
+                                <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
+                                <ExitToApp v-else :size="20" />
+                            </template>
+                            {{
+                                // TRANSLATORS: button label to leave (depart from) a team the user is currently a member of
                                 t('teamhub', 'Leave')
                             }}
                         </NcButton>
-                        <span class="team-card__via-badge">{{ t('teamhub', 'via group') }}</span>
-                    </span>
+                    </template>
+
+                    <!-- Indirect member (via group/team): Open + disabled Leave with tooltip -->
+                    <template v-else-if="team.isMember && !team.isDirectMember">
+                        <NcButton
+                            variant="secondary"
+                            :disabled="actionInProgress[team.id]"
+                            @click="openTeam(team)">
+                            <template #icon>
+                                <OpenInApp :size="20" />
+                            </template>
+                            {{ t('teamhub', 'Open') }}
+                        </NcButton>
+                        <span
+                            class="team-card__indirect-label"
+                            :title="t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.')">
+                            <NcButton variant="tertiary" :disabled="true">
+                                <template #icon><ExitToApp :size="20" /></template>
+                                {{
+                                    // TRANSLATORS: disabled button label; user cannot leave because they were added via a group
+                                    t('teamhub', 'Leave')
+                                }}
+                            </NcButton>
+                            <span class="team-card__via-badge">{{ t('teamhub', 'via group') }}</span>
+                        </span>
+                    </template>
 
                     <!-- Non-member open circle: Join immediately -->
                     <NcButton
@@ -144,6 +167,7 @@ import { NcButton, NcLoadingIcon, NcTextField } from '@nextcloud/vue'
 import AccountGroup    from 'vue-material-design-icons/AccountGroup.vue'
 import AccountQuestion from 'vue-material-design-icons/AccountQuestion.vue'
 import ExitToApp       from 'vue-material-design-icons/ExitToApp.vue'
+import OpenInApp       from 'vue-material-design-icons/OpenInApp.vue'
 import Plus            from 'vue-material-design-icons/Plus.vue'
 import Magnify         from 'vue-material-design-icons/Magnify.vue'
 import ViewGrid        from 'vue-material-design-icons/ViewGrid.vue'
@@ -158,6 +182,7 @@ export default {
         AccountGroup,
         AccountQuestion,
         ExitToApp,
+        OpenInApp,
         Plus,
         Magnify,
         ViewGrid,
@@ -230,6 +255,10 @@ export default {
             } finally {
                 this.actionInProgress[team.id] = false
             }
+        },
+
+        openTeam(team) {
+            this.$emit('team-opened', team.id)
         },
 
         async leaveTeam(team) {

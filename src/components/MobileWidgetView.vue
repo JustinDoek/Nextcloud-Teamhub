@@ -443,13 +443,15 @@ export default {
                             icon: 'ContentCopy',
                             handler: () => this.$emit('copy-link'),
                         },
-                        {
+                    ]
+                    if (this.isTeamModerator) {
+                        actions.push({
                             key: 'invite',
                             label: t('teamhub', 'Invite user'),
                             icon: 'AccountPlus',
                             handler: () => this.$emit('invite'),
-                        },
-                    ]
+                        })
+                    }
                     if (this.isTeamAdmin) {
                         actions.push({
                             key: 'manage-team',

@@ -49,9 +49,15 @@
                         <Plus :size="18" class="invite-modal__result-add" />
                     </li>
                 </ul>
-                <p v-else-if="query.length >= 2" class="invite-modal__empty">
-                    {{ t('teamhub', 'No users or groups found') }}
-                </p>
+                <div v-else-if="query.length >= 2" class="invite-modal__empty">
+                    <p class="invite-modal__empty-headline">
+                        {{ t('teamhub', 'No users or groups found') }}
+                    </p>
+                    <!-- TRANSLATORS: hint shown when a user-search returns zero results — explains that SSO-provisioned users (Microsoft Entra, SAML, OIDC) only appear after their first Nextcloud login -->
+                    <p class="invite-modal__empty-hint">
+                        {{ t('teamhub', 'If this colleague was just added via single sign-on (Microsoft Entra, SAML, or OIDC), they need to sign in to Nextcloud once before they can be added to a team.') }}
+                    </p>
+                </div>
             </div>
 
             <!-- Staged -->
@@ -304,6 +310,19 @@ export default {
     text-align: center;
     margin: 0;
     padding: 8px;
+}
+
+.invite-modal__empty-headline {
+    margin: 0 0 4px 0;
+    font-weight: 600;
+    color: var(--color-main-text);
+}
+
+.invite-modal__empty-hint {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--color-text-maxcontrast);
 }
 
 .invite-modal__searching {

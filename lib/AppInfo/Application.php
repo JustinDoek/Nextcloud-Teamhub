@@ -15,6 +15,7 @@ use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
 use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
+use OCA\TeamHub\Search\TeamSearchProvider;
 use OCA\TeamHub\Service\Suggestion\MeetingSuggestionService;
 use OCA\TeamHub\Service\Suggestion\PersonalAndTeamBusyProvider;
 use OCA\TeamHub\Service\Suggestion\TeamCalendarBusyProvider;
@@ -62,7 +63,8 @@ class Application extends App implements IBootstrap {
             );
         }
 
-        // Register TeamHub messages and decisions with NC unified search.
+        // Register TeamHub teams, messages, and decisions with NC unified search.
+        $context->registerSearchProvider(TeamSearchProvider::class);
         $context->registerSearchProvider(MessageSearchProvider::class);
         $context->registerSearchProvider(DecisionSearchProvider::class);
 

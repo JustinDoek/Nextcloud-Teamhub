@@ -952,12 +952,217 @@
         <!-- ─────────────────────────────────────────────────────────────────
              Audit tab
              ───────────────────────────────────────────────────────────────── -->
-        <NcSettingsSection
+        <div
             v-show="activeTab === 'audit'"
             id="tab-panel-audit"
             role="tabpanel"
-            :name="t('teamhub', 'Audit log')"
-            :description="t('teamhub', 'Per-team activity log capturing membership, file, and share events for governance and compliance.')">
+            class="teamhub-admin-panel">
+
+            <!-- ── Find teams for a user ───────────────────────────────────── -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Find teams for a user')"
+                :description="t('teamhub', 'Search for a Nextcloud user to see every team they belong to and their role in each. Useful when a colleague changes jobs and you need to remove them from — or add them to — the right teams. Direct memberships can be removed from here; memberships inherited through a group or sub-team must be removed from that source.')">
+
+                <!-- User search -->
+                <div class="audit-user-lookup">
+                    <NcTextField
+                        v-model="audit_userQuery"
+                        :label="t('teamhub', 'Search user')"
+                        :placeholder="t('teamhub', 'Type a username or display name…')"
+                        class="audit-user-lookup__search"
+                        @input="onAuditUserQueryInput"
+                        @keydown.enter.prevent="runAuditUserSearchNow">
+                        <template #icon>
+                            <MagnifyIcon :size="18" />
+                        </template>
+                    </NcTextField>
+
+                    <ul v-if="audit_userResults.length" class="admin-owner-results audit-user-lookup__results">
+                        <li
+                            v-for="u in audit_userResults"
+                            :key="u.uid"
+                            class="admin-owner-result"
+                            @mousedown.prevent="selectAuditUser(u)">
+                            {{ u.displayName }}
+                            <span class="admin-owner-result__uid">({{ u.uid }})</span>
+                        </li>
+                    </ul>
+                    <p v-else-if="audit_userSearching" class="admin-section-hint">
+                        <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
+                    </p>
+                </div>
+
+                <!-- Selected user header + clear -->
+                <div v-if="audit_selectedUser" class="audit-user-selected">
+                    <span class="audit-user-selected__label">{{ t('teamhub', 'Showing teams for:') }}</span>
+                    <strong>{{ audit_selectedUser.displayName }}</strong>
+                    <span class="admin-owner-result__uid">({{ audit_selectedUser.uid }})</span>
+                    <NcButton
+                        variant="tertiary"
+                        :aria-label="t('teamhub', 'Clear selected user')"
+                        @click="clearAuditUser">
+                        {{ t('teamhub', 'Clear') }}
+                    </NcButton>
+                </div>
+
+                <!-- Loading -->
+                <div v-if="audit_teamsLoading" class="admin-loading">
+                    <NcLoadingIcon :size="24" />
+                    <span>{{ t('teamhub', 'Loading teams…') }}</span>
+                </div>
+
+                <!-- Error -->
+                <div v-else-if="audit_teamsError" class="admin-error">
+                    {{ audit_teamsError }}
+                </div>
+
+                <!-- Empty state for the selected user -->
+                <div v-else-if="audit_selectedUser && audit_teamRows.length === 0" class="admin-empty">
+                    {{ t('teamhub', 'This user is not a member of any team.') }}
+                </div>
+
+                <!-- Result table -->
+                <template v-else-if="audit_selectedUser && audit_teamRows.length">
+                    <div
+                        class="maint-grid audit-user-grid"
+                        role="table"
+                        :aria-label="t('teamhub', 'Teams this user belongs to')"
+                        aria-live="polite">
+
+                        <!-- Header row -->
+                        <div class="maint-grid__head" role="row">
+                            <div class="maint-grid__cell audit-user-grid__cell--check" role="columnheader">
+                                <input
+                                    type="checkbox"
+                                    :checked="audit_allRemovableSelected"
+                                    :indeterminate.prop="audit_someRemovableSelected && !audit_allRemovableSelected"
+                                    :disabled="!audit_anyRemovable"
+                                    :aria-label="t('teamhub', 'Select all removable teams')"
+                                    @change="toggleSelectAllRemovable">
+                            </div>
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Team') }}</div>
+                            <!-- TRANSLATORS: column header showing the user's role in a team (Owner, Admin, Moderator, Member) -->
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Role') }}</div>
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Owner') }}</div>
+                            <!-- TRANSLATORS: column header explaining how the user got into this team (direct, via group, via sub-team) -->
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Membership') }}</div>
+                        </div>
+
+                        <!-- Data rows -->
+                        <div
+                            v-for="row in audit_teamRows"
+                            :key="row.teamId"
+                            class="maint-grid__row"
+                            role="row">
+
+                            <!-- Checkbox cell -->
+                            <div class="maint-grid__cell audit-user-grid__cell--check" role="cell">
+                                <input
+                                    type="checkbox"
+                                    :checked="audit_selectedTeamIds.includes(row.teamId)"
+                                    :disabled="!row.removable"
+                                    :aria-label="t('teamhub', 'Select {team}', { team: row.teamName })"
+                                    @change="toggleAuditRow(row)">
+                            </div>
+
+                            <!-- Team name -->
+                            <div class="maint-grid__cell" role="cell">
+                                <span class="maint-team-name">{{ row.teamName }}</span>
+                                <div v-if="row.teamDescription" class="audit-user-grid__desc">
+                                    {{ row.teamDescription }}
+                                </div>
+                            </div>
+
+                            <!-- Role chip -->
+                            <div class="maint-grid__cell" role="cell">
+                                <span
+                                    class="audit-user-grid__role"
+                                    :class="`audit-user-grid__role--${row.role.toLowerCase()}`">
+                                    {{ auditRoleLabel(row.role) }}
+                                </span>
+                            </div>
+
+                            <!-- Owner -->
+                            <div class="maint-grid__cell" role="cell">
+                                <span v-if="row.ownerUid" class="maint-owner-name">
+                                    {{ row.ownerDisplayName || row.ownerUid }}
+                                    <span class="maint-owner-uid">({{ row.ownerUid }})</span>
+                                </span>
+                                <span v-else class="maint-no-owner">{{ t('teamhub', 'No owner') }}</span>
+                            </div>
+
+                            <!-- Membership source / blocking reason -->
+                            <div class="maint-grid__cell" role="cell">
+                                <template v-if="row.isOwner">
+                                    <!-- TRANSLATORS: shown next to an Owner row to explain why the remove checkbox is disabled -->
+                                    <span class="audit-user-grid__note audit-user-grid__note--warn">
+                                        {{ t('teamhub', 'Owner — reassign in the Maintenance tab first') }}
+                                    </span>
+                                </template>
+                                <template v-else-if="row.source === 'direct'">
+                                    <!-- TRANSLATORS: badge meaning the user was added to this team individually, not via a group or sub-team -->
+                                    <span class="audit-user-grid__source audit-user-grid__source--direct">
+                                        {{ t('teamhub', 'Direct') }}
+                                    </span>
+                                </template>
+                                <template v-else-if="row.source === 'group'">
+                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
+                                        {{ t('teamhub', 'Via group: {name}', { name: row.sourceName || '?' }) }}
+                                    </span>
+                                </template>
+                                <template v-else-if="row.source === 'team'">
+                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
+                                        {{ t('teamhub', 'Via team: {name}', { name: row.sourceName || '?' }) }}
+                                    </span>
+                                </template>
+                                <template v-else>
+                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
+                                        {{ t('teamhub', 'Inherited (source unknown)') }}
+                                    </span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action bar -->
+                    <div class="audit-user-actions">
+                        <span class="audit-user-actions__summary">
+                            {{ n('teamhub', '{n} team selected', '{n} teams selected', audit_selectedTeamIds.length, { n: audit_selectedTeamIds.length }) }}
+                        </span>
+                        <NcButton
+                            variant="error"
+                            :disabled="audit_selectedTeamIds.length === 0 || audit_removeBusy"
+                            @click="openAuditRemoveConfirm">
+                            <template #icon>
+                                <NcLoadingIcon v-if="audit_removeBusy" :size="18" />
+                                <AccountRemoveIcon v-else :size="18" />
+                            </template>
+                            {{ t('teamhub', 'Remove from selected teams') }}
+                        </NcButton>
+                    </div>
+                </template>
+
+                <!-- Confirm dialog -->
+                <NcDialog
+                    v-if="audit_removeConfirmOpen"
+                    :name="t('teamhub', 'Remove user from teams?')"
+                    :buttons="auditRemoveDialogButtons"
+                    size="normal"
+                    @closing="audit_removeConfirmOpen = false">
+                    <p>
+                        {{ n('teamhub',
+                              'You are about to remove {user} from {n} team. This cannot be undone.',
+                              'You are about to remove {user} from {n} teams. This cannot be undone.',
+                              audit_selectedTeamIds.length,
+                              { user: audit_selectedUser ? audit_selectedUser.displayName : '', n: audit_selectedTeamIds.length }) }}
+                    </p>
+                </NcDialog>
+            </NcSettingsSection>
+
+            <!-- ── Audit log (existing) ────────────────────────────────────── -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Audit log')"
+                :description="t('teamhub', 'Per-team activity log capturing membership, file, and share events for governance and compliance.')">
 
             <!-- Always-visible info banner: explains hourly cadence -->
             <div class="audit-banner audit-banner--info">
@@ -1156,7 +1361,8 @@
                     </NcButton>
                 </div>
             </div>
-        </NcSettingsSection>
+            </NcSettingsSection>
+        </div>
 
         <!-- ──────────────────────────────────────────────────────────────────
              Archive tab
@@ -1633,12 +1839,24 @@ export default {
             auditEventCatalogue: [
                 'team.created', 'team.deleted', 'team.config_changed',
                 'team.owner_transferred', 'team.app_enabled', 'team.app_disabled',
-                'member.joined', 'member.left', 'member.removed', 'member.level_changed',
+                'member.joined', 'member.left', 'member.removed', 'member.removed_by_admin', 'member.level_changed',
                 'invite.sent',
                 'join.requested', 'join.approved', 'join.rejected',
                 'file.created', 'file.edited', 'file.deleted',
                 'share.created', 'share.permissions_changed', 'share.deleted',
             ],
+            // ── Audit tab — Find teams for a user ──────────────────────────
+            audit_userQuery: '',
+            audit_userResults: [],
+            audit_userSearching: false,
+            audit_userSearchTimer: null,
+            audit_selectedUser: null,    // { uid, displayName }
+            audit_teamRows: [],          // rows from listTeamsForUser
+            audit_teamsLoading: false,
+            audit_teamsError: null,
+            audit_selectedTeamIds: [],
+            audit_removeBusy: false,
+            audit_removeConfirmOpen: false,
             // ── Archive tab ────────────────────────────────────────────────
             archiveSettings: {
                 archiveBeforeDelete: false,
@@ -1709,6 +1927,35 @@ export default {
             if (isNaN(n)) return false
             if (n < this.auditRetention.min || n > this.auditRetention.max) return false
             return n !== this.auditRetention.retention_days
+        },
+
+        // ── Audit tab — Find teams for a user ────────────────────────────
+        audit_removableRows() {
+            return this.audit_teamRows.filter(r => r.removable)
+        },
+        audit_anyRemovable() {
+            return this.audit_removableRows.length > 0
+        },
+        audit_allRemovableSelected() {
+            return this.audit_anyRemovable
+                && this.audit_removableRows.every(r => this.audit_selectedTeamIds.includes(r.teamId))
+        },
+        audit_someRemovableSelected() {
+            return this.audit_removableRows.some(r => this.audit_selectedTeamIds.includes(r.teamId))
+        },
+        auditRemoveDialogButtons() {
+            return [
+                {
+                    label: this.t('teamhub', 'Cancel'),
+                    type: 'secondary',
+                    callback: () => { this.audit_removeConfirmOpen = false },
+                },
+                {
+                    label: this.t('teamhub', 'Remove'),
+                    type: 'error',
+                    callback: () => { this.executeAuditRemove() },
+                },
+            ]
         },
     },
     watch: {
@@ -2204,6 +2451,169 @@ export default {
                 showError(msg ? this.t('teamhub', 'Failed to assign owner: {error}', { error: msg }) : this.t('teamhub', 'Failed to assign owner'))
             } finally {
                 this.assigningOwner = false
+            }
+        },
+
+        // ------------------------------------------------------------------
+        // Audit tab — Find teams for a user
+        // ------------------------------------------------------------------
+
+        auditRoleLabel(role) {
+            switch (role) {
+                // TRANSLATORS: a team role — the user who owns/controls the team
+                case 'Owner':     return this.t('teamhub', 'Owner')
+                // TRANSLATORS: a team role with administrator privileges within the team
+                case 'Admin':     return this.t('teamhub', 'Admin')
+                // TRANSLATORS: a team role that can moderate but not administer
+                case 'Moderator': return this.t('teamhub', 'Moderator')
+                // TRANSLATORS: a regular team member with no special privileges
+                case 'Member':    return this.t('teamhub', 'Member')
+                default:          return role
+            }
+        },
+
+        onAuditUserQueryInput() {
+            // v-model has already updated audit_userQuery; just (re)schedule the
+            // debounced search. Mirrors maintenance-tab onOwnerSearch.
+            clearTimeout(this.audit_userSearchTimer)
+            if (!this.audit_userQuery || this.audit_userQuery.length < 1) {
+                this.audit_userResults = []
+                this.audit_userSearching = false
+                return
+            }
+            this.audit_userSearching = true
+            this.audit_userSearchTimer = setTimeout(() => this.fetchAuditUserResults(), 300)
+        },
+
+        // Enter-key flush: cancel any pending debounce and search immediately.
+        runAuditUserSearchNow() {
+            clearTimeout(this.audit_userSearchTimer)
+            if (!this.audit_userQuery || this.audit_userQuery.length < 1) {
+                return
+            }
+            this.audit_userSearching = true
+            this.fetchAuditUserResults()
+        },
+
+        async fetchAuditUserResults() {
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/users/search'),
+                    { params: { q: this.audit_userQuery } },
+                )
+                this.audit_userResults = Array.isArray(data) ? data : []
+            } catch (e) {
+                this.audit_userResults = []
+            } finally {
+                this.audit_userSearching = false
+            }
+        },
+
+        async selectAuditUser(user) {
+            this.audit_selectedUser     = { uid: user.uid, displayName: user.displayName }
+            this.audit_userQuery        = ''
+            this.audit_userResults      = []
+            this.audit_selectedTeamIds  = []
+            this.audit_teamRows         = []
+            this.audit_teamsError       = null
+            await this.loadAuditTeamsForUser()
+        },
+
+        async loadAuditTeamsForUser() {
+            if (!this.audit_selectedUser) return
+            this.audit_teamsLoading = true
+            this.audit_teamsError   = null
+            try {
+                const uid = encodeURIComponent(this.audit_selectedUser.uid)
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/users/${uid}/teams`),
+                )
+                this.audit_teamRows = Array.isArray(data?.teams) ? data.teams : []
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                this.audit_teamsError = msg
+                    ? this.t('teamhub', 'Failed to load teams: {error}', { error: msg })
+                    : this.t('teamhub', 'Failed to load teams')
+            } finally {
+                this.audit_teamsLoading = false
+            }
+        },
+
+        clearAuditUser() {
+            this.audit_selectedUser    = null
+            this.audit_teamRows        = []
+            this.audit_selectedTeamIds = []
+            this.audit_teamsError      = null
+        },
+
+        toggleAuditRow(row) {
+            if (!row.removable) return
+            const idx = this.audit_selectedTeamIds.indexOf(row.teamId)
+            if (idx >= 0) {
+                this.audit_selectedTeamIds.splice(idx, 1)
+            } else {
+                this.audit_selectedTeamIds.push(row.teamId)
+            }
+        },
+
+        toggleSelectAllRemovable() {
+            if (this.audit_allRemovableSelected) {
+                this.audit_selectedTeamIds = []
+            } else {
+                this.audit_selectedTeamIds = this.audit_removableRows.map(r => r.teamId)
+            }
+        },
+
+        openAuditRemoveConfirm() {
+            if (this.audit_selectedTeamIds.length === 0) return
+            this.audit_removeConfirmOpen = true
+        },
+
+        async executeAuditRemove() {
+            this.audit_removeConfirmOpen = false
+            if (!this.audit_selectedUser || this.audit_selectedTeamIds.length === 0) return
+            this.audit_removeBusy = true
+            try {
+                const uid    = encodeURIComponent(this.audit_selectedUser.uid)
+                const params = new URLSearchParams()
+                this.audit_selectedTeamIds.forEach(id => params.append('teamIds[]', id))
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/users/${uid}/remove-from-teams`),
+                    params.toString(),
+                    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+                )
+                const results = Array.isArray(data?.results) ? data.results : []
+                const ok   = results.filter(r => r.ok)
+                const fail = results.filter(r => !r.ok)
+
+                if (ok.length > 0) {
+                    showSuccess(
+                        this.n('teamhub',
+                            'Removed from {n} team',
+                            'Removed from {n} teams',
+                            ok.length,
+                            { n: ok.length }),
+                    )
+                }
+                fail.forEach(r => {
+                    const teamRow = this.audit_teamRows.find(t => t.teamId === r.teamId)
+                    const name    = teamRow ? teamRow.teamName : r.teamId
+                    showError(this.t('teamhub', 'Failed to remove from {team}: {error}', {
+                        team:  name,
+                        error: r.error || this.t('teamhub', 'unknown error'),
+                    }))
+                })
+
+                // Reload so the table reflects the change
+                this.audit_selectedTeamIds = []
+                await this.loadAuditTeamsForUser()
+            } catch (e) {
+                const msg = e?.response?.data?.error || ''
+                showError(msg
+                    ? this.t('teamhub', 'Failed to remove: {error}', { error: msg })
+                    : this.t('teamhub', 'Failed to remove'))
+            } finally {
+                this.audit_removeBusy = false
             }
         },
 
@@ -3955,6 +4365,125 @@ export default {
 .ghost-team-name {
     font-size: 13px;
     flex: 1;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Audit tab — Find teams for a user
+   ───────────────────────────────────────────────────────────────── */
+
+.audit-user-lookup {
+    position: relative;
+    margin-bottom: 14px;
+    max-width: 480px;
+}
+
+.audit-user-lookup__results {
+    margin-top: 4px;
+}
+
+.audit-user-selected {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border-radius: var(--border-radius);
+    background: var(--color-background-hover);
+    border: 1px solid var(--color-border);
+    margin-bottom: 14px;
+}
+
+.audit-user-selected__label {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+}
+
+/* Override the base maint-grid 6-column template (which would otherwise
+   give Role the 52px "members" slot and Membership the 100px "created"
+   slot, squashing chip content). Target __head and __row directly because
+   that's where the parent .maint-grid CSS sets display: grid. */
+.audit-user-grid.maint-grid > .maint-grid__head,
+.audit-user-grid.maint-grid > .maint-grid__row {
+    grid-template-columns:
+        44px                    /* checkbox */
+        minmax(160px, 2.2fr)    /* team name + optional description */
+        110px                   /* role chip */
+        minmax(170px, 1.4fr)    /* owner */
+        minmax(150px, 1.8fr);   /* membership / source chip */
+}
+
+.audit-user-grid__cell--check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.audit-user-grid__desc {
+    color: var(--color-text-maxcontrast);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.audit-user-grid__role {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--color-background-dark);
+    color: var(--color-main-text);
+}
+
+.audit-user-grid__role--owner {
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+
+.audit-user-grid__role--admin {
+    background: var(--color-warning);
+    color: var(--color-warning-text);
+}
+
+.audit-user-grid__source {
+    display: inline-block;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: var(--color-background-dark);
+    color: var(--color-main-text);
+}
+
+.audit-user-grid__source--direct {
+    background: var(--color-success);
+    color: var(--color-success-text);
+}
+
+.audit-user-grid__source--inherited {
+    background: var(--color-background-darker, var(--color-background-dark));
+    color: var(--color-text-maxcontrast);
+}
+
+.audit-user-grid__note--warn {
+    color: var(--color-warning-text);
+    background: var(--color-warning);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+.audit-user-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border);
+}
+
+.audit-user-actions__summary {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
 }
 
 </style>

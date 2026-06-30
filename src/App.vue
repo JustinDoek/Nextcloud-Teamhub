@@ -79,7 +79,8 @@
 
             <BrowseTeamsView
                 v-else-if="activeView === 'browse'"
-                @team-joined="onTeamJoined" />
+                @team-joined="onTeamJoined"
+                @team-opened="selectTeamFromSidebar" />
 
             <NcEmptyContent
                 v-else-if="!currentTeamId"

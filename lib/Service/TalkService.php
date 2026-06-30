@@ -1356,4 +1356,202 @@ class TalkService {
         }
     }
 
+    /**
+     * Reconcile the Talk room for $teamId against the team's EFFECTIVE membership.
+     *
+     * Unlike reconcileTalkRoomMembers (which considers direct members only) this
+     * walks circles_membership — Circles' denormalised cache — so users reaching
+     * the team via an attached group or sub-team are treated as members.
+     *
+     * Behaviour:
+     *   - Adds a talk_attendees row for every effective member missing one.
+     *   - Deletes the row for every user attendee no longer in the effective set.
+     *   - Skips room OWNER rows (participant_type=1) so the room cannot be
+     *     orphaned.
+     *   - Idempotent — safe to run on any cadence; the hourly cron job is the
+     *     primary caller.
+     *
+     * Returns an array of counts for logging / observability:
+     *   { added: int, removed: int }
+     *
+     * Non-fatal — any failure is logged and an empty result returned. The
+     * caller (background job) keeps iterating over remaining teams.
+     *
+     * @return array{added: int, removed: int}
+     */
+    public function reconcileEffectiveTalkRoomMembers(string $teamId): array {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return ['added' => 0, 'removed' => 0];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            // ── 1. Find the Talk room connected to this team ──────────────────
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('room_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                // No Talk room connected — nothing to reconcile.
+                return ['added' => 0, 'removed' => 0];
+            }
+            $roomId = (int)$row['room_id'];
+
+            // ── 2. Compute effective member set from circles_membership ──────
+            // circles_membership.single_id resolves to a NC uid by joining
+            // circles_member where m.circle_id = single_id AND m.user_type=1
+            // (the single_id IS the unique_id of the user's personal circle).
+            $eQb  = $db->getQueryBuilder();
+            $eRes = $eQb->select('m.user_id')
+                ->from('circles_membership', 'ms')
+                ->innerJoin('ms', 'circles_member', 'm', $eQb->expr()->andX(
+                    $eQb->expr()->eq('m.circle_id',  'ms.single_id'),
+                    $eQb->expr()->eq('m.user_type',  $eQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                ))
+                ->where($eQb->expr()->eq('ms.circle_id', $eQb->createNamedParameter($teamId)))
+                ->executeQuery();
+            $effective = [];
+            while ($eRow = $eRes->fetch()) {
+                $uid = (string)($eRow['user_id'] ?? '');
+                if ($uid !== '') {
+                    $effective[$uid] = true;
+                }
+            }
+            $eRes->closeCursor();
+
+            // Safety net: circles_membership can lag for very freshly added
+            // direct members. Also fold in the direct membership rows.
+            $dQb  = $db->getQueryBuilder();
+            $dRes = $dQb->select('user_id')
+                ->from('circles_member')
+                ->where($dQb->expr()->eq('circle_id', $dQb->createNamedParameter($teamId)))
+                ->andWhere($dQb->expr()->eq('user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($dQb->expr()->eq('status',    $dQb->createNamedParameter('Member')))
+                ->executeQuery();
+            while ($dRow = $dRes->fetch()) {
+                $uid = (string)($dRow['user_id'] ?? '');
+                if ($uid !== '') {
+                    $effective[$uid] = true;
+                }
+            }
+            $dRes->closeCursor();
+
+            // ── 3. Current talk_attendees user rows for this room ────────────
+            $aQb  = $db->getQueryBuilder();
+            $aRes = $aQb->select('actor_id', 'participant_type')
+                ->from('talk_attendees')
+                ->where($aQb->expr()->eq('room_id',
+                    $aQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($aQb->expr()->eq('actor_type', $aQb->createNamedParameter('users')))
+                ->executeQuery();
+            $currentByUid = [];
+            while ($aRow = $aRes->fetch()) {
+                $uid = (string)($aRow['actor_id'] ?? '');
+                if ($uid !== '') {
+                    $currentByUid[$uid] = (int)($aRow['participant_type'] ?? 0);
+                }
+            }
+            $aRes->closeCursor();
+
+            // ── 4. Add missing attendees ─────────────────────────────────────
+            $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
+            $added = 0;
+            foreach (array_keys($effective) as $uid) {
+                if (isset($currentByUid[$uid])) {
+                    continue;
+                }
+                $iQb = $db->getQueryBuilder();
+                $iQb->insert('talk_attendees')
+                    ->setValue('room_id',          $iQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->setValue('actor_type',       $iQb->createNamedParameter('users'))
+                    ->setValue('actor_id',         $iQb->createNamedParameter($uid))
+                    ->setValue('display_name',     $iQb->createNamedParameter(''))
+                    ->setValue('participant_type', $iQb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+
+                foreach ([
+                    'favorite'               => 0,
+                    'notification_level'     => 0,
+                    'notification_calls'     => 0,
+                    'last_joined_call'       => 0,
+                    'last_read_message'      => 0,
+                    'last_mention_message'   => 0,
+                    'last_mention_direct'    => 0,
+                    'in_call'                => 0,
+                    'permissions'            => 0,
+                    'publishing_permissions' => 0,
+                    'access_token'           => '',
+                    'remote_id'              => '',
+                    'phone_number'           => '',
+                    'phone_states'           => '',
+                ] as $col => $val) {
+                    if (in_array($col, $attendeeCols, true)) {
+                        $iQb->setValue($col, $iQb->createNamedParameter($val));
+                    }
+                }
+                try {
+                    $iQb->executeStatement();
+                    $added++;
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers: insert failed', [
+                        'teamId' => $teamId, 'roomId' => $roomId, 'uid' => $uid,
+                        'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            // ── 5. Remove orphans (skip room owners) ─────────────────────────
+            $removed = 0;
+            foreach ($currentByUid as $uid => $pType) {
+                if ($pType === 1) {
+                    continue; // never evict a room owner
+                }
+                if (isset($effective[$uid])) {
+                    continue; // still a member
+                }
+                try {
+                    $rQb = $db->getQueryBuilder();
+                    $rQb->delete('talk_attendees')
+                        ->where($rQb->expr()->eq('room_id',
+                            $rQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($rQb->expr()->eq('actor_type', $rQb->createNamedParameter('users')))
+                        ->andWhere($rQb->expr()->eq('actor_id',   $rQb->createNamedParameter($uid)))
+                        ->andWhere($rQb->expr()->neq('participant_type',
+                            $rQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->executeStatement();
+                    $removed++;
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers: delete failed', [
+                        'teamId' => $teamId, 'roomId' => $roomId, 'uid' => $uid,
+                        'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+
+            if ($added > 0 || $removed > 0) {
+                $this->logger->info('[TalkService] reconcileEffectiveTalkRoomMembers: drift reconciled', [
+                    'teamId' => $teamId, 'roomId' => $roomId,
+                    'added'  => $added, 'removed' => $removed,
+                    'effective' => count($effective), 'before' => count($currentByUid),
+                    'app' => Application::APP_ID,
+                ]);
+            }
+
+            return ['added' => $added, 'removed' => $removed];
+
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(),
+                'app' => Application::APP_ID,
+            ]);
+            return ['added' => 0, 'removed' => 0];
+        }
+    }
+
 }

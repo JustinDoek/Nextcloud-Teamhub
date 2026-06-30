@@ -563,18 +563,88 @@ class ActivityService {
             }
         }
 
-        // Build iCalendar VEVENT string
-        $uid     = strtoupper(bin2hex(random_bytes(16)));
+        // Build iCalendar VEVENT string.
+        //
+        // UID format: RFC 4122 UUIDv4 (lowercase hex, dashed). We previously
+        // emitted "<32-hex>@teamhub" with a fake @-suffix domain. NC Calendar's
+        // event editor "Availability will be checked" indicator never resolved
+        // for those events (issue #41) while it did for NC's own events. NC
+        // Calendar uses the bare UUID format and may parse the @-suffix as a
+        // scheduling host, silently failing on the unresolvable "@teamhub".
+        // Switching to a bare RFC 4122 UUID matches the format NC Calendar
+        // writes itself.
+        $bytes   = random_bytes(16);
+        $bytes[6] = chr(ord($bytes[6]) & 0x0f | 0x40); // UUID v4 (random)
+        $bytes[8] = chr(ord($bytes[8]) & 0x3f | 0x80); // variant 10xx
+        $hex     = bin2hex($bytes);
+        $uid     = substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' .
+                   substr($hex, 12, 4) . '-' . substr($hex, 16, 4) . '-' .
+                   substr($hex, 20, 12);
         $startDt = new \DateTime($start);
         $endDt   = new \DateTime($end);
         $now     = new \DateTime();
         $dtStamp = $now->format('Ymd\\THis\\Z');
-        $dtStart = $startDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z');
-        $dtEnd   = $endDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z');
+
+        // Timezone-aware DTSTART/DTEND emission. NC Calendar's editor may
+        // not run its room-availability resolver for UTC-only events
+        // (Issue #41 investigation). For EU CET/CEST zones we emit a
+        // VTIMEZONE block and TZID-parameterised local-time DTSTART/DTEND
+        // matching NC Calendar's own emit. Other zones fall back to the
+        // pre-existing UTC `Z`-suffix form (no VTIMEZONE block).
+        $userTz = '';
+        try {
+            $userTz = (string)$this->container->get(\OCP\IConfig::class)
+                ->getUserValue($user->getUID(), 'core', 'timezone', '');
+        } catch (\Throwable) {
+        }
+        $cetCestZones = [
+            'Europe/Amsterdam', 'Europe/Andorra', 'Europe/Belgrade',
+            'Europe/Berlin', 'Europe/Bratislava', 'Europe/Brussels',
+            'Europe/Budapest', 'Europe/Copenhagen', 'Europe/Gibraltar',
+            'Europe/Ljubljana', 'Europe/Luxembourg', 'Europe/Madrid',
+            'Europe/Malta', 'Europe/Monaco', 'Europe/Oslo',
+            'Europe/Paris', 'Europe/Podgorica', 'Europe/Prague',
+            'Europe/Rome', 'Europe/San_Marino', 'Europe/Sarajevo',
+            'Europe/Skopje', 'Europe/Stockholm', 'Europe/Tirane',
+            'Europe/Vaduz', 'Europe/Vatican', 'Europe/Vienna',
+            'Europe/Warsaw', 'Europe/Zagreb', 'Europe/Zurich',
+        ];
+        $useTzid    = $userTz !== '' && in_array($userTz, $cetCestZones, true);
+        $vtimezone  = '';
+        $dtStartFmt = "DTSTART:{$startDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z')}";
+        $dtEndFmt   = "DTEND:{$endDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z')}";
+        if ($useTzid) {
+            try {
+                $tz         = new \DateTimeZone($userTz);
+                $dtStartLoc = (clone $startDt)->setTimezone($tz)->format('Ymd\\THis');
+                $dtEndLoc   = (clone $endDt)->setTimezone($tz)->format('Ymd\\THis');
+                $dtStartFmt = "DTSTART;TZID={$userTz}:{$dtStartLoc}";
+                $dtEndFmt   = "DTEND;TZID={$userTz}:{$dtEndLoc}";
+                // Standard EU DST rules — all CET/CEST zones share these
+                // transitions. RFC 5545 §3.6.5 permits a single VTIMEZONE
+                // per VCALENDAR component; we emit one per event.
+                $vtimezone  = "BEGIN:VTIMEZONE\r\nTZID:{$userTz}\r\n"
+                    . "BEGIN:DAYLIGHT\r\nTZNAME:CEST\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n"
+                    . "DTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\n"
+                    . "BEGIN:STANDARD\r\nTZNAME:CET\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n"
+                    . "DTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\n"
+                    . "END:VTIMEZONE\r\n";
+            } catch (\Throwable) {
+                // Unknown / invalid timezone — fall back to UTC emission.
+                $useTzid    = false;
+                $vtimezone  = '';
+                $dtStartFmt = "DTSTART:{$startDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z')}";
+                $dtEndFmt   = "DTEND:{$endDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z')}";
+            }
+        }
 
         $ical  = "BEGIN:VCALENDAR\r\n";
         $ical .= "VERSION:2.0\r\n";
         $ical .= "PRODID:-//TeamHub//TeamHub//EN\r\n";
+        $ical .= "CALSCALE:GREGORIAN\r\n";
+        if ($vtimezone !== '') {
+            $ical .= $vtimezone;
+        }
         // When a room is being booked we need iTIP scheduling to fire so
         // the resource backend (e.g. RoomVox) receives the invite and can
         // accept/decline. iTIP requires ORGANIZER + at least one ATTENDEE
@@ -761,10 +831,17 @@ class ActivityService {
         }
 
         $ical .= "BEGIN:VEVENT\r\n";
-        $ical .= "UID:{$uid}@teamhub\r\n";
+        $ical .= "CREATED:{$dtStamp}\r\n";
         $ical .= "DTSTAMP:{$dtStamp}\r\n";
-        $ical .= "DTSTART:{$dtStart}\r\n";
-        $ical .= "DTEND:{$dtEnd}\r\n";
+        $ical .= "LAST-MODIFIED:{$dtStamp}\r\n";
+        $ical .= "UID:{$uid}\r\n";
+        $ical .= "{$dtStartFmt}\r\n";
+        $ical .= "{$dtEndFmt}\r\n";
+        // TRANSP:OPAQUE marks the event as time-blocking — the default per
+        // RFC 5545 §3.8.2.7, but emitting it explicitly matches what NC
+        // Calendar writes. Investigating #41: NC Calendar's editor may gate
+        // its availability resolver on the presence of this property.
+        $ical .= "TRANSP:OPAQUE\r\n";
         $ical .= "SUMMARY:" . $this->escapeIcalText($title) . "\r\n";
         if ($useScheduling) {
             // Two required compliance lines for any scheduled iTIP event:
@@ -787,17 +864,16 @@ class ActivityService {
             // scheduling plugin treats events without an organiser-attendee
             // as malformed and can refuse to deliver the iTIP message.
             //
-            // SCHEDULE-AGENT=CLIENT on the organiser's line (RFC 6638 §7.1):
-            // tells Sabre "the client handles scheduling delivery for this
-            // attendee, don't do anything for them yourself." Without this,
-            // when a non-organiser team member creates the event, Sabre
-            // attempts to materialise the event a SECOND time into the
-            // calendar we just wrote to (as scheduling delivery to the
-            // organiser-as-attendee), and Sabre rejects with "Calendar
-            // object with uid already exists in this calendar collection".
-            // Per-attendee parameter: invitees DON'T get this — we want
-            // Sabre to deliver to their personal calendars.
-            $ical .= "ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;ROLE=CHAIR;SCHEDULE-AGENT=CLIENT;CN={$organiserCn}:mailto:{$organiserEmail}\r\n";
+            // SCHEDULE-AGENT note (#41 investigation): we previously emitted
+            // SCHEDULE-AGENT=CLIENT here to stop Sabre re-materialising the
+            // event into the organiser's calendar (because we'd already
+            // written it). That was needed when writes went through direct
+            // CalDavBackend. With 3.82.6's ICreateFromString path, Sabre's
+            // scheduling plugin handles the organiser correctly — and the
+            // CLIENT value may be confusing NC Calendar's freebusy resolver
+            // (#41 reporter feedback). Defaults to SERVER (RFC 6638 §7.1)
+            // when omitted.
+            $ical .= "ATTENDEE;CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;ROLE=CHAIR;CN={$organiserCn}:mailto:{$organiserEmail}\r\n";
             // Per-invitee attendees. Standard iTIP shape: NEEDS-ACTION
             // PARTSTAT (each invitee gets to accept/decline in their own
             // calendar), RSVP=TRUE so reply emails are expected, ROLE=
@@ -832,10 +908,18 @@ class ActivityService {
         //   1. If a room was picked, its display name is the location.
         //      Combined with the Talk URL when present (Talk reads the
         //      LOCATION field to surface the meeting in its panel).
+        //      When a room is picked we deliberately IGNORE the user-typed
+        //      $location field: it may carry stale state from a previous
+        //      selection (Issue #41 — LOCATION ended up as the previously
+        //      picked room's UID instead of the actually-booked room). Fall
+        //      back to the room's email when $roomName is empty, matching
+        //      the same fallback used for the ATTENDEE CN above.
         //   2. Otherwise the free-text location field (with Talk URL).
         //   3. Otherwise just the Talk URL.
         //   4. Otherwise nothing.
-        $effectiveLocation = $bookingRoom ? ($roomName !== '' ? $roomName : $location) : $location;
+        $effectiveLocation = $bookingRoom
+            ? ($roomName !== '' ? $roomName : $roomEmail)
+            : $location;
         if ($talkUrl !== null) {
             if ($effectiveLocation !== '') {
                 $ical .= "LOCATION:" . $this->escapeIcalText($effectiveLocation . ' | ' . $talkUrl) . "\r\n";
@@ -873,7 +957,47 @@ class ActivityService {
         $objUri = strtolower($uid) . '.ics';
 
         try {
-            $caldav->createCalendarObject($calendarId, $objUri, $ical);
+            // Route the write through OCP\Calendar\IManager → ICreateFromString
+            // when scheduling is required (any event with a room or invitees).
+            // The public API uses NC's EmbeddedCalDavServer which registers
+            // sabre's Schedule\Plugin — same code path a real DAV PUT takes —
+            // so iTIP scheduling fires reliably. Direct CalDavBackend writes
+            // bypass that middleware and bridge inconsistently via the
+            // CalendarObjectCreatedEvent listener (Issue #41 investigation).
+            //
+            // Falls back to the direct backend write on any error so the
+            // pre-3.82.6 behaviour is preserved for paths that don't need
+            // scheduling (non-room, no-invitee events).
+            $writtenViaPublic = false;
+            if ($useScheduling) {
+                try {
+                    $manager   = $this->container->get(\OCP\Calendar\IManager::class);
+                    $calendars = $manager->getCalendarsForPrincipal(
+                        'principals/users/' . $user->getUID()
+                    );
+                    foreach ($calendars as $cal) {
+                        if ((string)$cal->getKey() !== (string)$calendarId) {
+                            continue;
+                        }
+                        if (!$cal instanceof \OCP\Calendar\ICreateFromString) {
+                            break;
+                        }
+                        $cal->createFromString($objUri, $ical);
+                        $writtenViaPublic = true;
+                        break;
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][ActivityService] ICreateFromString failed; falling back to backend', [
+                        'calendarId' => $calendarId,
+                        'exception'  => get_class($e),
+                        'message'    => $e->getMessage(),
+                        'app'        => Application::APP_ID,
+                    ]);
+                }
+            }
+            if (!$writtenViaPublic) {
+                $caldav->createCalendarObject($calendarId, $objUri, $ical);
+            }
         } catch (\Throwable $e) {
             // Surface the exception class alongside its message so admins
             // triaging a CalDAV write failure can distinguish e.g. Sabre's

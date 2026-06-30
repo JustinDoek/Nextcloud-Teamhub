@@ -3,6 +3,175 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.85.0] — 2026-06-30 — Session-end rollup
+
+Session boundary per SKILLS.md §session-end §3. Rolls up 3.84.1 → 3.84.8.
+
+### Headline changes
+
+- **Audit-tab "Find teams for a user"** (3.84.1) — new admin panel finds every team a user belongs to (direct + group + sub-team inherited) with role, owner, source classification, and bulk remove. Two new `MaintenanceController` endpoints; new service methods; per-row audit events.
+- **SSO empty-state hint** (3.84.2) in `InviteMemberModal` — explains why lazy-provisioned Microsoft Entra / SAML / OIDC users only appear after first login.
+- **Browse Teams "Open" button + TeamSearchProvider** (3.84.3) — direct-jump to a team you're already a member of; new unified-search provider surfaces TeamHub teams with deep links.
+- **Hourly Talk-membership reconciler** (3.84.4) — new `TalkMembershipReconcileJob` + `TalkService::reconcileEffectiveTalkRoomMembers` close long-standing drift gaps for group/sub-team membership changes.
+- **Invite-action role guards** (3.84.5) — three Invite-user buttons gated by `isTeamModerator`. Audit pass mapped every TeamWidgetGrid action emit to its backend role requirement.
+- **Audit-tab user search wiring fix** (3.84.6) — autocomplete now fires per keystroke; Enter flushes the debounce.
+- **Two small fixes** (3.84.7 / 3.84.8) — column alias whitespace bug; grid CSS selector targeting the actual grid container.
+
+### Added
+
+- 26 new user-facing strings, all translated to **nl / de / fr / da / es / it**.
+- New PHP files: `lib/Search/TeamSearchProvider.php`, `lib/BackgroundJob/TalkMembershipReconcileJob.php`.
+- New service methods: `MaintenanceService::listTeamsForUser`, `MaintenanceService::adminRemoveUserFromTeam`, `MaintenanceService::resolveUserSingleId` (private), `TalkService::reconcileEffectiveTalkRoomMembers`.
+- New `MaintenanceController` endpoints: `GET /api/v1/admin/maintenance/users/{userId}/teams` and `POST /api/v1/admin/maintenance/users/{userId}/remove-from-teams`.
+- New audit event type: `member.removed_by_admin`.
+
+### Frontend build required
+
+All Vue components touched (AdminSettings, InviteMemberModal, BrowseTeamsView, App, TeamWidgetGrid, MobileWidgetView). One `npm run build` covers everything.
+
+### Security
+
+- Both new admin endpoints gate at `#[AuthorizedAdminSetting]` attribute + service `requireNcAdmin()` defence in depth.
+- `TeamSearchProvider` membership-filters every result via `circles_membership` + direct rows; non-member teams are unreachable.
+- `adminRemoveUserFromTeam` refuses to remove owners (level≥9) and refuses non-direct memberships before any DB write; emits per-removal audit events with actor UID.
+
+## [3.84.8] — 2026-06-30 — Audit-tab grid columns sized properly
+
+### Fixed
+
+- **`AdminSettings.vue` audit tab "Find teams for a user"** — Role and Membership columns were squashed. Root cause: my `.audit-user-grid { grid-template-columns: ... }` targeted the wrapper element, but the base `.maint-grid` CSS sets `display: grid` on `.maint-grid__head` and `.maint-grid__row`. The override had no effect and the cells inherited the maintenance grid's 6-column template (52px "members count" → Role, 100px "created" → Membership). Override now correctly selects `.audit-user-grid.maint-grid > .maint-grid__head, > .maint-grid__row`. New widths: 44px checkbox · `minmax(160px, 2.2fr)` team · 110px role · `minmax(170px, 1.4fr)` owner · `minmax(150px, 1.8fr)` membership.
+
+## [3.84.7] — 2026-06-30 — Audit-tab list-teams query fixed on MySQL/MariaDB
+
+### Fixed
+
+- **`MaintenanceService::listTeamsForUser`** — "Unknown column 'c.unique_id ' in 'field list'" on MySQL/MariaDB. Multi-space `AS` alignment padding was being passed through verbatim to the driver, which read the trailing whitespace as part of the column name. Collapsed to single-space `AS`. Same lesson previously documented in `TeamIntegrationMapper::findAllWithEnabledStateForTeam`.
+
+## [3.84.6] — 2026-06-30 — Audit-tab user search autocomplete wiring
+
+### Fixed
+
+- **`AdminSettings.vue` audit-tab user search** — the field accepted typed input but no search ever fired. `:value` + `@update:value` on `NcTextField` did not reliably emit per keystroke. Switched to `v-model` + `@input` (native DOM event) — the proven pattern from the maintenance-tab "Assign owner" picker. Added `@keydown.enter.prevent` flush via new `runAuditUserSearchNow()` so Enter forces an immediate search by clearing the 300ms debounce. Hoisted the fetch into a small `fetchAuditUserResults()` helper so both debounce and Enter share one path.
+
+## [3.84.5] — 2026-06-30 — Invite-user role guards
+
+### Fixed
+
+- **Members were seeing the "Invite user" action and getting a 400 "Insufficient permissions" warning when they clicked.** `MemberService::inviteMembers` requires moderator level (4+) but three frontend affordances showed the button to everyone: `TeamWidgetGrid.vue` desktop teaminfo widget, `TeamWidgetGrid.vue` tablet teaminfo widget, `MobileWidgetView.vue` `widget-teaminfo` action list. All three now guarded by `isTeamModerator`. Audit pass on every other TeamWidgetGrid action emit confirmed: `manage-team` already guarded by `isTeamAdmin`; `copy-link` is no-op; `add-event` / `propose-decision` are member-level; `add-meeting` is configurable (default member); `add-deck-task` calls Deck's API; `create-page` / `delete-page` call IntraVox's API; `set-as-default` / `reset-to-default` / `add-personal-task` are per-user. Only Invite was the leak.
+
+## [3.84.4] — 2026-06-30 — Hourly Talk-membership reconciler
+
+### Added
+
+- **`lib/BackgroundJob/TalkMembershipReconcileJob.php`** — new `TimedJob`, interval 3600s, `setAllowParallelRuns(false)`, `TIME_INSENSITIVE`. Skips entirely when Talk (spreed) isn't installed. Lists every team with a connected Talk room (`talk_attendees.actor_type='circles'` DISTINCT `actor_id`) and calls `TalkService::reconcileEffectiveTalkRoomMembers` per team. Logs aggregate counts only when at least one team needed reconciliation. Registered in `appinfo/info.xml` `<background-jobs>`.
+- **`TalkService::reconcileEffectiveTalkRoomMembers(string $teamId): array{added,removed}`** — walks `circles_membership` for the team's effective member set (direct + group-inherited + sub-team-inherited), folds in `circles_member` direct rows as a cache-lag safety net, diffs against current `talk_attendees` user rows, inserts missing ones (reusing the column-detection pattern from `expandCircleMembersToTalk`), deletes orphans. Preserves `participant_type=1` owners so the room can never be orphaned. Idempotent.
+
+### Fixed
+
+- **Talk-room membership drift on group/sub-team changes** — when a group was added to a team, its existing members were never pulled into the Talk room. When a group was removed, the legacy `reconcileTalkRoomMembers` (which only knows about direct members) would evict users still reachable via another attached group. When an NC admin changed a group's membership outside TeamHub, nothing fired. The hourly cron now closes all four variants within a 60-minute window.
+
+### Notes
+
+- Existing direct-user paths (`syncUserToTeamTalkRoom` on invite, `removeUserFromTeamTalkRoom` on leave) remain unchanged — they handle the common cases instantly. The cron is the safety net.
+- `MemberService::removeMember` line 1238 still calls the legacy `reconcileTalkRoomMembers` — swapping to the new effective-aware method is logged as an open issue for next session.
+
+## [3.84.3] — 2026-06-30 — Browse Teams "Open" button + TeamSearchProvider
+
+### Added
+
+- **`BrowseTeamsView.vue` "Open" button** — direct member and indirect member team cards now show a secondary "Open" button (OpenInApp icon) before the existing destructive Leave / disabled-Leave-with-tooltip control. Click emits `team-opened`. `App.vue` listens and routes it to `selectTeamFromSidebar(teamId)` — same code path as clicking the team in the sidebar.
+- **`lib/Search/TeamSearchProvider.php`** — implements `IProvider`, registered in `Application::register()` (order 49, just before MessageSearchProvider at 50 and DecisionSearchProvider at 51). Surfaces matching TeamHub teams in NC's unified search with deep links to `/apps/teamhub/#/team/{teamId}`. Membership-filtered: LEFT JOINs `circles_member` (direct) and `circles_membership` (inherited) and only returns teams the searcher belongs to. Filter to user-created teams via `c.source = 16`. Case-insensitive LIKE via `LOWER()` + `escapeLikeParameter()` + `mb_strtolower()`. Excludes pending-deletion teams. Subline is description truncated at 140 chars.
+
+## [3.84.2] — 2026-06-30 — SSO empty-state hint in invite picker
+
+### Added
+
+- **`InviteMemberModal.vue` empty-state hint** — when the user search returns zero results, the modal now shows a two-line empty state: bold headline + smaller-text hint explaining lazy-provisioned SSO users only appear after first login. New CSS classes `.invite-modal__empty-headline` and `.invite-modal__empty-hint`. New string translated to all six locales.
+
+## [3.84.1] — 2026-06-30 — Audit-tab "Find teams for a user" admin panel
+
+### Added
+
+- **Audit-tab admin panel: find every team a user belongs to** — new `NcSettingsSection` at the top of the audit tab. Search for any NC user; result is a table of every team they're a member of with role, team owner, and source (Direct / Via group: X / Via team: Y). Bulk-remove checkboxes for direct non-owner rows. NcDialog confirmation. Per-row outcome toasts.
+- **`MaintenanceService::listTeamsForUser(string $userId): array`** — resolves user's single_id, queries `circles_membership` for accessible circles, filters to user-teams, classifies each row as `direct` (with role/level from `circles_member`) or inherited (walking the team's group/sub-team members and checking the user against each).
+- **`MaintenanceService::adminRemoveUserFromTeam(string $teamId, string $userId): void`** — NC-admin gated. Refuses owners (level≥9), refuses inherited memberships. Deletes `circles_member` row, rebuilds `circles_membership` cache, emits `member.removed_by_admin` audit event.
+- **`MaintenanceController` endpoints** `GET /api/v1/admin/maintenance/users/{userId}/teams` and `POST /api/v1/admin/maintenance/users/{userId}/remove-from-teams`. Per-row result objects returned so partial successes are visible.
+- **`member.removed_by_admin` audit event** added to the audit catalogue.
+
+### Security
+
+- Both endpoints gate twice — `#[AuthorizedAdminSetting]` attribute + service `requireNcAdmin()`.
+- List endpoint returns only data NC admins can already see elsewhere; no new PII exposure.
+- Remove endpoint emits an audit event for every removal with actor UID — proper attribution.
+
+## [3.84.0] — 2026-06-26 — Session-end rollup
+
+Session boundary per SKILLS.md §session-end §3. Rolls up 3.83.0 → 3.83.3 (see those entries for per-change detail).
+
+### Headline changes
+
+- **Issue #41 investigation** (3.83.0) — calendar event write path now routes through NC's `ICreateFromString` public API (`EmbeddedCalDavServer` + sabre `Schedule\Plugin`). UID is bare RFC-4122 UUIDv4 (was `<hex>@teamhub`). `CREATED`, `LAST-MODIFIED`, explicit `TRANSP:OPAQUE` added. VTIMEZONE + TZID-based DTSTART/DTEND for CET/CEST timezones. `SCHEDULE-AGENT=CLIENT` dropped from organiser ATTENDEE. LOCATION fix — no longer leaks stale free-text when a room is picked. Root cause of user-visible "Availability will be checked" hang traced to upstream [calendar_resource_management#192](https://github.com/nextcloud/calendar_resource_management/issues/192).
+- **More… overflow menu fix** (3.83.1) — `TeamTabBar.vue` overflow menu no longer closes when the cursor traverses the 4px gap between the trigger button and the `position: fixed` menu. 180ms delayed close, cancelled by `@mouseenter` on either element.
+- **Spanish (es) translation** (3.83.2) — full 1639-string translation added. `SKILLS.md` lists Spanish as a supported project language.
+- **Italian (it) translation** (3.83.3) — full 1639-string translation added. Project now ships six languages besides English (nl/de/fr/da/es/it).
+
+### Frontend build required
+
+`TeamTabBar.vue` was modified in 3.83.1 — Justin runs `npm run build` before deploying.
+
+## [3.83.3] — 2026-06-26 — Italian (it) translation added
+
+### Added
+
+- **Italian (it) translation files** — `l10n/it.json` + `l10n/it.js`. All 1639 strings translated (machine translation; native-speaker review pass welcome via PR). Uses informal "tu" register (modern app convention). Plural form: `nplurals=2; plural=(n != 1);`.
+- **SKILLS.md** updated to list Italian as the sixth supported project language alongside Dutch, German, French, Danish, and Spanish.
+
+## [3.83.2] — 2026-06-26 — Spanish (es) translation added
+
+### Added
+
+- **Spanish (es) translation files** — `l10n/es.json` + `l10n/es.js`. All 1639 strings translated (machine translation; native-speaker review pass welcome via PR). Uses neutral imperative forms, Spain Spanish (es_ES) conventions. Plural form: `nplurals=2; plural=(n != 1);`.
+- **SKILLS.md** updated to list Spanish alongside Dutch, German, French, and Danish as a supported project language.
+
+## [3.83.1] — 2026-06-26 — More… overflow menu no longer closes when cursor traverses the gap
+
+### Fixed
+
+- **TeamTabBar.vue** — overflow "More…" menu closed instantly when the cursor moved off the trigger button, before it could reach a menu item. Caused by `position: fixed` on the menu removing it from the parent's bounding box, so the 4px gap between button and menu fired `mouseleave` on the container. Fix: 180ms delayed close via `scheduleMoreMenuClose`, cancelled by `@mouseenter` on either the container or the menu. Timer cleared on `beforeDestroy` to avoid a leak.
+
+## [3.83.0] — 2026-06-26 — Calendar event write goes through sabre scheduling middleware (Issue #41 investigation)
+
+Session rollup of 3.82.1 through 3.82.10. Investigated [issue #41](https://github.com/JustinDoek/Nextcloud-Teamhub/issues/41) — *Room resource event not visible in resource's calendar*. Root cause traced to upstream [calendar_resource_management#192](https://github.com/nextcloud/calendar_resource_management/issues/192) (intermittent auto-acceptance + missing CalDAV scheduling properties on CLI-created room principals). TeamHub-side improvements: write path now routes through NC's `EmbeddedCalDavServer` so sabre's `Schedule\Plugin` fires reliably — same code path a DAV PUT takes — plus several iCal-format alignments with NC Calendar's own emit.
+
+### Headline changes
+
+- **Calendar event write path** — `ActivityService::createCalendarEvent` now uses `\OCP\Calendar\IManager::getCalendarsForPrincipal()` → `ICreateFromString::createFromString()` for any event with scheduling needs (room or invitees). Falls back to direct `CalDavBackend::createCalendarObject()` on error or for non-scheduled events. Public API is documented in NC's developer manual; routes through `EmbeddedCalDavServer` which registers `Sabre\CalDAV\Schedule\Plugin` — same as a real DAV PUT.
+- **UID format — RFC 4122 UUIDv4.** Was uppercase hex + `@teamhub`. Now bare `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`. Matches NC Calendar's own emit. No consumer in the codebase parses the `@teamhub` suffix (verified: `CalendarObjectDeletedListener` keys off `X-TEAMHUB-ROOMVOX-BOOKING-UID`; `DecisionMeetingService` stores the UID as an opaque string).
+- **iCal property additions** — `CREATED`, `LAST-MODIFIED`, explicit `TRANSP:OPAQUE`. RFC 5545 §3.6.1 / §3.8.2.7 compliant. Matches NC Calendar's emit.
+- **VTIMEZONE + TZID-based DTSTART/DTEND** — for users whose NC timezone setting is a CET/CEST zone (Europe/Amsterdam, Europe/Paris, etc.). Other timezones fall back to UTC `Z`-suffix as before. Adds a standard EU DST VTIMEZONE block.
+- **`SCHEDULE-AGENT=CLIENT` removed** from organiser-as-attendee line. Was a workaround for sabre double-materialising when writes went through direct backend; with the new write path sabre handles this correctly. Defaults to `SERVER` per RFC 6638 §7.1.
+- **LOCATION fix** — when a room is picked, `$location` (user-typed) is no longer used as a fallback. Was leaking stale free-text values into the iCal (Issue #41 secondary symptom: `LOCATION:room-kamer116` for an event booking kamer114). Always uses `$roomName`, falls back to `$roomEmail` if name is empty.
+
+### Issue #41 status
+
+The user-visible "Availability will be checked" / room resource not auto-booking is **downstream of TeamHub** — confirmed by:
+- Sabre's `Schedule\Plugin` extracts the iTIP REQUEST from our write and stores it (new row in `oc_schedulingobjects`)
+- For some events the REPLY comes back from CRM (room shows ACCEPTED with `SCHEDULE-STATUS=2.0`); for others it never does (event stays at `NEEDS-ACTION`)
+- PROPFIND on the room's principal returns 404 for `calendar-user-address-set`, `calendar-home-set`, `schedule-inbox-URL`, `schedule-outbox-URL`, `schedule-default-calendar-URL` — every CalDAV scheduling property
+- Matches [calendar_resource_management#192](https://github.com/nextcloud/calendar_resource_management/issues/192) verbatim
+
+Workaround for affected users: open the event in NC Calendar's editor and shift its time / move it on the calendar — that triggers a fresh DAV PUT and CRM sometimes catches the auto-accept.
+
+### Security & privacy
+
+- **No new logging of PII.** The only addition is a warning-level log line in the new write path that records the exception class and message when `ICreateFromString` falls back to backend — no event content, no email addresses, no calendar data.
+- **No new endpoints.** Pure refactor of the existing `ActivityService::createCalendarEvent` write step.
+- **No new database queries.** The public Calendar API does its own query through `oc_calendars`; we don't add ours.
+
+### Design
+
+- **DESIGN.md §2.24** — calendar event writes go through `ICreateFromString` (`EmbeddedCalDavServer`), not `CalDavBackend` directly. Documents *why*: direct backend writes bypass sabre's scheduling middleware, leading to inconsistent iTIP delivery and the "Availability will be checked" UI hang reported in #41.
+
 ## [3.82.0] — 2026-06-23 — Add Meeting consolidation, AppEmbed labelled toolbar, design rules
 
 Session rollup of 3.81.2 through 3.81.10. See those entries for the per-change detail; this row marks the session boundary per SKILLS.md.

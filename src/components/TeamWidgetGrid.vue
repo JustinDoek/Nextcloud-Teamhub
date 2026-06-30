@@ -107,7 +107,7 @@
                                 <template #icon><ContentCopy :size="20" /></template>
                                 {{ t('teamhub', 'Copy team link') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('invite')">
+                            <NcActionButton v-if="isTeamModerator" @click="$emit('invite')">
                                 <template #icon><AccountPlus :size="20" /></template>
                                 {{ t('teamhub', 'Invite user') }}
                             </NcActionButton>
@@ -596,7 +596,7 @@
                                 <template #icon><ContentCopy :size="20" /></template>
                                 {{ t('teamhub', 'Copy team link') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('invite')">
+                            <NcActionButton v-if="isTeamModerator" @click="$emit('invite')">
                                 <template #icon><AccountPlus :size="20" /></template>
                                 {{ t('teamhub', 'Invite user') }}
                             </NcActionButton>
