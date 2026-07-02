@@ -1718,6 +1718,11 @@ OC.L10N.register(
     "Failed to remove" : "Entfernen fehlgeschlagen",
     "unknown error" : "unbekannter Fehler",
     "Failed to load teams: {error}" : "Teams konnten nicht geladen werden: {error}",
-    "Failed to load teams" : "Teams konnten nicht geladen werden"
+    "Failed to load teams" : "Teams konnten nicht geladen werden",
+    "In progress" : "In Bearbeitung",
+    "To do" : "Zu erledigen",
+    "Instance summary" : "Instanz-Übersicht",
+    "Unique team members" : "Eindeutige Teammitglieder",
+    "Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team — directly, via a group, or via a sub-team — and is the metric per-seat licensing keys off." : "Aggregierte Zahlen für diese Nextcloud-Instanz. „Eindeutige Teammitglieder“ zählt jede unterscheidbare Person, die Zugriff auf mindestens ein Team hat — direkt, über eine Gruppe oder über ein Unter-Team — und ist die Kennzahl, auf die sich seat-basierte Lizenzen stützen."
 },
     "nplurals=2; plural=(n != 1);");

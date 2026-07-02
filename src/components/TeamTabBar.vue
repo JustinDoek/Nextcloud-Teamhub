@@ -235,10 +235,11 @@
                 {{ t('teamhub', 'More…') }}
             </button>
             <div v-show="moreMenuOpen"
+                 ref="moreMenuEl"
                  class="teamhub-tab-more-menu"
                  role="menu"
                  :aria-label="t('teamhub', 'More tabs')"
-                 :style="{ top: moreMenuTop + 'px', left: moreMenuLeft + 'px' }"
+                 :style="moreMenuStyle"
                  @mouseenter="openMoreMenu"
                  @mouseleave="scheduleMoreMenuClose">
                 <template v-for="tab in overflowTabs">
@@ -348,6 +349,7 @@ export default {
             moreMenuOpen: false,
             moreMenuTop: 0,
             moreMenuLeft: 0,
+            moreMenuMaxHeight: 600,
         }
     },
 
@@ -471,6 +473,14 @@ export default {
 
         activeInOverflow() {
             return this.overflowTabs.some(t => this.currentView === t.key)
+        },
+
+        moreMenuStyle() {
+            return {
+                top: this.moreMenuTop + 'px',
+                left: this.moreMenuLeft + 'px',
+                maxHeight: this.moreMenuMaxHeight + 'px',
+            }
         },
     },
 
@@ -649,13 +659,30 @@ export default {
          * Compute the dropdown's screen coordinates from the trigger's
          * bounding rect. Needed because the menu is position:fixed to escape
          * the tab bar's `overflow: hidden` clip.
+         *
+         * Horizontal: prefer left-align to the trigger; if the menu would
+         * spill past the viewport's right edge, slide left so it sits flush
+         * against the edge with an 8px margin.
+         *
+         * Vertical: cap max-height to the space remaining below the trigger,
+         * so the menu never extends past the viewport bottom and so the
+         * inline `overflow-y: auto` only engages when content genuinely
+         * exceeds that available space.
          */
         repositionMoreMenu() {
             const container = this.$refs.moreContainer
             if (!container) return
             const rect = container.getBoundingClientRect()
+            const margin = 8
+
             this.moreMenuTop = rect.bottom + 4
-            this.moreMenuLeft = rect.left
+            this.moreMenuMaxHeight = Math.max(120, window.innerHeight - this.moreMenuTop - margin)
+
+            const menuEl = this.$refs.moreMenuEl
+            // offsetWidth is 0 before first display; fall back to min-width.
+            const menuWidth = (menuEl && menuEl.offsetWidth) ? menuEl.offsetWidth : 180
+            const maxLeft = window.innerWidth - menuWidth - margin
+            this.moreMenuLeft = Math.max(margin, Math.min(rect.left, maxLeft))
         },
 
         openMoreMenu() {
@@ -665,8 +692,11 @@ export default {
                 clearTimeout(this._moreMenuCloseTimer)
                 this._moreMenuCloseTimer = null
             }
-            this.repositionMoreMenu()
+            // Show first so the menu has a measurable offsetWidth, then
+            // reposition on the next tick now that layout has run.
             this.moreMenuOpen = true
+            this.repositionMoreMenu()
+            this.$nextTick(() => this.repositionMoreMenu())
         },
 
         scheduleMoreMenuClose() {
@@ -846,10 +876,20 @@ export default {
 }
 
 .teamhub-tab-more-menu {
+    /* max-height is set inline by repositionMoreMenu() based on viewport
+       space below the trigger, so the menu never spills off-screen and
+       overflow-y only engages when content genuinely exceeds that space.
+
+       overflow-x is set explicitly: per CSS spec, setting overflow-y to
+       a non-visible value while leaving overflow-x at the default
+       `visible` promotes overflow-x to `auto` — which produced a
+       spurious horizontal scrollbar at the bottom of the menu even
+       when content fit. `hidden` keeps the horizontal axis truly
+       non-scrolling. */
     position: fixed;
     z-index: 1000;
     min-width: 180px;
-    max-height: 300px;
+    overflow-x: hidden;
     overflow-y: auto;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);

@@ -3404,7 +3404,7 @@ export default {
                 return
             }
             // For the four connectable apps, ask whether to Create or Connect.
-            // For any other app (intravox, shared_files, ...) just enable directly.
+            // For any other app (intravox, ...) just enable directly.
             const connectable = ['spreed', 'files', 'calendar', 'deck']
             if (connectable.includes(app.id)) {
                 this.pendingEnableApp = app
@@ -4321,7 +4321,7 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-/* Team Apps toggle items (shared_files, intravox) */
+/* Team Apps toggle items (intravox) */
 .members-list {
     display: flex;
     flex-direction: column;

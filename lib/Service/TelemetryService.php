@@ -33,6 +33,7 @@ use Psr\Log\LoggerInterface;
  *   "nc_version":           "32.0.4.1",
  *   "team_count":           42,
  *   "user_count":           180,
+ *   "unique_team_members":  73,
  *   "member_total":         137,
  *   "message_count":        904,
  *   "integrations":         ["teamhublists", "otherapp"],
@@ -157,6 +158,7 @@ class TelemetryService {
             'nc_version'           => $this->getNcVersion(),
             'team_count'           => $this->countTeams(),
             'user_count'           => $this->countUsers(),
+            'unique_team_members'  => $this->countUniqueTeamMembers(),
             'member_total'         => $this->countMembersTotal(),
             'message_count'        => $this->countMessages(),
             'integrations'         => $this->getRegisteredIntegrations(),
@@ -379,6 +381,56 @@ class TelemetryService {
     }
 
     /**
+     * Count distinct EFFECTIVE users across all TeamHub teams (source=16
+     * circles). Walks circles_membership — the denormalised cache — so a
+     * user reaching a team via an attached group or sub-team is counted once,
+     * and a user who is a direct member of multiple teams is also counted
+     * once. user_type IN (1, 4) covers both local NC users and federated
+     * users — same set we treat as "people" elsewhere (Talk reconciler, etc).
+     *
+     * This is the metric a per-seat licence would key off: how many distinct
+     * humans actually have access to at least one TeamHub team on this
+     * instance.
+     */
+    private function countUniqueTeamMembers(): int {
+        try {
+            // SELECT DISTINCT user_id over the join, deduplicate in PHP via
+            // an associative array. Avoids needing COUNT(DISTINCT col) which
+            // doesn't have a portable IFunctionBuilder shortcut in NC's
+            // QueryBuilder. Membership rows for one user across multiple
+            // teams collapse to a single key; result size is the answer.
+            $qb = $this->db->getQueryBuilder();
+            $qb->selectDistinct('m.user_id')
+                ->from('circles_membership', 'ms')
+                ->innerJoin('ms', 'circles_circle', 'c',
+                    $qb->expr()->eq('c.unique_id', 'ms.circle_id'))
+                ->innerJoin('ms', 'circles_member', 'm', $qb->expr()->andX(
+                    $qb->expr()->eq('m.circle_id', 'ms.single_id'),
+                    $qb->expr()->in('m.user_type', $qb->createNamedParameter(
+                        [1, 4], IQueryBuilder::PARAM_INT_ARRAY
+                    )),
+                ))
+                ->where($qb->expr()->eq('c.source',
+                    $qb->createNamedParameter(16, IQueryBuilder::PARAM_INT)));
+            $result = $qb->executeQuery();
+            $seen = [];
+            while ($row = $result->fetch()) {
+                $uid = (string)($row['user_id'] ?? '');
+                if ($uid !== '') {
+                    $seen[$uid] = true;
+                }
+            }
+            $result->closeCursor();
+            return count($seen);
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TelemetryService] countUniqueTeamMembers failed: ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+            return 0;
+        }
+    }
+
+    /**
      * Total count of member relationships across all teams.
      * Counts rows in circles_member with status='Member' (matches the pattern
      * used elsewhere in the codebase for member counting).
@@ -431,21 +483,21 @@ class TelemetryService {
      * Correct logic per app:
      *   • Default-enabled apps  (files, calendar, deck, spreed, intravox):
      *       count = total_teams − teams_with_explicit_disabled_row
-     *   • Default-disabled apps (shared_files):
-     *       count = teams_with_explicit_enabled_row
+     *
+     * The `shared_files` slot was removed in 3.86.2 — the Shared-files widget
+     * was folded into the Filecenter widget as an always-on tab and no longer
+     * has a per-team enable/disable toggle. Legacy rows for that app_id in
+     * teamhub_team_apps are simply not counted.
      *
      * The app IDs and defaults below mirror ManageTeamView.vue's appDefinitions().
      *
      * Example return:
      *   ['files' => 30, 'calendar' => 28, 'deck' => 18, 'spreed' => 25,
-     *    'intravox' => 12, 'shared_files' => 4]
+     *    'intravox' => 12]
      */
     private function getBuiltinIntegrationUsage(): array {
         // Apps where the default is enabled — absence of a row means enabled.
-        $defaultEnabled  = ['files', 'calendar', 'deck', 'spreed', 'intravox'];
-        // Apps where the default is disabled — only explicit opt-ins count.
-        $defaultDisabled = ['shared_files'];
-        $allBuiltin      = array_merge($defaultEnabled, $defaultDisabled);
+        $defaultEnabled = ['files', 'calendar', 'deck', 'spreed', 'intravox'];
 
         try {
             $totalTeams = $this->countTeams();
@@ -457,20 +509,15 @@ class TelemetryService {
                 ->from('teamhub_team_apps')
                 ->where($qb->expr()->in(
                     'app_id',
-                    $qb->createNamedParameter($allBuiltin, IQueryBuilder::PARAM_STR_ARRAY)
+                    $qb->createNamedParameter($defaultEnabled, IQueryBuilder::PARAM_STR_ARRAY)
                 ))
                 ->groupBy('app_id', 'enabled')
                 ->executeQuery();
 
-            $explicitEnabled  = [];
             $explicitDisabled = [];
             while ($row = $result->fetch()) {
-                $app = (string)$row['app_id'];
-                $cnt = (int)$row['cnt'];
-                if ((int)$row['enabled'] === 1) {
-                    $explicitEnabled[$app]  = $cnt;
-                } else {
-                    $explicitDisabled[$app] = $cnt;
+                if ((int)$row['enabled'] !== 1) {
+                    $explicitDisabled[(string)$row['app_id']] = (int)$row['cnt'];
                 }
             }
             $result->closeCursor();
@@ -480,14 +527,6 @@ class TelemetryService {
             // Default-enabled: total minus those explicitly turned off.
             foreach ($defaultEnabled as $app) {
                 $count = max(0, $totalTeams - ($explicitDisabled[$app] ?? 0));
-                if ($count > 0) {
-                    $usage[$app] = $count;
-                }
-            }
-
-            // Default-disabled: only those explicitly turned on.
-            foreach ($defaultDisabled as $app) {
-                $count = $explicitEnabled[$app] ?? 0;
                 if ($count > 0) {
                     $usage[$app] = $count;
                 }

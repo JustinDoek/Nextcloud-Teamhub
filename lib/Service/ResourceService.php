@@ -122,12 +122,15 @@ class ResourceService {
             ]);
         }
 
-        $resources = ['talk' => null, 'files' => null, 'calendar' => [], 'deck' => [], 'intravox' => false, 'tasks' => false, 'shared_files' => false];
+        $resources = ['talk' => null, 'files' => null, 'calendar' => [], 'deck' => [], 'intravox' => false, 'tasks' => false];
 
         try {
             // ── IntraVox enabled flag ─────────────────────────────────────────
-            // intravox and shared_files remain toggle-driven via teamhub_team_apps.
-            // They are not resource-backed and are not tracked in teamhub_team_app_resources.
+            // Toggle-driven via teamhub_team_apps; not resource-backed and not
+            // tracked in teamhub_team_app_resources. The former shared_files
+            // toggle was removed when the Shared-files widget was folded into
+            // the Filecenter widget as an always-on tab; any legacy rows for
+            // app_id='shared_files' in teamhub_team_apps are simply ignored.
             if ($this->appManager->isInstalled('intravox')) {
                 $ivQb  = $db->getQueryBuilder();
                 $ivRes = $ivQb->select('enabled')
@@ -139,31 +142,6 @@ class ResourceService {
                 $ivRow = $ivRes->fetch();
                 $ivRes->closeCursor();
                 $resources['intravox'] = $ivRow ? (bool)$ivRow['enabled'] : false;
-            }
-
-            // ── Shared Files toggle ───────────────────────────────────────────
-            try {
-                $sfQb  = $db->getQueryBuilder();
-                $sfRes = $sfQb->select('enabled')
-                    ->from('teamhub_team_apps')
-                    ->where($sfQb->expr()->eq('team_id', $sfQb->createNamedParameter($teamId)))
-                    ->andWhere($sfQb->expr()->eq('app_id', $sfQb->createNamedParameter('shared_files')))
-                    ->setMaxResults(1)
-                    ->executeQuery();
-                $sfRow = $sfRes->fetch();
-                $sfRes->closeCursor();
-                $resources['shared_files'] = $sfRow ? (bool)$sfRow['enabled'] : false;
-                $this->logger->debug('[TeamHub][ResourceService] shared_files toggle', [
-                    'teamId'  => $teamId,
-                    'enabled' => $resources['shared_files'],
-                    'app'     => Application::APP_ID,
-                ]);
-            } catch (\Throwable $e) {
-                $this->logger->warning('[TeamHub][ResourceService] shared_files toggle query failed', [
-                    'teamId' => $teamId,
-                    'error'  => $e->getMessage(),
-                    'app'    => Application::APP_ID,
-                ]);
             }
 
             // ── Resource-backed apps: Talk, Files, Calendar, Deck ─────────────

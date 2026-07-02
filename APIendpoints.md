@@ -124,6 +124,13 @@ Fetch aggregated timeline events for a team within a date window.
 **`meta` additions since 3.78.0** (all optional, presence depends on data):
 - `decisions` events: `linkedCardIds` (int[], 3.78.5) — Deck cards linked via "Link tasks", resolved from `task_path`. `sourceMessageId` (int, 3.78.9) — the `teamhub_messages` row that announced this proposal; `0` if none.
 - `deck` events (`eventRole: 'created'` only): `blockedByCardIds` (int[], 3.78.8) — Deck card IDs this card depends on. **NC 34 / Deck 1.18+ only** — absent entirely on older installs, never an empty array as a false signal of "checked, no dependencies."
+- **Popover-detail additions (3.86.0)** — all optional, present only when data exists:
+  - `calendar` events: `description` (string, truncated 280), `organizer` (string — `CN` or mailto-stripped), `attendeeCount` (int).
+  - `decisions` events: `proposedBy` / `decidedBy` (string UID) + `proposedByName` / `decidedByName` (string display name).
+  - `deck` events: `description` (string, truncated 280), `assignees` (string[] of UIDs) + `assigneeNames` (string[] of display names — user-type rows only on Deck installs with a `type` column).
+  - `messages` events: `snippet` (string, truncated 280 of message body), `authorName` (string display name companion to existing `authorId`).
+  - `milestone` events: `createdBy` (string UID) + `createdByName` (string display name).
+  - Display names are resolved via `IUserManager` in a single per-request pass; unknown/deleted users fall back to the raw UID.
 
 **Failures**:
 - `403` — not a member of the team
@@ -329,6 +336,33 @@ Per-team behaviour:
 - On success: deletes the row, rebuilds `circles_membership` via `MembershipService::onUpdate`, emits a `member.removed_by_admin` audit event with the admin's UID as actor.
 
 **Failures**: `400` empty `userId` / empty `teamIds`, `404` user not found. Per-team failures land in `results[].error` rather than as an HTTP error so the batch can keep going.
+
+---
+
+## Telemetry endpoint (response shape extended 3.86.0)
+
+### `GET /api/v1/admin/telemetry`
+
+Returns the admin telemetry settings plus a live preview of the next outgoing report.
+
+**Auth**: NC admin required (`#[AuthorizedAdminSetting]` on `AdminSettings`).
+
+**Response 200**:
+```json
+{
+  "enabled":    true,
+  "report_url": "https://tldr.host/teamhub/report/",
+  "preview":    { /* TelemetryService::collectStats() output */ }
+}
+```
+
+**`preview` field added 3.86.0**:
+- `unique_team_members` (int) — distinct effective people across every TeamHub team (`circles_membership` ↦ `circles_circle source=16` ↦ `circles_member user_type IN (1, 4)`). Same metric the admin Statistics tab's "Unique team members" card displays. Intended as the per-seat license counter for any future commercial-license model.
+
+**`preview.builtin_integrations` field removed 3.87.0**:
+- `shared_files` — the per-team toggle behind this metric was removed when the Shared-files widget was folded into the Filecenter widget as an always-on tab. The `builtin_integrations` map no longer emits a `shared_files` key. Legacy `teamhub_team_apps` rows for that `app_id` are ignored.
+
+Other `preview` fields are unchanged from earlier versions: `team_count`, `user_count`, `member_total`, `message_count`, `integrations`, `builtin_integrations`, `presence_module`, `decisions_module`, `teams_with_decisions_enabled`, `decisions_count`, `decisions_by_status`, `decision_categories_count`, `suggest_wizard_uses`, `link_domains`. See `TelemetryService::collectStats()` for the authoritative list.
 
 ---
 

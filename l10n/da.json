@@ -1786,7 +1786,12 @@
 		"Failed to remove": "Kunne ikke fjerne",
 		"unknown error": "ukendt fejl",
 		"Failed to load teams: {error}": "Kunne ikke indlæse teams: {error}",
-		"Failed to load teams": "Kunne ikke indlæse teams"
+		"Failed to load teams": "Kunne ikke indlæse teams",
+		"In progress": "I gang",
+		"To do": "At gøre",
+		"Instance summary": "Instansoversigt",
+		"Unique team members": "Unikke teammedlemmer",
+		"Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team — directly, via a group, or via a sub-team — and is the metric per-seat licensing keys off.": "Aggregerede tællinger for denne Nextcloud-instans. „Unikke teammedlemmer“ tæller hver distinkt person, der har adgang til mindst ét team — direkte, via en gruppe eller via et underteam — og er metrikken, som licens pr. plads baseres på."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

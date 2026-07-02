@@ -1225,17 +1225,22 @@ class MemberService {
         ]);
 
         // Sync the Talk room to reflect the membership change.
-        // - Direct user (type 1): remove that one attendee row.
-        // - Group/circle (type 2/16): reconcile all attendees against current membership
-        //   because we don't know which individual UIDs were reachable via the removed group.
-        //   The reconcile runs AFTER MembershipService::onUpdate() above, which has already
-        //   rebuilt circles_membership to reflect the removal.
+        // - Direct user (type 1): remove that one attendee row (handles both
+        //   actor_type='users' and actor_type='federated_users' for safety).
+        // - Group/circle (type 2/16): reconcile ALL attendees against the
+        //   effective membership because we don't know which individual UIDs
+        //   were reachable via the removed group. Uses the effective-aware
+        //   reconciler (not the legacy direct-only one) so users still reach-
+        //   able via another attached group are correctly preserved and any
+        //   federated attendees that drifted in are evicted. The reconcile
+        //   runs AFTER MembershipService::onUpdate() above, which has rebuilt
+        //   circles_membership to reflect the removal.
         if ($userType === 1) {
             error_log('[TeamHub][MemberService] removeMember: removing user from Talk room targetId=' . $targetId);
             $this->talkService->removeUserFromTeamTalkRoom($teamId, $targetId);
         } else {
             error_log('[TeamHub][MemberService] removeMember: reconciling Talk room after group/circle removal');
-            $this->talkService->reconcileTalkRoomMembers($teamId);
+            $this->talkService->reconcileEffectiveTalkRoomMembers($teamId);
         }
     }
 

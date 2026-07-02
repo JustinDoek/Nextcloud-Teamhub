@@ -78,26 +78,62 @@ class DeckService {
             $boardId = (int)$db->lastInsertId();
         }
 
-        // ── Create default stacks via QB ──────────────────────────────────────
-        $stackCols = $this->dbIntrospection->getTableColumns('deck_stacks');
-        foreach (['To do', 'In progress', 'Done'] as $idx => $stackTitle) {
-            try {
-                $qb = $db->getQueryBuilder();
-                $qb->insert('deck_stacks')
-                   ->setValue('title',    $qb->createNamedParameter($stackTitle))
-                   ->setValue('board_id', $qb->createNamedParameter($boardId));
-                foreach (['order' => $idx, 'deleted_at' => 0, 'last_modified' => time()] as $col => $val) {
-                    if (in_array($col, $stackCols, true)) {
-                        $qb->setValue($col, $qb->createNamedParameter($val));
+        // ── Resolve the creator's language and pull stack titles from
+        //    Deck's own translation catalogue ──────────────────────────────
+        // Reuses Deck's existing translations (these three strings have been
+        // in Deck since v1.0) rather than duplicating them into TeamHub's PO
+        // files. Falls back to English when Deck's catalogue lacks the
+        // language or the string — IL10N::t() returns the source string in
+        // that case, which is the correct visible default.
+        $stackTitles = $this->translateDefaultStackTitles($uid);
+
+        // ── Create default stacks via Deck's StackMapper (preferred) ─────────
+        // Mirrors the BoardMapper path above. Deck's Stack entity carries the
+        // setters that produce a valid row (including `order`, which the Deck
+        // UI requires to be non-NULL for renaming to be enabled).
+        $stacksCreated = false;
+        try {
+            $stackMapper = $this->container->get(\OCA\Deck\Db\StackMapper::class);
+            foreach ($stackTitles as $idx => $stackTitle) {
+                $stack = new \OCA\Deck\Db\Stack();
+                $stack->setTitle($stackTitle);
+                $stack->setBoardId($boardId);
+                $stack->setOrder($idx);
+                $stackMapper->insert($stack);
+            }
+            $stacksCreated = true;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[DeckService] Deck StackMapper failed, using QB fallback', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+        }
+
+        // ── Fallback: QB insert into deck_stacks ──────────────────────────────
+        // `order` is a required column since Deck 1.0 — always set it, do not
+        // gate on introspection. Stacks with NULL order cannot be renamed in
+        // the Deck UI until the user reshuffles them.
+        if (!$stacksCreated) {
+            $stackCols = $this->dbIntrospection->getTableColumns('deck_stacks');
+            foreach ($stackTitles as $idx => $stackTitle) {
+                try {
+                    $qb = $db->getQueryBuilder();
+                    $qb->insert('deck_stacks')
+                       ->setValue('title',    $qb->createNamedParameter($stackTitle))
+                       ->setValue('board_id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                       ->setValue('order',    $qb->createNamedParameter($idx, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                       ->setValue('last_modified', $qb->createNamedParameter(time(), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+                    if (in_array('deleted_at', $stackCols, true)) {
+                        $qb->setValue('deleted_at', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
                     }
+                    $qb->executeStatement();
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[DeckService] Deck stack insert failed', [
+                        'stack' => $stackTitle,
+                        'error' => $e->getMessage(),
+                        'app'   => Application::APP_ID,
+                    ]);
                 }
-                $qb->executeStatement();
-            } catch (\Throwable $e) {
-                $this->logger->warning('[DeckService] Deck stack insert failed', [
-                    'stack' => $stackTitle,
-                    'error' => $e->getMessage(),
-                    'app'   => Application::APP_ID,
-                ]);
             }
         }
 
@@ -1029,6 +1065,54 @@ class DeckService {
             return $found !== false;
         } catch (\Throwable) {
             return false;
+        }
+    }
+
+    /**
+     * Return the three default stack titles ('To do', 'In progress', 'Done')
+     * translated into the creator's NC language using TeamHub's own
+     * translation catalogue.
+     *
+     * Earlier (3.85.5) this pulled from Deck's catalogue on the assumption
+     * its .po files carried the strings. In practice Deck's translation
+     * coverage for these three is uneven — Dutch had 'Done' → 'Klaar' but
+     * not 'To do' / 'In progress' — leaving columns half-translated. Owning
+     * the strings in TeamHub gives us deterministic coverage across all six
+     * shipped locales.
+     *
+     * Falls back to English when language resolution fails — IL10N::t()
+     * returns the source string when its catalogue lacks an entry, which is
+     * the correct visible default.
+     *
+     * @param string $uid Board owner UID
+     * @return string[] Three titles in order: index 0 = To do, 1 = In progress, 2 = Done
+     */
+    private function translateDefaultStackTitles(string $uid): array {
+        $defaults = ['To do', 'In progress', 'Done'];
+        try {
+            $config      = $this->container->get(\OCP\IConfig::class);
+            $l10nFactory = $this->container->get(\OCP\L10N\IFactory::class);
+
+            $language = $config->getUserValue($uid, 'core', 'lang', '');
+            if ($language === '') {
+                $language = $config->getSystemValue('default_language', 'en');
+            }
+
+            $l = $l10nFactory->get(Application::APP_ID, $language);
+            return [
+                // TRANSLATORS: default first column ("backlog") of a new Deck kanban board
+                (string)$l->t('To do'),
+                // TRANSLATORS: default middle column of a new Deck kanban board — work currently being worked on
+                (string)$l->t('In progress'),
+                // TRANSLATORS: default last column of a new Deck kanban board — completed work
+                (string)$l->t('Done'),
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[DeckService] Could not resolve translated stack titles, falling back to English', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return $defaults;
         }
     }
 

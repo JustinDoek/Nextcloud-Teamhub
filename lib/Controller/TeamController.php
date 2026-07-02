@@ -308,7 +308,7 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function deleteTeamResource(string $teamId, string $app): JSONResponse {
         // Allowlist valid app values — reject anything unexpected before it reaches the service
-        $allowed = ['spreed', 'files', 'calendar', 'deck', 'intravox', 'shared_files'];
+        $allowed = ['spreed', 'files', 'calendar', 'deck', 'intravox'];
         if (!in_array($app, $allowed, true)) {
             return new JSONResponse(['error' => 'Invalid app identifier'], Http::STATUS_BAD_REQUEST);
         }
@@ -750,14 +750,14 @@ class TeamController extends Controller {
             }
             $uid = $user->getUID();
 
-            // Check the shared_files toggle for this team.
+            // The dedicated Shared-files widget was folded into the Filecenter
+            // widget as an always-on tab (its per-team enable/disable toggle
+            // was removed). We still resolve $resources to find the team folder
+            // ID we should exclude from the results, but no longer gate on the
+            // (now-removed) shared_files flag. The frontend already hides this
+            // whole widget when Files integration is off for the team, so this
+            // endpoint is only reachable in the right context.
             $resources = $this->resourceService->getTeamResources($teamId);
-            if (empty($resources['shared_files'])) {
-                $this->logger->debug('[TeamHub][TeamController] getTeamSharedFiles — toggle off', [
-                    'teamId' => $teamId, 'app' => 'teamhub',
-                ]);
-                return new JSONResponse(['items' => [], 'total' => 0, 'page' => 1, 'limit' => 10]);
-            }
 
             // Pagination params — clamp limit to 1–50.
             $page   = max(1, (int)$this->request->getParam('page', 1));
@@ -1247,7 +1247,7 @@ class TeamController extends Controller {
                 // Only toggle-driven apps go to teamhub_team_apps.
                 // Resource-backed apps (spreed/files/calendar/deck) are now
                 // registry-driven — createTeamResources() writes their rows directly.
-                $toggleOnlyAppIds = ['shared_files', 'intravox'];
+                $toggleOnlyAppIds = ['intravox'];
                 foreach ($appStates as $as) {
                     $appId = isset($as['app_id']) ? (string)$as['app_id'] : '';
                     if ($appId !== '' && in_array($appId, $toggleOnlyAppIds, true)) {

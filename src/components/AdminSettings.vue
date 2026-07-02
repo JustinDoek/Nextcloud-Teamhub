@@ -316,6 +316,25 @@
             class="teamhub-admin-panel">
 
             <NcSettingsSection
+                :name="t('teamhub', 'Instance summary')"
+                :description="t('teamhub', 'Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team — directly, via a group, or via a sub-team — and is the metric per-seat licensing keys off.')">
+
+                <div v-if="telemetryLoading" class="admin-loading">
+                    <NcLoadingIcon :size="24" />
+                </div>
+                <div v-else class="admin-stat-grid">
+                    <div class="admin-stat-card">
+                        <div class="admin-stat-card__value">{{ telemetry.preview && telemetry.preview.team_count != null ? telemetry.preview.team_count : '—' }}</div>
+                        <div class="admin-stat-card__label">{{ t('teamhub', 'Teams') }}</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <div class="admin-stat-card__value">{{ telemetry.preview && telemetry.preview.unique_team_members != null ? telemetry.preview.unique_team_members : '—' }}</div>
+                        <div class="admin-stat-card__label">{{ t('teamhub', 'Unique team members') }}</div>
+                    </div>
+                </div>
+            </NcSettingsSection>
+
+            <NcSettingsSection
                 :name="t('teamhub', 'Usage statistics')"
                 :description="t('teamhub', 'TeamHub can send anonymous usage data to help improve the app. No URLs, hostnames, or user data are ever included — only an anonymous UUID and aggregate counts.')">
 
@@ -3471,6 +3490,36 @@ export default {
 .admin-save-ok  { font-size: 14px; color: var(--color-success-text); font-weight: 500; }
 .admin-save-err { font-size: 14px; color: var(--color-error-text); }
 /* ── Statistics tab ────────────────────────────────────────────── */
+.admin-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.admin-stat-card {
+    background: var(--color-background-dark);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.admin-stat-card__value {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--color-main-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-stat-card__label {
+    font-size: 13px;
+    color: var(--color-text-maxcontrast);
+}
+
 .admin-telemetry-details {
     margin-top: 16px;
     display: flex;

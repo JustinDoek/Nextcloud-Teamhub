@@ -964,14 +964,23 @@ class TalkService {
     }
 
     /**
-     * Remove a single user's attendee row from the Talk room connected to $teamId.
+     * Remove a single member's attendee row(s) from the Talk room connected
+     * to $teamId.
      *
-     * Called when a direct user member (user_type=1) leaves or is removed from the
-     * team. Talk does not watch for Circles membership changes, so TeamHub must
-     * explicitly remove the row to revoke access.
+     * Called when a direct member (user_type=1 local OR user_type=4 federated)
+     * leaves or is removed from the team. Talk does not watch for Circles
+     * membership changes, so TeamHub must explicitly remove the row to revoke
+     * access.
      *
-     * Room OWNER rows (participant_type=1) are intentionally preserved to prevent
-     * orphaning a Talk room without an owner.
+     * The same identifier can occur under more than one actor_type — a local
+     * user's UID and a federated UID happen to look different, but Talk's
+     * circle-expansion may have created an attendee under either type
+     * depending on how the member was first reached. We therefore delete from
+     * both 'users' AND 'federated_users' for the given actor_id; the
+     * non-matching row is a no-op.
+     *
+     * Room OWNER rows (participant_type=1) are intentionally preserved to
+     * prevent orphaning a Talk room without an owner.
      *
      * Non-fatal: failure is logged but does not propagate.
      */
@@ -1006,7 +1015,10 @@ class TalkService {
             $affected = $dqb->delete('talk_attendees')
                 ->where($dqb->expr()->eq('room_id',
                     $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('users')))
+                ->andWhere($dqb->expr()->in('actor_type', $dqb->createNamedParameter(
+                    ['users', 'federated_users'],
+                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
+                )))
                 ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
                 ->andWhere($dqb->expr()->neq('participant_type',
                     $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))) // preserve OWNER
@@ -1384,6 +1396,20 @@ class TalkService {
             return ['added' => 0, 'removed' => 0];
         }
 
+        // Map Circles user_type → Talk actor_type for every member type that
+        // corresponds to a per-person attendee row in talk_attendees.
+        //   1 (local user)  → 'users'
+        //   4 (federated)   → 'federated_users'
+        // 'circles' attendee rows represent the team itself and must never be
+        // touched; group / sub-team / email member types do not produce per-
+        // person attendee rows from the circle-expansion side, so they're
+        // intentionally outside this map.
+        $userTypeToActorType = [
+            1 => 'users',
+            4 => 'federated_users',
+        ];
+        $managedActorTypes = array_values($userTypeToActorType);
+
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
 
@@ -1406,22 +1432,33 @@ class TalkService {
 
             // ── 2. Compute effective member set from circles_membership ──────
             // circles_membership.single_id resolves to a NC uid by joining
-            // circles_member where m.circle_id = single_id AND m.user_type=1
-            // (the single_id IS the unique_id of the user's personal circle).
+            // circles_member where m.circle_id = single_id AND m.user_type IN
+            // (the managed types above). single_id IS the unique_id of the
+            // person's personal circle, regardless of whether that person is
+            // local or federated.
+            //
+            // Keyed by "actor_type|actor_id" so a local 'justin' and a
+            // federated 'justin@host.com' never collide.
+            $effective = [];
+
             $eQb  = $db->getQueryBuilder();
-            $eRes = $eQb->select('m.user_id')
+            $eRes = $eQb->select('m.user_id', 'm.user_type')
                 ->from('circles_membership', 'ms')
                 ->innerJoin('ms', 'circles_member', 'm', $eQb->expr()->andX(
-                    $eQb->expr()->eq('m.circle_id',  'ms.single_id'),
-                    $eQb->expr()->eq('m.user_type',  $eQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                    $eQb->expr()->eq('m.circle_id', 'ms.single_id'),
+                    $eQb->expr()->in('m.user_type', $eQb->createNamedParameter(
+                        array_keys($userTypeToActorType),
+                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                    )),
                 ))
                 ->where($eQb->expr()->eq('ms.circle_id', $eQb->createNamedParameter($teamId)))
                 ->executeQuery();
-            $effective = [];
             while ($eRow = $eRes->fetch()) {
-                $uid = (string)($eRow['user_id'] ?? '');
-                if ($uid !== '') {
-                    $effective[$uid] = true;
+                $uid       = (string)($eRow['user_id'] ?? '');
+                $userType  = (int)($eRow['user_type'] ?? 0);
+                $actorType = $userTypeToActorType[$userType] ?? null;
+                if ($uid !== '' && $actorType !== null) {
+                    $effective[$actorType . '|' . $uid] = ['actor_type' => $actorType, 'actor_id' => $uid];
                 }
             }
             $eRes->closeCursor();
@@ -1429,33 +1466,46 @@ class TalkService {
             // Safety net: circles_membership can lag for very freshly added
             // direct members. Also fold in the direct membership rows.
             $dQb  = $db->getQueryBuilder();
-            $dRes = $dQb->select('user_id')
+            $dRes = $dQb->select('user_id', 'user_type')
                 ->from('circles_member')
                 ->where($dQb->expr()->eq('circle_id', $dQb->createNamedParameter($teamId)))
-                ->andWhere($dQb->expr()->eq('user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($dQb->expr()->eq('status',    $dQb->createNamedParameter('Member')))
+                ->andWhere($dQb->expr()->in('user_type', $dQb->createNamedParameter(
+                    array_keys($userTypeToActorType),
+                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                )))
+                ->andWhere($dQb->expr()->eq('status', $dQb->createNamedParameter('Member')))
                 ->executeQuery();
             while ($dRow = $dRes->fetch()) {
-                $uid = (string)($dRow['user_id'] ?? '');
-                if ($uid !== '') {
-                    $effective[$uid] = true;
+                $uid       = (string)($dRow['user_id'] ?? '');
+                $userType  = (int)($dRow['user_type'] ?? 0);
+                $actorType = $userTypeToActorType[$userType] ?? null;
+                if ($uid !== '' && $actorType !== null) {
+                    $effective[$actorType . '|' . $uid] = ['actor_type' => $actorType, 'actor_id' => $uid];
                 }
             }
             $dRes->closeCursor();
 
-            // ── 3. Current talk_attendees user rows for this room ────────────
+            // ── 3. Current talk_attendees rows for this room (managed types) ─
             $aQb  = $db->getQueryBuilder();
-            $aRes = $aQb->select('actor_id', 'participant_type')
+            $aRes = $aQb->select('actor_type', 'actor_id', 'participant_type')
                 ->from('talk_attendees')
                 ->where($aQb->expr()->eq('room_id',
                     $aQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($aQb->expr()->eq('actor_type', $aQb->createNamedParameter('users')))
+                ->andWhere($aQb->expr()->in('actor_type', $aQb->createNamedParameter(
+                    $managedActorTypes,
+                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
+                )))
                 ->executeQuery();
-            $currentByUid = [];
+            $current = [];
             while ($aRow = $aRes->fetch()) {
-                $uid = (string)($aRow['actor_id'] ?? '');
-                if ($uid !== '') {
-                    $currentByUid[$uid] = (int)($aRow['participant_type'] ?? 0);
+                $actorType = (string)($aRow['actor_type'] ?? '');
+                $actorId   = (string)($aRow['actor_id']   ?? '');
+                if ($actorType !== '' && $actorId !== '') {
+                    $current[$actorType . '|' . $actorId] = [
+                        'actor_type'       => $actorType,
+                        'actor_id'         => $actorId,
+                        'participant_type' => (int)($aRow['participant_type'] ?? 0),
+                    ];
                 }
             }
             $aRes->closeCursor();
@@ -1463,15 +1513,15 @@ class TalkService {
             // ── 4. Add missing attendees ─────────────────────────────────────
             $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
             $added = 0;
-            foreach (array_keys($effective) as $uid) {
-                if (isset($currentByUid[$uid])) {
+            foreach ($effective as $key => $member) {
+                if (isset($current[$key])) {
                     continue;
                 }
                 $iQb = $db->getQueryBuilder();
                 $iQb->insert('talk_attendees')
                     ->setValue('room_id',          $iQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                    ->setValue('actor_type',       $iQb->createNamedParameter('users'))
-                    ->setValue('actor_id',         $iQb->createNamedParameter($uid))
+                    ->setValue('actor_type',       $iQb->createNamedParameter($member['actor_type']))
+                    ->setValue('actor_id',         $iQb->createNamedParameter($member['actor_id']))
                     ->setValue('display_name',     $iQb->createNamedParameter(''))
                     ->setValue('participant_type', $iQb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
 
@@ -1500,7 +1550,8 @@ class TalkService {
                     $added++;
                 } catch (\Throwable $e) {
                     $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers: insert failed', [
-                        'teamId' => $teamId, 'roomId' => $roomId, 'uid' => $uid,
+                        'teamId' => $teamId, 'roomId' => $roomId,
+                        'actorType' => $member['actor_type'], 'actorId' => $member['actor_id'],
                         'error'  => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
@@ -1508,11 +1559,11 @@ class TalkService {
 
             // ── 5. Remove orphans (skip room owners) ─────────────────────────
             $removed = 0;
-            foreach ($currentByUid as $uid => $pType) {
-                if ($pType === 1) {
+            foreach ($current as $key => $attendee) {
+                if ($attendee['participant_type'] === 1) {
                     continue; // never evict a room owner
                 }
-                if (isset($effective[$uid])) {
+                if (isset($effective[$key])) {
                     continue; // still a member
                 }
                 try {
@@ -1520,15 +1571,16 @@ class TalkService {
                     $rQb->delete('talk_attendees')
                         ->where($rQb->expr()->eq('room_id',
                             $rQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->andWhere($rQb->expr()->eq('actor_type', $rQb->createNamedParameter('users')))
-                        ->andWhere($rQb->expr()->eq('actor_id',   $rQb->createNamedParameter($uid)))
+                        ->andWhere($rQb->expr()->eq('actor_type', $rQb->createNamedParameter($attendee['actor_type'])))
+                        ->andWhere($rQb->expr()->eq('actor_id',   $rQb->createNamedParameter($attendee['actor_id'])))
                         ->andWhere($rQb->expr()->neq('participant_type',
                             $rQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                         ->executeStatement();
                     $removed++;
                 } catch (\Throwable $e) {
                     $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers: delete failed', [
-                        'teamId' => $teamId, 'roomId' => $roomId, 'uid' => $uid,
+                        'teamId' => $teamId, 'roomId' => $roomId,
+                        'actorType' => $attendee['actor_type'], 'actorId' => $attendee['actor_id'],
                         'error'  => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
@@ -1538,7 +1590,7 @@ class TalkService {
                 $this->logger->info('[TalkService] reconcileEffectiveTalkRoomMembers: drift reconciled', [
                     'teamId' => $teamId, 'roomId' => $roomId,
                     'added'  => $added, 'removed' => $removed,
-                    'effective' => count($effective), 'before' => count($currentByUid),
+                    'effective' => count($effective), 'before' => count($current),
                     'app' => Application::APP_ID,
                 ]);
             }

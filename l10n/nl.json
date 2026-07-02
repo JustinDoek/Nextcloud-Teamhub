@@ -1786,7 +1786,12 @@
 		"Failed to remove": "Verwijderen mislukt",
 		"unknown error": "onbekende fout",
 		"Failed to load teams: {error}": "Teams laden mislukt: {error}",
-		"Failed to load teams": "Teams laden mislukt"
+		"Failed to load teams": "Teams laden mislukt",
+		"In progress": "Bezig",
+		"To do": "Te doen",
+		"Instance summary": "Instantieoverzicht",
+		"Unique team members": "Unieke teamleden",
+		"Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team — directly, via a group, or via a sub-team — and is the metric per-seat licensing keys off.": "Geaggregeerde aantallen voor deze Nextcloud-instantie. Unieke teamleden telt elke persoon die toegang heeft tot ten minste één team — direct, via een groep of via een sub-team — en is de waarde waarop per-seat licentiëring zich baseert."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

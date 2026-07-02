@@ -9,13 +9,16 @@
 
         <!-- Search and view controls -->
         <div class="browse-teams-controls">
+            <!-- NcTextField default slot in @nextcloud/vue 8.x renders a
+                 trailing icon button that overlays the input and intercepts
+                 clicks — the input never receives focus, so no cursor and
+                 no typing. The proven maintenance-tab pattern omits the
+                 slot; we match it here. -->
             <NcTextField
                 v-model="searchQuery"
                 :label="t('teamhub', 'Search teams')"
                 :placeholder="t('teamhub', 'Search by name or description...')"
-                class="browse-teams-search">
-                <Magnify :size="20" />
-            </NcTextField>
+                class="browse-teams-search" />
 
             <div class="browse-teams-view-toggle">
                 <NcButton
@@ -169,7 +172,6 @@ import AccountQuestion from 'vue-material-design-icons/AccountQuestion.vue'
 import ExitToApp       from 'vue-material-design-icons/ExitToApp.vue'
 import OpenInApp       from 'vue-material-design-icons/OpenInApp.vue'
 import Plus            from 'vue-material-design-icons/Plus.vue'
-import Magnify         from 'vue-material-design-icons/Magnify.vue'
 import ViewGrid        from 'vue-material-design-icons/ViewGrid.vue'
 import ViewList        from 'vue-material-design-icons/ViewList.vue'
 
@@ -184,7 +186,6 @@ export default {
         ExitToApp,
         OpenInApp,
         Plus,
-        Magnify,
         ViewGrid,
         ViewList,
     },
@@ -418,6 +419,7 @@ export default {
 .team-card__actions {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
     margin-top: 0; /* header margin-bottom already provides separation */
 }
 

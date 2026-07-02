@@ -3,6 +3,192 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.87.0] — 2026-07-01 — Session-end rollup
+
+Second session boundary of the 2026-06-30/07-01 window. Rolls up two post-3.86.0 patches (3.86.1 and 3.86.2). Nothing new landed here beyond the version bump and the docs sweep — see the entries below for per-change detail.
+
+### Rolled up
+
+- **3.86.1** — Timeline Deck-assignee fetch: skip `DbIntrospectionService` entirely, try (table, participantColumn) variants directly with try/catch. Introspection was silently returning `[]` on installs where the table exists but is empty (Strategy 2 `SELECT * LIMIT 1` fails on empty tables + Strategy 3 `INFORMATION_SCHEMA` can be access-restricted).
+- **3.86.2** — Shared-files tab in Filecenter widget always empty. Backend was still gating on the `shared_files` toggle that the frontend removed when the widget was folded in. Removed the gate and swept the remaining plumbing from `ResourceService`, `TeamController` (`$allowed`, `$toggleOnlyAppIds`), `TelemetryService::getBuiltinIntegrationUsage`, and dead comments in `ManageTeamView.vue`.
+
+### Changed
+
+- Deck-assignee logging in `TimelineService` demoted from `info` to `debug`. The info level was appropriate during the diagnostic phase but fires on every timeline fetch — would bloat production logs. Admins can set `loglevel=0` for the diagnostic capability when needed.
+
+### Frontend build required
+
+`ManageTeamView.vue` was touched at comment level only during 3.86.2. If deploying from the previous session's 3.86.0 baseline you already needed `npm run build` for `AdminSettings.vue` / `BrowseTeamsView.vue` / `TeamTabBar.vue`; this rollup adds nothing to that.
+
+## [3.86.2] — 2026-07-01 — Shared files widget: unblock + toggle sweep
+
+### Fixed
+
+- **Shared-files tab in the Filecenter widget was always empty on every team.** When the standalone Shared-files widget was folded into the Filecenter widget as an always-on tab, its per-team `shared_files` enable/disable toggle was removed from the frontend. But the backend endpoint `GET /api/v1/teams/{teamId}/files/shared` still short-circuited to `{items:[], total:0}` when the toggle was off — and since the toggle defaults to `false` for teams without an explicit row, that path was hit for every team. Removed the toggle gate in [lib/Controller/TeamController.php:753-760](lib/Controller/TeamController.php:753); shares now appear whenever the current user is a team member.
+
+### Removed
+
+- **`shared_files` toggle plumbing swept from backend.** The toggle no longer serves a purpose (the widget is always on when Files is enabled); leaving it in place would only invite future confusion.
+  - `ResourceService::getTeamResources` — dropped the `shared_files` key from the returned array and the DB lookup that populated it (`lib/Service/ResourceService.php` ~L125, ~L144-167).
+  - `TeamController::deleteTeamResource` — dropped `'shared_files'` from the `$allowed` app-id allowlist (line 311).
+  - `TeamController::updateTeamApps` — dropped `'shared_files'` from `$toggleOnlyAppIds` (line 1250).
+  - `TelemetryService::getBuiltinIntegrationUsage` — dropped the `$defaultDisabled = ['shared_files']` path and simplified the aggregation to default-enabled apps only. `builtin_integrations` telemetry no longer emits a `shared_files` key.
+  - `ManageTeamView.vue` — dead-comment references to `shared_files` in `toggleApp()` and CSS section header removed.
+- Legacy rows for `app_id='shared_files'` in `teamhub_team_apps` are left in place and simply ignored. No migration is added — the rows are harmless.
+
+### Frontend build required
+
+`ManageTeamView.vue` was touched (comment-only change), so a rebuild isn't strictly necessary for correctness. But if you're deploying the PHP changes anyway, run `npm run build` for cleanliness.
+
+## [3.86.1] — 2026-06-30 — Timeline Deck assignees: skip introspection
+
+### Fixed
+
+- **Deck assignees still didn't appear in the timeline popover after 3.85.11**, because the fetch was still gated on `DbIntrospectionService::getTableColumns()`. On the failing install, no `[TimelineService] Deck assignees` log line was emitted at all — meaning introspection returned `[]` for BOTH candidate tables even though the data (and the tables) exist. Root cause: DbIntrospection Strategy 2 (`SELECT * LIMIT 1`) fails on empty tables and Strategy 3 (`INFORMATION_SCHEMA`) can be access-restricted, so the introspection silently returns `[]` and every downstream lookup that gates on it silently skips.
+- Rewrote the fetch to skip introspection entirely and try (table, participantColumn) pairs directly with `try`/`catch`, same pattern the existing ACL fallback in `fetchDeckEvents` already uses. A missing-table SQLSTATE[42S02] just bumps to the next variant. Four variants tried: `deck_card_assigned_users` × (`participant_uid`, `participant`), then `deck_assigned_users` × (`participant_uid`, `participant`). Type filter is tried optimistically and dropped if the column doesn't exist. Log line emitted at `info` level so it's visible without debug loglevel: `Deck assignees: lookup done hit=<table/col or <none>> cardsWithAssignees=N`. New private helper `fetchDeckAssigneesForVariant()`. PHP only — no `npm run build`.
+
+## [3.86.0] — 2026-06-30 — Session-end rollup
+
+Session boundary per SKILLS.md §session-end §3. Rolls up 3.85.1 → 3.85.11 — eleven incremental fixes and features in one bug-focused session.
+
+### Headline changes
+
+- **Deck stack `order` bug** (3.85.1) — TeamHub-created Deck columns landed with NULL `order`, blocking renaming in the Deck UI. `DeckService::createDeckBoard` now prefers `\OCA\Deck\Db\StackMapper::insert()` (mirrors the BoardMapper pattern); QB fallback always sets `order` + `last_modified` with `PARAM_INT`. New `BackfillDeckStackOrder` post-migration repair step heals existing NULL rows per board.
+- **TeamTabBar "More…" dropdown fixes** (3.85.2 / 3.85.3) — viewport clamping (was spilling past the right edge), dynamic max-height from space below trigger, and explicit `overflow-x: hidden` to suppress the CSS-spec-mandated horizontal scrollbar promotion.
+- **Browse Teams regressions** (3.85.4) — `gap: 8px` added to `.team-card__actions` (Open/Leave were flush); removed the `<Magnify>` icon from the search `<NcTextField>` slot because `@nextcloud/vue 8.x` turns it into a trailing button that overlaid the input and stole pointer events (input was unfocusable).
+- **Default Deck stack titles localised** (3.85.5 / 3.85.6) — "To do" / "In progress" / "Done" now translated to the board creator's NC language using TeamHub's own catalogue. 2 new strings × 6 locales.
+- **Talk reconciler federated-user blind spot** (3.85.7) — `reconcileEffectiveTalkRoomMembers` was direct-only on `actor_type='users'`; rewrote to handle `'users'` AND `'federated_users'` with `(actor_type|actor_id)` keying. `removeUserFromTeamTalkRoom` deletes from both. `MemberService::removeMember` line 1238 swapped from legacy `reconcileTalkRoomMembers` to effective-aware variant (closes a long-standing HANDOFF open issue).
+- **Timeline item popover** (3.85.8 / 3.85.9 / 3.85.11) — click any chip → small dialog with title, labelled date row, source-specific detail rows, optional description/snippet, and "Open in [app] →" button. Modifier-clicks still navigate natively. 15 inline MDI SVG icons replace the initial emoji set. `TimelineService` extended with description, organizer, attendee count, proposedBy / decidedBy, deck card description, message body snippet, milestone createdBy, and Deck assignees. New `resolveDisplayNames()` resolves UIDs via `IUserManager` with a per-request cache. Deck assignee fetch hardened with `DbIntrospectionService` to handle both `deck_card_assigned_users.participant_uid` (newer Deck) and `deck_assigned_users.participant` (older).
+- **Admin Statistics → Instance summary** (3.85.10) — two prominent stat cards at the top of the Statistics tab: Teams (total source=16 circles) and Unique team members (distinct effective people across all teams, `circles_membership` ↦ `circles_member user_type IN (1, 4)`). New `TelemetryService::countUniqueTeamMembers()`. `unique_team_members` added to telemetry payload. Designed as the per-seat license metric a future commercial-license model can key off.
+
+### Added
+
+- 5 new user-facing strings translated to **nl / de / fr / da / es / it**: `To do`, `In progress`, `Instance summary`, `Unique team members`, and the Instance-summary description.
+- New PHP file: `lib/Migration/RepairSteps/BackfillDeckStackOrder.php` (registered in `appinfo/info.xml`).
+- New private service methods: `DeckService::translateDefaultStackTitles`, `TelemetryService::countUniqueTeamMembers`, `TimelineService::truncateForPopup`, `TimelineService::resolveDisplayNames`.
+- `unique_team_members` added to the telemetry response shape (documented in `APIendpoints.md`).
+- Documented the per-source `meta.*` additions for the timeline endpoint in `APIendpoints.md`.
+
+### Frontend build required
+
+`AdminSettings.vue`, `BrowseTeamsView.vue`, `TeamTabBar.vue` all touched. One `npm run build` covers everything. `templates/timeline.php` is server-rendered (no build step).
+
+### Security
+
+- No new endpoints added. All existing auth gates unchanged.
+- Talk reconciler's broader actor-type handling preserves the room OWNER (`participant_type=1`) protection — owners can never be evicted by either the immediate or the hourly path.
+- Telemetry's `unique_team_members` is an aggregate count; no UIDs or content leave the instance.
+- Timeline popover renders every user-supplied string through the existing `esc()` HTML-escaping helper (titles, descriptions, snippets, display names). The "Open in [app] →" anchor uses server-generated URLs only (calendar edit URL, deck card URL, TeamHub deep link) — not user-controlled input. `target="_top"` + `rel="noopener noreferrer"` retained.
+
+## [3.85.11] — 2026-06-30 — Timeline popover: Deck assignee fetch hardened
+
+### Fixed
+
+- **Deck card assignees never appeared in the timeline popover** even when the card had an assignee. The 3.85.9 fetch hard-coded `deck_card_assigned_users.participant_uid`, but Deck has shipped two table names and two participant-column names for the same data over its history (`deck_card_assigned_users.participant_uid` newer, `deck_assigned_users.participant` older). On installs where either pair didn't match, the query silently returned zero rows and the popover never rendered the "Assigned to" row. Reworked the fetch to detect both tables and both column names via `DbIntrospectionService` and use whichever exists. Also: when a `type` column is present (Deck's 0=user / 1=group / 2=circle convention), filter to `type=0` so group/circle assignment labels don't get rendered as if they were people. Debug log line emits `table=… participantCol=… cardsWithAssignees=…` so future installs make the lookup state observable. No `npm run build` required (PHP only).
+
+## [3.85.10] — 2026-06-30 — Admin Statistics: team + unique-user counts
+
+### Added
+
+- **"Instance summary" section at the top of admin Statistics tab.** Two prominent stat cards: **Teams** (total source=16 circles) and **Unique team members** (distinct people across every team's effective membership). Designed as the headline metric a future per-seat licence model can key off.
+- **New `TelemetryService::countUniqueTeamMembers()`** walks `circles_membership` (the denormalised cache, so users reaching a team via group / sub-team are counted once), joins to `circles_circle` filtered on `source=16`, and to `circles_member` filtered on `user_type IN (1, 4)` — local + federated users, same set treated as "people" elsewhere (Talk reconciler, etc). DISTINCT applied in PHP for cross-DB portability (no `COUNT(DISTINCT col)` shortcut in NC's IFunctionBuilder).
+- `unique_team_members` added to the telemetry payload (alongside the existing `team_count`). Docblock payload-shape comment updated.
+- 3 new user-facing strings translated to **nl / de / fr / da / es / it / en**: `Instance summary`, `Unique team members`, and the section description.
+
+### Frontend build required
+
+`AdminSettings.vue` was touched — run `npm run build`.
+
+## [3.85.9] — 2026-06-30 — Timeline popover: polish pass
+
+### Changed
+
+- **Emoji icons replaced with inline Material Design Icon SVGs.** The 3.85.8 popover used emoji glyphs (📍 📅 👤 👥 📋 📑 ⚡ 🎯 🏷 ✅ ⚠ 📌 ✓ ↩) as row markers; replaced with a curated set of 15 inline MDI SVGs (`map-marker`, `calendar`, `calendar-clock`, `account`, `account-multiple`, `view-dashboard`, `list-square`, `flash`, `target`, `tag`, `check`, `check-decagram`, `undo-variant`, `pin`, `alert`, `plus-circle`, `circle-small`). Sized 14×14, `fill="currentColor"` so they pick up the surrounding text colour. Same visual language Nextcloud itself uses across the UI.
+- **Date row now always labelled.** Previous build showed "do 2 jul 2026" alone under the title — ambiguous: created? due? completed? Replaced the standalone `.th-popover__when` block with an in-grid detail row whose label is computed from `(source, type)`: calendar→When, decisions→Proposed/Decided/Withdrawn, deck→Due/Created/Completed, messages→Posted, milestone→Date. Deck "due" rows additionally use the `calendar-clock` icon to reinforce the deadline framing.
+
+### Added
+
+- **Deck card assignees in the popover.** `TimelineService::fetchDeckEvents` now does a single batched query against `deck_card_assigned_users` (`participant_uid`, `card_id`) for every card that emitted at least one event, and attaches `meta.assignees` (raw UIDs). `resolveDisplayNames()` was extended to handle array-of-UID meta keys and adds an `assigneeNames` companion via `IUserManager`. Popover renders "Assigned to {name}" (single) or "Assignees {a, b, c}" (multiple). Falls back silently if `deck_card_assigned_users` doesn't exist on this Deck version. No new schema, no `npm run build` required.
+
+## [3.85.8] — 2026-06-30 — Timeline item popover
+
+### Added
+
+- **Click any timeline chip to open a small popover with the key fields for that item before navigating to the source app.** The chip's `<a href>` is preserved, so middle-click / ctrl-click / cmd-click / shift-click still open the underlying URL the way the browser normally would; only plain left-click is intercepted. The popover ends with an "Open in [Calendar / Deck / TeamHub] →" button that follows the same URL. Click outside or press Esc to dismiss. Position auto-flips above the chip when there's no room below, and clamps horizontally inside the viewport.
+- **`TimelineService` now returns rich per-event details** so the popover can render meaningfully without a second roundtrip:
+  - Calendar events: `description` (truncated), `organizer` (CN or mailto), `attendeeCount`, plus the existing `location` / `calendarName`.
+  - Decisions: `proposedBy` + `decidedBy` raw UIDs (already had status / impact / level / category).
+  - Deck cards: `description` (truncated).
+  - Messages: `snippet` (truncated body) + the existing `authorId` / `pinned`.
+  - Milestones: `createdBy`.
+- **Display-name resolution.** A new private `TimelineService::resolveDisplayNames()` walks the event list once after assembly and adds `*Name` companions (`proposedByName`, `decidedByName`, `authorName`, `createdByName`) via `IUserManager::get()->getDisplayName()` with an in-method cache. Missing/deleted users fall back to the raw UID. One pass per request, not per event.
+- New private `TimelineService::truncateForPopup()` helper normalises whitespace and caps free-form text at 280 characters with an ellipsis.
+
+### Changed
+
+- Timeline chip's `title` attribute updated from "click to open" to "click for details" to set the right expectation.
+
+### No frontend build required
+
+`templates/timeline.php` is rendered server-side and shipped as-is; the popover CSS + JS live inline in that template. `TimelineService.php` is PHP. **No `npm run build` needed** for this change.
+
+## [3.85.7] — 2026-06-30 — Talk reconciler: federated user eviction
+
+### Fixed
+
+- **Removed members could persist in a team's Talk room indefinitely if they were federated users.** Symptom: TeamHub member list shows the user is gone, Talk participant list still shows them after the hourly cron has run multiple times. Three coordinated changes:
+  1. `TalkService::reconcileEffectiveTalkRoomMembers` now considers BOTH `actor_type='users'` AND `actor_type='federated_users'`. Previously it only fetched local-user attendee rows, so federated drift was invisible to the eviction loop. The effective member set is now computed for `circles_member.user_type IN (1, 4)` and keyed by `actor_type|actor_id` so a local `justin` and a federated `justin@host.com` never collide.
+  2. `TalkService::removeUserFromTeamTalkRoom` (called on direct-user removal) now deletes from both `'users'` and `'federated_users'` for the given actor_id, so the right row is always cleaned up regardless of how Talk's circle-expansion originally categorised the attendee.
+  3. `MemberService::removeMember` (group/circle removal path, line 1238) swapped from the legacy direct-only `reconcileTalkRoomMembers` to the effective-aware `reconcileEffectiveTalkRoomMembers`. Resolves a long-standing HANDOFF open issue — users still reachable via another attached group are now correctly preserved instead of being evicted.
+
+  Room OWNER preservation (`participant_type=1`) and all other behaviour unchanged. PHP-only — no `npm run build` required.
+
+## [3.85.6] — 2026-06-30 — Default Deck stacks: own the translations
+
+### Fixed
+
+- **Only "Done" was translated in Dutch boards after 3.85.5; "To do" and "In progress" stayed in English.** Deck's translation coverage for these three strings is uneven — Dutch had `Done` → `Klaar` but not `To do` / `In progress`, so the bare source strings leaked through.
+- Switched `DeckService::translateDefaultStackTitles` to use **TeamHub's own catalogue** (`Application::APP_ID`) instead of Deck's. Added `To do` and `In progress` to all seven locale files (en + nl/de/fr/da/es/it) in both `.js` and `.json`; `Done` already had translations in every locale. Result: every locale now renders all three columns consistently. `TRANSLATORS:` hints added to the three `t()` calls to disambiguate context for future translators. PHP-only change — no `npm run build` required.
+
+### Added
+
+- 2 new user-facing strings (`To do`, `In progress`) translated to **nl / de / fr / da / es / it**.
+
+## [3.85.5] — 2026-06-30 — Default Deck stacks created in the user's language
+
+### Changed
+
+- **Default Deck stacks ("To do", "In progress", "Done") created by TeamHub are now translated into the board creator's NC language.** Previously hard-coded English regardless of user locale. `DeckService::createDeckBoard` now resolves the creator's language via `IConfig::getUserValue($uid, 'core', 'lang')` (falling back to `default_language` then English) and pulls the three titles from **Deck's own translation catalogue** via `IFactory::get('deck', $lang)` — these exact strings have been part of Deck since v1.0, so its `.po` files already carry them in every language Deck ships. No duplication into TeamHub's PO files. New private helper `DeckService::translateDefaultStackTitles($uid)`; falls back to English if anything in the resolution chain fails (`IL10N::t()` returns the source string when a catalogue lacks an entry, which is the correct visible default). PHP-only change — no `npm run build` required.
+
+## [3.85.4] — 2026-06-30 — Browse Teams: button spacing + search input regressions
+
+### Fixed
+
+- **No gap between Open and Leave buttons** on member team cards after the 3.84.3 Open-button addition. `.team-card__actions` was `display: flex; justify-content: flex-end;` with no `gap`, so the buttons sat flush against each other. Added `gap: 8px` (NC default action-row spacing).
+- **Search input could not be focused or typed in.** The `<NcTextField>` had a `<Magnify>` icon in its default slot. In `@nextcloud/vue 8.x` the NcTextField default slot is rendered as a trailing icon button that overlays the input area and intercepts pointer events — so clicks landed on the icon button instead of the field. The proven maintenance-tab pattern omits the slot; matched it here. Removed the now-unused `Magnify` import. Frontend rebuild (`npm run build`) required.
+
+## [3.85.3] — 2026-06-30 — More-menu horizontal scrollbar suppressed
+
+### Fixed
+
+- **Spurious horizontal scrollbar at the bottom of the "More…" dropdown.** Follow-up to 3.85.2. Per CSS spec, when `overflow-y` is set to a non-`visible` value while `overflow-x` is left at its default `visible`, `overflow-x` is promoted to `auto` — which produced a horizontal scrollbar whenever sub-pixel rounding nudged any item edge past the container. Added explicit `overflow-x: hidden` to `.teamhub-tab-more-menu` so the horizontal axis is truly non-scrolling. Frontend rebuild (`npm run build`) required.
+
+## [3.85.2] — 2026-06-30 — More-menu viewport clamping
+
+### Fixed
+
+- **TeamTabBar "More…" dropdown could fall partly off the right edge of the viewport and showed a scrollbar that wasn't needed.** The menu was anchored to `rect.left` of the trigger (which sits near the right edge of the tab bar) with `min-width: 180px`, so on narrower viewports it overflowed the window. The static `max-height: 300px` combined with `overflow-y: auto` could also reserve a scrollbar gutter even when content fit. `repositionMoreMenu()` now clamps `left` to `min(rect.left, window.innerWidth − menuWidth − 8)` so the menu always stays inside the viewport with an 8px margin, and computes `max-height` dynamically from the space remaining below the trigger so the inline `overflow-y: auto` only engages when content genuinely exceeds that space. Frontend rebuild (`npm run build`) required.
+
+## [3.85.1] — 2026-06-30 — Deck stack `order` bug
+
+### Fixed
+
+- **Deck columns created via TeamHub could not be renamed.** When `DbIntrospectionService::getTableColumns('deck_stacks')` fell through to a degraded path (HANDOFF.md notes this is possible on some installs), the `order` value was silently omitted from the stack INSERT — rows landed with NULL `order`, and Deck's UI refuses to rename a stack with NULL order until the user manually reshuffles columns. `DeckService::createDeckBoard` now mirrors the BoardMapper pattern: tries `\OCA\Deck\Db\StackMapper::insert()` first (uses Deck's own setters, always sets order). On exception falls back to a hardened QB insert that always sets `order` + `last_modified` (not gated on introspection) and binds integer columns as `PARAM_INT`.
+
+### Added
+
+- New post-migration repair step `BackfillDeckStackOrder` (registered in `appinfo/info.xml`). Idempotent: finds existing `deck_stacks` rows with NULL `order` and assigns sequential values per board starting at `MAX(existing order) + 1`. Skips cleanly if the Deck app isn't installed. Heals teams created in 3.85.0 and earlier without user intervention.
+
 ## [3.85.0] — 2026-06-30 — Session-end rollup
 
 Session boundary per SKILLS.md §session-end §3. Rolls up 3.84.1 → 3.84.8.

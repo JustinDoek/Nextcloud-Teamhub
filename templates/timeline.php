@@ -495,6 +495,134 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
         box-shadow: none !important;
     }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Item popover (v3.85.8) — click on a chip opens this small dialog with the
+   key fields for the underlying item, plus an "Open in [app]" link that
+   navigates the parent window (the chip itself no longer navigates on
+   plain click; middle-click / ctrl-click still do, via the underlying
+   <a href>).
+   ───────────────────────────────────────────────────────────────────────── */
+.th-popover {
+    position: fixed;
+    z-index: 100;
+    min-width: 280px;
+    max-width: 360px;
+    background: var(--nc-bg);
+    border: 1px solid var(--nc-border);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    padding: 12px 14px 10px;
+    font-size: 13px;
+    color: var(--nc-text);
+}
+.th-popover[hidden] { display: none; }
+
+.th-popover__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.th-popover__source {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--nc-slate);
+}
+.th-popover__close {
+    background: none;
+    border: none;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--nc-slate);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.th-popover__close:hover { background: rgba(0, 0, 0, 0.06); }
+.th-popover__close:focus-visible {
+    outline: 2px solid var(--nc-blue);
+    outline-offset: 2px;
+}
+
+.th-popover__title {
+    margin: 0 0 10px;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+.th-popover__details {
+    margin: 0 0 10px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 10px;
+    row-gap: 6px;
+    font-size: 12px;
+}
+.th-popover__row {
+    display: contents;
+}
+.th-popover__row > dt {
+    color: var(--nc-slate);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.th-popover__row > dd {
+    margin: 0;
+    color: var(--nc-text);
+    word-break: break-word;
+}
+/* Inline MDI SVG icons — sized to match label line-height with currentColor
+   so they pick up the surrounding text colour. */
+.th-popover__svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--nc-slate);
+}
+
+.th-popover__description,
+.th-popover__snippet {
+    border-top: 1px solid var(--nc-border);
+    margin-top: 8px;
+    padding-top: 8px;
+    color: var(--nc-text);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+
+.th-popover__footer {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+}
+.th-popover__open {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: var(--nc-blue);
+    color: #fff;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 600;
+}
+.th-popover__open:hover { filter: brightness(0.95); text-decoration: none; }
+.th-popover__open:focus-visible {
+    outline: 2px solid var(--nc-blue);
+    outline-offset: 2px;
+}
 </style>
 </head>
 <body>
@@ -1361,15 +1489,23 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
             var a = document.createElement('a');
             a.className = cls + ' echip--url';
             a.href = ev.url;
-            // In-app deep-links (TeamHub itself, /apps/deck/board/…, calendar
-            // edit-sidebar URL) need to navigate the parent window so the user
-            // doesn't end up viewing them inside our own iframe. target=_top
-            // breaks out of the iframe explicitly and lets the user follow
-            // the link in the main NC window.
+            // The href + target=_top is retained so middle-click / ctrl-click
+            // / cmd-click open the item in the parent window the way users
+            // expect from any link. Plain left-click is intercepted below
+            // and routed to the item popover instead (v3.85.8).
             a.target = '_top';
             a.rel = 'noopener noreferrer';
-            a.title = ev.title + ' — click to open';
+            a.title = ev.title + ' — click for details';
             a.innerHTML = html;
+            a.addEventListener('click', function (e) {
+                // Let modifier-clicks behave natively (new tab / new window /
+                // download). Only intercept the plain primary-button click.
+                if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
+                    return;
+                }
+                e.preventDefault();
+                openItemPopover(ev, a);
+            });
             return a;
         }
 
@@ -1378,6 +1514,253 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
         div.title = ev.title;
         div.innerHTML = html;
         return div;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Item popover (v3.85.8) — single shared element, anchored to whichever
+    // chip was last clicked. Click outside / Esc dismisses.
+    // ─────────────────────────────────────────────────────────────────────
+
+    var popoverEl = null;
+
+    function getPopover() {
+        if (popoverEl) return popoverEl;
+        popoverEl = document.createElement('div');
+        popoverEl.className = 'th-popover';
+        popoverEl.hidden = true;
+        popoverEl.setAttribute('role', 'dialog');
+        popoverEl.setAttribute('aria-modal', 'false');
+        document.body.appendChild(popoverEl);
+
+        // Click outside (anywhere not inside the popover and not on a chip
+        // that's about to open it) closes the popover.
+        document.addEventListener('mousedown', function (e) {
+            if (popoverEl.hidden) return;
+            if (popoverEl.contains(e.target)) return;
+            if (e.target.closest && e.target.closest('.echip--url')) return;
+            closePopover();
+        });
+
+        // Esc closes.
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !popoverEl.hidden) {
+                closePopover();
+            }
+        });
+
+        // Re-anchor on scroll/resize so the popover doesn't drift off its
+        // chip as the user scrolls the iframe.
+        var reposition = function () {
+            if (!popoverEl.hidden && popoverEl._anchor) {
+                positionPopover(popoverEl, popoverEl._anchor);
+            }
+        };
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+
+        return popoverEl;
+    }
+
+    function closePopover() {
+        if (popoverEl) {
+            popoverEl.hidden = true;
+            popoverEl._anchor = null;
+        }
+    }
+
+    function openItemPopover(ev, anchorEl) {
+        var p = getPopover();
+        p.innerHTML = renderPopoverContent(ev);
+        p.hidden = false;
+        p._anchor = anchorEl;
+        positionPopover(p, anchorEl);
+
+        var closeBtn = p.querySelector('.th-popover__close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closePopover);
+        }
+    }
+
+    function positionPopover(p, anchorEl) {
+        var rect = anchorEl.getBoundingClientRect();
+        var margin = 8;
+        var pw = p.offsetWidth;
+        var ph = p.offsetHeight;
+
+        // Default: below the chip aligned to its left edge. Flip up if not
+        // enough room below; clamp horizontally so the popover never leaves
+        // the viewport.
+        var top = rect.bottom + 6;
+        if (top + ph > window.innerHeight - margin) {
+            top = Math.max(margin, rect.top - ph - 6);
+        }
+        var left = rect.left;
+        if (left + pw > window.innerWidth - margin) {
+            left = Math.max(margin, window.innerWidth - pw - margin);
+        }
+        if (left < margin) left = margin;
+
+        p.style.top  = top + 'px';
+        p.style.left = left + 'px';
+    }
+
+    // Inline Material Design Icon SVG paths. Keep this list tight — one
+    // entry per concept we actually surface in the popover. All glyphs are
+    // 24×24 source, rendered at 14×14 with currentColor so they pick up the
+    // surrounding text colour automatically.
+    var MDI_PATHS = {
+        'map-marker':   'M12 11.5A2.5 2.5 0 0 1 9.5 9 2.5 2.5 0 0 1 12 6.5 2.5 2.5 0 0 1 14.5 9a2.5 2.5 0 0 1-2.5 2.5M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Z',
+        'calendar':     'M19 19H5V8h14m0-5h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .89-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z',
+        'calendar-clock': 'M15 13h1.5v2.82l2.44 1.41-.75 1.3L15 16.69V13m4-5H5v11h4.67c-.43-.91-.67-1.93-.67-3a7 7 0 0 1 7-7c1.07 0 2.09.24 3 .67V8M5 21a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h1V1h2v2h8V1h2v2h1a2 2 0 0 1 2 2v6.1c1.24 1.26 2 2.99 2 4.9a7 7 0 0 1-7 7c-1.91 0-3.64-.76-4.9-2H5m11-9.85A4.85 4.85 0 0 0 11.15 16c0 2.68 2.17 4.85 4.85 4.85A4.85 4.85 0 0 0 20.85 16c0-2.68-2.17-4.85-4.85-4.85Z',
+        'account':      'M12 4a4 4 0 0 1 4 4 4 4 0 0 1-4 4 4 4 0 0 1-4-4 4 4 0 0 1 4-4m0 10c4.42 0 8 1.79 8 4v2H4v-2c0-2.21 3.58-4 8-4Z',
+        'account-multiple': 'M16 17v2H2v-2s0-4 7-4 7 4 7 4m-3.5-9.5A3.5 3.5 0 1 0 9 11a3.5 3.5 0 0 0 3.5-3.5m3.44 5.5A5.32 5.32 0 0 1 18 17v2h4v-2s0-3.63-6.06-4M15 4a3.4 3.4 0 0 0-1.93.59 5 5 0 0 1 0 5.82A3.4 3.4 0 0 0 15 11a3.5 3.5 0 0 0 0-7Z',
+        'view-dashboard': 'M13 3v6h8V3M13 21h8V11h-8M3 21h8v-6H3M3 13h8V3H3v10Z',
+        'list-square':  'M19 19V5H5v14h14M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5c-1.11 0-2-.9-2-2V5a2 2 0 0 1 2-2h14M9 7h8v2H9V7m0 4h8v2H9v-2m0 4h8v2H9v-2M7 7v2H5V7h2m0 4v2H5v-2h2m0 4v2H5v-2h2Z',
+        'flash':        'M7 2v11h3v9l7-12h-4l4-8H7Z',
+        'target':       'M11 2v2.07A8 8 0 0 0 4.07 11H2v2h2.07A8 8 0 0 0 11 19.93V22h2v-2.07A8 8 0 0 0 19.93 13H22v-2h-2.07A8 8 0 0 0 13 4.07V2m-2 4.08V8h2V6.09A5.99 5.99 0 0 1 17.92 11H16v2h1.91A5.99 5.99 0 0 1 13 17.92V16h-2v1.91A5.99 5.99 0 0 1 6.08 13H8v-2H6.09A5.99 5.99 0 0 1 11 6.08M12 11a1 1 0 0 0-1 1 1 1 0 0 0 1 1 1 1 0 0 0 1-1 1 1 0 0 0-1-1Z',
+        'tag':          'M5.5 7A1.5 1.5 0 0 1 4 5.5 1.5 1.5 0 0 1 5.5 4 1.5 1.5 0 0 1 7 5.5 1.5 1.5 0 0 1 5.5 7m15.91 4.58-9-9C12.05 2.22 11.55 2 11 2H4c-1.11 0-2 .89-2 2v7c0 .55.22 1.05.59 1.41l9 9c.36.36.86.59 1.41.59.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.05-.59-1.42Z',
+        'check':        'M21 7 9 19l-5.5-5.5 1.41-1.41L9 16.17 19.59 5.59 21 7Z',
+        'check-decagram': 'm23 12-2.44-2.78.34-3.68-3.61-.82-1.89-3.18L12 3 8.6 1.54 6.71 4.72l-3.61.81.34 3.68L1 12l2.44 2.78-.34 3.69 3.61.82 1.89 3.18L12 21l3.4 1.46 1.89-3.18 3.61-.82-.34-3.68L23 12m-13 5-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8Z',
+        'undo-variant': 'M13.5 7A6.5 6.5 0 0 1 20 13.5a6.5 6.5 0 0 1-6.5 6.5H10v-2h3.5c2.5 0 4.5-2 4.5-4.5S16 9 13.5 9H7.83l3.08 3.09L9.5 13.5 4 8l5.5-5.5 1.42 1.41L7.83 7H13.5M6 18h2v2H6v-2Z',
+        'pin':          'M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2Z',
+        'alert':        'M13 14h-2v-4h2m0 8h-2v-2h2M1 21h22L12 2 1 21Z',
+        'plus-circle':  'M17 13h-4v4h-2v-4H7v-2h4V7h2v4h4m-5-9A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2Z',
+        'circle-small': 'M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5Z'
+    };
+
+    function iconSvg(name) {
+        var d = MDI_PATHS[name];
+        if (!d) return '';
+        return '<svg class="th-popover__svg" viewBox="0 0 24 24" aria-hidden="true">'
+            +    '<path d="' + d + '" fill="currentColor"/>'
+            +  '</svg>';
+    }
+
+    function renderPopoverContent(ev) {
+        var meta = ev.meta || {};
+
+        var sourceLabel = ({
+            calendar:  'Calendar event',
+            decisions: ({ proposed: 'Decision proposed', decided: 'Decision decided', withdrawn: 'Decision withdrawn' })[ev.type] || 'Decision',
+            deck:      ({ created: 'Deck card created', due: 'Deck card due', completed: 'Deck card completed' })[ev.type] || 'Deck card',
+            messages:  'Message post',
+            milestone: 'Milestone'
+        })[ev.source] || ev.source;
+
+        var appName = ({
+            calendar:  'Calendar',
+            decisions: 'TeamHub',
+            deck:      'Deck',
+            messages:  'TeamHub',
+            milestone: 'TeamHub'
+        })[ev.source] || 'app';
+
+        // Per-event-type date label. The plain "2 jul 2026" alone was
+        // ambiguous in the popover; pairing it with "Due" / "Created" /
+        // "Completed" / etc tells the reader what the date represents.
+        var whenLabelByType = {
+            calendar:  { event:      'When' },
+            decisions: { proposed:   'Proposed', decided: 'Decided', withdrawn: 'Withdrawn' },
+            deck:      { due:        'Due', created: 'Created', completed: 'Completed' },
+            messages:  { posted:     'Posted' },
+            milestone: { milestone:  'Date' }
+        };
+        var whenLabel = (whenLabelByType[ev.source] && whenLabelByType[ev.source][ev.type]) || 'When';
+        var whenIcon  = (ev.source === 'deck' && ev.type === 'due') ? 'calendar-clock' : 'calendar';
+
+        var rows = [];
+
+        // Date row first so the popover reads top-to-bottom: "what kind of
+        // moment is this?" before the source-specific detail rows.
+        rows.push(detailRow(whenIcon, whenLabel, esc(formatWhen(ev))));
+
+        if (ev.source === 'calendar') {
+            if (meta.location)              rows.push(detailRow('map-marker',       'Location',  esc(meta.location)));
+            if (meta.calendarName)          rows.push(detailRow('calendar',         'Calendar',  esc(meta.calendarName)));
+            if (meta.organizer)             rows.push(detailRow('account',          'Organizer', esc(meta.organizer)));
+            if (meta.attendeeCount > 0)     rows.push(detailRow('account-multiple', 'Attendees', String(meta.attendeeCount)));
+        } else if (ev.source === 'decisions') {
+            if (meta.status)                rows.push(detailRow('circle-small',     'Status',    esc(meta.status)));
+            if (meta.impact)                rows.push(detailRow('flash',            'Impact',    esc(meta.impact)));
+            if (meta.level)                 rows.push(detailRow('target',           'Level',     esc(meta.level)));
+            if (meta.category)              rows.push(detailRow('tag',              'Category',  esc(meta.category)));
+            var proposedBy = meta.proposedByName || meta.proposedBy;
+            if (proposedBy)                 rows.push(detailRow('account',          'Proposed by', esc(proposedBy)));
+            var decidedBy = meta.decidedByName || meta.decidedBy;
+            if (ev.type !== 'proposed' && decidedBy) {
+                rows.push(detailRow(ev.type === 'withdrawn' ? 'undo-variant' : 'check-decagram',
+                                    ev.type === 'withdrawn' ? 'Withdrawn by' : 'Decided by',
+                                    esc(decidedBy)));
+            }
+        } else if (ev.source === 'deck') {
+            if (meta.boardName)             rows.push(detailRow('view-dashboard',   'Board',    esc(meta.boardName)));
+            if (meta.stackName)             rows.push(detailRow('list-square',      'Column',   esc(meta.stackName)));
+            // Assignees: prefer the resolved display names, fall back to raw UIDs.
+            var assignees = (meta.assigneeNames && meta.assigneeNames.length) ? meta.assigneeNames
+                          : (meta.assignees && meta.assignees.length) ? meta.assignees : null;
+            if (assignees && assignees.length) {
+                var assigneeIcon = assignees.length > 1 ? 'account-multiple' : 'account';
+                var assigneeLabel = assignees.length > 1 ? 'Assignees' : 'Assigned to';
+                rows.push(detailRow(assigneeIcon, assigneeLabel, esc(assignees.join(', '))));
+            }
+            if (ev.type === 'due' && meta.overdue)
+                                            rows.push(detailRow('alert',            'Status',   'Overdue'));
+            if (meta.completed && ev.type !== 'completed')
+                                            rows.push(detailRow('check',            'Status',   'Completed'));
+        } else if (ev.source === 'messages') {
+            var author = meta.authorName || meta.authorId;
+            if (author)                     rows.push(detailRow('account',          'Posted by', esc(author)));
+            if (meta.pinned)                rows.push(detailRow('pin',              'Pinned',   'Yes'));
+        } else if (ev.source === 'milestone') {
+            var creator = meta.createdByName || meta.createdBy;
+            if (creator)                    rows.push(detailRow('account',          'Created by', esc(creator)));
+        }
+
+        var description = meta.description ? esc(meta.description) : '';
+        var snippet     = meta.snippet     ? esc(meta.snippet)     : '';
+
+        var openBtn = ev.url
+            ? '<a class="th-popover__open" href="' + esc(ev.url) + '" target="_top" rel="noopener noreferrer">'
+              + 'Open in ' + esc(appName) + ' →</a>'
+            : '';
+
+        return ''
+            + '<div class="th-popover__header">'
+            +   '<span class="th-popover__source">' + esc(sourceLabel) + '</span>'
+            +   '<button class="th-popover__close" type="button" aria-label="Close">✕</button>'
+            + '</div>'
+            + '<h3 class="th-popover__title">' + esc(ev.title) + '</h3>'
+            + '<dl class="th-popover__details">' + rows.join('') + '</dl>'
+            + (description    ? '<div class="th-popover__description">' + description + '</div>' : '')
+            + (snippet        ? '<div class="th-popover__snippet">'     + snippet     + '</div>' : '')
+            + (openBtn        ? '<div class="th-popover__footer">'      + openBtn     + '</div>' : '');
+    }
+
+    function detailRow(iconName, label, valueHtml) {
+        return '<div class="th-popover__row">'
+            +    '<dt>' + iconSvg(iconName) + esc(label) + '</dt>'
+            +    '<dd>' + valueHtml + '</dd>'
+            +  '</div>';
+    }
+
+    function formatWhen(ev) {
+        var start = new Date(ev.date);
+        var end   = ev.endDate ? new Date(ev.endDate) : null;
+        var dOpts = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+        var tOpts = { hour: '2-digit', minute: '2-digit' };
+
+        var startDate = start.toLocaleDateString(undefined, dOpts);
+        if (ev.allDay) return startDate;
+
+        var startTime = start.toLocaleTimeString(undefined, tOpts);
+        if (!end) return startDate + ' · ' + startTime;
+
+        var endDate = end.toLocaleDateString(undefined, dOpts);
+        var endTime = end.toLocaleTimeString(undefined, tOpts);
+        if (startDate === endDate) {
+            return startDate + ' · ' + startTime + ' – ' + endTime;
+        }
+        return startDate + ' ' + startTime + ' – ' + endDate + ' ' + endTime;
     }
 
     fetchAndRender();

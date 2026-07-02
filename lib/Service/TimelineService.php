@@ -136,8 +136,93 @@ class TimelineService {
         // Sort ascending by anchor date so the frontend receives a stable order.
         usort($events, fn($a, $b) => strcmp($a['date'], $b['date']));
 
+        // Resolve any raw UIDs in meta to display names so the popup can show
+        // "Jan Janssen" instead of "jjanssen". One batched lookup pass —
+        // IUserManager::get() hits an in-process cache for repeated UIDs.
+        $this->resolveDisplayNames($events);
+
         $this->logger->debug('[TimelineService] getEvents: returning ' . count($events) . ' events', ['app' => Application::APP_ID]);
         return $events;
+    }
+
+    /**
+     * Truncate free-form text to a popup-friendly length, normalising
+     * whitespace (CRLF, tabs, runs of spaces) so the popup doesn't show
+     * raw layout artefacts. Appends an ellipsis when truncated.
+     */
+    private function truncateForPopup(string $text, int $max = 280): string {
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
+        if ($text === '') {
+            return '';
+        }
+        if (mb_strlen($text) <= $max) {
+            return $text;
+        }
+        return mb_substr($text, 0, $max - 1) . '…';
+    }
+
+    /**
+     * Walk every event and add `*Name` display-name companions for any
+     * known UID-bearing meta keys. Lookups go through IUserManager which
+     * keeps its own per-request cache, so repeat UIDs across events are
+     * cheap. Missing/deleted users keep the raw UID as the display name.
+     *
+     * @param array<int, array<string, mixed>> $events  Mutated in place
+     */
+    private function resolveDisplayNames(array &$events): void {
+        try {
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+        } catch (\Throwable) {
+            return; // No user manager → leave raw UIDs in place.
+        }
+
+        $cache = [];
+        $resolve = function (string $uid) use (&$cache, $userManager): string {
+            if ($uid === '') {
+                return '';
+            }
+            if (isset($cache[$uid])) {
+                return $cache[$uid];
+            }
+            try {
+                $u = $userManager->get($uid);
+                $name = $u ? (string)$u->getDisplayName() : $uid;
+            } catch (\Throwable) {
+                $name = $uid;
+            }
+            return $cache[$uid] = $name;
+        };
+
+        // (uid-meta-key => display-name-meta-key) — extend here as new
+        // event types start surfacing actors in their meta.
+        $uidKeys = [
+            'authorId'   => 'authorName',
+            'proposedBy' => 'proposedByName',
+            'decidedBy'  => 'decidedByName',
+            'createdBy'  => 'createdByName',
+        ];
+
+        foreach ($events as &$ev) {
+            if (!isset($ev['meta']) || !is_array($ev['meta'])) {
+                continue;
+            }
+            foreach ($uidKeys as $uidKey => $nameKey) {
+                if (!empty($ev['meta'][$uidKey])) {
+                    $ev['meta'][$nameKey] = $resolve((string)$ev['meta'][$uidKey]);
+                }
+            }
+            // Array-of-UIDs companions (Deck card assignees).
+            if (!empty($ev['meta']['assignees']) && is_array($ev['meta']['assignees'])) {
+                $names = [];
+                foreach ($ev['meta']['assignees'] as $uid) {
+                    if (is_string($uid) && $uid !== '') {
+                        $names[] = $resolve($uid);
+                    }
+                }
+                $ev['meta']['assigneeNames'] = $names;
+            }
+        }
+        unset($ev);
     }
 
     // =========================================================================
@@ -247,6 +332,32 @@ class TimelineService {
                         $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTs;
                     }
 
+                    // Rich popup fields (v3.85.8): pulled from the same VEVENT
+                    // so no extra query. Description is truncated for popup
+                    // display; attendees/organizer give context without
+                    // requiring the user to open the calendar app.
+                    $description = isset($vevent->DESCRIPTION)
+                        ? $this->truncateForPopup((string)$vevent->DESCRIPTION)
+                        : null;
+
+                    $organizer = null;
+                    if (isset($vevent->ORGANIZER)) {
+                        $cn = (string)($vevent->ORGANIZER['CN'] ?? '');
+                        if ($cn !== '') {
+                            $organizer = $cn;
+                        } else {
+                            $mailto = (string)$vevent->ORGANIZER;
+                            $organizer = preg_replace('/^mailto:/i', '', $mailto);
+                        }
+                    }
+
+                    $attendeeCount = 0;
+                    if (isset($vevent->ATTENDEE)) {
+                        foreach ($vevent->ATTENDEE as $_) {
+                            $attendeeCount++;
+                        }
+                    }
+
                     $events[] = [
                         'id'      => 'cal-' . (string)($vevent->UID ?? $row['uri']),
                         'source'  => 'calendar',
@@ -257,8 +368,11 @@ class TimelineService {
                         'allDay'  => !$dtstart->hasTime(),
                         'url'     => $editUrl,
                         'meta'    => [
-                            'calendarName' => $calName,
-                            'location'     => isset($vevent->LOCATION) ? (string)$vevent->LOCATION : null,
+                            'calendarName'  => $calName,
+                            'location'      => isset($vevent->LOCATION) ? (string)$vevent->LOCATION : null,
+                            'description'   => $description,
+                            'organizer'     => $organizer,
+                            'attendeeCount' => $attendeeCount,
                         ],
                     ];
 
@@ -365,6 +479,10 @@ class TimelineService {
                 'level'         => $level !== '' ? $level : null,
                 'decisionId'    => $id,
                 'linkedCardIds' => $linkedCardIdsByDecision[$id] ?? [],
+                // Popup actors (v3.85.8). Raw UIDs; resolveDisplayNames()
+                // (called from getEvents) will add *Name companions.
+                'proposedBy'    => (string)($row['proposed_by'] ?? ''),
+                'decidedBy'     => (string)($row['answered_by'] ?? ''),
                 // The stream post that announced this proposal (v3.78.9).
                 // Every decision is created alongside a messageType='decision'
                 // post in teamhub_messages — see MessageService::createMessage.
@@ -614,10 +732,18 @@ class TimelineService {
             $stack     = $stacks[$stackId] ?? ['board_title' => '', 'title' => '', 'board_id' => 0];
             $title     = (string)$crow['title'];
 
+            // Deck stores card descriptions in `description` (TEXT, Markdown).
+            // Truncate for popup display; full content is one click away via
+            // the "Open in Deck" action.
+            $description = isset($crow['description']) && $crow['description'] !== ''
+                ? $this->truncateForPopup((string)$crow['description'])
+                : null;
+
             $meta = [
-                'boardName' => $stack['board_title'],
-                'stackName' => $stack['title'],
-                'cardId'    => $cardId,
+                'boardName'   => $stack['board_title'],
+                'stackName'   => $stack['title'],
+                'cardId'      => $cardId,
+                'description' => $description,
             ];
 
             $deckCardUrl = '/apps/deck/board/' . $stack['board_id'] . '/card/' . $cardId;
@@ -718,6 +844,98 @@ class TimelineService {
         }
         $cres->closeCursor();
 
+        // ── Card assignees (v3.85.9; hardened v3.85.11) ─────────────────────
+        // Deck has shipped two table names and two participant-column names
+        // for the same data over its history:
+        //   newer (≈Deck 1.6+):  deck_card_assigned_users.participant_uid
+        //   older:               deck_assigned_users.participant
+        // Earlier this fetch hard-coded the newer pair, so installs running
+        // either older Deck — or even current Deck where the column simply
+        // hasn't been renamed yet — silently returned no assignees and the
+        // popover never showed an "Assigned to" row. Detect both via
+        // DbIntrospectionService and use whichever exists. If a `type`
+        // column is present (0=user, 1=group, 2=circle on Deck's convention)
+        // filter to user assignments only so group/circle labels don't get
+        // rendered as if they were people.
+        if (!empty($allCardIds)) {
+            // Don't gate on DbIntrospectionService — it silently returns [] for
+            // tables that exist-but-are-empty when Strategy 2 (SELECT * LIMIT 1)
+            // returns no rows AND Strategy 3 (INFORMATION_SCHEMA) is restricted
+            // or fails. That swallowed the lookup on at least one production
+            // install (see log: 8 cards, no "Deck assignees" line emitted at all).
+            //
+            // Instead, try every plausible (table, participantColumn) pair
+            // directly; the same pattern fetchDeckEvents already uses for the
+            // ACL tables. A SQLSTATE[42S02] "Base table or view not found" just
+            // bumps us to the next variant. The Upcoming Tasks widget gets the
+            // same data via Deck's REST API (/apps/deck/api/v1.0/boards/{id}/
+            // stacks → card.assignedUsers), but server-side loopback HTTP is
+            // forbidden per SKILLS.md, so a direct DB read is the way.
+            $variants = [
+                ['deck_card_assigned_users', 'participant_uid'],
+                ['deck_card_assigned_users', 'participant'],
+                ['deck_assigned_users',      'participant_uid'],
+                ['deck_assigned_users',      'participant'],
+            ];
+
+            $this->logger->debug('[TimelineService] Deck assignees: starting lookup'
+                . ' cards=' . count(array_unique($allCardIds)),
+                ['app' => Application::APP_ID]);
+
+            $assigneesByCard = [];
+            $hit = null;
+            foreach ($variants as [$aTable, $partCol]) {
+                try {
+                    // Try WITH a type filter first (Deck convention: 0=user,
+                    // 1=group, 2=circle). If the type column doesn't exist on
+                    // this version, the query throws and we retry without it.
+                    $bound = $this->fetchDeckAssigneesForVariant(
+                        $aTable, $partCol, array_unique($allCardIds), true
+                    );
+                } catch (\Throwable $e) {
+                    // Two failure modes: missing table (try next variant) or
+                    // missing `type` column (retry same variant unfiltered).
+                    $msg = $e->getMessage();
+                    if (str_contains($msg, '42S02') || str_contains($msg, 'not found')) {
+                        $this->logger->debug('[TimelineService] Deck assignees: ' . $aTable . ' not present, trying next variant',
+                            ['app' => Application::APP_ID]);
+                        continue;
+                    }
+                    try {
+                        $bound = $this->fetchDeckAssigneesForVariant(
+                            $aTable, $partCol, array_unique($allCardIds), false
+                        );
+                    } catch (\Throwable $e2) {
+                        $this->logger->debug('[TimelineService] Deck assignees: ' . $aTable . '/' . $partCol
+                            . ' failed both with and without type filter: ' . $e2->getMessage(),
+                            ['app' => Application::APP_ID]);
+                        continue;
+                    }
+                }
+
+                $assigneesByCard = $bound;
+                $hit = $aTable . '/' . $partCol;
+                break;
+            }
+
+            $this->logger->debug('[TimelineService] Deck assignees: lookup done'
+                . ' hit=' . ($hit ?: '<none>')
+                . ' cardsWithAssignees=' . count($assigneesByCard),
+                ['app' => Application::APP_ID]);
+
+            if (!empty($assigneesByCard)) {
+                foreach ($events as &$ev) {
+                    if ($ev['source'] === 'deck'
+                        && isset($ev['meta']['cardId'])
+                        && isset($assigneesByCard[$ev['meta']['cardId']])
+                    ) {
+                        $ev['meta']['assignees'] = $assigneesByCard[$ev['meta']['cardId']];
+                    }
+                }
+                unset($ev);
+            }
+        }
+
         // ── Card dependencies (v3.78.8) ─────────────────────────────────────
         // NC 34 / Deck 1.18+ only — deck_dependent_cards is a brand-new table
         // (confirmed against Deck v1.18.0-beta.3 source: lib/Migration/
@@ -811,7 +1029,7 @@ class TimelineService {
      */
     private function fetchMessageEvents(string $teamId, int $from, int $to): array {
         $qb  = $this->db->getQueryBuilder();
-        $res = $qb->select('id', 'subject', 'author_id', 'created_at', 'pinned')
+        $res = $qb->select('id', 'subject', 'message', 'author_id', 'created_at', 'pinned')
             ->from('teamhub_messages')
             ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->gte('created_at',
@@ -835,6 +1053,8 @@ class TimelineService {
             if ($subject === '') {
                 $subject = '(post)';
             }
+            $body    = (string)($row['message'] ?? '');
+            $snippet = $body !== '' ? $this->truncateForPopup($body) : null;
             $events[] = [
                 'id'      => 'msg-' . (int)$row['id'],
                 'source'  => 'messages',
@@ -848,6 +1068,7 @@ class TimelineService {
                     'authorId'  => (string)($row['author_id'] ?? ''),
                     'pinned'    => !empty($row['pinned']),
                     'messageId' => (int)$row['id'],
+                    'snippet'   => $snippet,
                 ],
             ];
         }
@@ -895,6 +1116,7 @@ class TimelineService {
                 'url'     => null,
                 'meta'    => [
                     'milestoneId' => $row->getId(),
+                    'createdBy'   => method_exists($row, 'getCreatedBy') ? (string)$row->getCreatedBy() : '',
                 ],
             ];
         }
@@ -929,5 +1151,42 @@ class TimelineService {
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Run the Deck-assignees query for one (table, participantColumn) variant.
+     * Throws on missing-table or missing-column SQL errors so the caller can
+     * decide whether to bump variants or retry without the type filter.
+     *
+     * @param int[] $cardIds
+     * @return array<int, string[]>  card_id => list of participant identifiers
+     */
+    private function fetchDeckAssigneesForVariant(
+        string $table,
+        string $participantColumn,
+        array  $cardIds,
+        bool   $withTypeFilter
+    ): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('card_id', $participantColumn)
+            ->from($table)
+            ->where($qb->expr()->in('card_id',
+                $qb->createNamedParameter($cardIds, IQueryBuilder::PARAM_INT_ARRAY)));
+        if ($withTypeFilter) {
+            // Deck convention: type=0 user, 1 group, 2 circle. Filter so a
+            // group label isn't rendered as if it were a person.
+            $qb->andWhere($qb->expr()->eq('type',
+                $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)));
+        }
+        $res = $qb->executeQuery();
+        $out = [];
+        while ($row = $res->fetch()) {
+            $uid = (string)($row[$participantColumn] ?? '');
+            if ($uid !== '') {
+                $out[(int)$row['card_id']][] = $uid;
+            }
+        }
+        $res->closeCursor();
+        return $out;
     }
 }
