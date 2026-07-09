@@ -3,6 +3,18 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [3.87.1] — 2026-07-09 — Nextcloud 34 compatibility
+
+### Fixed
+
+- **Timeline iframe crashed on NC 34** with `Call to undefined method OC\Server::getContentSecurityPolicyNonceManager()`. NC 34 removed the shortcut method on `\OC\Server`; the same nonce manager is still available under its FQCN via the DI container. `templates/timeline.php` now resolves the manager through `\OC::$server->get(...)` with a `has(...)` guard and a legacy fallback so NC 32 / 33 / 34 all render the standalone timeline page correctly.
+- **`IntegrationController::getEnabledIntegrations` failed with `SQLSTATE[42P01]` "relation oc_teamhub_team_integrations does not exist"** on fresh NC 34 installs where the v2.9.0 create-table migration didn't materialise the tables. Added safety-net migration `Version000387100Date20260709000000` that idempotently creates `teamhub_integ_registry` and `teamhub_team_integrations` with the final schema (v2.9.0 base + `php_class` column + composite unique index). Existing installs where the tables already exist skip the migration entirely.
+- **`IntegrationService::getEnabledIntegrations` now degrades to an empty result** instead of throwing when the integration tables are missing, so the tab bar / sidebar loads cleanly even if the safety-net migration hasn't run yet.
+
+### Frontend build required
+
+None — all changes are PHP-side.
+
 ## [3.87.0] — 2026-07-01 — Session-end rollup
 
 Second session boundary of the 2026-06-30/07-01 window. Rolls up two post-3.86.0 patches (3.86.1 and 3.86.2). Nothing new landed here beyond the version bump and the docs sweep — see the entries below for per-change detail.

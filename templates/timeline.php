@@ -39,8 +39,17 @@
  * here and stamp it with the per-request CSP nonce retrieved from the same
  * manager NC core uses — the nonce is already present in the response's CSP
  * header so the browser allows the script to run.
+ *
+ * NC 34 removed \OC\Server::getContentSecurityPolicyNonceManager(). The same
+ * nonce manager is still resolvable via the DI container by FQCN on NC 32,
+ * 33, and 34, so we prefer that path and only fall back to the legacy method
+ * on older builds that still expose it.
  */
-$nonce = \OC::$server->getContentSecurityPolicyNonceManager()->getNonce();
+if (method_exists(\OC::$server, 'getContentSecurityPolicyNonceManager')) {
+    $nonce = \OC::$server->getContentSecurityPolicyNonceManager()->getNonce();
+} else {
+    $nonce = \OC::$server->get(\OC\Security\CSP\ContentSecurityPolicyNonceManager::class)->getNonce();
+}
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
