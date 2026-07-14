@@ -168,7 +168,7 @@ export default {
 }
 
 .links-modal h3 {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     margin: 0 0 10px;
 }
@@ -202,7 +202,7 @@ export default {
 .links-list__title { font-size: 13px; font-weight: 500; }
 
 .links-list__url {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     overflow: hidden;
     text-overflow: ellipsis;

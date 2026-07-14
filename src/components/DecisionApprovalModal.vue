@@ -107,25 +107,50 @@ export default {
 
 <style scoped>
 .th-approval-modal { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 12px; }
-.th-approval-modal__title { margin: 0; font-size: 16px; font-weight: 700; color: var(--color-main-text); }
-.th-approval-modal__hint { margin: 0; font-size: 12px; color: var(--color-text-maxcontrast); }
+.th-approval-modal__title { margin: 0; font-size: var(--th-font-heading); font-weight: 700; color: var(--color-main-text); }
+.th-approval-modal__hint { margin: 0; font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 .th-approval-modal__field { display: flex; flex-direction: column; gap: 4px; }
 .th-approval-modal__label { font-size: 13px; font-weight: 600; color: var(--color-main-text); }
 .th-approval-modal__required { color: var(--color-error); }
+/* v3.100.17: expanded from the condensed single-line rule (gui.md § 13)
+   so each property lives on its own line, and added an explicit
+   :focus-visible ring so keyboard users get a visible focus indicator
+   (the previous rule stripped outline and relied on border-color alone).
+   font-size stays at 13px — the sibling __label is also 13px; a design
+   pass that maps 13px to a token needs to update both together. */
 .th-approval-modal__textarea {
-    width: 100%; padding: 8px 10px; border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius); background: var(--color-main-background);
-    color: var(--color-main-text); font-size: 13px; resize: vertical; outline: none;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+    resize: vertical;
+    outline: none;
 }
-.th-approval-modal__textarea:focus { border-color: var(--color-primary-element); }
-.th-approval-modal__counter { font-size: 11px; color: var(--color-text-maxcontrast); text-align: right; }
+.th-approval-modal__textarea:focus {
+    border-color: var(--color-primary-element);
+}
+.th-approval-modal__textarea:focus-visible {
+    border-color: var(--color-primary-element);
+    box-shadow: 0 0 0 2px var(--color-primary-element);
+}
+.th-approval-modal__counter { font-size: var(--th-font-micro); color: var(--color-text-maxcontrast); text-align: right; }
 .th-approval-modal__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* v3.100.16: local override of --color-primary-element so NcButton's
+   primary styling picks up success (approve) / error (deny) fills.
+   Previously used raw hex — now points at the canonical NC tokens so
+   both buttons follow the theme (light/dark/branded). Also overrides
+   the -text token so the label contrast survives the fill swap. */
 .th-approval-modal__btn--approve {
-    --color-primary-element: #2d7031 !important;
-    --color-primary-element-hover: #245a28 !important;
+    --color-primary-element: var(--color-success) !important;
+    --color-primary-element-hover: var(--color-success-hover) !important;
+    --color-primary-element-text: var(--color-success-text) !important;
 }
 .th-approval-modal__btn--deny {
-    --color-primary-element: #c8253f !important;
-    --color-primary-element-hover: #a01e34 !important;
+    --color-primary-element: var(--color-error) !important;
+    --color-primary-element-hover: var(--color-error-hover) !important;
+    --color-primary-element-text: var(--color-error-text) !important;
 }
 </style>

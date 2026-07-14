@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\DecisionMapper;
 use OCA\TeamHub\Db\TeamAppResourceMapper;
+use OCA\TeamHub\Exception\NotFoundException;
 use OCP\App\IAppManager;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Files\IRootFolder;
@@ -339,7 +340,7 @@ class MeetingService {
         $teamFolderNode = $this->resolveTeamFolder($teamId);
 
         if ($teamFolderNode === null) {
-            throw new \Exception('Team files folder not found — please set up Files for this team first.');
+            throw new NotFoundException('Team files folder not found — please set up Files for this team first.');
         }
 
         // Ensure Meetings/ subfolder

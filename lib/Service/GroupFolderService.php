@@ -310,6 +310,103 @@ class GroupFolderService {
         }
     }
 
+    /**
+     * v3.100.10 — list GroupFolders that this team was PREVIOUSLY
+     * connected to but is no longer (status='disconnected' in
+     * teamhub_team_app_resources). Only folders present in the team's
+     * own resource history are exposed — the picker never leaks folder
+     * names the team was never a member of.
+     *
+     * Used by the picker's "Reconnect" section so team admins can
+     * reattach folders they previously disconnected. Attaching a team
+     * to a brand-new folder is a separate flow (admin creates a folder
+     * via Team Folders → Create).
+     *
+     * @return array<int,array{folder_id:int, mount_point:string}>
+     */
+    public function listGroupFoldersAvailableToAttach(string $circleUniqueId): array {
+        if (!$this->appManager->isInstalled('groupfolders')) {
+            return [];
+        }
+        try {
+            // 1. Find the team's disconnected 'gf:{id}' rows.
+            $rqb = $this->db->getQueryBuilder();
+            $rres = $rqb->select('resource_id')
+                ->from('teamhub_team_app_resources')
+                ->where($rqb->expr()->eq('team_id', $rqb->createNamedParameter($circleUniqueId)))
+                ->andWhere($rqb->expr()->eq('app_id', $rqb->createNamedParameter('files')))
+                ->andWhere($rqb->expr()->eq('status',  $rqb->createNamedParameter('disconnected')))
+                ->executeQuery();
+            $folderIds = [];
+            while ($row = $rres->fetch()) {
+                $rid = (string)$row['resource_id'];
+                if (str_starts_with($rid, 'gf:')) {
+                    $fid = (int)substr($rid, 3);
+                    if ($fid > 0) {
+                        $folderIds[$fid] = true;
+                    }
+                }
+            }
+            $rres->closeCursor();
+
+            if (empty($folderIds)) {
+                return [];
+            }
+
+            // 2. Verify each folder still exists and is not currently
+            //    assigned to this team (defence in depth against edge
+            //    cases where the ACL row survived our disconnect).
+            $fqb = $this->db->getQueryBuilder();
+            $fres = $fqb->select('gf.folder_id', 'gf.mount_point')
+                ->from('group_folders', 'gf')
+                ->where($fqb->expr()->in(
+                    'gf.folder_id',
+                    $fqb->createNamedParameter(
+                        array_keys($folderIds),
+                        IQueryBuilder::PARAM_INT_ARRAY,
+                    ),
+                ))
+                ->orderBy('gf.mount_point', 'ASC')
+                ->executeQuery();
+            $folders = [];
+            while ($row = $fres->fetch()) {
+                $folders[(int)$row['folder_id']] = (string)$row['mount_point'];
+            }
+            $fres->closeCursor();
+
+            // 3. Filter out any that are currently attached (paranoia).
+            $aqb = $this->db->getQueryBuilder();
+            $ares = $aqb->select('folder_id')
+                ->from('group_folders_groups')
+                ->where($aqb->expr()->eq(
+                    'circle_id',
+                    $aqb->createNamedParameter($circleUniqueId),
+                ))
+                ->executeQuery();
+            $attached = [];
+            while ($row = $ares->fetch()) {
+                $attached[(int)$row['folder_id']] = true;
+            }
+            $ares->closeCursor();
+
+            $out = [];
+            foreach ($folders as $fid => $mp) {
+                if (isset($attached[$fid])) {
+                    continue;
+                }
+                $out[] = ['folder_id' => $fid, 'mount_point' => $mp];
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][GroupFolderService] listGroupFoldersAvailableToAttach failed', [
+                'circleUniqueId' => $circleUniqueId,
+                'error' => $e->getMessage(),
+                'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────

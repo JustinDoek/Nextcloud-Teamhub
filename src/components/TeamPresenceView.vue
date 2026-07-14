@@ -372,7 +372,7 @@ export default {
 }
 
 .presence-toolbar__period {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     min-width: 160px;
     text-align: center;
@@ -382,7 +382,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     padding: 4px 8px;
     border-radius: var(--border-radius-pill, 12px);
@@ -453,7 +453,7 @@ export default {
     align-items: center;
     justify-content: center;
     padding: 4px 2px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     border-left: 1px solid var(--color-border);
     gap: 1px;

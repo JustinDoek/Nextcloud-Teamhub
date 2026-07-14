@@ -299,6 +299,38 @@
                     track-by="id"
                     :aria-label="t('teamhub', 'Decision category')" />
             </div>
+
+            <!-- v3.97.5 — Milestone picker. Advanced project teams only.
+                 Optional linkage; skipping keeps the proposal unlinked.
+                 v3.99.5 — always renders for Advanced projects. When the
+                 team has no milestones yet, we show a small empty-state
+                 hint pointing to Manage Team → Project → Milestones rather
+                 than hiding the whole field — the linkage feature was
+                 undiscoverable before the first milestone existed. -->
+            <div
+                v-if="showMilestonePicker"
+                class="post-form__field post-form__field--milestone">
+                <label for="decision-milestone" class="field-label">
+                    {{ t('teamhub', 'Milestone (optional)') }}
+                </label>
+                <div
+                    v-if="!loadingMilestones && decisionMilestoneOptions.length === 0"
+                    class="post-form__milestone-empty">
+                    {{ t('teamhub', 'No milestones yet. Add one under Manage Team → Project → Milestones to link decisions to it.') }}
+                </div>
+                <NcSelect
+                    v-else
+                    id="decision-milestone"
+                    v-model="decisionMilestone"
+                    :options="decisionMilestoneOptions"
+                    :loading="loadingMilestones"
+                    :clearable="true"
+                    :searchable="true"
+                    :placeholder="t('teamhub', 'Link to a milestone')"
+                    label="labelWithDate"
+                    track-by="id"
+                    :aria-label="t('teamhub', 'Milestone to link this proposal to')" />
+            </div>
         </div>
 
         <!-- Actions -->
@@ -455,6 +487,12 @@ export default {
             // When non-null, this proposal supersedes the referenced decision —
             // the backend auto-withdraws that decision on successful submit.
             decisionSupersedesId: null,
+            // v3.97.5 — optional milestone linkage for Advanced project teams.
+            // Loaded lazily when the compose form is opened on such a team.
+            // Bound NcSelect option object { id, label, date } or null.
+            decisionMilestone: null,
+            decisionMilestoneOptions: [],
+            loadingMilestones: false,
             // Poll options carry a stable `id` so the v-for can key on identity
             // rather than array index (perf pass V6). Index-as-key on inputs
             // bound with v-model causes Vue to reuse the wrong DOM node when an
@@ -484,7 +522,7 @@ export default {
     },
 
     computed: {
-        ...mapState(['members', 'allEffectiveMembers', 'messageSettings', 'decisionsModuleEnabled', 'decisionsConfig', 'currentView']),
+        ...mapState(['members', 'allEffectiveMembers', 'messageSettings', 'decisionsModuleEnabled', 'decisionsConfig', 'currentView', 'project']),
 
         mentions() {
             // NcRichContenteditable user-data must be a plain object keyed by userId.
@@ -501,6 +539,29 @@ export default {
                 }
             }
             return result
+        },
+
+        /**
+         * v3.97.5 — is this an Advanced project team where a milestone
+         * picker would ever be relevant? Used to gate the fetch.
+         * v3.99.5 — the visible-picker check is now identical to this one;
+         * the "no milestones" case renders an empty-state hint instead of
+         * hiding the whole field.
+         */
+        showMilestonePickerCandidate() {
+            return !!(
+                this.messageType === 'decision'
+                && this.project
+                && this.project.isProject
+                && this.project.mode === 'advanced'
+            )
+        },
+        showMilestonePicker() {
+            // v3.99.5 — always show for Advanced projects. Empty state
+            // handled in the template. Previous "&& options.length > 0"
+            // gate made the linkage undiscoverable before the first
+            // milestone existed.
+            return this.showMilestonePickerCandidate
         },
 
         subjectLabel() {
@@ -597,6 +658,12 @@ export default {
             if (newVal === 'decision' && !this.decisionCategoriesLoaded) {
                 this.loadDecisionCategories()
             }
+            // v3.97.5 — same trigger for the Advanced-project milestone
+            // picker. Idempotent — a second call overwrites the cached
+            // options with fresh data, which is fine.
+            if (newVal === 'decision' && this.showMilestonePickerCandidate) {
+                this.loadDecisionMilestones()
+            }
         },
         // When the user navigates back to the message stream (e.g. from
         // the Decisions tab's Supersede flow), check the global handshake.
@@ -614,6 +681,10 @@ export default {
         if (this.forceDecision) {
             this.messageType = 'decision'
             this.loadDecisionCategories()
+            // v3.97.5 — prime the milestone picker too when appropriate.
+            if (this.showMilestonePickerCandidate) {
+                this.loadDecisionMilestones()
+            }
         }
     },
 
@@ -1168,11 +1239,40 @@ export default {
             }
         },
 
+        /**
+         * v3.97.5 — Load milestones for the picker. Advanced project teams
+         * only. Uses the member-gated /milestones/pick endpoint so
+         * non-admins can also see and pick milestones when proposing.
+         */
+        async loadDecisionMilestones() {
+            if (!this.showMilestonePickerCandidate) return
+            const teamId = this.$store.state.currentTeamId
+            this.loadingMilestones = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/milestones/pick`)
+                )
+                const items = Array.isArray(data?.items) ? data.items : []
+                this.decisionMilestoneOptions = items.map(m => ({
+                    ...m,
+                    labelWithDate: m.date
+                        ? `${m.label} — ${m.date}`
+                        : m.label,
+                }))
+            } catch (err) {
+                // Non-fatal — picker just stays empty. The gate hides it.
+                this.decisionMilestoneOptions = []
+            } finally {
+                this.loadingMilestones = false
+            }
+        },
+
         resetDecisionFields() {
             this.decisionImpact    = ''
             this.decisionLevel     = 'operational'
             this.decisionCategory  = null
             this.decisionSupersedesId = null
+            this.decisionMilestone = null
         },
 
         // ── Submit ──────────────────────────────────────────────────────────
@@ -1218,6 +1318,12 @@ export default {
                         // bypass stream discussion and live only in the
                         // Decisions tab.
                         sourceType: this.forceDecision ? 'direct' : undefined,
+                        // v3.97.5 — optional milestone linkage. Only sent
+                        // when the picker actually returned options and the
+                        // user picked one; unlinked proposals send null.
+                        // Backend rejects on non-Advanced teams, so the
+                        // gate above is defence-in-depth.
+                        milestoneId: this.decisionMilestone?.id || null,
                     }
                 }
 
@@ -1336,9 +1442,12 @@ export default {
 
 .post-form__type-option input { display: none; }
 
+/* v3.100.14: full-saturation active state per SKILLS.md
+   (was --color-primary-element-light). */
 .post-form__type-option.active {
     border-color: var(--color-primary-element);
-    background: var(--color-primary-element-light);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
 /* Body + toolbar */
@@ -1384,7 +1493,7 @@ export default {
 
 .post-form__toolbar-hint {
     margin-left: auto;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     padding-right: 6px;
     white-space: nowrap;
@@ -1413,8 +1522,11 @@ export default {
     font-size: 13px;
 }
 
+/* v3.100.14: full-saturation error state per SKILLS.md § "State-coloured
+   backgrounds" (was --color-error-hover — a hover token used as state bg). */
 .post-form__attachment--error {
-    background: var(--color-error-hover, #fff0f0);
+    background: var(--color-error);
+    color: var(--color-error-text);
 }
 
 .post-form__attachment-icon { flex-shrink: 0; color: var(--color-text-maxcontrast); }
@@ -1424,7 +1536,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
 }
@@ -1505,33 +1617,44 @@ export default {
     background: var(--color-background-dark);
 }
 
+/* v3.100.14: full-saturation active state per SKILLS.md
+   (was --color-primary-element-light). */
 .decision-impact-chip.active {
     border-color: var(--color-primary-element);
-    background: var(--color-primary-element-light);
-    color: var(--color-primary-element-text-dark, var(--color-main-text));
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     font-weight: 600;
 }
 
+/* v3.99.7 — Justin: "the impact field uses --color-success, should be
+ * --color-success-text". Aligned to the SKILLS.md state-colour rule
+ * (full saturation background + matching text token), swapping the soft
+ * tint background for the full state colour and using the paired text
+ * token so the label stays readable. */
 .decision-impact-chip--high.active {
     border-color: var(--color-error);
-    background: color-mix(in srgb, var(--color-error) 12%, transparent);
+    background: var(--color-error);
+    color: var(--color-error-text);
 }
 
 .decision-impact-chip--medium.active {
     border-color: var(--color-warning);
-    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+    background: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .decision-impact-chip--low.active {
     border-color: var(--color-success);
-    background: color-mix(in srgb, var(--color-success) 12%, transparent);
+    background: var(--color-success);
+    color: var(--color-success-text);
 }
 
-/* Level chip uses a neutral blue-ish accent so it's visually distinct from impact */
+/* Level chip active state — full saturation primary per SKILLS.md
+   v3.100.14 (was a 12% color-mix soft tint). */
 .decision-level-chip.active {
     border-color: var(--color-primary-element);
-    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
-    color: var(--color-primary-element-text, var(--color-main-text));
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
 .decision-category-empty {
@@ -1559,7 +1682,7 @@ export default {
 }
 
 .post-form__image-dialog-divider {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     text-align: center;
     margin: 0;
@@ -1576,16 +1699,19 @@ export default {
 }
 .post-form__image-dialog-divider::before { left: 0; }
 .post-form__image-dialog-divider::after  { right: 0; }
+/* v3.100.14: full-saturation warning banner per SKILLS.md (was a 12%
+   color-mix soft tint). Fallback #hex values dropped now that NC
+   guarantees --color-warning / --color-warning-text on all themes. */
 .decision-supersede-banner {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
     margin-bottom: 8px;
-    background: color-mix(in srgb, var(--color-warning, #c9a227) 12%, transparent);
-    border: 1px solid var(--color-warning, #c9a227);
+    background: var(--color-warning);
+    border: 1px solid var(--color-warning);
     border-radius: var(--border-radius);
-    color: var(--color-warning-text, #a05a00);
+    color: var(--color-warning-text);
     font-size: 0.9em;
 }
 
@@ -1608,13 +1734,29 @@ export default {
     flex-shrink: 0;
 }
 
+/* v3.100.14: hover feedback on a clear button that lives inside the
+   warning banner. --color-warning-hover is the intended token for this
+   (hover state OF an already-warning-coloured surface, not a state
+   background), so SKILLS.md § "State-coloured backgrounds" allows it. */
 .decision-supersede-banner__clear:hover {
-    background: color-mix(in srgb, var(--color-warning, #c9a227) 20%, transparent);
+    background: var(--color-warning-hover);
 }
 
 .decision-supersede-banner__clear:focus-visible {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 1px;
+}
+
+/* v3.99.5 — empty-state hint shown in the milestone picker slot when the
+ * Advanced project has no milestones yet. */
+.post-form__milestone-empty {
+    padding: 8px 12px;
+    background: var(--color-background-hover);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--border-radius);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+    line-height: 1.4;
 }
 
 </style>

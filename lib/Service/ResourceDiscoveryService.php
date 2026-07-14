@@ -365,22 +365,34 @@ class ResourceDiscoveryService {
             }
 
             // — Resources in our table but not in NC reality → delete —
+            //
+            // v3.100.11 — skip rows already marked 'disconnected'. Those
+            // are our own intentional soft-deletes (see
+            // ResourceService::removeTeamAccess) — the ACL row was
+            // stripped by us on purpose, and we're keeping the registry
+            // entry so the Files picker can offer a scoped reconnect
+            // section. Reconciling them away would defeat that whole
+            // history mechanism.
             foreach ($localRows as $row) {
-                if (!isset($realIdSet[$row->getResourceId()])) {
-                    $this->resourceMapper->deleteById($row->getId());
-                    $this->auditService->log(
-                        $teamId,
-                        'resource.external_withdrawn',
-                        null, // system actor
-                        'resource',
-                        "{$appId}:{$row->getResourceId()}",
-                        ['app_id' => $appId, 'resource_id' => $row->getResourceId()],
-                    );
-                    $this->logger->info('[TeamHub][ResourceDiscoveryService] resource externally withdrawn', [
-                        'teamId' => $teamId, 'appId' => $appId,
-                        'resourceId' => $row->getResourceId(), 'app' => Application::APP_ID,
-                    ]);
+                if (isset($realIdSet[$row->getResourceId()])) {
+                    continue;
                 }
+                if ($row->getStatus() === 'disconnected') {
+                    continue;
+                }
+                $this->resourceMapper->deleteById($row->getId());
+                $this->auditService->log(
+                    $teamId,
+                    'resource.external_withdrawn',
+                    null, // system actor
+                    'resource',
+                    "{$appId}:{$row->getResourceId()}",
+                    ['app_id' => $appId, 'resource_id' => $row->getResourceId()],
+                );
+                $this->logger->info('[TeamHub][ResourceDiscoveryService] resource externally withdrawn', [
+                    'teamId' => $teamId, 'appId' => $appId,
+                    'resourceId' => $row->getResourceId(), 'app' => Application::APP_ID,
+                ]);
             }
         } catch (\Throwable $e) {
             // Never crash the page load — reconciliation failure is non-fatal.

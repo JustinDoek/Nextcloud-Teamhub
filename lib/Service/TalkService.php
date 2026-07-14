@@ -80,9 +80,9 @@ class TalkService {
                 $participantService->addCircle($room, $circle);
                 $circleLinked = true;
                 $usedTalkApi  = true;
-                error_log('[TeamHub][TalkService] Talk S1: addCircle succeeded via API — circle membership resolved natively by Talk');
+                $this->logger->debug('[TeamHub][TalkService] Talk S1: addCircle succeeded via API — circle membership resolved natively by Talk', ['app' => Application::APP_ID]);
             } catch (\Throwable $e) {
-                $this->logger->warning('[TalkService] Talk S1: ParticipantService::addCircle failed — using direct DB fallback', [
+                $this->logger->warning('[TeamHub][TalkService] Talk S1: ParticipantService::addCircle failed — using direct DB fallback', [
                     'error' => $e->getMessage(),
                     'app'   => Application::APP_ID,
                 ]);
@@ -101,7 +101,7 @@ class TalkService {
                     // Expand individual attendee rows as a safety net so users can at
                     // least find the room. New members added later will be in the same
                     // situation until the room is reconnected.
-                    error_log('[TeamHub][TalkService] Talk S1: using fallback expansion (API path failed)');
+                    $this->logger->debug('[TeamHub][TalkService] Talk S1: using fallback expansion (API path failed)', ['app' => Application::APP_ID]);
                     $this->expandCircleMembersToTalk($roomId, $teamId, $db);
                 }
             }
@@ -141,9 +141,9 @@ class TalkService {
                 $participantService->addCircle($room, $circle);
                 $circleLinked = true;
                 $usedTalkApi  = true;
-                error_log('[TeamHub][TalkService] Talk S2: addCircle succeeded via API');
+                $this->logger->debug('[TeamHub][TalkService] Talk S2: addCircle succeeded via API', ['app' => Application::APP_ID]);
             } catch (\Throwable $e) {
-                $this->logger->warning('[TalkService] Talk S2: Manager addCircle failed — using direct DB fallback', [
+                $this->logger->warning('[TeamHub][TalkService] Talk S2: Manager addCircle failed — using direct DB fallback', [
                     'error' => $e->getMessage(),
                     'app'   => Application::APP_ID,
                 ]);
@@ -156,7 +156,7 @@ class TalkService {
             if ($roomId !== null && $circleLinked) {
                 $this->promoteTalkCircleToModerator($roomId, $teamId, $db);
                 if (!$usedTalkApi) {
-                    error_log('[TeamHub][TalkService] Talk S2: using fallback expansion (API path failed)');
+                    $this->logger->debug('[TeamHub][TalkService] Talk S2: using fallback expansion (API path failed)', ['app' => Application::APP_ID]);
                     $this->expandCircleMembersToTalk($roomId, $teamId, $db);
                 }
             }
@@ -269,13 +269,13 @@ class TalkService {
             // safety net so users can find the room. New members added later won't be
             // automatically synced; the room should be reconnected after Talk API support
             // is confirmed (Strategies 1/2).
-            error_log('[TeamHub][TalkService] Talk S3: direct DB path — expanding individual members as fallback');
+            $this->logger->debug('[TeamHub][TalkService] Talk S3: direct DB path — expanding individual members as fallback', ['app' => Application::APP_ID]);
             $this->expandCircleMembersToTalk($roomId, $teamId, $db);
 
             return ['token' => $token, 'name' => $teamName, 'circle_added' => true];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] Talk: all strategies failed', [
+            $this->logger->error('[TeamHub][TalkService] Talk: all strategies failed', [
                 'error' => $e->getMessage(),
                 'trace' => substr($e->getTraceAsString(), 0, 800),
                 'app'   => Application::APP_ID,
@@ -366,7 +366,7 @@ class TalkService {
             }
             return $out;
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] listOwnedRooms failed', [
+            $this->logger->error('[TeamHub][TalkService] listOwnedRooms failed', [
                 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return [];
@@ -453,9 +453,9 @@ class TalkService {
                 $participantService->addCircle($room, $circle);
                 $circleAdded = true;
                 $usedTalkApi = true;
-                error_log('[TeamHub][TalkService] connectExistingRoom: addCircle succeeded via API — Talk resolves membership natively');
+                $this->logger->debug('[TeamHub][TalkService] connectExistingRoom: addCircle succeeded via API — Talk resolves membership natively', ['app' => Application::APP_ID]);
             } catch (\Throwable $e) {
-                $this->logger->warning('[TalkService] connectExistingRoom: ParticipantService::addCircle failed — using direct DB insert', [
+                $this->logger->warning('[TeamHub][TalkService] connectExistingRoom: ParticipantService::addCircle failed — using direct DB insert', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -477,7 +477,7 @@ class TalkService {
                 // circle membership for the conversation list. Expand individual attendee
                 // rows as a safety net. New members added to the team after this point
                 // will need a room reconnect to gain Talk sidebar visibility.
-                error_log('[TeamHub][TalkService] connectExistingRoom: using fallback expansion (API path failed)');
+                $this->logger->debug('[TeamHub][TalkService] connectExistingRoom: using fallback expansion (API path failed)', ['app' => Application::APP_ID]);
                 $this->expandCircleMembersToTalk($roomId, $teamId, $db);
             }
 
@@ -490,7 +490,7 @@ class TalkService {
             ];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] connectExistingRoom failed', [
+            $this->logger->error('[TeamHub][TalkService] connectExistingRoom failed', [
                 'teamId' => $teamId, 'roomId' => $roomId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -550,7 +550,7 @@ class TalkService {
             return true;
 
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] insertTalkCircleAttendee failed', [
+            $this->logger->error('[TeamHub][TalkService] insertTalkCircleAttendee failed', [
                 'roomId' => $roomId, 'teamId' => $teamId,
                 'error'  => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -559,9 +559,35 @@ class TalkService {
     }
 
     public function promoteTalkCircleToModerator(int $roomId, string $teamId, \OCP\IDBConnection $db): void {
+        // v3.100.8 (apps.md W-5) — try ParticipantService first, fall back
+        // to raw UPDATE. Gains system chat message on promotion.
+        $promotedViaApi = false;
+        try {
+            $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomById($roomId);
+            $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+            $participant = $participantService->getParticipantByActor($room, 'circles', $teamId);
+            if ($participant !== null) {
+                $participantService->updateParticipantType(
+                    $room,
+                    $participant,
+                    \OCA\Talk\Participant::MODERATOR,
+                );
+                $promotedViaApi = true;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] promoteTalkCircleToModerator: ParticipantService path unavailable — using DB fallback', [
+                'roomId' => $roomId, 'teamId' => $teamId,
+                'reason' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        if ($promotedViaApi) {
+            return;
+        }
+
         try {
             $uqb = $db->getQueryBuilder();
-            $affected = $uqb->update('talk_attendees')
+            $uqb->update('talk_attendees')
                 ->set('participant_type', $uqb->createNamedParameter(2)) // MODERATOR
                 ->where($uqb->expr()->eq('room_id',    $uqb->createNamedParameter($roomId)))
                 ->andWhere($uqb->expr()->eq('actor_type', $uqb->createNamedParameter('circles')))
@@ -570,7 +596,7 @@ class TalkService {
 
         } catch (\Throwable $e) {
             // Non-fatal: room still works, but circle members won't have mod rights
-            $this->logger->warning('[TalkService] Talk: promoteTalkCircleToModerator failed', [
+            $this->logger->warning('[TeamHub][TalkService] Talk: promoteTalkCircleToModerator failed', [
                 'roomId' => $roomId,
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
@@ -616,13 +642,13 @@ class TalkService {
                 ->andWhere($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId)))
                 ->executeStatement();
 
-            $this->logger->debug('[TalkService] suspendTalkAccess: circle attendee removed', [
+            $this->logger->debug('[TeamHub][TalkService] suspendTalkAccess: circle attendee removed', [
                 'teamId' => $teamId, 'roomId' => $roomId, 'app' => Application::APP_ID,
             ]);
 
             return $roomId;
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] suspendTalkAccess failed', [
+            $this->logger->error('[TeamHub][TalkService] suspendTalkAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return null;
@@ -640,7 +666,7 @@ class TalkService {
         try {
             return $this->insertTalkCircleAttendee($roomId, $teamId, $teamName, $db);
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] resumeTalkAccess failed', [
+            $this->logger->error('[TeamHub][TalkService] resumeTalkAccess failed', [
                 'teamId' => $teamId, 'roomId' => $roomId, 'error' => $e->getMessage(),
                 'app' => Application::APP_ID,
             ]);
@@ -666,7 +692,7 @@ class TalkService {
             $res->closeCursor();
 
             if (!$row) {
-                $this->logger->warning('[TalkService] removeRoomAccess: room not found', [
+                $this->logger->warning('[TeamHub][TalkService] removeRoomAccess: room not found', [
                     'token' => $token, 'app' => Application::APP_ID,
                 ]);
                 return false;
@@ -680,13 +706,13 @@ class TalkService {
                 ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
                 ->executeStatement();
 
-            $this->logger->debug('[TalkService] removeRoomAccess: circle attendee removed', [
+            $this->logger->debug('[TeamHub][TalkService] removeRoomAccess: circle attendee removed', [
                 'teamId' => $teamId, 'token' => $token, 'roomId' => $roomId,
                 'affected' => $affected, 'app' => Application::APP_ID,
             ]);
             return $affected > 0;
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] removeRoomAccess failed', [
+            $this->logger->error('[TeamHub][TalkService] removeRoomAccess failed', [
                 'teamId' => $teamId, 'token' => $token,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -723,12 +749,12 @@ class TalkService {
                 ->where($db->getQueryBuilder()->expr()->eq('id', $db->getQueryBuilder()->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->info('[TalkService] deleteRoomById: room deleted', [
+            $this->logger->info('[TeamHub][TalkService] deleteRoomById: room deleted', [
                 'token' => $token, 'roomId' => $roomId, 'app' => Application::APP_ID,
             ]);
             return ['deleted' => true, 'token' => $token];
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] deleteRoomById failed', [
+            $this->logger->error('[TeamHub][TalkService] deleteRoomById failed', [
                 'token' => $token, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
@@ -769,7 +795,7 @@ class TalkService {
             return ['deleted' => true, 'detail' => "Talk room {$roomId} deleted"];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] deleteTalkRoom failed', [
+            $this->logger->error('[TeamHub][TalkService] deleteTalkRoom failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
@@ -785,12 +811,12 @@ class TalkService {
      * @return bool  True on success, false on any failure (non-fatal)
      */
     public function postChatMessage(string $token, string $uid, string $message): bool {
-        $this->logger->debug('[TalkService] postChatMessage — start', [
+        $this->logger->debug('[TeamHub][TalkService] postChatMessage — start', [
             'token' => $token, 'uid' => $uid, 'app' => Application::APP_ID,
         ]);
 
         if (!$this->appManager->isInstalled('spreed')) {
-            $this->logger->warning('[TalkService] postChatMessage — spreed not installed', [
+            $this->logger->warning('[TeamHub][TalkService] postChatMessage — spreed not installed', [
                 'app' => Application::APP_ID,
             ]);
             return false;
@@ -801,7 +827,7 @@ class TalkService {
             $room        = $manager->getRoomByToken($token);
 
             if (!$room) {
-                $this->logger->warning('[TalkService] postChatMessage — room not found', [
+                $this->logger->warning('[TeamHub][TalkService] postChatMessage — room not found', [
                     'token' => $token, 'app' => Application::APP_ID,
                 ]);
                 return false;
@@ -824,14 +850,14 @@ class TalkService {
                 false   // silent
             );
 
-            $this->logger->debug('[TalkService] postChatMessage — success', [
+            $this->logger->debug('[TeamHub][TalkService] postChatMessage — success', [
                 'token' => $token, 'app' => Application::APP_ID,
             ]);
 
             return true;
 
         } catch (\Throwable $e) {
-            $this->logger->warning('[TalkService] postChatMessage failed', [
+            $this->logger->warning('[TeamHub][TalkService] postChatMessage failed', [
                 'token' => $token, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return false;
@@ -875,7 +901,9 @@ class TalkService {
             return;
         }
 
-        error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: teamId=' . $teamId . ' uid=' . $uid);
+        $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: enter', [
+            'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
+        ]);
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -892,7 +920,9 @@ class TalkService {
             $res->closeCursor();
 
             if (!$row) {
-                error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: no Talk room for team — skip');
+                $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: no Talk room for team — skip', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
                 return;
             }
             $roomId = (int)$row['room_id'];
@@ -911,55 +941,89 @@ class TalkService {
             $ckRes->closeCursor();
 
             if ($existing) {
-                error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: uid=' . $uid . ' already has attendee row — skip');
+                $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: attendee row already present — skip', [
+                    'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
                 return;
             }
 
             // ── 3. Insert individual user attendee row ────────────────────────
-            $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
-            $aqb = $db->getQueryBuilder();
-            $aqb->insert('talk_attendees')
-                ->setValue('room_id',          $aqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                ->setValue('actor_type',       $aqb->createNamedParameter('users'))
-                ->setValue('actor_id',         $aqb->createNamedParameter($uid))
-                ->setValue('display_name',     $aqb->createNamedParameter(''))
-                ->setValue('participant_type', $aqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)); // PARTICIPANT
-
-            foreach ([
-                'favorite'               => 0,
-                'notification_level'     => 0,
-                'notification_calls'     => 0,
-                'last_joined_call'       => 0,
-                'last_read_message'      => 0,
-                'last_mention_message'   => 0,
-                'last_mention_direct'    => 0,
-                'in_call'                => 0,
-                'permissions'            => 0,
-                'publishing_permissions' => 0,
-                'access_token'           => '',
-                'remote_id'              => '',
-                'phone_number'           => '',
-                'phone_states'           => '',
-            ] as $col => $val) {
-                if (in_array($col, $attendeeCols, true)) {
-                    $aqb->setValue($col, $aqb->createNamedParameter($val));
+            // v3.100.8 (apps.md W-5) — Talk ParticipantService::addUsers
+            // first so system chat message + push notifications fire; fall
+            // back to raw INSERT when the Talk API refuses (typically
+            // circle-scoped rooms where the acting user isn't a moderator).
+            $addedViaApi = false;
+            try {
+                $roomManager = $this->container->get(\OCA\Talk\Manager::class);
+                $room = $roomManager->getRoomById($roomId);
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $userManager = $this->container->get(\OCP\IUserManager::class);
+                $userObj = $userManager->get($uid);
+                if ($userObj !== null) {
+                    $participantService->addUsers($room, [[
+                        'actorType' => 'users',
+                        'actorId'   => $uid,
+                        'displayName' => $userObj->getDisplayName(),
+                    ]]);
+                    $addedViaApi = true;
                 }
+            } catch (\Throwable $e) {
+                $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: ParticipantService::addUsers failed — using DB fallback', [
+                    'uid' => $uid, 'roomId' => $roomId,
+                    'reason' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
             }
-            $aqb->executeStatement();
 
-            $this->logger->info('[TalkService] syncUserToTeamTalkRoom: user added to Talk room', [
+            if (!$addedViaApi) {
+                $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
+                $aqb = $db->getQueryBuilder();
+                $aqb->insert('talk_attendees')
+                    ->setValue('room_id',          $aqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->setValue('actor_type',       $aqb->createNamedParameter('users'))
+                    ->setValue('actor_id',         $aqb->createNamedParameter($uid))
+                    ->setValue('display_name',     $aqb->createNamedParameter(''))
+                    ->setValue('participant_type', $aqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)); // PARTICIPANT
+
+                foreach ([
+                    'favorite'               => 0,
+                    'notification_level'     => 0,
+                    'notification_calls'     => 0,
+                    'last_joined_call'       => 0,
+                    'last_read_message'      => 0,
+                    'last_mention_message'   => 0,
+                    'last_mention_direct'    => 0,
+                    'in_call'                => 0,
+                    'permissions'            => 0,
+                    'publishing_permissions' => 0,
+                    'access_token'           => '',
+                    'remote_id'              => '',
+                    'phone_number'           => '',
+                    'phone_states'           => '',
+                ] as $col => $val) {
+                    if (in_array($col, $attendeeCols, true)) {
+                        $aqb->setValue($col, $aqb->createNamedParameter($val));
+                    }
+                }
+                $aqb->executeStatement();
+            }
+
+            $this->logger->info('[TeamHub][TalkService] syncUserToTeamTalkRoom: user added to Talk room', [
                 'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
+                'viaApi' => $addedViaApi,
                 'app'    => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom: inserted attendee uid=' . $uid . ' roomId=' . $roomId);
+            $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: inserted attendee', [
+                'uid' => $uid, 'roomId' => $roomId, 'app' => Application::APP_ID,
+            ]);
 
         } catch (\Throwable $e) {
             // Non-fatal — user can still reach the room via the TeamHub tab token link.
-            $this->logger->warning('[TalkService] syncUserToTeamTalkRoom failed', [
+            $this->logger->warning('[TeamHub][TalkService] syncUserToTeamTalkRoom failed', [
                 'teamId' => $teamId, 'uid' => $uid,
                 'error'  => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] syncUserToTeamTalkRoom FAILED: ' . $e->getMessage());
+            // The $this->logger->warning above already carries the full context;
+            // no separate error_log needed.
         }
     }
 
@@ -989,7 +1053,9 @@ class TalkService {
             return;
         }
 
-        error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom: teamId=' . $teamId . ' uid=' . $uid);
+        $this->logger->debug('[TeamHub][TalkService] removeUserFromTeamTalkRoom: enter', [
+            'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
+        ]);
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -1006,36 +1072,69 @@ class TalkService {
             $res->closeCursor();
 
             if (!$row) {
-                error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom: no Talk room — skip');
+                $this->logger->debug('[TeamHub][TalkService] removeUserFromTeamTalkRoom: no Talk room — skip', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
                 return;
             }
             $roomId = (int)$row['room_id'];
 
-            $dqb      = $db->getQueryBuilder();
-            $affected = $dqb->delete('talk_attendees')
-                ->where($dqb->expr()->eq('room_id',
-                    $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($dqb->expr()->in('actor_type', $dqb->createNamedParameter(
-                    ['users', 'federated_users'],
-                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
-                )))
-                ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
-                ->andWhere($dqb->expr()->neq('participant_type',
-                    $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))) // preserve OWNER
-                ->executeStatement();
+            // v3.100.8 (apps.md W-5) — ParticipantService::removeAttendee
+            // first so system leave-message fires; fall back to raw DELETE
+            // when the Talk API refuses.
+            $removedViaApi = false;
+            try {
+                $roomManager = $this->container->get(\OCA\Talk\Manager::class);
+                $room = $roomManager->getRoomById($roomId);
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $participant = $participantService->getParticipantByActor(
+                    $room, 'users', $uid,
+                );
+                if ($participant !== null
+                    && (int)$participant->getAttendee()->getParticipantType() !== 1 /* preserve OWNER */
+                ) {
+                    $participantService->removeAttendee(
+                        $room,
+                        $participant->getAttendee(),
+                        \OCA\Talk\Room::PARTICIPANT_REMOVED,
+                    );
+                    $removedViaApi = true;
+                }
+            } catch (\Throwable $e) {
+                $this->logger->debug('[TeamHub][TalkService] removeUserFromTeamTalkRoom: ParticipantService::removeAttendee failed — using DB fallback', [
+                    'uid' => $uid, 'roomId' => $roomId,
+                    'reason' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
 
-            $this->logger->info('[TalkService] removeUserFromTeamTalkRoom: done', [
+            $affected = 0;
+            if (!$removedViaApi) {
+                $dqb      = $db->getQueryBuilder();
+                $affected = $dqb->delete('talk_attendees')
+                    ->where($dqb->expr()->eq('room_id',
+                        $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($dqb->expr()->in('actor_type', $dqb->createNamedParameter(
+                        ['users', 'federated_users'],
+                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
+                    )))
+                    ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
+                    ->andWhere($dqb->expr()->neq('participant_type',
+                        $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))) // preserve OWNER
+                    ->executeStatement();
+            }
+
+            $this->logger->info('[TeamHub][TalkService] removeUserFromTeamTalkRoom: done', [
                 'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
-                'affected' => $affected, 'app' => Application::APP_ID,
+                'viaApi' => $removedViaApi, 'affected' => $affected,
+                'app' => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom: deleted ' . $affected . ' row(s) uid=' . $uid);
 
         } catch (\Throwable $e) {
-            $this->logger->warning('[TalkService] removeUserFromTeamTalkRoom failed', [
+            $this->logger->warning('[TeamHub][TalkService] removeUserFromTeamTalkRoom failed', [
                 'teamId' => $teamId, 'uid' => $uid,
                 'error'  => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] removeUserFromTeamTalkRoom FAILED: ' . $e->getMessage());
+            // logger->warning above already carries the failure detail.
         }
     }
 
@@ -1060,7 +1159,9 @@ class TalkService {
             return;
         }
 
-        error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: teamId=' . $teamId);
+        $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: enter', [
+            'teamId' => $teamId, 'app' => Application::APP_ID,
+        ]);
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -1077,7 +1178,9 @@ class TalkService {
             $res->closeCursor();
 
             if (!$row) {
-                error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: no Talk room — skip');
+                $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: no Talk room — skip', [
+                    'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
                 return;
             }
             $roomId = (int)$row['room_id'];
@@ -1113,9 +1216,27 @@ class TalkService {
             }
             $mRes->closeCursor();
 
-            error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: attendees=' . count($attendees) . ' currentMembers=' . count($currentMembers));
+            $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: sets loaded', [
+                'attendees' => count($attendees), 'currentMembers' => count($currentMembers),
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
 
             // ── 4. Evict attendees no longer in the team ──────────────────────
+            // v3.100.8 (apps.md W-5) — per-attendee: try ParticipantService
+            // first (fires system leave-message + push), fall back to raw
+            // DELETE if the API refuses.
+            $room = null;
+            $participantService = null;
+            try {
+                $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomById($roomId);
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+            } catch (\Throwable $e) {
+                $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: Talk API path unavailable — using DB fallback for all evictions', [
+                    'roomId' => $roomId, 'reason' => $e->getMessage(),
+                    'app' => Application::APP_ID,
+                ]);
+            }
+
             $removed = 0;
             foreach ($attendees as $attendee) {
                 $uid  = (string)($attendee['actor_id']        ?? '');
@@ -1125,7 +1246,31 @@ class TalkService {
                     continue; // skip empty rows and room OWNERs
                 }
 
-                if (!isset($currentMembers[$uid])) {
+                if (isset($currentMembers[$uid])) {
+                    continue;
+                }
+
+                $viaApi = false;
+                if ($room !== null && $participantService !== null) {
+                    try {
+                        $participant = $participantService->getParticipantByActor($room, 'users', $uid);
+                        if ($participant !== null) {
+                            $participantService->removeAttendee(
+                                $room,
+                                $participant->getAttendee(),
+                                \OCA\Talk\Room::PARTICIPANT_REMOVED,
+                            );
+                            $viaApi = true;
+                        }
+                    } catch (\Throwable $e) {
+                        $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: per-attendee API remove failed — falling back for this uid', [
+                            'uid' => $uid, 'roomId' => $roomId,
+                            'reason' => $e->getMessage(),
+                            'app' => Application::APP_ID,
+                        ]);
+                    }
+                }
+                if (!$viaApi) {
                     $dqb = $db->getQueryBuilder();
                     $dqb->delete('talk_attendees')
                         ->where($dqb->expr()->eq('room_id',
@@ -1135,23 +1280,26 @@ class TalkService {
                         ->andWhere($dqb->expr()->neq('participant_type',
                             $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                         ->executeStatement();
-                    $removed++;
-                    error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: evicted uid=' . $uid);
                 }
+                $removed++;
+                $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: evicted attendee', [
+                    'uid' => $uid, 'roomId' => $roomId, 'viaApi' => $viaApi,
+                    'app' => Application::APP_ID,
+                ]);
             }
 
-            $this->logger->info('[TalkService] reconcileTalkRoomMembers: complete', [
+            $this->logger->info('[TeamHub][TalkService] reconcileTalkRoomMembers: complete', [
                 'teamId' => $teamId, 'roomId' => $roomId,
                 'checked' => count($attendees), 'removed' => $removed,
                 'app'    => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] reconcileTalkRoomMembers: done removed=' . $removed);
+            // logger->info above already carries the removed count.
 
         } catch (\Throwable $e) {
-            $this->logger->warning('[TalkService] reconcileTalkRoomMembers failed', [
+            $this->logger->warning('[TeamHub][TalkService] reconcileTalkRoomMembers failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] reconcileTalkRoomMembers FAILED: ' . $e->getMessage());
+            // logger->warning above already carries the failure detail.
         }
     }
 
@@ -1174,12 +1322,14 @@ class TalkService {
      */
     private function resolveCircle(string $teamId, string $uid): ?\OCA\Circles\Model\Circle {
         try {
-            error_log('[TeamHub][TalkService] resolveCircle: resolving teamId=' . $teamId . ' for uid=' . $uid);
+            $this->logger->debug('[TeamHub][TalkService] resolveCircle: enter', [
+                'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
+            ]);
 
             $userManager = $this->container->get(\OCP\IUserManager::class);
             $userObj     = $userManager->get($uid);
             if ($userObj === null) {
-                $this->logger->warning('[TalkService] resolveCircle: user not found', [
+                $this->logger->warning('[TeamHub][TalkService] resolveCircle: user not found', [
                     'uid' => $uid, 'app' => Application::APP_ID,
                 ]);
                 return null;
@@ -1194,17 +1344,20 @@ class TalkService {
             $circlesMgr = $this->container->get(\OCA\Circles\CirclesManager::class);
             $circle     = $circlesMgr->getCircle($teamId);
 
-            error_log('[TeamHub][TalkService] resolveCircle: resolved circle name=' . $circle->getName());
+            $this->logger->debug('[TeamHub][TalkService] resolveCircle: resolved', [
+                'teamId' => $teamId, 'circleName' => $circle->getName(),
+                'app' => Application::APP_ID,
+            ]);
             return $circle;
 
         } catch (\Throwable $e) {
-            $this->logger->warning('[TalkService] resolveCircle: could not resolve Circle object — will fall back to direct DB', [
+            $this->logger->warning('[TeamHub][TalkService] resolveCircle: could not resolve Circle object — will fall back to direct DB', [
                 'teamId' => $teamId,
                 'uid'    => $uid,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] resolveCircle: FAILED ' . $e->getMessage());
+            // logger->warning above already carries the failure detail.
             return null;
         }
     }
@@ -1248,7 +1401,9 @@ class TalkService {
      * @return int Number of new attendee rows actually inserted.
      */
     public function expandCircleMembersToTalk(int $roomId, string $teamId, \OCP\IDBConnection $db): int {
-        error_log('[TeamHub][TalkService] expandCircleMembersToTalk: start roomId=' . $roomId . ' teamId=' . $teamId);
+        $this->logger->debug('[TeamHub][TalkService] expandCircleMembersToTalk: enter', [
+            'roomId' => $roomId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+        ]);
 
         try {
             // ── 1. Fetch direct user members of the team circle ───────────────
@@ -1270,7 +1425,9 @@ class TalkService {
             }
             $res->closeCursor();
 
-            error_log('[TeamHub][TalkService] expandCircleMembersToTalk: found ' . count($uids) . ' direct members');
+            $this->logger->debug('[TeamHub][TalkService] expandCircleMembersToTalk: fetched direct members', [
+                'count' => count($uids), 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
 
             if (empty($uids)) {
                 return 0;
@@ -1296,7 +1453,9 @@ class TalkService {
                 $ckRes->closeCursor();
 
                 if ($exists) {
-                    error_log('[TeamHub][TalkService] expandCircleMembersToTalk: uid=' . $uid . ' already has attendee row — skip');
+                    $this->logger->debug('[TeamHub][TalkService] expandCircleMembersToTalk: attendee row already present — skip', [
+                        'uid' => $uid, 'roomId' => $roomId, 'app' => Application::APP_ID,
+                    ]);
                     continue;
                 }
 
@@ -1333,10 +1492,12 @@ class TalkService {
                 try {
                     $aqb->executeStatement();
                     $added++;
-                    error_log('[TeamHub][TalkService] expandCircleMembersToTalk: inserted attendee for uid=' . $uid);
+                    $this->logger->debug('[TeamHub][TalkService] expandCircleMembersToTalk: inserted attendee', [
+                        'uid' => $uid, 'roomId' => $roomId, 'app' => Application::APP_ID,
+                    ]);
                 } catch (\Throwable $e) {
                     // Non-fatal: log and continue for remaining members.
-                    $this->logger->warning('[TalkService] expandCircleMembersToTalk: failed to insert attendee', [
+                    $this->logger->warning('[TeamHub][TalkService] expandCircleMembersToTalk: failed to insert attendee', [
                         'uid'    => $uid,
                         'roomId' => $roomId,
                         'error'  => $e->getMessage(),
@@ -1345,25 +1506,25 @@ class TalkService {
                 }
             }
 
-            $this->logger->info('[TalkService] expandCircleMembersToTalk: complete', [
+            $this->logger->info('[TeamHub][TalkService] expandCircleMembersToTalk: complete', [
                 'teamId'    => $teamId,
                 'roomId'    => $roomId,
                 'expanded'  => $added,
                 'skipped'   => count($uids) - $added,
                 'app'       => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] expandCircleMembersToTalk: done — added=' . $added);
+            // logger->info above already carries the added count.
 
             return $added;
 
         } catch (\Throwable $e) {
-            $this->logger->error('[TalkService] expandCircleMembersToTalk failed', [
+            $this->logger->error('[TeamHub][TalkService] expandCircleMembersToTalk failed', [
                 'teamId' => $teamId,
                 'roomId' => $roomId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
             ]);
-            error_log('[TeamHub][TalkService] expandCircleMembersToTalk: EXCEPTION ' . $e->getMessage());
+            // logger->error above already carries the failure detail.
             return 0;
         }
     }
@@ -1437,8 +1598,8 @@ class TalkService {
             // person's personal circle, regardless of whether that person is
             // local or federated.
             //
-            // Keyed by "actor_type|actor_id" so a local 'justin' and a
-            // federated 'justin@host.com' never collide.
+            // Keyed by "actor_type|actor_id" so a local 'alice' and a
+            // federated 'alice@host.com' never collide.
             $effective = [];
 
             $eQb  = $db->getQueryBuilder();
@@ -1549,7 +1710,7 @@ class TalkService {
                     $iQb->executeStatement();
                     $added++;
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers: insert failed', [
+                    $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: insert failed', [
                         'teamId' => $teamId, 'roomId' => $roomId,
                         'actorType' => $member['actor_type'], 'actorId' => $member['actor_id'],
                         'error'  => $e->getMessage(), 'app' => Application::APP_ID,
@@ -1578,7 +1739,7 @@ class TalkService {
                         ->executeStatement();
                     $removed++;
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers: delete failed', [
+                    $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: delete failed', [
                         'teamId' => $teamId, 'roomId' => $roomId,
                         'actorType' => $attendee['actor_type'], 'actorId' => $attendee['actor_id'],
                         'error'  => $e->getMessage(), 'app' => Application::APP_ID,
@@ -1587,7 +1748,7 @@ class TalkService {
             }
 
             if ($added > 0 || $removed > 0) {
-                $this->logger->info('[TalkService] reconcileEffectiveTalkRoomMembers: drift reconciled', [
+                $this->logger->info('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: drift reconciled', [
                     'teamId' => $teamId, 'roomId' => $roomId,
                     'added'  => $added, 'removed' => $removed,
                     'effective' => count($effective), 'before' => count($current),
@@ -1598,7 +1759,7 @@ class TalkService {
             return ['added' => $added, 'removed' => $removed];
 
         } catch (\Throwable $e) {
-            $this->logger->warning('[TalkService] reconcileEffectiveTalkRoomMembers failed', [
+            $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(),
                 'app' => Application::APP_ID,
             ]);

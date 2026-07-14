@@ -206,9 +206,14 @@ export default {
     align-items: flex-start;
 }
 
+/* v3.100.16: NC theme tokens per SKILLS.md § "State-coloured
+   backgrounds" — full-saturation fill + matching -text token. The
+   previous --color-*-bg / --color-*-border fallbacks were pinned to
+   raw hex that didn't follow the dark theme. */
 .archive-modal__warning {
-    background: var(--color-warning-bg, #fff3cd);
-    border: 1px solid var(--color-warning-border, #ffc107);
+    background: var(--color-warning);
+    border: 1px solid var(--color-warning);
+    color: var(--color-warning-text);
     border-radius: var(--border-radius);
     padding: 10px 14px;
     font-size: 13px;
@@ -216,13 +221,13 @@ export default {
 }
 
 .archive-modal__error {
-    background: #ffebee;
-    border: 2px solid #c62828;
+    background: var(--color-error);
+    border: 2px solid var(--color-error);
+    color: var(--color-error-text);
     border-radius: var(--border-radius);
     padding: 10px 14px;
     font-size: 13px;
     font-weight: 500;
-    color: #7f0000;
 }
 
 .archive-modal__actions {

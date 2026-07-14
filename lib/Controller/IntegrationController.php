@@ -32,6 +32,7 @@ use Psr\Log\LoggerInterface;
  *   PUT    /api/v1/teams/{teamId}/integrations/reorder                   — persist drag order
  */
 class IntegrationController extends Controller {
+    use ExceptionResponseTrait;
 
     public function __construct(
         string $appName,
@@ -60,7 +61,12 @@ class IntegrationController extends Controller {
         }
     }
 
-    /** POST /api/v1/ext/integrations/register — NC admin required. */
+    /**
+     * POST /api/v1/ext/integrations/register — NC admin required.
+     *
+     * CSRF exempt because external NC apps call this from their own PHP
+     * install/update hooks (no browser session, no CSRF token available).
+     */
     #[NoCSRFRequired]
     public function registerIntegration(): JSONResponse {
         try {
@@ -102,7 +108,12 @@ class IntegrationController extends Controller {
         }
     }
 
-    /** DELETE /api/v1/ext/integrations/{appId} — NC admin required. */
+    /**
+     * DELETE /api/v1/ext/integrations/{appId} — NC admin required.
+     *
+     * CSRF exempt for the same reason as registerIntegration — external
+     * apps call this from PHP uninstall hooks.
+     */
     #[NoCSRFRequired]
     public function deregisterIntegration(string $appId): JSONResponse {
         $appId = trim($appId);
@@ -113,12 +124,10 @@ class IntegrationController extends Controller {
         try {
             $this->integrationService->deregisterIntegration($appId);
             return new JSONResponse(['success' => true]);
-        } catch (\Exception $e) {
-            $this->logger->error('IntegrationController::deregisterIntegration — failed', [
-                'app_id' => $appId, 'exception' => $e, 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to deregister integration', [
+                'app_id' => $appId,
             ]);
-            $status = str_contains($e->getMessage(), 'admin') ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -134,12 +143,9 @@ class IntegrationController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
             return new JSONResponse($this->integrationService->getEnabledIntegrations($teamId));
         } catch (\Throwable $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->error('IntegrationController::getEnabledIntegrations — failed', [
-                'team_id' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
+            return $this->exceptionResponse($e, 'Failed to load enabled integrations', [
+                'team_id' => $teamId,
             ]);
-            return new JSONResponse(['widgets' => [], 'menu_items' => []], $status);
         }
     }
 
@@ -150,14 +156,10 @@ class IntegrationController extends Controller {
         try {
             $this->memberService->requireMemberLevel($teamId);
             return new JSONResponse($this->integrationService->fetchWidgetData($teamId, $registryId));
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            $this->logger->warning('IntegrationController::getWidgetData — failed', [
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to fetch widget data', [
                 'team_id' => $teamId, 'registry_id' => $registryId,
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            return new JSONResponse(['items' => [], 'error' => $e->getMessage()], $status);
         }
     }
 
@@ -180,15 +182,11 @@ class IntegrationController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
             $form = $this->integrationService->fetchActionForm($teamId, $registryId, $actionId);
             return new JSONResponse($form);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            $this->logger->warning('IntegrationController::getActionForm — failed', [
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load action form', [
                 'team_id' => $teamId, 'registry_id' => $registryId,
-                'action_id' => $actionId, 'error' => $e->getMessage(),
-                'app' => Application::APP_ID,
+                'action_id' => $actionId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -212,15 +210,11 @@ class IntegrationController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
             $result = $this->integrationService->submitAction($teamId, $registryId, $actionId, $fields);
             return new JSONResponse($result);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            $this->logger->warning('IntegrationController::submitAction — failed', [
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to submit action', [
                 'team_id' => $teamId, 'registry_id' => $registryId,
-                'action_id' => $actionId, 'error' => $e->getMessage(),
-                'app' => Application::APP_ID,
+                'action_id' => $actionId,
             ]);
-            return new JSONResponse(['success' => false, 'error' => $e->getMessage()], $status);
         }
     }
 
@@ -236,18 +230,14 @@ class IntegrationController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
             return new JSONResponse($this->integrationService->getRegistryForTeam($teamId));
         } catch (\Throwable $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->error('IntegrationController::getIntegrationRegistry — failed', [
-                'team_id' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
+            return $this->exceptionResponse($e, 'Failed to load integration registry', [
+                'team_id' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
     /** POST /api/v1/teams/{teamId}/integrations/{registryId}/toggle — team admin required. */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function toggleIntegration(string $teamId, int $registryId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -256,20 +246,15 @@ class IntegrationController extends Controller {
             $enable = isset($body['enable']) ? filter_var($body['enable'], FILTER_VALIDATE_BOOLEAN) : true;
 
             return new JSONResponse($this->integrationService->toggleIntegration($teamId, $registryId, $enable));
-        } catch (\Exception $e) {
-            $this->logger->warning('IntegrationController::toggleIntegration — failed', [
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to toggle integration', [
                 'team_id' => $teamId, 'registry_id' => $registryId,
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
     /** PUT /api/v1/teams/{teamId}/integrations/reorder — team admin required. */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function reorderIntegrations(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -282,13 +267,10 @@ class IntegrationController extends Controller {
             }
 
             return new JSONResponse($this->integrationService->reorderIntegrations($teamId, $order));
-        } catch (\Exception $e) {
-            $this->logger->error('IntegrationController::reorderIntegrations — failed', [
-                'team_id' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to reorder integrations', [
+                'team_id' => $teamId,
             ]);
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 }

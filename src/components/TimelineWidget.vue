@@ -47,18 +47,23 @@ export default {
     min-height: 320px;
 }
 
+/* v3.100.16: iframe wrapper background — theme-safe token (was #fff,
+   which pinned white even in dark mode). The timeline.php content
+   inside still has its own opaque bg, so this only shows in the split
+   second before the iframe paints — but keeping it aligned with the
+   NC theme prevents a flash of light on a dark-mode canvas. */
 .th-tl__iframe {
     flex: 1;
     width: 100%;
     border: none;
     display: block;
     min-height: 320px;
-    background: #fff;
+    background: var(--color-main-background);
 }
 
 .th-tl__empty {
     padding: 24px 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     text-align: center;
 }

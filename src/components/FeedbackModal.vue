@@ -286,9 +286,12 @@ export default {
         color: var(--color-error-text);
     }
 
+    /* v3.100.16: full-saturation error per SKILLS.md § "State-coloured
+       backgrounds" (was --color-error-light — a non-canonical NC token
+       — with a raw hex fallback that always fired). */
     &__server-error {
         padding: 8px 12px;
-        background: var(--color-error-light, #ffe0e0);
+        background: var(--color-error);
         color: var(--color-error-text);
         border-radius: var(--border-radius);
         font-size: 0.9em;

@@ -3,17 +3,835 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [3.87.1] — 2026-07-09 — Nextcloud 34 compatibility
+## [3.104.0] — 2026-07-13 — Budget + Time iframes production pass + Team Apps relocation
+
+Long polish session on top of v3.103.0's iframe rebuild. No API changes; no PHP touched; three new strings translated to all locales.
+
+### Added
+
+- `openBudgetSettings()` / `openTimeSettings()` methods in the two iframe views. Each stashes `SET_MANAGE_TEAM_DEEP_LINK({ tab: 'project', section: 'budget' | 'time' })` in Vuex before emitting `open-project-settings` so the destination section scrolls + highlights on arrival (same pattern the Compass uses).
+- `canAddAnyExpense` computed + `editableLanes` computed in `ProjectBudgetView`. Gate the new global "Add expense" button in the Workstream-lanes widget header; populate the lane picker in the modal.
+- Required lane `<select>` in the Add / Edit expense modal, disabled when editing (moving expenses between lanes is a different flow), auto-selecting when only one lane is editable.
+- `resetScrollTop()` method in both iframe views — called from `mounted() → $nextTick` and from `watch: currentView`. Fixes the mobile bug where re-entering the Budget or Time tab landed the user partway down the container because `scrollTop` persisted across `display: none / block` toggles.
+- `min-height: 52 px` on `.th-iframe-widget__header` so the widget-card header stays a stable height regardless of what any consumer puts in the `#actions` slot.
+- Three new user-facing strings translated to nl/de/fr/da/es/it: `Choose a lane…`, `Open Manage Team — Project — Budget`, `Open Manage Team — Project — Time investment`. All 14 locale files updated and validated.
+
+### Changed
+
+- Vuex getter mapping in both iframe views: `mapGetters(['isTeamAdmin'])` → `mapGetters({ isTeamAdmin: 'currentUserIsTeamAdmin' })`. The store getter is `currentUserIsTeamAdmin`; the old alias silently produced `undefined`, so every `v-if="isTeamAdmin"` was silently falsy. Fixes the missing "Budget settings" / "Time settings" buttons and un-breaks other admin-gated surfaces in ProjectTimeView.
+- Widget-header button variants unified: `Budget settings`, `Time settings`, `Add expense`, `Log time` all now `variant="primary"` (dark green). No more mixed primary/secondary in the same widget-card row.
+- Workstream-lanes rebuilt to mirror the Time-report per-lane layout. Coloured swatch + lane title + real-spent total on the header row; then a table with `Member | Description (+ date sub-line) | Projected | Real | Options`. Retired the per-lane stats block and budget bar (the Utilisation widget's per-lane bar chart already carries that signal).
+- Empty states (`.th-budget__lane-empty`, `.th-time__report-empty--small`) unified to `font-style: italic; font-size: var(--th-font-meta)` — matches every other widget's empty-state treatment.
+- Member picker moved from the Time-report widget-header `#actions` slot to inside the report body's `.th-time__report-head` next to the Per-member toggle. Fixes the widget-header height jitter caused by the raw `<select>`'s intrinsic height differing from `NcButton`'s.
+- Both modals rebuilt with a unified `.th-budget__input` / `.th-time__input` class — 36 px height, 8 px radius, primary-element focus ring — applied to every field regardless of type. Add-expense modal has a 2-column amount grid; Log-time modal has a 3-column hours/minutes/date grid; both collapse to 1 column below 480 px.
+- Iframe scroll behaviour: `.th-budget` and `.th-time` both gained `-webkit-overflow-scrolling: touch`, `overscroll-behavior: contain`, and explicit `overflow-y: auto; overflow-x: hidden`. `.th-time` also gained `height: 100%; box-sizing: border-box` which it was missing entirely — that's why Time widgets 2 + 3 were unreachable on mobile.
+- `.th-time__kpis` grid layout: `auto-fit, minmax(180 px, 1fr)` → explicit `4 / 2 / 1` breakpoint ladder (desktop 4-across, ≤ 900 px 2×2, ≤ 360 px single column). Was collapsing to 1 column on any phone width.
+- `.th-budget__kpi-value` drops from 26 px → 20 px at ≤ 720 px so amounts like `€ 10.000,00` stay inside their tile. Both KPI value classes gain `min-width: 0` + `overflow-wrap: anywhere`.
+- `ProjectPhaseStepper` and `ProjectCompassPanel` now `v-if`-gated on `!isMobile` in `TeamView`. On phones they used to eat vertical room above `TeamWidgetGrid` and push the `MobileWidgetView`'s icon bar + FAB below the viewport.
+- Manage Team → **Settings tab**: Team Apps section removed. Manage Team → **Integrations tab**: Team Apps section added below the existing Integrations content — 394-line block relocated via an atomic Node splice preserving data flow, methods, and CSS classes. All Team Apps functionality (per-app resource lists, pending/at-risk sub-panels, connect / create / delete dialogs, ignored resources) now lives alongside internal and third-party integrations.
+
+### Removed
+
+- Per-lane `Add expense` buttons in each lane section's `row1` header — one global button in the workstream widget header now drives every expense, with lane picked in the modal.
+- Speculative `min-height: 0 + max-height: 100%` cap on `.th-budget` / `.th-time` from a preceding iteration — the combination made widget-card children shrink to fit and lose their internal padding + KPI grid layout. The JS scroll-reset alone (`resetScrollTop`) is sufficient for the visible-widget bug.
+- Dead widget-header inline strip `.th-time__report-actions` (the picker + Log-time button that used to live inside it moved elsewhere).
+- Unused `NcTextField` imports and component registrations in both iframe views.
+
+### Security
+
+- No PHP touched, no new endpoints, no new `v-html`, no new `axios` sites, no debug logging added. Session-end scan clean.
+
+---
+
+## [3.103.0] — 2026-07-13 — Budget + Time iframes polish pass
+
+Four follow-up asks landing on top of v3.102.0's iframe rebuild.
+
+### Added
+
+- Global "Add expense" `NcButton` in the Budget iframe's Workstream-lanes widget header, visible when the current user has any editable lane. Consolidates the four per-lane buttons this replaces.
+- Required lane `<select>` in the Add / Edit expense modal, populated from the user's editable lanes. Disabled when editing an existing expense (moving an expense between lanes is a different flow). Preselects the single editable lane when there's only one.
+- New `.th-budget__widget-row` and `.th-time__widget-row` grid containers wrapping widgets 2 + 3 so Utilisation sits next to Workstream lanes / Time report on wide viewports. Both containers carry a `--single` modifier that collapses back to one column when Utilisation is hidden.
+- Three new user-facing strings — `Choose a lane…`, `Open Manage Team — Project — Budget`, `Open Manage Team — Project — Time investment` — translated to nl/de/fr/da/es/it. All 14 locale files updated and validated.
+
+### Changed
+
+- Iframe backdrop on both `.th-budget` and `.th-time` set to `var(--color-background-dark)` (theme-aware) so widget cards read as elevated surfaces on a subtly darker canvas — matches the dashboard-widget rhythm.
+- Overview widget-header settings buttons swapped from icon-only `variant="tertiary"` to icon + label `variant="secondary"` with a `title` tooltip that spells out the destination (`Open Manage Team — Project — Budget` / `Open Manage Team — Project — Time investment`). Still gated on `isTeamAdmin`.
+- Nested layouts inside the Utilisation widget (`.th-budget__charts` donut + bars) and Workstream-lanes widget (`.th-budget__lanes` 2-column grid) collapsed to single-column stacks — the halved widget width from the 2-column widget row would have squeezed both charts and lane cards to unreadable widths.
+
+### Removed
+
+- Per-lane "Add expense" `NcButton` in each lane section's `row1` header. The workstream-lanes widget-header now carries one button, and the modal picks the lane.
+- `.th-budget__charts` `grid-template-columns: 280px 1fr` at 900 px+, and `.th-budget__lanes` `grid-template-columns: 1fr 1fr` at 900 px+. Both retired now that their parent widgets sit at half width on wide viewports.
+
+### Security
+
+- No PHP touched, no new endpoints. Same expense CRUD flow — the `POST /budget/lanes/{laneId}/expenses` endpoint receives the `laneId` picked in the modal instead of preselected by the button. Session-end security scan clean.
+
+---
+
+## [3.102.0] — 2026-07-13 — Budget + Time iframes rebuilt into widget cards
+
+Follow-up to v3.101.0 GUI audit. The two Advanced-project full-tab iframes (`ProjectBudgetView`, `ProjectTimeView`) now use the dashboard's widget-card visual language instead of rendering as one long section. Each iframe is composed from three stacked `IframeWidgetCard` widgets so every information block has its own header + body.
+
+### Added
+
+- `src/components/IframeWidgetCard.vue` — shared widget-card chrome for any full-tab iframe view. Slots: `#icon`, `#actions`, default (body), `#footer`. Optional collapse chevron with `{widget}` placeholder aria-label (reuses the existing `Expand {widget}` / `Collapse {widget}` translation keys).
+- Four new user-facing strings — `Budget overview`, `Time overview`, `Time report`, `Workstream lanes` — translated to nl/de/fr/da/es/it and committed to both `.json` and `.js` locale files.
+
+### Changed
+
+- `ProjectBudgetView.vue` restructured into three `IframeWidgetCard` widgets: Budget overview (KPIs, settings button in header actions), Utilisation (donut + per-workstream bars, rendered only when there's chart data), Workstream lanes (lane sections + expenses tables, with lane count as widget badge). Loading / error / empty states now render inside the Workstream-lanes widget body so the chrome stays consistent.
+- `ProjectTimeView.vue` restructured the same way: Time overview (KPIs, settings), Utilisation (per-member + per-lane bars), Time report (view-switcher + tables). The member picker and Log-time button moved from the report's inline action row into the Time-report widget's header actions slot, matching every other widget's primary-action placement.
+- Data flow, expense/time-log CRUD, modals, permission gating, and computed properties preserved in both views. This is a template + chrome refactor, not a behavioural change.
+
+### Removed
+
+- `.th-budget__kpis-wrap`, `.th-budget__settings-btn` CSS blocks — retired now that KPIs sit inside a widget-card body and the settings button lives in the widget header's actions slot.
+- `.th-time__kpis-wrap`, `.th-time__settings-btn`, `.th-time__report-actions` — same reason.
+- Redundant `margin-bottom: 24px` on `.th-budget__charts` — the enclosing widget card owns bottom spacing now.
+
+### Security
+
+- No PHP touched, no new endpoints, no new `v-html` or `axios` sites. Session-end security scan clean.
+
+---
+
+## [3.101.0] — 2026-07-13 — GUI audit + design-token migration
+
+Session-long audit against the Nextcloud design guide and SKILLS.md § "State-coloured backgrounds". No API changes; no PHP files touched.
+
+### Added
+
+- App-wide typography, border-radius, and icon-size token scales in `src/styles/widget-tokens.css`, imported into all three entry points so admin and personal settings pages inherit the scale too.
+- `src/constants/uiTokens.js` — JS mirror of the icon-size scale, for `vue-material-design-icons` `:size` props that need a number at compile time.
+- `src/components/WidgetCollapseButton.vue` — micro-component extracted from the collapse-chevron pattern that was copy-pasted 12 times in `TeamWidgetGrid.vue`. `{widget}` placeholder aria-label lets translators reposition the widget name in their locale.
+- Missing `aria-label` on `InviteMemberModal`'s chip-remove button.
+- `gui.md` at the repository root — full frontend audit that documented every finding this session addressed and the ones still open.
+- `SKILLS.md` gained six new rules under "Nextcloud design guidelines" — the design-token scale, hex restriction, focus-visibility standard, NcButton default with documented custom-`<button>` carve-outs, micro-component extraction threshold, and an expanded state-coloured-backgrounds section reflecting the retirement of `--th-color-*` in favour of NC theme tokens.
+
+### Changed
+
+- State-tinted backgrounds across the frontend migrated to SKILLS.md's canonical `--color-X` + `--color-X-text` pattern (chips, badges, selected/active states, warning/error/info banners, danger notices). Neutral surfaces for decorative avatars and category tiles switched to `--color-background-dark`.
+- 286 exact-match `font-size: 11 / 12 / 14 / 16 / 20 px` sites converted to the new token scale (`--th-font-micro / -meta / -body / -heading / -heading-lg`). No visual change — every swap is value-preserving.
+- 9 raw `<button>` sites converted to `NcButton` (App.vue help button, TeamWidgetGrid edit-banner Save/Reset default, ActivityFeedView refresh, ActivityWidget more/refresh, FilesSharedWidget pagination, AddEventModal Select all). Custom `-btn` CSS blocks retired.
+- `⠿` Braille drag-handle character in `TeamTabBar.vue` replaced with the `DragVariant` MDI icon (12 sites). `×` multiplication-sign close-chip character in `AdminSettings`, `InviteMemberModal`, `ManageTeamView` replaced with the `Close` MDI icon.
+- Presence dot colours in `MemberRow.vue` now return CSS variable references (`var(--color-success)` etc.) so they follow the NC theme in light/dark mode.
+- `DecisionApprovalModal` Approve / Deny buttons: local `--color-primary-element` override now points at `--color-success` / `--color-error` tokens instead of pinned hex, so both follow the theme.
+- Activity feed / activity widget source badges (Circles / Files / Deck / Calendar / Talk) collapsed from a Google-Material palette (raw hex) to one neutral surface with an MDI icon carrying the source distinction.
+- Home widget-grid canvas backdrop switched from `#f4f4f4` to `--color-background-dark`. Dark-mode explicit override retired (base is theme-aware).
+- `App.vue:6` inline `<div style="height: 44px …" />` sidebar spacer moved into a scoped class.
+- `DecisionApprovalModal.vue:118` condensed single-line textarea rule expanded to one property per line with an explicit `:focus-visible` box-shadow ring.
 
 ### Fixed
 
-- **Timeline iframe crashed on NC 34** with `Call to undefined method OC\Server::getContentSecurityPolicyNonceManager()`. NC 34 removed the shortcut method on `\OC\Server`; the same nonce manager is still available under its FQCN via the DI container. `templates/timeline.php` now resolves the manager through `\OC::$server->get(...)` with a `has(...)` guard and a legacy fallback so NC 32 / 33 / 34 all render the standalone timeline page correctly.
-- **`IntegrationController::getEnabledIntegrations` failed with `SQLSTATE[42P01]` "relation oc_teamhub_team_integrations does not exist"** on fresh NC 34 installs where the v2.9.0 create-table migration didn't materialise the tables. Added safety-net migration `Version000387100Date20260709000000` that idempotently creates `teamhub_integ_registry` and `teamhub_team_integrations` with the final schema (v2.9.0 base + `php_class` column + composite unique index). Existing installs where the tables already exist skip the migration entirely.
-- **`IntegrationService::getEnabledIntegrations` now degrades to an empty result** instead of throwing when the integration tables are missing, so the tab bar / sidebar loads cleanly even if the safety-net migration hasn't run yet.
+- WCAG 2.4.7 regression in `MyPresencePanel.vue:510` — `:focus-visible { outline: none }` was silencing the keyboard focus ring entirely. Now gets a proper 2 px primary outline.
+- Hover + focus-visible rules that were grouped and set `outline: none` (with no `:focus-visible` replacement) in `ProjectHealthWidget`, `ProjectCompassPanel` (3 sites), `TeamDecisionsView` (2 button sites). Split so `:focus-visible` keeps a visible ring while `:hover` handles the background feedback only.
+
+### Removed
+
+- Four `--th-color-*` (success / warning / error / neutral) hard-contrast hex tokens from `src/styles/widget-tokens.css`. All consumers migrated to NC's `--color-*` + `-text` pairs.
+- Four `--th-color-*-soft` tokens (SKILLS.md § "State-coloured backgrounds" explicitly forbids project-local soft tint tokens).
+- `--th-widget-success-strong` alias — no consumers.
+- Google-Material activity-badge palette (`#e8f0fe / #3b5998` and 9 more Circles/Files/Deck/Calendar/Talk pairs).
+- 132 → 32 raw hex colour declarations (75 % cut). Remaining hex is deliberate: categorical `LANE_PALETTE` values for swimlane distinction, JS luminance-based text-colour computations (return values), documentation comments, and placeholder text.
+- 7 dead custom `-btn` CSS blocks whose raw `<button>` templates were converted to `NcButton`.
+
+### Deliberately deferred
+
+- `font-size: 13px` (199 sites) and other odd values (10 / 15 / 18 / 22 / 26 / 28 / 34 px) — need per-site design decision.
+- Border-radius scale application (~111 sites); most sites need a per-site design decision.
+- Icon-size scale application; needs a design decision on `import ICON_BODY` per file vs `app.config.globalProperties.$icon`.
+- `timeline.php` dark-mode rewrite (1772-line standalone template) — needs an approach decision (`postMessage` bridge vs full Vue rewrite).
+- Categorical `LANE_PALETTE` in `ProjectSwimlaneView` / `ProjectBudgetView` / `ProjectTimeView` — design decision.
+- Custom tab bars in `TeamTabBar.vue` (975 lines) and `AdminSettings.vue` — need a check against `@nextcloud/vue 9.x` per SKILLS.md § "NC component uncertainty rule".
+
+### Security
+
+- No new endpoints, no PHP changes, no new `v-html` sites. Session-end security scan clean.
+
+---
+
+## [3.100.13] — 2026-07-12 — Fix: TalkService::connectExistingRoom type mismatch
+
+### Fixed
+
+- **`ResourceService::connectExistingResource` now casts Talk roomId to
+  int.** `TalkService::connectExistingRoom` declares `int $roomId`, but
+  the resourceId picked from the picker arrives at the switch statement
+  as a string. The regression fired only for the Talk case; other apps
+  handle the string→int conversion inside their own sub-services. Cast
+  is done at the call site so the TalkService type remains strict.
+
+### Server-side note (not a code change)
+
+- If NC cron reports `Could not resolve OCA\TeamHub\BackgroundJob\ResourceDiscoveryJob!
+  Class ... does not exist` after upgrade, that is a classloader cache
+  stale on the server, not a code bug — the class file is present in
+  this release. To clear it:
+  1. Confirm the file exists at
+     `apps/teamhub/lib/BackgroundJob/ResourceDiscoveryJob.php` on the
+     server.
+  2. Run `sudo -u www-data php occ app:disable teamhub && sudo -u
+     www-data php occ app:enable teamhub` to force a re-registration.
+  3. If step 2 doesn't clear it, restart PHP-FPM to drop OPcache: the
+     autoloader map is cached in-process.
+
+---
+
+## [3.100.12] — 2026-07-12 — Fix: discovery reconciler wiping soft-deleted rows
+
+### Fixed
+
+- **`ResourceDiscoveryService::reconcileApp` no longer hard-deletes rows
+  marked `disconnected`.** Root cause of the v3.100.11 "picker shows no
+  reattach options" regression: after we soft-deleted the row in
+  `removeTeamAccess` and stripped the ACL from the group folder, the
+  next reconciliation pass saw a row with no matching NC-side resource
+  and treated it as "external withdrawal", hard-deleting the row we
+  intentionally kept. The reconciler now skips rows whose status is
+  already `disconnected` — those are our own soft-deletes, not
+  externally-withdrawn resources.
+
+### Note
+
+- `ResourceService::deleteTeamResource` (which HARD-deletes the
+  underlying NC folder via `deleteGroupFolder`) still hard-clears the
+  registry via `removeResourceRowsByTeamAndApp`. That's the correct
+  behaviour — if the folder no longer exists in NC, keeping a
+  "disconnected" registry row would just be dead history the picker
+  would then filter out anyway (`listGroupFoldersAvailableToAttach`
+  verifies the folder still exists in `group_folders`).
+
+---
+
+## [3.100.11] — 2026-07-12 — Scoped team-folder picker + resend-invite
+
+### Fixed
+
+- **W-4 privacy — Files picker no longer leaks every group folder on
+  the instance.** Team admins previously saw every Team folder in the
+  picker's "attach" section, even ones the team was never a member of.
+  Now the picker only surfaces folders THIS team was previously
+  connected to (present in `teamhub_team_app_resources` with
+  `status='disconnected'`). Fresh-attach to a brand-new folder is a
+  separate flow via Team Folders admin → Create.
+- **W-4 soft-delete on resource remove.** `ResourceService::removeTeamAccess`
+  now updates the row to `status='disconnected'` instead of hard-deleting.
+  `upsertResourceRow` already promotes `pending`/`ignored` rows to
+  `active` on reconnect; the list is extended to include `disconnected`
+  so a reconnect resurrects the same row rather than inserting a
+  duplicate.
+- **W-5 resend invite when notification was lost.** Previously the
+  invite endpoint returned a silent `already_invited` success when
+  Circles refused with `FederatedItemBadRequestException`. If the target
+  is still `Invited` (deleted the notification, missed it, etc.) they'd
+  never get a chance to accept. The endpoint now inspects the current
+  row status:
+  - `Invited` → delete the stale row and re-invite; Circles' notifier
+    fires a fresh notification. Result map returns `invite_resent`.
+  - `Member`  → no-op success. Result map returns `already_invited`.
+  Only user_type=1 targets take the resend path; groups/circles are
+  handled by the existing auto-confirm block.
+
+### Added
+
+- **`MemberService::fetchAnyMemberStatus`** — helper that returns the
+  raw circles_member.status for a (teamId, userId) row without
+  filtering to `Member`. Used by the resend flow to distinguish
+  `Invited` (resend) from `Member` (no-op).
+
+### Changed
+
+- **`MemberService::fetchMemberStatus` semantics.** Now returns
+  `'Member'` or `null`, filtered to accepted members only. This matches
+  the Talk-sync gate's call site (`if ($status === 'Member')`) and
+  makes the intent clearer. The unrestricted variant is
+  `fetchAnyMemberStatus`.
+
+---
+
+## [3.100.10] — 2026-07-12 — v3.100.9 test-round follow-ups (already-invited + team-folder reattach)
+
+### Fixed
+
+- **`MemberService::inviteMembers` treats "Already invited" as idempotent
+  success.** Circles throws `FederatedItemBadRequestException` (code 123,
+  message "Already invited into the team") when the target already has an
+  Invited/Member row. Previously we let the exception bubble up as a
+  failure; re-invite is a common admin flow ("resend invite" / "did the
+  first one land?"), so the endpoint now returns `already_invited` in the
+  per-target results map and does not error. Existing Talk-sync logic
+  still runs when the row is already `Member`.
+
+### Added
+
+- **`GroupFolderService::listGroupFoldersAvailableToAttach($teamId)`** —
+  returns every group folder the team is NOT currently a member of. Used
+  by the picker's new "available" section.
+- **`FilesService::listConnectableFileFolders` — third section for team
+  admins.** When the caller is a team admin AND no group folder is
+  currently attached to the team, the picker now lists every group
+  folder the team could be attached to (fresh attach or reconnect after
+  a previous disconnect). Non-admins are unaffected. The connect flow
+  is idempotent — `assignCircleToFolder` treats "already assigned" as
+  success — so reconnect works via the existing connect endpoint.
+- **`MemberService::isCurrentUserTeamAdmin($teamId)`** — cheap bool
+  helper mirroring `isCurrentUserDirectMember`, used to gate the new
+  picker section. Write endpoints still call `requireAdminLevel` so the
+  security boundary is unchanged.
+
+### Note
+
+- The new picker section items carry `type='group_folder'` (matching
+  the existing shape) with an additional `available: true` flag. This
+  keeps them renderable in the current frontend without a rebuild.
+  A future GUI session can style available-vs-attached differently.
+
+---
+
+## [3.100.9] — 2026-07-12 — v3.100.8 test-round follow-ups
+
+### Fixed
+
+- **`MemberService::inviteMembers` no longer syncs invited users to Talk
+  until they accept.** Previously, calling `ParticipantService::addUsers`
+  on an `Invited`-status circle member bypassed Circles' invite flow —
+  Talk added the user as a full participant and Circles' invite
+  notification never fired. New behaviour: check the row's status after
+  `addMember()`; sync to Talk only when status is `Member` (auto-accepted
+  invite), defer otherwise. Test W-5.
+- **`MemberService::requestJoinTeam` open-circle auto-approve now syncs
+  to Talk** — mirroring what `approveRequest` already did. Fills the
+  gap left by the inviteMembers gate above.
+- **`TeamService::browseAllTeams` now surfaces open (CFG_OPEN) circles.**
+  The browse-teams query previously only included CFG_VISIBLE circles.
+  An open circle without CFG_VISIBLE was invisible in browse, which
+  blocked test W-2 (auto-approve join). Any circle marked as
+  auto-accept (CFG_OPEN) is now discoverable because hiding it serves
+  no security purpose.
+- **`TeamService::browseAllTeams` `requiresApproval` flag now reads the
+  correct bit.** The check was `($config & 1) > 0`, which reads
+  CFG_SINGLE, not CFG_OPEN (= 16). Every browsed team was reporting
+  `requiresApproval=false` regardless of its actual config. Fixed to
+  read the CFG_OPEN bit.
+- **Reverted the `FilesService::suspendFilesAccess` +
+  `removeFilesAccess` W-4 migration.** The IManager path leaves a row
+  in `share` that the reconnect-duplicate check then hits, so users
+  cannot reattach the same folder after disconnecting. The audit-log
+  entry is already written by ResourceService so no observability is
+  lost by returning to the raw DELETE. The `deleteSharedFolder` site
+  (which is only used on full team deletion, not reconnect) keeps its
+  pre-existing IManager-first pattern.
+
+---
+
+## [3.100.8] — 2026-07-12 — apps.md review: shift eligible cross-app writes/reads to OCP/OCA APIs
+
+### Added
+
+- **`lib/Exception/AppNotAvailableException.php`** — carries "app is not
+  installed" as a 422 through the controller trait.
+- **`lib/Exception/TrialRequestException.php`** — LicenseService now
+  throws this with the licensing back-end's HTTP status attached; the
+  controller stops substring-matching messages to determine status.
+
+### Changed — cross-app writes now API-first with raw-DB fallback
+
+- **`MemberService::approveRequest` + `requestJoinTeam` (open-circle
+  auto-approve)** — try `CirclesManager::confirmMemberRequest()` first
+  so `MemberConfirmedEvent` fires (activity/notifications pick it up),
+  fall back to raw UPDATE on hidden circles. (apps.md W-2)
+- **`FilesService::suspendFilesAccess` + `removeFilesAccess` +
+  `deleteSharedFolder`** — all three now try `IManager::getShareById()
+  + deleteShare()` first so `ShareDeletedEvent` fires; fall back to raw
+  DELETE when the IManager can't hydrate the share row. (apps.md W-4)
+- **`TalkService::syncUserToTeamTalkRoom` + `removeUserFromTeamTalkRoom`
+  + `reconcileTalkRoomMembers` per-attendee eviction +
+  `promoteTalkCircleToModerator`** — all now try Talk's
+  `ParticipantService::addUsers / removeAttendee /
+  updateParticipantType` first (gains system chat messages + push
+  notifications), fall back to raw INSERT/UPDATE/DELETE when the API
+  refuses. Room creation and initial circle expansion still use the
+  documented QB fallback. (apps.md W-5)
+- **`TaskService::createTeamTask`** — single path via
+  `\OCP\Calendar\ICalendarManager` +
+  `ICalendar::createFromString($uri, $icsData)` (fully public OCP API).
+  Dropped the `CalDavBackend` + raw-QB dual path. `insertCalendarObject`
+  private helper removed. (apps.md W-6)
+
+### Changed — cross-app reads shifted where API supports it
+
+- **`TeamService::getTeam`** — API-first via
+  `CirclesManager::getCircle()`, raw SELECT fallback for hidden circles.
+  Member-count query still direct (see note below). (apps.md R-1)
+- **`DecisionCategoryService::findTeamOwnerUid`** — API-first via
+  `CirclesManager::getCircle()->getOwner()->getUserId()`, raw SELECT
+  fallback. Injected `ContainerInterface`. (apps.md R-1)
+- **`CalendarService::listOwnedCalendars` +
+  `connectExistingCalendar` ownership check** — try
+  `\OCP\Calendar\ICalendarManager::getCalendarsForPrincipal()`, fall back
+  to raw SELECT for older NC versions or unusual deployments. (apps.md
+  R-2)
+- **`ActivityService`** meeting-URL Talk-room lookup —
+  `\OCA\Talk\Manager::getRoomForActor('circles', $teamId)->getToken()`
+  first, raw QB fallback. Room resolution now goes through Talk's own
+  visibility rules, matching R-4 of apps.md. (apps.md R-4)
+- **`ArchiveService::estimateFolderSize`** — file size via
+  `\OCP\Files\IRootFolder::getById($fileId)[0]->getSize()` (fully
+  public OCP API), raw `filecache` SELECT retained as fallback. (apps.md
+  R-7)
+
+### Kept raw — with documented rationale
+
+- **`MemberService::getMemberLevelFromDb`** — arbitrary-user support
+  (target-user checks). CirclesManager exposes level only via
+  `getInitiator()`.
+- **`Search\TeamSearchProvider`** — SQL LIKE-search pushes filtering to
+  the DB; `probeCircles()` + PHP filter would regress on every keystroke.
+- **`CalendarService::resolveCalendarOwnerUri`** — no
+  getCalendarById() on ICalendarManager; reverse lookup would walk every
+  principal.
+- **`TaskService::fetchVtodoRows`** — same reverse-lookup gap.
+- **`AuditIngestionService::checkActivityAvailable` +
+  `fetchActivityRows` + `collectCurrentShares` + `buildTeamFolderMap` +
+  `listTeamIds`** — no OCP reader for `activity`; no reverse-recipient
+  lookup on `IShare`; nightly system job needs global scope.
+- **`AuditController::listTeams` + `exportTeam`** — admin needs display
+  names for teams they may not be members of.
+- **`DeckService::createStackOnTeamBoard` last_modified bump** — not an
+  OCP gap. Deck's cache contract is the column value, not a method
+  call. `BoardService::update()` would fire wrong events. (apps.md W-7)
+- **`UserDeletedListener`** — NC doesn't expose "reassign" APIs; direct
+  reassign UPDATEs are the only path. New docblock note about
+  listener-ordering hazard on shared apps' deletion listeners. (apps.md
+  W-8)
+
+### Follow-up
+
+- Every migrated path preserves the raw-DB path as fallback and logs a
+  `debug` line when the API path refuses. No behavior regression on
+  older NC versions.
+- The `[TeamHub][ClassName]` log prefix is consistent everywhere.
+- No `npm run build` needed — PHP-only changes.
+
+---
+
+## [3.99.4] — 2026-07-08 — Decisions integration for Advanced projects
+
+### Added
+
+- **`ProjectService::seedAdvancedProjectDecisions`** — new private helper called from both "created advanced" and "basic → advanced upgrade" upsert branches. Enables Decisions for the team via `DecisionTeamService::saveConfig` and creates a "Project management" category via `DecisionCategoryService::createCategory`. Localised per the creator's NC language. Idempotent — duplicate-name errors are swallowed at debug level.
+- **`DeckService::maybeSeedCategoryForStack`** — new private helper called from `createStackOnTeamBoard` after a successful stack insert. Mirrors the new lane title into a same-named Decisions category, gated on the module being enabled globally + team-level. Silent skip on duplicate. Non-fatal to the primary stack write.
+
+### Changed
+
+- **`ProjectService` constructor** — added `DecisionTeamService`, `DecisionCategoryService`, `IConfig`, `IFactory`.
+- **`DeckService` constructor** — added `DecisionCategoryService`, `DecisionTeamConfigMapper`, `IConfig`.
+
+### Follow-up
+
+- Closes the spawn task from the 3.97.5 session ("Add Decisions integration to Advanced projects").
+
+---
+
+## [3.99.1] — 2026-07-08 — Phase model reshuffle + Execution advisory cleanup + workstreams Deck-refresh fix + Compass refetch on Home return
+
+Post-session-end patch based on Justin's feedback on 3.99.0.
+
+### Changed
+
+- **Phase model reshuffled.** Advanced projects now open on `initiation` (was `planning`). Initiation carries the pure-config items — project dates, invite members, budget total, time capacity — moved from Planning. Planning becomes the "plan the actual work" phase: charter configuration, kickoff meeting, workstreams, milestones. `ProjectService::DEFAULT_PHASE = 'initiation'`.
+- **Execution advisories removed** from the Compass — `milestones_on_track` and `within_bounds` are gone. Justin's rationale: those signals already live in the project-health widget; duplicating them in the Compass added noise without action. Execution keeps only `first_expense` + `first_timelog`.
+
+### Added
+
+- **Two new Planning items** with manual-mark UX:
+  - `charter_configured` — links to the Pages (IntraVox) tab. Inline "Mark done" button records `teamhub_project.charter_configured_at`.
+  - `kickoff_meeting` — links to the Add Meeting wizard. Inline "Mark done" button records `teamhub_project.kickoff_meeting_at`.
+- **New migration** `Version000399001Date20260708100000` adds both columns.
+- **New endpoint** `PUT /api/v1/teams/{teamId}/project/marks/{markType}` (admin-gated). Body `{ done: bool }`. Sets or clears the mark timestamp.
+- **`ProjectReadinessService::setMark`** — validates `markType` against `VALID_MARK_TYPES = ['charter_configured', 'kickoff_meeting']`, then persists.
+- **10 new strings** translated to nl/de/fr/da/es/it.
+
+### Fixed
+
+- **Workstreams modal now actually refreshes the Deck board.** `DeckService::createStackOnTeamBoard` bumps `deck_boards.last_modified = time()` alongside the stack insert. Deck's frontend keys off that timestamp when deciding whether to refetch the stack list; without the bump, admins added lanes via the Compass but they stayed invisible in Deck until an unrelated write or a hard reload.
+- **Compass refetches on Home return.** `ProjectCompassPanel.vue` watches `currentView` and refetches when the user returns to `msgstream` from another tab. Fixes the pattern where logging the first expense required a team reload before the Compass reflected it.
+
+### Version
+
+- Bump 3.99.0 → 3.99.1.
+
+---
+
+## [3.99.0] — 2026-07-08 — Closing phase: readable artifact + archive-policy warning (Track E Session 7, closed)
+
+Session-end major bump. Track E Session 7 wraps the Project Teams arc. Advanced projects can now export a human-readable snapshot of their decisions/budget/time/milestones into the team's Files before archiving; the artifact stays behind after the team itself is gone.
+
+### Added
+
+- **`ClosingArtifactService`** — generates `Project Closing/` folder in the team's Files with five markdown files:
+  - `summary.md` — one-page overview (mode, phase, dates, currency, counts)
+  - `decisions.md` — every decision with status, impact, category, proposer, date
+  - `budget.md` — project total, per-lane allocation vs real spent, expense line items
+  - `time.md` — per-member available vs logged hours, per-lane roll-up
+  - `milestones.md` — dated milestones with reached / open status
+- **New endpoints** on `ProjectController`:
+  - `POST /api/v1/teams/{teamId}/project/closing/generate` — admin-gated, produces the artifact, stamps `closing_artifact_at`
+  - `GET  /api/v1/teams/{teamId}/project/closing/status` — member-gated, returns `{ generated, generatedAt, filePath }`
+  - `GET  /api/v1/teams/{teamId}/project/closing/archive-policy` — member-gated, returns `{ archiveBeforeDelete, archiveMode, dataLossWarning }`
+- **Migration** — `teamhub_project.closing_artifact_at BIGINT NULL`. Set by the service on success; presence gates the Compass readiness item.
+- **Closing-phase Compass items** (2):
+  - `closing_artifact` — required. Done when `closing_artifact_at` is set. Emits `open-generate-modal` when clicked.
+  - `team_archive` — advisory. Prompts the owner to archive from Compass footer OR Manage Team → Danger.
+- **`ClosingArtifactModal.vue`** — confirmation + progress + success dialog for the Generate action. Shows the resulting file path.
+- **`ArchivePolicyWarningModal.vue`** — fetches `/archive-policy` on open. If the admin configured archive-off + hard-delete (`dataLossWarning: true`), shows the "All project data will be lost" warning with Cancel / Continue anyway. Otherwise shows a plain policy description and Continue.
+- **~30 new user-facing strings** wrapped in `t()` and translated to nl/de/fr/da/es/it.
+
+### Changed
+
+- **Version bump** 3.98.4 → 3.99.0. Track E Project Teams arc is now complete.
+
+### Security
+
+- All endpoints go through `MemberService::requireAdminLevel` / `requireMemberLevel`. The archive endpoint itself is unchanged — `ArchiveService::produceTeamArchive` still enforces owner-only (level 9) at its own layer. The warning modal doesn't bypass any gate; it just fetches the policy so the frontend can render an informed confirmation.
+
+### Follow-up
+
+- The `Manage Team → Danger` archive flow could also route through `ArchivePolicyWarningModal` for consistency (the Compass path already does). Small follow-up; not blocking.
+- Closing-phase retro artifact (a formal retrospective doc) is deliberately out of scope — teams handle retros however they like today and the Compass already surfaces slipping milestones + over-budget lanes as advisory items for that conversation.
+
+---
+
+## [3.98.0] — 2026-07-08 — Project Compass: guided setup checklist + Next-up prompt (Track E follow-on)
+
+Guides users through the Advanced project workflow with a persistent setup panel on the team Home view. Folds the pre-3.98.0 one-shot ProjectPhaseGuide dialog into a permanent companion.
+
+### Added
+
+- **`ProjectCompassPanel.vue`** — new panel between the phase stepper and the widget grid, Advanced projects only. Renders a phase-appropriate setup checklist (5 Planning items, 4 Execution items) plus a big "Next up" prompt showing the topmost incomplete item with a jump-link. When every item is done: "Ready to enter {nextPhase}" CTA that fires the setPhase endpoint (admin only). Collapsible (state persisted in `localStorage`). Refetches on window focus, tab visibility change, and Vuex `project` / `budgetConfig` / `timeConfig` mutations.
+- **`ProjectReadinessService`** — computes the per-phase checklist. Planning: project dates set, members invited, milestones added, budget total set (if budget integration enabled), time capacity per member (if time integration enabled). Execution: first expense, first time entry, milestones on track, budget within bounds. All checks read existing tables; no new schema.
+- **`GET /api/v1/teams/{teamId}/project/readiness`** — member-gated endpoint returning `{ isProject, phase, nextPhase, readyToAdvance, items: [{id, done, label, hint, link}] }`. Non-Advanced teams get `{ isProject: false }` and the panel hides.
+- **`SET_MANAGE_TEAM_DEEP_LINK` Vuex mutation** — new deep-link mechanism `{tab, section, nonce}`. ManageTeamView watches it, switches to the requested tab, and scrolls to `[data-section="…"]` anchors on the Project tab. Nonce forces re-fire on identical successive clicks. Compass items with `link.target === 'manage-team'` route through this mutation.
+- **`data-section` anchors** on Manage Team → Project tab: `milestones`, `budget`, `time`. Enables the smooth-scroll + highlight animation used by resource-warning focus.
+- **New mapper helpers** — `ExpenseMapper::hasAnyForTeam`, `TimeLogMapper::hasAnyForTeam`. Cheap existence checks used by the Execution-phase readiness signals.
+- **~38 new user-facing strings** wrapped in `t()` and translated to nl/de/fr/da/es/it.
+
+### Changed
+
+- **`TeamView::maybeShowProjectGuideForNewTeam`** no longer auto-opens the phase Guide dialog. Kept as a legacy cleanup step for the one-shot store flag. The Guide remains accessible on demand via the Compass "Walkthrough" button and the phase stepper info button.
+- **Version bump** 3.97.5 → 3.98.0.
+
+### Removed
+
+- Auto-opening of the ProjectPhaseGuide dialog on new Advanced project creation. The persistent Compass panel takes over the "guide the owner" role.
+
+### Security
+
+- Readiness endpoint is member-gated. Every check reads data the caller already has access to via other endpoints (project fact / milestones / expenses / time logs). The `advance-phase` CTA calls the existing `setPhase` endpoint, which still enforces admin level backend-side.
+
+### Follow-up
+
+- Phase-transition readiness modal ("You should complete these first" list) — Component 3 in the design proposal. Deliberately out of scope this bump.
+- Contextual empty-state banners on Budget / Time tabs — Component 4. Small; would spawn as a separate patch.
+- Session 7 (Closing phase) will define the Closing checklist items when it lands.
+
+---
+
+## [3.97.5] — 2026-07-07 — Milestone linkage on decisions (Advanced projects, follow-on)
+
+Small extension of Session 6. Advanced project teams can link a proposal to a specific milestone at propose time. Existing decision behaviour is untouched — the milestone linkage is optional and hidden entirely on non-project / Basic-mode teams.
+
+### Added
+
+- **`teamhub_decisions.milestone_id`** (BIGINT NULL) — soft link to `teamhub_milestones.id`. Nullable on every existing row.
+- **`DecisionService::propose()`** gains an optional `?int $milestoneId = null` parameter. Rejects with 400 if the passed milestone doesn't belong to the team or the team isn't an Advanced project. `MessageService::createMessage` reads `decisionData['milestoneId']` and passes it through.
+- **Decision serialiser** now includes `milestoneId`, `milestoneLabel`, `milestoneDate` — resolved once per row via `MilestoneMapper::findById`. Soft link: if the milestone is later deleted, label/date resolve to null and the frontend hides the chip.
+- **`GET /api/v1/teams/{teamId}/milestones/pick`** — member-gated read used by the compose picker. Same shape as the admin-only `/milestones` endpoint. Data is already visible to every member via Timeline + project-health widget, so exposing id/label/date at member scope adds no new leak.
+- **PostMessageForm** milestone picker (`NcSelect`), gated on `messageType === 'decision' && project.isProject && project.mode === 'advanced' && milestones.length > 0`. Present on both compose surfaces (inline stream + `ComposeDecisionModal`).
+- **DecisionsList + TeamDecisionsView detail panel** show a small milestone chip (`FlagOutline` icon + label, `--color-primary-element` background) when the decision has a milestone linked. Title attribute carries the full label + date on hover.
+
+### Changed
+
+- **Version bump** 3.97.4 → 3.97.5.
+
+### Security
+
+- New endpoint is member-gated via `MilestoneService::listForTeamAsMember` → `MemberService::requireMemberLevel`. The old admin-only `listForTeam` path is unchanged.
+- Backend rejects any `milestoneId` on non-Advanced or non-project teams — the frontend gate is defence-in-depth, not the sole check.
+
+### Follow-up
+
+- Filter the Decisions tab by milestone, and roll up decision counts per milestone into the project-health widget's Milestones pillar — both deliberately out of scope this bump.
+
+---
+
+## [3.97.0] — 2026-07-07 — Execution-phase project-health widget (Track E Session 6, closed)
+
+Session-end bump. Track E Session 6 closes the Execution-phase arc with a small draggable **Project health** widget summarising three pillars — Budget & Time bounds, Milestones vs Deck-card ownership, and Quality (open decisions + unsolved questions). Plus an hourly milestone auto-post job that announces reached milestones to the team stream.
+
+### Added
+
+- **`ProjectHealthWidget.vue`** — new draggable widget in the team layout grid. Three tiles, each colour-banded by state (green ok / amber at-risk / red over-bound):
+  - **Budget & Time** — lanes over budget + members over hours + project-level over-budget flag. Sourced from `BudgetService::getProjectBudget` and `TimeService::getProjectTime` rollups (single source of truth).
+  - **Milestones** — up to 5 upcoming (or most-recent past) dated milestones, each with owned-card counts derived from Deck. A milestone M owns every Deck card whose `duedate` falls in `(previous_milestone.date, M.date]` (or `(project.startDate, M.date]` for the first milestone). Status: on-track (all owned done), at-risk (some open, none overdue), slipping (some open and past their duedate).
+  - **Quality** — open decisions (`teamhub_decisions.status IN ('open','finalized')`) plus unsolved question-type messages. Decisions count is only shown when the Decisions module is enabled for the team; a follow-up task tracks wiring Decisions into the Advanced project workflow as a first-class artifact.
+- **`GET /api/v1/teams/{teamId}/project/health`** — new endpoint returning the widget envelope. Membership-gated + tab-visibility-gated (canView=false when either can_view_budget or can_view_time is false); the frontend hides the widget in that case.
+- **`ProjectHealthService`** — orchestrates the three pillars. Reuses BudgetService + TimeService for the roll-up counters. Deck cards fetched with a hardened direct query mirroring the TimelineService pattern (three-column select with try/catch fallback, handles Deck-version drift).
+- **`widget-project-health`** in `LayoutController::DEFAULT_LAYOUT` + `ALLOWED_WIDGET_IDS`. Auto-appears in every user's layout via `mergeNewWidgets`; frontend gate on `showProjectHealthWidget` computed prop hides the render for non-eligible teams so no dead slot appears in normal use.
+- **Mobile + tablet layouts** for the widget — matches the existing Decisions widget pattern in both `MobileWidgetView.vue` (icon-bar entry) and the tablet block in `TeamWidgetGrid.vue`.
+- **`teamhub_milestones.posted_at`** column (BIGINT, nullable) — set once the auto-post has fired for a milestone.
+- **`MilestoneAutoPostJob`** — hourly `TimedJob` that walks milestones where `milestone_date <= now AND posted_at IS NULL`, posts "Milestone reached: {label}" to the team stream (authored by the milestone's `created_by`), and stamps `posted_at`. Advanced projects only; Basic/non-project teams get their milestones stamped-and-skipped so they don't linger.
+- **`MilestoneAutoPostService`** — sweep body. Bypasses `MessageService::createMessage` (which requires an authenticated userSession) by writing directly through `MessageMapper::create`. Author attribution goes to the milestone's `created_by` so the post carries a real user on the stream.
+- **Two mapper helpers**: `DecisionMapper::countByTeamAndStatus`, `MessageMapper::countUnsolvedQuestions`, `MilestoneMapper::findDueUnposted`.
+- **27 new user-facing strings** wrapped in `t()`/`n()` and translated to all 6 project locales (nl/de/fr/da/es/it), plus 2 backend strings for the milestone auto-post message.
+
+### Changed
+
+- **Version bump** from 3.96.0 to 3.97.0 in `appinfo/info.xml` and `package.json`.
+- **`ProjectController`** gains a `getHealth` action + a `ProjectHealthService` constructor dependency. No behaviour change to existing project/get, project/save, project/setPhase routes.
+
+### Security
+
+- Widget endpoint is member-gated (`requireMemberLevel`) and additionally visibility-gated (both `canUserViewBudgetTab` and `canUserViewTimeTab` must be true). Non-members get 403 via the standard mapper; below-floor viewers get `canView: false` and no data. Same defence-in-depth as Budget/Time endpoints.
+- Milestone auto-post writes bypass `MessageService::createMessage` gate checks (no post-min-level enforcement) because the job runs in a system context, but the message is scoped to the milestone's own team and authored by the admin who created the milestone — so the write is trivially authorised.
+
+### Follow-up (out of scope this session)
+
+- Wire the Decisions module into the Advanced project workflow so the Quality signal has real data by default. Spawn-task chip logged during the session.
+
+---
+
+## [3.96.0] — 2026-07-06 — Execution-phase Time investment page (Track E Session 5, closed)
+
+Session-end bump. Track E Session 5 is complete. Advanced-mode project teams get a new **Time** tab on the team home mirroring the Budget arc's shape.
+
+### Added
+
+- **Time investment tab** (`ProjectTimeView.vue`, new). 4 coloured KPI cards (Available / Logged / Remaining / Utilisation), horizontal member bar chart, horizontal lane bar chart, then a report section with a **view switcher**:
+  - **Per lane** (default) — section per Deck stack, table `Member / Activity / Hours` per row.
+  - **Per member** — dropdown picker (default = self) + summary strip (threshold-coloured at 70% warn, 100% error) + table `Activity / Lane / Hours`.
+- **Time settings section** in Manage Team → Project — view-level dropdown + per-member available-hours grid (`<input type="number" step="0.5">`). No add/remove: every team member is auto-populated via reconcile-on-read.
+- **Time investment toggle** row in Manage Team → Integrations (Advanced projects only, default on).
+- **9 new endpoints** under `/api/v1/teams/{teamId}/time/…`. See APIendpoints.md for the full contract.
+- **Activity widget integration**. Time-log and budget-expense CRUD events surface in the team activity feed with role-gated visibility (Time events only for users who can see the Time tab; expense events only for users who can see the Budget tab). New `if (item.app === 'teamhub')` branch in `formatSubject` on both `ActivityFeedView.vue` and `ActivityWidget.vue`. `ClockOutline`/`WalletOutline` added to icon map; `teamhub → 'Project'` in APP_LABELS.
+- **Reconcile-on-read pattern** in `TimeService::getProjectTime` — every fetch walks `MemberService::getAllEffectiveMembers` and inserts `teamhub_project_member` rows (with `available_minutes = 0`) for any team member without one. Owner + newly-added members can log immediately; admins fill in the hours budget later.
+
+### Changed
+
+- **Budget tab visibility model — floor is now authoritative.** `BudgetService::canUserViewBudgetTab` no longer bypasses the role floor when the caller is a named editor of any lane. Named editors still get elevated *edit* rights via `requireLaneWithEdit`, but tab visibility is now a clean single-role check matching Time. This was needed because reconcile-on-read on the Time side would otherwise silently defeat any floor restriction, and having Budget and Time behave the same way is the simpler mental model.
+- **Renamed "Logged per workstream" → "Logged per lane"** in the per-lane chart title.
+- **State colour tokens** on the Time tab now use `--color-text-success` / `--color-text-warning` / `--color-text-error` instead of the soft `--color-success` etc. `--color-text-warning` is not shipped by NC — defined locally in `.th-time` as `#b45309` (dark amber). Utilisation state thresholds: `< 70%` neutral, `70–100%` warn, `> 100%` over.
+
+### Fixed
+
+- **Sidebar re-click wiping advanced-project state.** Clicking the currently open team's name in the sidebar a second time called `selectTeam` unconditionally, which reset `SET_PROJECT` to `isProject: false`. TeamView's `currentTeamId` watcher didn't re-fire (same teamId), so `loadLayout` never re-ran and the phase stepper, Budget/Time tabs, and Manage Team → Project tab all disappeared until page reload. `App.vue::selectTeamFromSidebar` now guards `if (this.currentTeamId !== teamId)` before dispatching. Pre-existing bug — only became visible once we had four advanced-project affordances hanging off the project fact.
+
+### Schema
+
+- `teamhub_project` — new column `time_view_min_level` SMALLINT DEFAULT 1.
+- `teamhub_project_member` (new) — `(team_id, user_id)` unique, `available_minutes` INT DEFAULT 0. Presence in this table means "project participant". Reconciled on read against the team's effective member set.
+- `teamhub_time_log` (new) — `card_id` + `stack_id` (denormalised at write for lane-rollup stability) + `user_id` (target) + `created_by` (submitter) + `minutes` INT + `worked_at` UTC-midnight BIGINT + `description` STRING(255). Four indexes covering the report queries.
 
 ### Frontend build required
 
-None — all changes are PHP-side.
+`npm run build`: `ProjectTimeView.vue` (new), `TeamView.vue`, `TeamTabBar.vue`, `ManageTeamView.vue`, `ActivityFeedView.vue`, `ActivityWidget.vue`, `App.vue`, `store/index.js` all touched.
+
+### Translations
+
+~70 new strings translated to Dutch, German, French, Danish, Spanish, Italian across two passes (initial + follow-up for the view switcher and activity subjects).
+
+## [3.95.0] — 2026-07-05 — Execution-phase Budget page (Track E Session 4, closed)
+
+Session-end bump rolling up 3.92.0 → 3.94.3. Track E Session 4 is complete. The full arc is captured in the entries below; this entry is the one-paragraph summary of what shipped.
+
+### Summary
+
+Advanced-mode project teams get a new **Budget** tab on the team home, plus a Budget config section in Manage Team → Project. The tab shows four coloured KPI cards (Project Budget / Allocated / Spent-projected + Real-spent subtitle / Remaining-real that flips red when over budget), a utilisation donut, a per-lane horizontal bar chart, and one card per Deck stack with expenses. The permission model is two clean layers: a project-level "who sees the tab" role floor plus a per-lane edit floor and named-editor override. Named editors on any lane implicitly see the tab (edit implies view). All money as BIGINT minor units — no floating-point drift, portable MySQL/MariaDB/Postgres. Every "real" figure is coloured red / green / neutral against its projected value (over / under / equal). Currency picker: 10 curated ISO codes, backend permissive to any 3-letter code. Lane sync is reconcile-on-read against `TimelineService::getDeckStacks` — no Deck event listeners needed; deleted-stack lanes are retained (expense history survives) but hidden until the stack reappears.
+
+### SKILLS.md — new durable rule
+
+**"UI shapes: circles, not ellipses"** — a six-lock CSS recipe (width + height + min-width + min-height + max-width + max-height + `flex: 0 0 auto` + `padding: 0` + `box-sizing: border-box`) required for round icon buttons. NC's global button reset applies **both** `min-width: 44px` and `min-height: 44px`; fixing only one axis leaves the button an oval on the other. Reference implementation: `.phase-stepper__info`. Grep this before writing any new round icon button.
+
+### Frontend build required
+
+`npm run build`: `ProjectBudgetView.vue` (new), `TeamView.vue`, `TeamTabBar.vue`, `ManageTeamView.vue` all touched.
+
+## [3.94.0] — 2026-07-05 — Layered budget permissions, professional charts, no ellipses
+
+Session-end bump. Three things Justin flagged after using 3.93.0:
+
+### Changed
+
+- **Permission model simplified into two clear layers.** Removed the per-workstream View floor (`view_min_level` on `teamhub_budget_lane`). It's now a single project-level setting: `teamhub_project.budget_view_min_level`. A member sees the Budget tab when their team role is at or above that floor OR they are a named editor on any of the project's workstreams. Once they see the tab, all workstreams are visible; the per-workstream Edit floor + named-editors list still gate who can add/change/remove expenses in each workstream. This maps directly to Justin's two-layer ask: "1. A setting where we set the required role to see the budget tab. 2. A setting where we can choose a role or editor(s) per swimming lane to add/edit/remove expenses. If somebody is added as an editor that member can also see the budget tab." Old column stays in the schema (no destructive migration on live installs); new code doesn't read it.
+- **Budget tab visibility signalled via layout bundle.** `LayoutController::getLayout` now returns `budgetConfig.can_view_budget` — a per-request precomputed bool combining the project-level floor and the named-editor override. Frontend gate at `TeamView.buildAllTabDescriptors` now checks `isAdvancedProject && budget_enabled && can_view_budget`. Avoids a second endpoint round-trip on team open.
+- **Manage Team → Project → Budget config.** Total-budget row gained a "Who sees the Budget tab" dropdown (member / moderator+ / admin-only). Per-lane table dropped the "View from" column — it was never used at the DB level after this session, and having it in the UI was confusing. `?` popup rewritten around the new two-layer model.
+
+### Added
+
+- **Utilisation donut** at the top of the Budget tab — big SVG circle with dash-array arc showing real spent as % of allocated. Colour follows the same over / under / equal semantics as the numeric colouring: red past 100%, green under, neutral at exactly 100% or when no allocation is set. Percentage label sits in the center of the donut; the arc animates on data change.
+- **Per-workstream horizontal bar chart** — one row per workstream: fixed-width name column, a track that goes from 0 to the global project max (allocated OR real), a light "allocated" background bar, and a coloured "real" overlay bar. Numbers to the right. Bars scale against the global max so a small workstream reads as "smaller" at a glance next to a big one, not just "same-sized-with-a-tiny-fill." Replaces the tiny, mostly-invisible grouped bar chart from 3.93.0 (which was also stretched horizontally by a `preserveAspectRatio="none"` I've since removed).
+- **`BudgetService::canUserViewBudgetTab($teamId, $userId): bool`** — lightweight visibility precheck used by LayoutController. Never throws; returns false on any failure so a broken read never breaks the layout endpoint.
+
+### Removed / deprecated
+
+- Removed `viewMinLevel` argument from `BudgetService::upsertLane` and `BudgetController::updateLane` (still accepted in the body silently for one release, but unused). Response no longer carries per-lane `viewMinLevel`.
+- `teamhub_budget_lane.view_min_level` column stays in the schema — dropping columns risks losing user data on installs I can't see. Backend stops reading it as of 3.94.0.
+
+### Writing style
+
+- **SKILLS.md** — new rule: no ellipsis (`…`) or three-dot (`...`) truncation in UI text (button labels, placeholders, dialog titles, aria-labels, toast messages). Use complete words instead: `Saving`, `Add editor`, not `Saving…` or `Add editor…`. Applied to every string I introduced this session; a broader sweep of pre-existing `Saving…`s elsewhere in the codebase is out of scope for this session.
+
+### Frontend build required
+
+`npm run build`: `ProjectBudgetView.vue`, `TeamView.vue`, `ManageTeamView.vue` all touched.
+
+## [3.93.0] — 2026-07-05 — Budget page polish: graphs, colored real, named editors
+
+Session-end bump. Follow-up on 3.92.x: adds the graphs the budget page was missing, colours the "real spent" figures against the projected baseline, restructures each lane card into three clear rows, and reworks the permission model so specific team members can be granted edit access independent of their role.
+
+### Added
+
+- **Per-lane bar chart (project overview)** — inline SVG grouped bar chart at the top of the Budget page: one group per workstream, three bars per group (allocated / projected / real). The real bar follows the over/under/equal state colouring (see below). Axisless — precise numbers stay in the stats row above; the chart's job is visual comparison at a glance.
+- **Per-lane budget bar (in each card)** — horizontal fill showing real spent against the lane's own scale, with a marker line at projected spent. Fill colour follows the state rule. Track uses `--color-background-dark` so it stays legible in both themes.
+- **Colored real amount** — `real > projected` renders red (`--color-error-text`), `real < projected` renders green (`--color-success-text`), `real === projected` renders default text colour. Applied to expense rows, per-lane rollup, and the project rollup. A single Vue helper (`realColorClass`) returns one of three modifier classes; CSS specificity fans it out to `color` / `background` / `fill` depending on element type. State colours only fire when there is a projected amount to compare against — a lane with 0 projected renders neutral rather than incorrectly green.
+- **Additional editors per lane (`teamhub_budget_lane_editor` table)** — an admin can name specific team members who can edit a workstream's expenses regardless of their team role. Every additional editor implicitly also has view access (edit implies view), so hiding a lane from the general membership while keeping specific members able to work on it is now a two-click configuration in Manage Team → Project → Budget.
+- **`?` popup in the Budget config table** — explains View from / Edit from / Additional editors and how they combine.
+
+### Changed
+
+- **Lane card structure** — was one horizontal header row + a table. Now three distinct rows: (1) swatch + name + Add expense button, (2) budget stats + budget bar, (3) expenses table. Reads more clearly and gives the graph a clean home.
+- **Responsive grid** — lane cards now sit in a CSS grid: 1 column on narrow viewports, 2 columns at ≥ 900px. Was a single flex column previously.
+- **`BudgetService::getProjectBudget`** — `canView = canEdit OR level >= view_min_level`, `canEdit = level >= edit_min_level OR user is an additional editor`. Editors override the role floors entirely. Editor UIDs are resolved to `{uid, displayName}` in the response so the config UI can show real names.
+- **`BudgetService::upsertLane`** — accepts `editorUids: string[]`, atomically replaces the editor set for the lane via `BudgetLaneEditorMapper::replaceForLane` (diff-based — kept `created_at` semantics of "first time this UID was added"). Unknown UIDs are refused (validation via `IUserManager::get`).
+- **Route `PUT /budget/lanes/{laneId}`** — body now accepts `editor_uids: string[]` alongside the existing fields. Absent field == empty set. See APIendpoints.md.
+- **Audit event `project.budget_lane_changed`** — diff payload now includes an `editors` field (comma-separated + sorted UIDs) so an audit trail records who was added/removed.
+
+### Frontend build required
+
+`npm run build`: `ProjectBudgetView.vue`, `ManageTeamView.vue` both touched.
+
+## [3.92.0] — 2026-07-04 — Execution-phase Budget page
+
+Session-end bump. Track E Session 4: Advanced-mode project teams get a Budget tab on the team home. The tab shows the project total + currency, plus one card per Deck stack ("workstream") with allocated / spent-projected / spent-real / remaining plus a list of expenses. Admins configure the project total, currency, per-lane allocations, and per-lane view/edit role gates from Manage Team → Project.
+
+### Added
+
+- **Budget tab (`ProjectBudgetView.vue`)** — new team-home tab, auto-registered when `project.mode === 'advanced'`. Per-lane cards; add / edit / delete expense dialog gated on `lane.canEdit`; auto-refetch on window focus / tab visibilitychange so admin edits made in another tab reflect on return.
+- **Per-Deck-stack budget lanes** — every Advanced project's Deck stacks are surfaced as budget lanes (workstreams). Each lane records its own `allocated_minor` (share of the project total), `view_min_level` (member/moderator/admin — controls who sees the lane on the Budget page), and `edit_min_level` (controls who can add or change expenses in the lane). Lane rows are auto-inserted on first read for any current Deck stack that doesn't have one; lanes for deleted stacks are retained in the DB but hidden from the response so expense history survives a stack delete/restore.
+- **Expenses** — one row per line item (`teamhub_expense`), scoped to a lane. `projected_minor` is always set, `real_minor` is nullable (null = not yet incurred). Optional `incurred_at` UTC-midnight timestamp.
+- **Manage Team → Project → Budget config section** — total budget input + currency picker (curated list of 10 common ISO-4217 codes, backend accepts any valid 3-letter code) + a per-lane table with allocation + view/edit level dropdowns and a Save button per row.
+- **Migration `Version000392000Date20260704000000.php`** — atomic schema change covering all three touches: two new columns on `teamhub_project` (`currency`, `budget_total_minor`), new `teamhub_budget_lane` table, new `teamhub_expense` table. All money stored as BIGINT minor units (cents) for portable, drift-free arithmetic on MySQL/MariaDB/Postgres.
+- **New endpoints**: `GET /budget`, `PUT /budget`, `PUT /budget/lanes/{laneId}`, `POST /budget/lanes/{laneId}/expenses`, `PUT /budget/lanes/{laneId}/expenses/{expenseId}`, `DELETE /budget/lanes/{laneId}/expenses/{expenseId}`. See APIendpoints.md.
+- **Audit events**: `project.budget_total_changed`, `project.budget_lane_changed`, `project.expense_added`, `project.expense_updated`, `project.expense_deleted`.
+- **52 translation strings × 6 locales** (nl, de, fr, da, es, it).
+
+### Design
+
+Per-lane role gates for view + edit; sum-of-lane-allocations ≤ project total; permissive backend currency (any 3-letter code) with a curated frontend picker; lane sync reconciles against live Deck stacks on every read (no Deck event listeners); `Intl.NumberFormat` for display with a `toFixed(2)` fallback for exotic currencies. Full rationale in DESIGN.md §2.44.
+
+### Frontend build required
+
+`npm run build`: new `ProjectBudgetView.vue`; `TeamView.vue`, `TeamTabBar.vue`, `ManageTeamView.vue` all touched.
+
+## [3.91.0] — 2026-07-04 — Planning-phase swimlane view
+
+Session-end bump. Track E Session 3: the Timeline tab, for Advanced-mode project teams only, is replaced by a new swimlane component with Deck stacks as workstream lanes, one card per row, single-bar-per-card Gantt display, and orthogonal cross-lane dependency connectors. Basic-mode teams are unaffected — they still get the classic iframe Timeline.
+
+### Added
+
+- **`ProjectSwimlaneView.vue`** — new native Vue component, auto-selected in the Timeline tab whenever `project.mode === 'advanced'`. Deck stacks become horizontal swimlanes, ordered by Deck's own stack `order`; one row per card inside each lane (no collision packing, per user direction — "in the advanced project view we don't work with multiple events in one row"). Every card renders as a single filled bar spanning its real `start`→`due` dates when both are set, or a bar exactly one calendar day wide anchored on the due date otherwise (falling back further to start/created/completed on stacks without a due date). Two view styles toggle in the toolbar: **Lanes** (subject inside the bar) and **List** (fixed 200px left name column + timeline pane). Zoom levels: 1 month / 3 months / 6 months. Milestones remain full-height vertical marker lines across all lanes.
+- **New `start` timeline event type** — surfaced from Deck 1.16+'s new `deck_cards.startdate` column (added by Deck migration `Version11002Date20260312000000.php`, nullable `datetime`). Absent on older Deck installs; degrades gracefully (bar falls back to due-only marker). Never proxied from `last_modified` — we don't invent a start Deck itself doesn't have.
+- **Per-lane auto-colours** — 8-entry palette keyed by Deck stack `order` (falling back to `stackId` when `order` is null, e.g. installs predating `BackfillDeckStackOrder`). Small colour swatch chip renders left of each lane name in both views. State colours (overdue/completed) still override to `--color-error`/`--color-success` per the SKILLS.md full-saturation rule.
+- **Orthogonal cross-lane dependency connectors** — dark grey (`var(--color-text-maxcontrast)`), 90° corners only (no diagonals). Line leaves the blocker's right edge, turns down/up at a midpoint corner, enters the successor's left edge. Uses SVG polyline. Gated by `timelineConfig.card_dependencies_supported` (NC 34 / Deck 1.18+ `deck_dependent_cards` table).
+- **In-canvas popover** — clicking a bar opens a small panel positioned adjacent to it (inside the same scrolling canvas as the bar), showing title, start/due dates, board, column, assignees, description snippet, and an "Open in Deck" link. Escape/click-outside close it, focus returns to the trigger. Deliberately not `NcPopover` — see DESIGN.md §2.42.
+- **Auto-refetch on window focus / tab visibilitychange** — so edits made to a card in Deck (in another tab) reflect on return to the swimlane without a full page reload.
+- **`stackId` / `stackOrder` in Deck event meta** — every `source: 'deck'` event now carries its stack identifier so the frontend can group events into lanes without string-matching `stackName` (which isn't guaranteed unique across boards).
+- **`TimelineService::getDeckStacks(string $teamId): array`** — public method returning the full, date-independent, order-sorted list of stacks connected to a team, so a stack with zero cards in the currently-viewed window still renders as an empty lane. Shares board/stack resolution with `fetchDeckEvents()` via a new private `resolveTeamDeckStacks()` helper.
+
+### Changed
+
+- **`GET /api/v1/teams/{teamId}/timeline`** — response envelope is now `{events: [...], stacks: [...]}`. `stacks` is Deck-specific and independently try-caught; a Deck-side failure returns `stacks: []` without breaking `events`. Existing consumers see the additional key and can ignore it — no breaking change.
+- **`TimelineService::fetchDeckEvents()`** — now introspects `deck_stacks` for an `order` column (safe on both MySQL/MariaDB and Postgres via `IQueryBuilder`, since `order` is a reserved word — never quoted or interpolated as a raw SQL string) and includes the value in each event's `meta`. NULL orders sort last, tie-broken by `stackId` — deterministic on both DB backends without relying on default NULL ordering.
+- **`TeamView.vue`** — the Timeline tab now branches on `isAdvancedProject`: Advanced-mode projects render `<ProjectSwimlaneView>`; Basic-mode teams keep the existing `<AppEmbed>`-based iframe Timeline exactly as before. The classic Timeline's control state (period nav, source filters, print, menu toggles) is unchanged and untouched by this session.
+
+### Frontend build required
+
+`TeamView.vue` touched (single conditional branch); new `ProjectSwimlaneView.vue` component.
+
+## [3.90.0] — 2026-07-03 — Project-owner onboarding + Deck Project management stack
+
+Session-end bump. Two features on Track E (Project Teams roadmap) plus three live bug fixes found and fixed against Justin's instance during the same session.
+
+### Added
+
+- **Project-owner onboarding guide** — a one-time dialog (`ProjectPhaseGuide.vue`) auto-opens for the owner right after an Advanced project team is created, explaining what to do in the current phase (a full checklist for Planning; a short "coming soon" note for Execution/Closing, since dedicated tooling for those phases doesn't exist yet) and how to advance a phase via Manage Team → Project. Reopenable any time via a new "About this phase" info button on the phase stepper. Triggered by a one-shot, non-persisted Vuex flag — see DESIGN.md §2.39.
+- **Deck "Project management" stack** — every Advanced project's Deck board now always gets a 4th stack (alongside To do / In progress / Done), pre-populated with 4 starter cards: Invite project members, Create project contract, Add project milestones, Schedule the planning kickoff meeting. Each card is assigned to the team creator with a due date 7 days out, so the board isn't empty on day one. Basic/Collaboration/Department teams are unaffected — unchanged 3-stack, no-card behaviour. See DESIGN.md §2.40.
+- **`GET /api/v1/teams/{teamId}/intravox/team-page`** — new endpoint returning a team's own IntraVox page, resolved unambiguously by path rather than title alone. See Fixed, below, and APIendpoints.md.
+- **`GET /api/v1/admin/deck-diagnostic`** — new admin-only, read-only diagnostic (reflection on `CardMapper` + defensive probes for the assignee-write API), kept permanently alongside the existing `intravox-diagnostic` as a reusable discovery tool for future Deck-API work.
+
+### Fixed
+
+- **IntraVox page lookup was ambiguous across multiple Advanced-project teams.** Every Advanced project's IntraVox page is titled "Contract" (translated) since 3.89.0 — once more than one such team exists, the widget's old title-only match (a client-side bulk fetch + `.find()`) could resolve to the *wrong* team's page, or none at all (reported by Justin: team "Flow 6"'s page existed on disk but never appeared in the widget). Fixed properly: new `IntravoxService::getTeamPage()` shortlists title-candidates then confirms each one's real folder **path** via a follow-up `getPage()` call, returning only the exact match. `getSubPages()` had the identical latent bug in its own root-page lookup and now shares the same fix. See DESIGN.md §2.41.
+- **Team-type selector coloring** — reverted the 3.88.0 soft-tint selection-tile exception (DESIGN.md §2.37) back to full-saturation `var(--color-success)`/`var(--color-primary-element)` at Justin's request ("It should use the darker green"). No scoped exception to the SKILLS.md full-saturation rule remains.
+- **Phase stepper visual polish** — the bar now spans the full width of the canvas (phase connectors stretch to fill the available space, instead of the whole group clustering on the left); the "About this phase" info button — a real `<button>`, unlike the stepper's other `<span>`-based circular markers — now renders as a true circle instead of an oval, caused by Nextcloud's global button `min-width` overriding an unqualified `width`. See DESIGN.md §2.36 addendum.
+
+### Performance
+
+- Added a 5-minute cache to `getTeamPage()` (`teamhub_intravox_teampage_{teamId}`), matching `getSubPages()`'s existing cache — needed because the path-based lookup now does real backend work (up to a few `getPage()` calls) on every widget mount, where the old (incorrect) approach made none.
+
+### Frontend build required
+
+`ProjectPhaseStepper.vue`, `IntravoxWidget.vue`, `CreateTeamView.vue`, `TeamView.vue`, `ManageTeamView.vue` all touched; new components `ProjectPhaseGuide.vue`.
+
+## [3.89.0] — 2026-07-03 — IntraVox project charter
+
+Advanced Project teams' auto-created IntraVox page is no longer a blank canvas — it's seeded with the 9-element PMC (Projectmatig Creëren) project-definition charter, translated to all 6 locales and rendered in the creating user's own NC language.
+
+### Added
+
+- **9-element project-definition charter**, seeded automatically when an Advanced Project team is created with the Pages module enabled. Rendered as IntraVox's native collapsible/FAQ-style sections — one per element (Challenge or Problem, Urgency, Objective, Result, Scope, Effects, Users of the end result, Constraints, Relationship to other projects and programmes), each with a guiding question. Source: [pmc-online.nl](https://pmc-online.nl/structuur/projectdefinitie/), translated to English then localised into nl/de/fr/da/es/it.
+- **`IntravoxService::buildProjectCharterLayout()`** — resolves the creating user's NC language the same way `DeckService::translateDefaultStackTitles` does (per-user `IConfig` lookup → `default_language` → English), so the charter renders in the creator's language automatically.
+- Basic/Collaboration/Department teams are unaffected — they keep today's blank-page behaviour exactly.
+
+### Fixed
+
+- **`IntravoxService::createPage()` was silently ignoring seeded content.** Confirmed empirically (via a diagnostic write/read-back probe) that `createPage()`'s `$data['layout']` is discarded — the page comes back with an empty layout regardless. Content must be set via a follow-up `updatePage()` call, which itself rebuilds the whole page from `$data` rather than merging — `title` must always be included or IntraVox's internal `sanitizeText($data['title'])` throws on a null value. See DESIGN.md §2.38.
+- **Section titles containing an apostrophe rendered as literal `&apos;`** (e.g. Dutch "programma's", French "d'autres"). Root cause is in IntraVox itself — `sanitizeText()` HTML-encodes apostrophes for `title`/`sectionTitle` fields, but IntraVox's frontend renders them as plain text without decoding. Not something TeamHub can configure around; fixed by rephrasing the two affected charter titles to avoid apostrophes. Question/body text is unaffected (uses `sanitizeHtml()`, confirmed safe).
+- **"Scope (out of scope)"** simplified to **"Scope"** across all 7 locales — matches the terse-noun style of the other 8 titles; the "what's excluded" framing already lives in the guiding question.
+
+### Frontend build required
+
+`CreateTeamView.vue` — sends `projectMode` in the IntraVox page-creation request.
+
+## [3.88.0] — 2026-07-03 — Project Teams keystone
+
+Session-end bump. Rolls up 3.87.1 (the in-session minor). Persists project-ness for teams created from the "Project" template — the previously-cosmetic template choice ([CreateTeamView.vue](src/components/CreateTeamView.vue) `form.teamType`) is now recorded server-side and drives a Basic/Advanced lifecycle. Foundational session: no charter/swimlane/budget/dashboard tooling yet — see DESIGN.md §2.36 and HANDOFF.md for the deferred roadmap.
+
+### Added
+
+- **`teamhub_project` table** (new migration) — one row per team created from the Project template. `mode` (`basic`|`advanced`) is the lifecycle discriminator; `phase` (`initiation`|`planning`|`execution`|`closing`) is meaningful only for `advanced` projects and starts on `planning` (Initiation is assumed already cleared by the time a team exists). `start_date`/`target_end` reserved for future phase-aware tooling.
+- **`ProjectService`** — `getForTeam` (member-gated read), `upsert` (admin-gated create/mode-change, including Basic → Advanced upgrade), `setPhase` (admin-gated, advanced-only). Audit events: `project.created`, `project.mode_changed`, `project.updated`, `project.phase_changed`.
+- **3 new endpoints**: `GET/PUT /api/v1/teams/{teamId}/project`, `PUT /api/v1/teams/{teamId}/project/phase`. See APIendpoints.md.
+- **Project mode selector** in the create wizard (Step 1, Project template only) — Basic (cosmetic, no lifecycle UI) vs Advanced (full PMC phase lifecycle). Persists on team creation.
+- **`ProjectPhaseStepper.vue`** — read-only 4-phase stepper (Initiation → Planning → Execution → Closing) shown on the team Home view for Advanced projects. Visible to every member; phase changes are admin-only.
+- **Manage Team → Project tab** — new standalone tab (Project-template teams only): phase selector for Advanced projects, "Upgrade to Advanced" action for Basic ones. Previously would have lived under Integration settings, but a project isn't an integration that can be toggled on/off, so it got its own tab instead.
+- Project fact rides the existing `/layout` bundle response (`LayoutController::projectFacts()`) rather than a dedicated fetch — no extra HTTP round-trip on team open.
+
+### Fixed
+
+- **Unreadable hover state on a selected Basic/Advanced tile** — `.ctv__mode:hover` and `.ctv__mode--selected` had a CSS-specificity tie that `:hover` won, reverting the background to grey while the selected tile's white text stayed, making it unreadable. Added `.ctv__mode--selected:hover` to re-assert the selected colours.
+- **Team-type selector card colours** — Project/Collaboration/Department cards previously had per-type accent colours (yellow, blue, green) that changed on hover. Unified to a single scheme: white background + green edge when unselected, bolder green edge + light-green fill when selected, dark text throughout. Documented as a scoped exception to the SKILLS.md full-saturation state-colour rule (DESIGN.md §2.37) — selection tiles, not chips/pills/banners.
+
+### Changed
+
+- **SKILLS.md** — corrected stale frontend standards: Vue 2.7 → 3.x, Vuex 3.x → 4.x, `@nextcloud/vue` 8.x → 9.x. The codebase migrated to Vue 3 (Options API) some time ago; the working-agreement doc hadn't caught up.
+
+### Frontend build required
+
+`CreateTeamView.vue`, `ManageTeamView.vue`, `TeamView.vue` all touched — new component (`ProjectPhaseStepper.vue`) and store wiring (`src/store/index.js`).
 
 ## [3.87.0] — 2026-07-01 — Session-end rollup
 

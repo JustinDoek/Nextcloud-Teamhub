@@ -175,7 +175,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;

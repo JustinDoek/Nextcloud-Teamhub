@@ -254,7 +254,7 @@ export default {
 }
 
 .pres-cal__month-title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     margin-bottom: 8px;
     color: var(--color-main-text);
@@ -267,7 +267,7 @@ export default {
     margin-bottom: 2px;
 }
 .pres-cal__dow-label {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 500;
     text-align: center;
     color: var(--color-text-maxcontrast);
@@ -304,7 +304,7 @@ export default {
 }
 
 .pres-cal__day-num {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     text-align: right;
     padding: 2px 4px;
     color: var(--color-text-maxcontrast);

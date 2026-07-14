@@ -157,9 +157,10 @@ export default {
     display: block;
 }
 
+/* v3.100.16: NC theme token (was --th-color-error hex). */
 .teamhub-external-widget__error {
     font-size: 13px;
-    color: var(--th-color-error);
+    color: var(--color-error-text);
     padding: 8px 0;
     margin: 0;
 }

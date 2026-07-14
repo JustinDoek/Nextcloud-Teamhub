@@ -51,6 +51,33 @@
                     </div>
                 </div>
 
+                <!-- Project mode — only for the Project template -->
+                <div v-if="form.teamType === 'project'" class="ctv__field">
+                    <label id="project-mode-label" class="ctv__label">{{ t('teamhub', 'Project setup') }}</label>
+                    <div class="ctv__modes" role="radiogroup" aria-labelledby="project-mode-label">
+                        <div
+                            v-for="m in projectModes"
+                            :key="m.id"
+                            :class="['ctv__mode', {
+                                'ctv__mode--selected': form.projectMode === m.id,
+                                'ctv__mode--locked':   m.locked,
+                            }]"
+                            role="radio"
+                            :tabindex="m.locked ? -1 : 0"
+                            :aria-checked="form.projectMode === m.id ? 'true' : 'false'"
+                            :aria-disabled="m.locked ? 'true' : 'false'"
+                            @click="!m.locked && (form.projectMode = m.id)"
+                            @keydown.enter.prevent="!m.locked && (form.projectMode = m.id)"
+                            @keydown.space.prevent="!m.locked && (form.projectMode = m.id)">
+                            <span class="ctv__mode-name">
+                                {{ m.label }}
+                                <LockOutline v-if="m.locked" :size="14" class="ctv__mode-lock" />
+                            </span>
+                            <span class="ctv__mode-desc">{{ m.description }}</span>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <!-- ── STEP 2: Settings ── -->
@@ -269,6 +296,7 @@ import Gavel from 'vue-material-design-icons/Gavel.vue'
 import AccountClock from 'vue-material-design-icons/AccountClock.vue'
 import TimelineClockOutline from 'vue-material-design-icons/TimelineClockOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
+import LockOutline from 'vue-material-design-icons/LockOutline.vue'
 import ResourcePicker from './ResourcePicker.vue'
 
 // Canonical Circles config bit values — see src/constants/circlesConfig.js
@@ -286,7 +314,7 @@ export default {
         NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
         Check, Close, CheckCircle, AlertCircle,
         Chat, Folder, Calendar, CardText, Briefcase, AccountMultiple, AccountGroup, OfficeBuildingOutline,
-        Gavel, AccountClock, TimelineClockOutline, FileDocumentOutline,
+        Gavel, AccountClock, TimelineClockOutline, FileDocumentOutline, LockOutline,
         ResourcePicker,
     },
     emits: ['created', 'cancel'],
@@ -308,10 +336,19 @@ export default {
             wizardDescription: '',
             creationDone: false,
             createdTeam: null,
+            // v3.100.1 — cheap license entitlements probe. Fetched
+            // once in mounted() from GET /license/entitlements (member-
+            // callable, minimal payload). Drives whether the "Advanced"
+            // project-mode tile is selectable or shown as a locked upsell.
+            licenseCanCreateAdvanced: true,   // optimistic default; corrected on mount
             form: {
                 name: '',
                 description: '',
                 teamType: 'collaboration',
+                // Project Teams (v3.88.0) — only meaningful when teamType==='project'.
+                // 'advanced' = guided PMC lifecycle (default, "force into project mode");
+                // 'basic' = the historical cosmetic project preset, still recorded.
+                projectMode: 'advanced',
                 members: [],
                 apps: {
                     talk:     { mode: null, resourceId: null, name: '' },
@@ -344,6 +381,28 @@ export default {
                 { id: 'project', label: t('teamhub', 'Project'), description: t('teamhub', 'Time-bound work with clear goals'), icon: 'Briefcase', accent: 'project' },
                 { id: 'collaboration', label: t('teamhub', 'Collaboration'), description: t('teamhub', 'Ongoing team knowledge sharing'), icon: 'AccountMultiple', accent: 'collaboration' },
                 { id: 'department', label: t('teamhub', 'Department'), description: t('teamhub', 'Organizational department or unit'), icon: 'OfficeBuildingOutline', accent: 'department' },
+            ]
+        },
+        projectModes() {
+            const advancedLocked = !this.licenseCanCreateAdvanced
+            return [
+                {
+                    id: 'advanced',
+                    // TRANSLATORS: project setup mode — the full guided project experience
+                    label: t('teamhub', 'Advanced'),
+                    description: advancedLocked
+                        // TRANSLATORS: shown on the Advanced project mode tile when the instance has no valid business license
+                        ? t('teamhub', 'This feature requires a license — ask your admin.')
+                        : t('teamhub', 'Guided project lifecycle — phases (Initiation, Planning, Execution, Closing) and project tools.'),
+                    locked: advancedLocked,
+                },
+                {
+                    id: 'basic',
+                    // TRANSLATORS: project setup mode — the simple, no-lifecycle project experience
+                    label: t('teamhub', 'Basic'),
+                    description: t('teamhub', 'A project-flavoured team with the familiar setup — no lifecycle tools.'),
+                    locked: false,
+                },
             ]
         },
         appOptions() {
@@ -393,7 +452,13 @@ export default {
         templateProfile() {
             const profiles = {
                 project: {
-                    apps: { talk: null, files: 'create', calendar: 'create', deck: 'create' },
+                    // v3.99.6 — Talk preselected for project teams. Justin
+                    // wanted advanced projects to open the wizard with Talk
+                    // enabled; since Advanced is the default projectMode
+                    // and the user can still uncheck Talk in Step 2, we
+                    // just preselect it at the profile level rather than
+                    // adding a projectMode watcher.
+                    apps: { talk: 'create', files: 'create', calendar: 'create', deck: 'create' },
                     config: { open: false, invite: true, request: false, visible: false, protected: false },
                     modules: { decisions: true, presence: false, timeline: true, pages: true },
                     subtitle: t('teamhub', 'Set up a project team in a few steps'),
@@ -462,6 +527,7 @@ export default {
         await this.checkIntravox()
         this.applyTemplateDefaults()
         await this.loadWizardDescription()
+        await this.loadLicenseEntitlements()
     },
     methods: {
         t,
@@ -573,6 +639,7 @@ export default {
             if (this.intravoxAvailable && this.form.modules.pages) tasks.push({ label: t('teamhub', 'Creating documentation page'), status: 'waiting' })
             const hasModuleConfig = this.form.modules.presence || this.form.modules.decisions || !this.form.modules.timeline
             if (hasModuleConfig) tasks.push({ label: t('teamhub', 'Configuring team modules'), status: 'waiting' })
+            if (this.form.teamType === 'project') tasks.push({ label: t('teamhub', 'Setting up project'), status: 'waiting' })
 
             // Build the full app-state payload for ALL known apps so the backend can
             // persist enabled/disabled in teamhub_team_apps immediately after team creation.
@@ -642,9 +709,15 @@ export default {
                 if (appsToCreate.length > 0) {
                     this.setTask(i, 'running')
                     try {
+                        // Project Teams (v3.90.x) — when Deck is among appsToCreate and this
+                        // is an Advanced project, DeckService seeds the "Project management"
+                        // stack + starter cards. Irrelevant for the other create-resources
+                        // calls below (persist-only / connect-existing paths never create a
+                        // new Deck board, so they don't need it).
+                        const projectMode = this.form.teamType === 'project' ? this.form.projectMode : null
                         const { data: resourceResults } = await axios.post(
                             generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/create-resources`),
-                            { apps: appsToCreate, teamName: team.name, appStates }
+                            { apps: appsToCreate, teamName: team.name, appStates, projectMode }
                         )
                         const anyError = Object.values(resourceResults).some(r => r?.error)
                         this.setTask(i++, anyError ? 'error' : 'done')
@@ -712,6 +785,25 @@ export default {
                     } catch { this.setTask(i++, 'error') }
                 }
 
+                // 8. Persist project-ness (Project template only) — records mode so the
+                //    team is a real project (basic or advanced) from creation onward.
+                if (this.form.teamType === 'project') {
+                    this.setTask(i, 'running')
+                    try {
+                        await axios.put(
+                            generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/project`),
+                            { mode: this.form.projectMode }
+                        )
+                        // Project-owner onboarding (v3.90.x) — one-shot signal read
+                        // once by TeamView on first open of this team to auto-show
+                        // the phase guide. Advanced only; Basic has no phase to guide.
+                        if (this.form.projectMode === 'advanced') {
+                            this.$store.commit('SET_JUST_CREATED_ADVANCED_PROJECT', team.id)
+                        }
+                        this.setTask(i++, 'done')
+                    } catch { this.setTask(i++, 'error') }
+                }
+
                 // Show completed progress for a moment, then show "Open team" button
                 await new Promise(r => setTimeout(r, 600))
                 this.createdTeam = team
@@ -752,6 +844,36 @@ export default {
             }
         },
 
+        /**
+         * v3.100.1 — Check whether the instance's TeamHub Business
+         * license allows creating new Advanced projects. Endpoint is
+         * member-callable and returns only { canCreateAdvanced,
+         * enforcementLevel } — no sensitive license detail.
+         *
+         * When Advanced is locked out and the wizard defaulted to
+         * projectMode='advanced', silently flip to 'basic' so the user
+         * has a working selection preselected — the tile remains
+         * visible but greyed to explain why they can't pick it.
+         */
+        async loadLicenseEntitlements() {
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/license/entitlements')
+                )
+                this.licenseCanCreateAdvanced = !!data?.canCreateAdvanced
+                if (!this.licenseCanCreateAdvanced && this.form.projectMode === 'advanced') {
+                    this.form.projectMode = 'basic'
+                }
+            } catch {
+                // Endpoint error → fail-open (assume Advanced allowed).
+                // The backend upsert() still enforces the gate on submit,
+                // so the worst case is we don't grey out the tile — the
+                // user gets a clean 403 later instead of the pre-flight
+                // upsell. Old behavior.
+                this.licenseCanCreateAdvanced = true
+            }
+        },
+
         async saveModuleConfig(teamId) {
             const calls = []
             if (this.form.modules.presence && this.presenceModuleEnabled) {
@@ -784,7 +906,13 @@ export default {
         async createIntravoxPage(team) {
             // Route through TeamHub's IntravoxService — reads admin config for parentPath,
             // uses in-process PageService call (no loopback HTTP).
-            await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/intravox/page`))
+            // Project Teams (v3.88.x) — Advanced projects get the 9-element charter
+            // seeded server-side; Basic/Collaboration/Department keep the blank page.
+            const projectMode = this.form.teamType === 'project' ? this.form.projectMode : null
+            await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/intravox/page`),
+                { projectMode }
+            )
         },
 
         toSlug(text) {
@@ -870,10 +998,10 @@ export default {
 
 .ctv__step--done .ctv__step-num {
     background: var(--color-success);
-    color: #fff;
+    color: var(--color-success-text);
 }
 
-.ctv__step-label { font-size: 14px; font-weight: 500; }
+.ctv__step-label { font-size: var(--th-font-body); font-weight: 500; }
 
 .ctv__step-line {
     flex: 1;
@@ -892,7 +1020,7 @@ export default {
 
 .ctv__field { display: flex; flex-direction: column; gap: 8px; }
 
-.ctv__label { font-size: 14px; font-weight: 600; }
+.ctv__label { font-size: var(--th-font-body); font-weight: 600; }
 .ctv__hint { font-size: 13px; color: var(--color-text-maxcontrast); margin: 0 0 4px; }
 
 /* Team types */
@@ -908,6 +1036,9 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 20px 12px;
+    /* v3.100.14: neutral resting border (was --color-success-hover — a
+       transient hover token, and the resting border isn't a state signal
+       anyway; the icon accent below carries the type/state cue). */
     border: 2px solid var(--color-border);
     border-radius: var(--border-radius-large);
     cursor: pointer;
@@ -915,20 +1046,98 @@ export default {
     transition: border-color 0.15s, background 0.15s;
 }
 
-/* Accent colors per template type */
-.ctv__type--project .ctv__type-icon { color: var(--color-warning); }
-.ctv__type--collaboration .ctv__type-icon { color: var(--color-primary-element); }
-.ctv__type--department .ctv__type-icon { color: var(--color-success); }
+/* Icon accent — one consistent colour across all three template-type cards.
+   Only selection state distinguishes a card now, not which type it is. */
+.ctv__type-icon { color: var(--color-success); }
 
-.ctv__type:hover { border-color: var(--color-primary-element); background: var(--color-background-hover); }
-.ctv__type--project:hover,
-.ctv__type--project.ctv__type--selected { border-color: var(--color-warning); background: var(--color-warning-hover, rgba(232, 131, 16, 0.08)); }
-.ctv__type--collaboration:hover,
-.ctv__type--collaboration.ctv__type--selected { border-color: var(--color-primary-element); background: var(--color-primary-element-light); }
-.ctv__type--department:hover,
-.ctv__type--department.ctv__type--selected { border-color: var(--color-success); background: var(--color-success-hover, rgba(46, 181, 43, 0.08)); }
-.ctv__type-name { font-weight: 600; font-size: 14px; }
-.ctv__type-desc { font-size: 12px; color: var(--color-text-maxcontrast); line-height: 1.4; }
+.ctv__type:hover { background: var(--color-background-hover); }
+
+/* Selected state — full-saturation primary token + matching text token
+   (SKILLS.md state-colour rule). Matches the Basic/Advanced mode selector's
+   treatment below and the phase stepper's active/info markers. Supersedes the
+   earlier soft-tint exception (DESIGN.md §2.37) — reverted per Justin's
+   follow-up request for visual consistency across all selection tiles.
+   Uses --color-primary-element (not --color-success) so a *selected* tile
+   doesn't read as a "success/done" state — success is reserved for the
+   phase stepper's completed markers. */
+.ctv__type--selected,
+.ctv__type--selected:hover {
+    border-color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+
+.ctv__type-name { font-weight: 600; font-size: var(--th-font-body); }
+.ctv__type-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); line-height: 1.4; }
+.ctv__type--selected .ctv__type-desc { color: var(--color-primary-element-text); }
+
+/* Project mode selector (Basic / Advanced) */
+.ctv__modes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.ctv__mode {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    border: 2px solid var(--color-border);
+    border-radius: var(--border-radius-large);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.ctv__mode:hover { border-color: var(--color-primary-element); background: var(--color-background-hover); }
+.ctv__mode:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+
+/* Selected mode — full-saturation primary token + matching text (SKILLS.md). */
+.ctv__mode--selected {
+    border-color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+
+/* Re-assert selected colours on hover — .ctv__mode:hover has equal CSS
+   specificity (class + pseudo-class) to .ctv__mode--selected (single class)
+   and was winning the tie, reverting a hovered selected tile to the grey
+   hover background while its text stayed white — unreadable. */
+.ctv__mode--selected:hover {
+    border-color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+
+.ctv__mode-name { font-weight: 600; font-size: var(--th-font-body); }
+.ctv__mode-desc { font-size: var(--th-font-meta); line-height: 1.4; color: var(--color-text-maxcontrast); }
+.ctv__mode--selected .ctv__mode-desc { color: var(--color-primary-element-text); }
+
+/* v3.100.1 — locked-out project mode (Advanced without a valid license).
+   Not disabled outright — we still render the tile so the user sees the
+   feature exists — but the click handler no-ops and the tile is muted so
+   it doesn't compete visually with the picked mode. */
+.ctv__mode--locked {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background: var(--color-background-hover);
+}
+.ctv__mode--locked:hover {
+    border-color: var(--color-border);
+    background: var(--color-background-hover);
+}
+/* MDI icons render as an inline-block <span> containing the SVG; nudge
+   alignment so the lock sits on the text baseline of the label. */
+.ctv__mode-lock {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    vertical-align: -2px;
+    color: var(--color-text-maxcontrast);
+}
 
 /* Member search */
 .ctv__member-search { position: relative; }
@@ -961,7 +1170,11 @@ export default {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: var(--color-primary-element-light);
+    /* v3.100.14: neutral surface for a decorative "not a photo"
+       avatar per SKILLS.md — the primary-coloured icon inside carries
+       the accent. Was --color-primary-element-light which is a state
+       token and shouldn't back non-state surfaces. */
+    background: var(--color-background-dark);
     color: var(--color-primary-element);
     display: flex;
     align-items: center;
@@ -975,8 +1188,8 @@ export default {
 }
 
 .ctv__user-info { display: flex; flex-direction: column; }
-.ctv__user-name { font-size: 14px; font-weight: 500; }
-.ctv__user-id { font-size: 12px; color: var(--color-text-maxcontrast); }
+.ctv__user-name { font-size: var(--th-font-body); font-weight: 500; }
+.ctv__user-id { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 
 .ctv__chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
@@ -1017,6 +1230,15 @@ export default {
 }
 
 .ctv__app:hover { background: var(--color-background-hover); }
+/* v3.104.5: reverted 3.100.14's full-saturation treatment. The Apps
+   step is a MULTI-select (a project team ticks all four apps by
+   default), so all four tiles turn into solid dark-green blocks with
+   white text on them — the eye reads the whole card as a "primary
+   button" and the app name washes out. Reverted to the light-tint
+   background + dark border pattern used pre-3.100.14: the border tells
+   you it's selected, the light tint is a soft state cue, and both the
+   app name and description keep their normal (readable) text colours.
+   Same reasoning applied to .ctv__module below. */
 .ctv__app:has(.ctv__app-check:checked) {
     border-color: var(--color-primary-element);
     background: var(--color-primary-element-light);
@@ -1032,8 +1254,8 @@ export default {
 
 .ctv__app-icon { color: var(--color-primary-element); flex-shrink: 0; }
 .ctv__app-text { display: flex; flex-direction: column; gap: 2px; }
-.ctv__app-name { font-size: 14px; font-weight: 600; }
-.ctv__app-desc { font-size: 12px; color: var(--color-text-maxcontrast); }
+.ctv__app-name { font-size: var(--th-font-body); font-weight: 600; }
+.ctv__app-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 
 /* Compact variant: header row with inline toggle, picker below only when needed */
 .ctv__app--compact {
@@ -1072,7 +1294,7 @@ export default {
     background: transparent;
     border: none;
     padding: 4px 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     cursor: pointer;
     color: var(--color-text-maxcontrast);
@@ -1154,7 +1376,7 @@ export default {
 }
 
 .ctv__settings-group-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1175,12 +1397,12 @@ export default {
 
 .ctv__setting:hover { background: var(--color-background-hover); }
 
-.ctv__setting-name { font-size: 14px; font-weight: 500; line-height: 1.3; display: block; }
-.ctv__setting-desc { font-size: 12px; color: var(--color-text-maxcontrast); line-height: 1.4; display: block; }
+.ctv__setting-name { font-size: var(--th-font-body); font-weight: 500; line-height: 1.3; display: block; }
+.ctv__setting-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); line-height: 1.4; display: block; }
 
 /* Files — group folders hint */
 .ctv__app-hint {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     font-style: italic;
     display: block;
@@ -1202,6 +1424,11 @@ export default {
 }
 
 .ctv__module:hover { background: var(--color-background-hover); }
+/* v3.104.5: reverted 3.100.14's full-saturation treatment — same
+   reasoning as .ctv__app above. Team modules is a multi-select and a
+   fully saturated selected state read as "everything is a primary
+   action" with unreadable module names in white on dark green.
+   Light-tint background + dark border is the correct pattern. */
 .ctv__module:has(.ctv__module-check:checked) {
     border-color: var(--color-primary-element);
     background: var(--color-primary-element-light);
@@ -1226,11 +1453,11 @@ export default {
 .ctv__module-icon { color: var(--color-primary-element); flex-shrink: 0; margin-top: 1px; }
 .ctv__module--disabled .ctv__module-icon { color: var(--color-text-maxcontrast); }
 .ctv__module-text { display: flex; flex-direction: column; gap: 2px; }
-.ctv__module-name { font-size: 14px; font-weight: 600; }
-.ctv__module-desc { font-size: 12px; color: var(--color-text-maxcontrast); }
+.ctv__module-name { font-size: var(--th-font-body); font-weight: 600; }
+.ctv__module-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 
 .ctv__module-unavailable {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-warning-text);
     font-style: italic;
     margin-top: 2px;

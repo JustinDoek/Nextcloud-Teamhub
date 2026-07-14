@@ -198,7 +198,7 @@ export default {
     width: 38px;
     height: 38px;
     border-radius: var(--border-radius-large);
-    background: var(--color-background-dark, #f4f4f4);
+    background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
 }

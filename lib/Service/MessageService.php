@@ -5,6 +5,8 @@ namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\MessageMapper;
+use OCA\TeamHub\Exception\AccessDeniedException;
+use OCA\TeamHub\Exception\NotFoundException;
 use OCP\App\IAppManager;
 use OCP\IConfig;
 use OCP\IDBConnection;
@@ -136,7 +138,7 @@ class MessageService {
     ): array {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
 
         if (!in_array($priority, ['normal', 'priority'])) {
@@ -219,6 +221,12 @@ class MessageService {
                         // so they bypass the open/discussion phase and go straight
                         // to 'finalized'. Inline stream proposals remain 'open'.
                         !empty($decisionData['autoFinalize']),
+                        // v3.97.5 — optional milestone linkage for Advanced
+                        // project teams. propose() validates that the milestone
+                        // exists in this team and that the team is Advanced;
+                        // non-Advanced teams passing this get a 400.
+                        isset($decisionData['milestoneId']) && $decisionData['milestoneId'] !== '' && $decisionData['milestoneId'] !== null
+                            ? (int)$decisionData['milestoneId'] : null,
                     );
                     $this->db->commit();
                     // Attach the decision payload so the frontend can render
@@ -258,14 +266,21 @@ class MessageService {
     /**
      * Update an existing message
      */
-    public function updateMessage(int $messageId, string $subject, string $message): array {
+    public function updateMessage(string $teamId, int $messageId, string $subject, string $message): array {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
         $existing = $this->messageMapper->find($messageId);
+        // M-1 — enforce that the route's teamId matches the message's team.
+        // Without this check, the URL teamId is trusted for nothing today
+        // but any future refactor that starts trusting it would create a
+        // team-scope mismatch. Cheap defence-in-depth.
+        if ((string)($existing['team_id'] ?? '') !== $teamId) {
+            throw new NotFoundException('Message not found in this team');
+        }
         if ($existing['author_id'] !== $user->getUID()) {
-            throw new \Exception('Only the author can edit this message');
+            throw new AccessDeniedException('Only the author can edit this message');
         }
         $updated = $this->messageMapper->update($messageId, $subject, $message);
 
@@ -276,7 +291,7 @@ class MessageService {
             $memberUids = $this->getTeamMemberUids($teamId);
             $this->sendMentionNotifications($teamId, $messageId, $message, $user, $memberUids);
         } catch (\Throwable $e) {
-            $this->logger->warning('[MessageService] Could not send mention notifications on update', [
+            $this->logger->warning('[TeamHub][MessageService] Could not send mention notifications on update', [
                 'messageId' => $messageId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
         }
@@ -290,9 +305,12 @@ class MessageService {
     public function deleteMessage(string $teamId, int $messageId): void {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
         $existing = $this->messageMapper->find($messageId);
+        if ((string)($existing['team_id'] ?? '') !== $teamId) {
+            throw new NotFoundException('Message not found in this team');
+        }
 
         // Author can always delete their own message.
         // Team admin/owner can delete any message (moderation).
@@ -309,7 +327,7 @@ class MessageService {
     public function getAggregatedMessages(): array {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
         try {
             $circlesManager = $this->getCirclesManager();
@@ -419,7 +437,7 @@ class MessageService {
             $msRes->closeCursor();
         } catch (\Throwable $e) {
             // circles_membership may not exist on older Circles versions — non-fatal
-            $this->logger->debug('[MessageService] getTeamMemberUids: circles_membership lookup failed', [
+            $this->logger->debug('[TeamHub][MessageService] getTeamMemberUids: circles_membership lookup failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -455,17 +473,17 @@ class MessageService {
                         ])
                         ->setLink($link);
                     $this->notificationManager->notify($notification);
-                    $this->logger->debug('[MessageService] Sent mention notification', [
+                    $this->logger->debug('[TeamHub][MessageService] Sent mention notification', [
                         'to' => $mentionedId, 'messageId' => $messageId, 'app' => Application::APP_ID,
                     ]);
                 } catch (\Exception $e) {
-                    $this->logger->warning('[MessageService] Failed to send mention notification', [
+                    $this->logger->warning('[TeamHub][MessageService] Failed to send mention notification', [
                         'to' => $mentionedId, 'exception' => $e, 'app' => Application::APP_ID,
                     ]);
                 }
             }
         } catch (\Throwable $e) {
-            $this->logger->warning('[MessageService] sendMentionNotifications failed', [
+            $this->logger->warning('[TeamHub][MessageService] sendMentionNotifications failed', [
                 'messageId' => $messageId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
         }

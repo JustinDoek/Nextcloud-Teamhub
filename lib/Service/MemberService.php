@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Db\PendingDeletionMapper;
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TalkService;
 use OCP\Accounts\IAccountManager;
@@ -276,7 +277,7 @@ class MemberService {
             array_slice($allDirect, 0, 16)
         );
 
-        $this->logger->debug('[MemberService] getTeamMembers: loaded', [
+        $this->logger->debug('[TeamHub][MemberService] getTeamMembers: loaded', [
             'teamId'          => $teamId,
             'direct_count'    => count($members),
             'effective_count' => $effectiveCount,
@@ -394,8 +395,9 @@ class MemberService {
         // ─────────────────────────────────────────────────────────────────────
         // Approach: circles_membership is Circles' own denormalized cache of
         // "every single_id reachable from this circle". For team Sugar this
-        // contains JDoek (direct), justin.doek (direct), and Jaap (via the
-        // teamhubbies group). We resolve each user single_id to a NC user by
+        // contains every reachable user single_id for the circle, including
+        // members joined directly and members joined via a nested group.
+        // We resolve each user single_id to a NC user by
         // joining back to circles_member with user_type=1 (the row Circles
         // writes for each personal user circle).
         //
@@ -512,7 +514,7 @@ class MemberService {
         // Sort by display name, case-insensitive
         usort($list, fn ($a, $b) => strcasecmp($a['displayName'], $b['displayName']));
 
-        $this->logger->info('[MemberService] getAllEffectiveMembers: resolved', [
+        $this->logger->info('[TeamHub][MemberService] getAllEffectiveMembers: resolved', [
             'teamId' => $teamId, 'count' => count($list), 'app' => Application::APP_ID,
         ]);
 
@@ -800,7 +802,7 @@ class MemberService {
                 ];
             }
 
-            $this->logger->debug('[MemberService] getMembersForManage: row resolved', [
+            $this->logger->debug('[TeamHub][MemberService] getMembersForManage: row resolved', [
                 'user_id' => $subLabel, 'single_id' => $subSingle,
                 'user_type' => $subType, 'circle_source' => $subSource,
                 'circle_name' => $circleName, 'display' => $displayName,
@@ -810,7 +812,7 @@ class MemberService {
         }
         $gcRes->closeCursor();
 
-        $this->logger->debug('[MemberService] getMembersForManage', [
+        $this->logger->debug('[TeamHub][MemberService] getMembersForManage', [
             'teamId'          => $teamId,
             'direct'          => count($direct),
             'groups'          => count($groups),
@@ -893,6 +895,15 @@ class MemberService {
      * Public so TeamService can use it for permission checks.
      */
     public function getMemberLevelFromDb(\OCP\IDBConnection $db, string $teamId, string $userId): int {
+        // apps.md R-1 note: kept as a direct SELECT deliberately.
+        // CirclesManager exposes level only via getInitiator()->getLevel(),
+        // which is scoped to the CURRENT session user — this method must
+        // support arbitrary $userId lookups (target-user checks in
+        // TeamController::transferOwnership, MemberService::updateMemberLevel,
+        // BudgetService::currentUserLevel-for-editor). An API migration
+        // that iterates getMembers() to find $userId hydrates every member
+        // entity per call, which is materially more expensive than an
+        // indexed lookup on (circle_id, user_id, status).
         $qb = $db->getQueryBuilder();
         $result = $qb->select('level')
             ->from('circles_member')
@@ -907,6 +918,66 @@ class MemberService {
     }
 
     /**
+     * Read the raw status column ('Member' | 'Invited' | 'Requesting' | 'Blocked')
+     * for a (teamId, userId) row of user_type=1 (individual NC user).
+     *
+     * Used by inviteMembers to decide whether to sync the user to the team's
+     * Talk room immediately (status='Member') or defer until they accept the
+     * invite (status='Invited'). See v3.100.8 regression fix.
+     */
+    private function fetchMemberStatus(\OCP\IDBConnection $db, string $teamId, string $userId): ?string {
+        try {
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('status')
+                ->from('circles_member')
+                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+                ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+            return $row ? (string)$row['status'] : null;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] fetchMemberStatus failed', [
+                'teamId' => $teamId, 'userId' => $userId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Read the raw status column WITHOUT filtering to 'Member' rows.
+     * Returns the current status ('Invited', 'Member', 'Requesting',
+     * 'Blocked') or null when no row exists. Used by the resend-invite
+     * flow to distinguish "still Invited" (resend) from "already Member"
+     * (no-op).
+     */
+    private function fetchAnyMemberStatus(\OCP\IDBConnection $db, string $teamId, string $userId): ?string {
+        try {
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('status')
+                ->from('circles_member')
+                ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+                ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+            return $row ? (string)$row['status'] : null;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] fetchAnyMemberStatus failed', [
+                'teamId' => $teamId, 'userId' => $userId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
      * Asserts the current user is at least a basic member (level >= 1) of the team.
      * Use this to gate read-only endpoints that should be invisible to non-members.
      * Uses a direct indexed DB query — avoids the full Circles API member-list fetch.
@@ -916,7 +987,7 @@ class MemberService {
     public function requireMemberLevel(string $teamId): void {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
@@ -934,7 +1005,7 @@ class MemberService {
             return;
         }
 
-        throw new \Exception('You are not a member of this team');
+        throw new AccessDeniedException('You are not a member of this team');
     }
 
     /**
@@ -946,17 +1017,17 @@ class MemberService {
     public function requireAdminLevel(string $teamId): void {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
 
         if ($level === 0) {
-            throw new \Exception('You are not a member of this team');
+            throw new AccessDeniedException('You are not a member of this team');
         }
         if ($level < 8) {
-            throw new \Exception('Insufficient permissions. Admin or owner role required.');
+            throw new AccessDeniedException('Insufficient permissions. Admin or owner role required.');
         }
     }
 
@@ -969,17 +1040,17 @@ class MemberService {
     public function requireOwnerLevel(string $teamId): void {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
 
         if ($level === 0) {
-            throw new \Exception('You are not a member of this team');
+            throw new AccessDeniedException('You are not a member of this team');
         }
         if ($level < 9) {
-            throw new \Exception('Insufficient permissions. Owner role required.');
+            throw new AccessDeniedException('Insufficient permissions. Owner role required.');
         }
     }
 
@@ -992,17 +1063,17 @@ class MemberService {
     public function requireModeratorLevel(string $teamId): void {
         $user = $this->userSession->getUser();
         if (!$user) {
-            throw new \Exception('User not authenticated');
+            throw new AccessDeniedException('User not authenticated');
         }
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
 
         if ($level === 0) {
-            throw new \Exception('You are not a member of this team');
+            throw new AccessDeniedException('You are not a member of this team');
         }
         if ($level < 4) {
-            throw new \Exception('Insufficient permissions. Moderator, admin, or owner role required.');
+            throw new AccessDeniedException('Insufficient permissions. Moderator, admin, or owner role required.');
         }
     }
 
@@ -1087,18 +1158,12 @@ class MemberService {
                 throw new \Exception('You are not a member of this team.');
             }
 
+            // v3.99.6 — owner cannot leave, period. Previous code only
+            // blocked when other members were still in the team; a sole-
+            // owner who left orphaned the team. Only ways an owner exits:
+            // transfer ownership first, or delete the team.
             if ($level >= 9) {
-                $cntQb  = $db->getQueryBuilder();
-                $cntRes = $cntQb->select($cntQb->func()->count('*', 'cnt'))
-                    ->from('circles_member')
-                    ->where($cntQb->expr()->eq('circle_id', $cntQb->createNamedParameter($teamId)))
-                    ->andWhere($cntQb->expr()->eq('status', $cntQb->createNamedParameter('Member')))
-                    ->executeQuery();
-                $cnt = (int)($cntRes->fetch()['cnt'] ?? 0);
-                $cntRes->closeCursor();
-                if ($cnt > 1) {
-                    throw new \Exception('Team owner cannot leave. Transfer ownership or delete the team first.');
-                }
+                throw new \Exception('Team owner cannot leave. Transfer ownership or delete the team first.');
             }
 
             // Delete all rows for this user in this circle (covers Member + Requesting).
@@ -1109,7 +1174,7 @@ class MemberService {
                 ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->info('[MemberService] leaveTeam: member removed via direct DB delete', [
+            $this->logger->info('[TeamHub][MemberService] leaveTeam: member removed via direct DB delete', [
                 'uid'    => $uid,
                 'teamId' => $teamId,
                 'app'    => Application::APP_ID,
@@ -1117,10 +1182,12 @@ class MemberService {
 
             // Remove the departing member from the team's Talk room so they
             // lose access immediately. Talk does not watch for Circles changes.
-            error_log('[TeamHub][MemberService] leaveTeam: removing uid=' . $uid . ' from Talk room');
+            $this->logger->debug('[TeamHub][MemberService] leaveTeam: removing uid from Talk room', [
+                'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
             $this->talkService->removeUserFromTeamTalkRoom($teamId, $uid);
         } catch (\Exception $e) {
-            $this->logger->error('[MemberService] Error leaving team', [
+            $this->logger->error('[TeamHub][MemberService] Error leaving team', [
                 'teamId'    => $teamId,
                 'exception' => $e,
                 'app'       => Application::APP_ID,
@@ -1212,12 +1279,12 @@ class MemberService {
             $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
             $membershipService->onUpdate($teamId);
         } catch (\Throwable $e) {
-            $this->logger->warning('[MemberService] removeMember: cache rebuild failed', [
+            $this->logger->warning('[TeamHub][MemberService] removeMember: cache rebuild failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
 
-        $this->logger->info('[MemberService] removeMember: removed via direct DB delete', [
+        $this->logger->info('[TeamHub][MemberService] removeMember: removed via direct DB delete', [
             'teamId'   => $teamId,
             'targetId' => $targetId,
             'userType' => $userType,
@@ -1236,10 +1303,14 @@ class MemberService {
         //   runs AFTER MembershipService::onUpdate() above, which has rebuilt
         //   circles_membership to reflect the removal.
         if ($userType === 1) {
-            error_log('[TeamHub][MemberService] removeMember: removing user from Talk room targetId=' . $targetId);
+            $this->logger->debug('[TeamHub][MemberService] removeMember: removing user from Talk room', [
+                'targetId' => $targetId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
             $this->talkService->removeUserFromTeamTalkRoom($teamId, $targetId);
         } else {
-            error_log('[TeamHub][MemberService] removeMember: reconciling Talk room after group/circle removal');
+            $this->logger->debug('[TeamHub][MemberService] removeMember: reconciling Talk room after group/circle removal', [
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
             $this->talkService->reconcileEffectiveTalkRoomMembers($teamId);
         }
     }
@@ -1331,7 +1402,7 @@ class MemberService {
 
                         if ($cycleCount > 0) {
                             $results[$memberId] = 'failed: circular nesting not allowed — this team is already a member of the target team';
-                            $this->logger->warning('[MemberService] inviteMembers: circular nesting rejected', [
+                            $this->logger->warning('[TeamHub][MemberService] inviteMembers: circular nesting rejected', [
                                 'teamId'            => $teamId,
                                 'candidateCircleId' => $candidateCircleId,
                                 'app'               => Application::APP_ID,
@@ -1341,7 +1412,78 @@ class MemberService {
                     }
                 }
 
-                $circleMemberService->addMember($teamId, $invitee);
+                // v3.100.10 — resend-invite handling.
+                // Circles throws FederatedItemBadRequestException with
+                // "Already invited into the team" when the target already
+                // has an Invited/Member row for this circle. Two real
+                // scenarios that hit this exception:
+                //
+                //   (a) Target has already accepted (status='Member').
+                //       Nothing to do — no-op success.
+                //   (b) Target is still 'Invited' but never saw / deleted
+                //       the NC notification about it. The admin's intent
+                //       is to RE-SEND the invite; failing here is wrong
+                //       UX. We remove the stale Invited row, then let
+                //       Circles create a fresh one so its notifier fires
+                //       a new notification for the user.
+                //
+                // Only user_type=1 targets get the resend flow — for
+                // groups/circles the auto-confirm block below handles it.
+                $alreadyInvited = false;
+                $resent         = false;
+                try {
+                    $circleMemberService->addMember($teamId, $invitee);
+                } catch (\Throwable $addMemberEx) {
+                    $msg = $addMemberEx->getMessage();
+                    $isAlreadyInvited = ($addMemberEx instanceof \OCA\Circles\Exceptions\FederatedItemBadRequestException)
+                        || str_contains($msg, 'Already invited')
+                        || str_contains($msg, 'already a member');
+                    if (!$isAlreadyInvited) {
+                        throw $addMemberEx;
+                    }
+
+                    $alreadyInvited = true;
+                    $currentStatus  = $memberType === 1
+                        ? $this->fetchAnyMemberStatus($db, $teamId, $memberId)
+                        : null;
+
+                    if ($memberType === 1
+                        && $currentStatus !== null
+                        && strcasecmp($currentStatus, 'Invited') === 0
+                    ) {
+                        // Resend path: nuke the stale Invited row, then
+                        // re-invite so the Circles notifier fires again.
+                        $this->logger->info('[TeamHub][MemberService] inviteMembers: stale Invited row — resending invite', [
+                            'id' => $memberId, 'teamId' => $teamId,
+                            'app' => Application::APP_ID,
+                        ]);
+                        try {
+                            $delQb = $db->getQueryBuilder();
+                            $delQb->delete('circles_member')
+                                ->where($delQb->expr()->eq('circle_id', $delQb->createNamedParameter($teamId)))
+                                ->andWhere($delQb->expr()->eq('user_id',  $delQb->createNamedParameter($memberId)))
+                                ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                                ->andWhere($delQb->expr()->eq('status',   $delQb->createNamedParameter('Invited')))
+                                ->executeStatement();
+
+                            // Re-invite. If this second call still throws,
+                            // we propagate — something else is wrong.
+                            $circleMemberService->addMember($teamId, $invitee);
+                            $resent = true;
+                        } catch (\Throwable $resendEx) {
+                            $this->logger->warning('[TeamHub][MemberService] inviteMembers: resend attempt failed — falling back to no-op success', [
+                                'id' => $memberId, 'teamId' => $teamId,
+                                'error' => $resendEx->getMessage(), 'app' => Application::APP_ID,
+                            ]);
+                        }
+                    } else {
+                        $this->logger->debug('[TeamHub][MemberService] inviteMembers: already invited/member — treating as no-op', [
+                            'id' => $memberId, 'type' => $memberType,
+                            'teamId' => $teamId, 'status' => $currentStatus,
+                            'reason' => $msg, 'app' => Application::APP_ID,
+                        ]);
+                    }
+                }
 
                 // Circles' addMember() creates an 'Invited' status row for non-user
                 // types (groups, circles). For user_type=1, it goes straight to
@@ -1375,7 +1517,7 @@ class MemberService {
                             ->andWhere($confirmQb->expr()->eq('status', $confirmQb->createNamedParameter('Invited')))
                             ->executeStatement();
 
-                        $this->logger->info('[MemberService] inviteMembers: auto-confirmed group/circle membership', [
+                        $this->logger->info('[TeamHub][MemberService] inviteMembers: auto-confirmed group/circle membership', [
                             'id'      => $memberId,
                             'type'    => $memberType,
                             'teamId'  => $teamId,
@@ -1391,7 +1533,7 @@ class MemberService {
                         } catch (\Throwable $cacheEx) {
                             // Cache rebuild failure is non-fatal — access will be
                             // reconciled by the Circles background job.
-                            $this->logger->warning('[MemberService] inviteMembers: membership cache rebuild failed (non-fatal)', [
+                            $this->logger->warning('[TeamHub][MemberService] inviteMembers: membership cache rebuild failed (non-fatal)', [
                                 'teamId' => $teamId,
                                 'error'  => $cacheEx->getMessage(),
                                 'app'    => Application::APP_ID,
@@ -1401,7 +1543,7 @@ class MemberService {
                         // Confirm failure is logged but does not fail the overall invite —
                         // the group IS in the circle (addMember succeeded); it just needs
                         // a manual acceptance or the next Circles background job to fix status.
-                        $this->logger->warning('[MemberService] inviteMembers: could not auto-confirm group/circle (addMember succeeded)', [
+                        $this->logger->warning('[TeamHub][MemberService] inviteMembers: could not auto-confirm group/circle (addMember succeeded)', [
                             'id'    => $memberId,
                             'type'  => $memberType,
                             'error' => $confirmEx->getMessage(),
@@ -1410,21 +1552,48 @@ class MemberService {
                     }
                 }
 
-                $results[$memberId] = 'invited';
-                $this->logger->info('[MemberService] inviteMembers: member added', [
-                    'id' => $memberId, 'type' => $memberType, 'app' => Application::APP_ID,
+                if ($resent) {
+                    $results[$memberId] = 'invite_resent';
+                } elseif ($alreadyInvited) {
+                    $results[$memberId] = 'already_invited';
+                } else {
+                    $results[$memberId] = 'invited';
+                }
+                $this->logger->info('[TeamHub][MemberService] inviteMembers: member added', [
+                    'id' => $memberId, 'type' => $memberType,
+                    'alreadyInvited' => $alreadyInvited,
+                    'resent'         => $resent,
+                    'app' => Application::APP_ID,
                 ]);
 
-                // Add direct user members to the team's Talk room immediately.
-                // Talk expands circle members once at addCircle() time but does not
-                // watch for subsequent circle membership changes.
+                // Add direct user members to the team's Talk room immediately —
+                // but ONLY when the circles_member row is already 'Member'.
+                // For invite-required teams Circles creates an 'Invited' row and
+                // fires its own invite-notification event; pushing the user into
+                // Talk at that moment via ParticipantService::addUsers bypasses
+                // Circles' invite path (Talk adds them as a full participant and
+                // Circles' notifier never sees the join). Talk sync for those
+                // users happens when they accept — via approveRequest /
+                // MemberJoinedEvent — not here.
+                //
+                // Fix for v3.100.8 regression reported against W-5.
                 if ($memberType === 1) {
-                    error_log('[TeamHub][MemberService] inviteMembers: syncing new user to Talk room uid=' . $memberId);
-                    $this->talkService->syncUserToTeamTalkRoom($teamId, $memberId);
+                    $status = $this->fetchMemberStatus($db, $teamId, $memberId);
+                    if ($status === 'Member') {
+                        $this->logger->debug('[TeamHub][MemberService] inviteMembers: syncing new user to Talk room', [
+                            'uid' => $memberId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                        ]);
+                        $this->talkService->syncUserToTeamTalkRoom($teamId, $memberId);
+                    } else {
+                        $this->logger->debug('[TeamHub][MemberService] inviteMembers: deferring Talk sync until invite accepted', [
+                            'uid' => $memberId, 'teamId' => $teamId,
+                            'status' => $status, 'app' => Application::APP_ID,
+                        ]);
+                    }
                 }
             } catch (\Exception $e) {
                 $results[$memberId] = 'failed: ' . $e->getMessage();
-                $this->logger->warning('[MemberService] Could not invite member', [
+                $this->logger->warning('[TeamHub][MemberService] Could not invite member', [
                     'id'        => $memberId,
                     'type'      => $memberType,
                     'exception' => $e,
@@ -1459,14 +1628,14 @@ class MemberService {
             $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
             $federatedUserService->setLocalCurrentUser($user);
             $circleService->circleJoin($teamId);
-            $this->logger->info('[MemberService] requestJoinTeam: circleJoin succeeded via CircleService', [
+            $this->logger->info('[TeamHub][MemberService] requestJoinTeam: circleJoin succeeded via CircleService', [
                 'uid'    => $user->getUID(),
                 'teamId' => $teamId,
                 'app'    => Application::APP_ID,
             ]);
             return;
         } catch (\Throwable $e) {
-            $this->logger->warning('[MemberService] requestJoinTeam via CircleService::circleJoin failed, trying direct DB insert', [
+            $this->logger->warning('[TeamHub][MemberService] requestJoinTeam via CircleService::circleJoin failed, trying direct DB insert', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -1512,18 +1681,18 @@ class MemberService {
         if ($singleId === null) {
             // Personal circle doesn't exist yet (brand new user who has never
             // interacted with Circles). Generate it via Circles' own service.
-            $this->logger->info('[MemberService] requestJoinTeam: personal circle not found, generating it', [
+            $this->logger->info('[TeamHub][MemberService] requestJoinTeam: personal circle not found, generating it', [
                 'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
             try {
                 $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
                 $generated = $federatedUserService->getLocalFederatedUser($uid, true, true);
                 $singleId  = $generated->getSingleId();
-                $this->logger->info('[MemberService] requestJoinTeam: personal circle generated', [
+                $this->logger->info('[TeamHub][MemberService] requestJoinTeam: personal circle generated', [
                     'uid' => $uid, 'singleId' => $singleId, 'app' => Application::APP_ID,
                 ]);
             } catch (\Throwable $e) {
-                $this->logger->error('[MemberService] requestJoinTeam: could not generate personal circle', [
+                $this->logger->error('[TeamHub][MemberService] requestJoinTeam: could not generate personal circle', [
                     'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
                 throw new \Exception('Unable to request team membership: your Nextcloud account is not fully initialised. Please contact your administrator.');
@@ -1534,7 +1703,7 @@ class MemberService {
             throw new \Exception('Unable to request team membership: could not resolve your Nextcloud identity. Please contact your administrator.');
         }
 
-        $this->logger->info('[MemberService] requestJoinTeam: resolved single_id for user', [
+        $this->logger->info('[TeamHub][MemberService] requestJoinTeam: resolved single_id for user', [
             'uid' => $uid, 'singleId' => $singleId, 'app' => Application::APP_ID,
         ]);
 
@@ -1571,7 +1740,7 @@ class MemberService {
         try {
             $qb->insert('circles_member')->values($values)->executeStatement();
         } catch (\Throwable $e) {
-            $this->logger->error('[MemberService] requestJoinTeam DB fallback failed', [
+            $this->logger->error('[TeamHub][MemberService] requestJoinTeam DB fallback failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -1596,7 +1765,7 @@ class MemberService {
             $isOpen = ($circleConfig & CirclesConfig::CFG_OPEN) > 0;
 
 
-            $this->logger->info('[MemberService] requestJoinTeam: circle config check', [
+            $this->logger->info('[TeamHub][MemberService] requestJoinTeam: circle config check', [
                 'teamId' => $teamId, 'config' => $circleConfig, 'isOpen' => $isOpen,
                 'app'    => Application::APP_ID,
             ]);
@@ -1604,16 +1773,44 @@ class MemberService {
             if ($isOpen) {
                 // Open circle: auto-approve by flipping status straight to Member.
                 // Do NOT send a notification — no admin action is required.
-                $approveQb = $db->getQueryBuilder();
-                $approveQb->update('circles_member')
-                    ->set('status', $approveQb->createNamedParameter('Member'))
-                    ->set('level',  $approveQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                    ->where($approveQb->expr()->eq('circle_id', $approveQb->createNamedParameter($teamId)))
-                    ->andWhere($approveQb->expr()->eq('user_id',   $approveQb->createNamedParameter($uid)))
-                    ->andWhere($approveQb->expr()->eq('status',    $approveQb->createNamedParameter('Requesting')))
-                    ->executeStatement();
-                $this->logger->info('[MemberService] requestJoinTeam: open circle — auto-approved, no notification sent', [
-                    'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                //
+                // v3.100.8 (apps.md W-2) — try CirclesManager first so
+                // activity/notifications fire member_confirmed; fall back
+                // to the raw UPDATE that was previously the only path.
+                $confirmedViaApi = false;
+                try {
+                    $circlesMgr = $this->getCirclesManager();
+                    $circle = $circlesMgr->getCircle($teamId);
+                    foreach ($circle->getInheritedMembers(false) as $m) {
+                        if ($m->getUserId() === $uid
+                            && strcasecmp($m->getStatus(), 'Requesting') === 0
+                        ) {
+                            if (method_exists($circlesMgr, 'confirmMemberRequest')) {
+                                $circlesMgr->confirmMemberRequest($m);
+                                $confirmedViaApi = true;
+                            }
+                            break;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->debug('[TeamHub][MemberService] requestJoinTeam: CirclesManager path unavailable — using DB fallback', [
+                        'uid' => $uid, 'teamId' => $teamId,
+                        'reason' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+                if (!$confirmedViaApi) {
+                    $approveQb = $db->getQueryBuilder();
+                    $approveQb->update('circles_member')
+                        ->set('status', $approveQb->createNamedParameter('Member'))
+                        ->set('level',  $approveQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                        ->where($approveQb->expr()->eq('circle_id', $approveQb->createNamedParameter($teamId)))
+                        ->andWhere($approveQb->expr()->eq('user_id',   $approveQb->createNamedParameter($uid)))
+                        ->andWhere($approveQb->expr()->eq('status',    $approveQb->createNamedParameter('Requesting')))
+                        ->executeStatement();
+                }
+                $this->logger->info('[TeamHub][MemberService] requestJoinTeam: open circle — auto-approved, no notification sent', [
+                    'uid' => $uid, 'teamId' => $teamId, 'viaApi' => $confirmedViaApi,
+                    'app' => Application::APP_ID,
                 ]);
 
                 // Audit: this is a direct join, not a pending request. Circles will
@@ -1627,10 +1824,17 @@ class MemberService {
                     $uid,
                     ['via' => 'open_circle_self_join'],
                 );
+
+                // v3.100.8 — add the newly joined user to the team's Talk room.
+                // Mirrors what approveRequest does; needed because inviteMembers
+                // now defers Talk sync for Invited users, so the only paths that
+                // trigger sync are (a) direct Member on invite, (b) admin
+                // approves pending request, (c) here — open-circle self-join.
+                $this->talkService->syncUserToTeamTalkRoom($teamId, $uid);
             } else {
                 // Closed circle: notify admins that approval is needed.
                 $this->sendJoinRequestNotification($teamId, $uid, $db);
-                $this->logger->info('[MemberService] requestJoinTeam: closed circle — notification sent to admins', [
+                $this->logger->info('[TeamHub][MemberService] requestJoinTeam: closed circle — notification sent to admins', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
 
@@ -1646,7 +1850,7 @@ class MemberService {
             }
         } catch (\Throwable $e) {
             // Non-fatal — user is Requesting and an admin can approve manually
-            $this->logger->warning('[MemberService] requestJoinTeam: open/closed check failed, skipping notification', [
+            $this->logger->warning('[TeamHub][MemberService] requestJoinTeam: open/closed check failed, skipping notification', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1727,18 +1931,18 @@ class MemberService {
                         ->setLink($link);
                     $notificationManager->notify($notification);
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[MemberService] sendJoinRequestNotification: failed for admin', [
+                    $this->logger->warning('[TeamHub][MemberService] sendJoinRequestNotification: failed for admin', [
                         'adminUid' => $adminUid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
             }
             $aRes->closeCursor();
 
-            $this->logger->info('[MemberService] sendJoinRequestNotification: sent to team admins', [
+            $this->logger->info('[TeamHub][MemberService] sendJoinRequestNotification: sent to team admins', [
                 'teamId' => $teamId, 'requester' => $requestingUid, 'app' => Application::APP_ID,
             ]);
         } catch (\Throwable $e) {
-            $this->logger->warning('[MemberService] sendJoinRequestNotification failed', [
+            $this->logger->warning('[TeamHub][MemberService] sendJoinRequestNotification failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1796,12 +2000,12 @@ class MemberService {
                 ->executeQuery();
             $cnt = (int)$res->fetchOne();
             $res->closeCursor();
-            $this->logger->debug('[MemberService] getEffectiveMemberCount', [
+            $this->logger->debug('[TeamHub][MemberService] getEffectiveMemberCount', [
                 'teamId' => $teamId, 'count' => $cnt, 'app' => Application::APP_ID,
             ]);
             return $cnt;
         } catch (\Throwable $e) {
-            $this->logger->warning('[MemberService] getEffectiveMemberCount failed, returning 0', [
+            $this->logger->warning('[TeamHub][MemberService] getEffectiveMemberCount failed, returning 0', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return 0;
@@ -1834,12 +2038,12 @@ class MemberService {
                 ->executeQuery();
             $cnt = (int)$res->fetchOne();
             $res->closeCursor();
-            $this->logger->debug('[MemberService] isEffectiveMember via circles_membership', [
+            $this->logger->debug('[TeamHub][MemberService] isEffectiveMember via circles_membership', [
                 'teamId' => $teamId, 'uid' => $uid, 'found' => $cnt > 0, 'app' => Application::APP_ID,
             ]);
             return $cnt > 0;
         } catch (\Throwable $e) {
-            $this->logger->warning('[MemberService] isEffectiveMember circles_membership lookup failed', [
+            $this->logger->warning('[TeamHub][MemberService] isEffectiveMember circles_membership lookup failed', [
                 'teamId' => $teamId, 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return false;
@@ -1858,6 +2062,21 @@ class MemberService {
         }
         $db = $this->container->get(\OCP\IDBConnection::class);
         return $this->getMemberLevelFromDb($db, $teamId, $user->getUID()) > 0;
+    }
+
+    /**
+     * Cheap "is caller team admin (level ≥ 8)" check that returns bool
+     * instead of throwing. Used to gate optional UI sections; the actual
+     * write endpoints still call requireAdminLevel() so the gate stays
+     * server-authoritative.
+     */
+    public function isCurrentUserTeamAdmin(string $teamId): bool {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            return false;
+        }
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        return $this->getMemberLevelFromDb($db, $teamId, $user->getUID()) >= 8;
     }
 
     // -------------------------------------------------------------------------
@@ -1889,7 +2108,7 @@ class MemberService {
                 $pRow = $pRes->fetch();
                 $pRes->closeCursor();
                 if ($pRow && !empty($pRow[$valCol])) {
-                    $this->logger->info('[MemberService] resolveUserSingleId: found via preferences', [
+                    $this->logger->info('[TeamHub][MemberService] resolveUserSingleId: found via preferences', [
                         'uid' => $uid, 'table' => $prefTable, 'app' => Application::APP_ID,
                     ]);
                     return (string)$pRow[$valCol];
@@ -1925,13 +2144,13 @@ class MemberService {
             $cRow = $cRes->fetch();
             $cRes->closeCursor();
             if ($cRow && !empty($cRow['unique_id'])) {
-                $this->logger->info('[MemberService] resolveUserSingleId: found via DB join', [
+                $this->logger->info('[TeamHub][MemberService] resolveUserSingleId: found via DB join', [
                     'uid' => $uid, 'app' => Application::APP_ID,
                 ]);
                 return (string)$cRow['unique_id'];
             }
         } catch (\Throwable $e) {
-            $this->logger->warning('[MemberService] resolveUserSingleId: DB join failed', [
+            $this->logger->warning('[TeamHub][MemberService] resolveUserSingleId: DB join failed', [
                 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1977,7 +2196,7 @@ class MemberService {
         }
         $res->closeCursor();
 
-        $this->logger->info('[MemberService] getPendingRequests: found via DB', [
+        $this->logger->info('[TeamHub][MemberService] getPendingRequests: found via DB', [
             'teamId' => $teamId, 'count' => count($pending), 'app' => Application::APP_ID,
         ]);
 
@@ -2012,23 +2231,53 @@ class MemberService {
             throw new \Exception('Pending request not found');
         }
 
+        // v3.100.8 (apps.md W-2) — API-first with fallback.
+        // Try CirclesManager first so activity/notification events fire
+        // (member_confirmed) and the audit picks them up. On hidden or
+        // otherwise API-refusing circles, fall through to the raw UPDATE
+        // that used to be the only path. The direct UPDATE is safe:
+        // requireAdminLevel() and the Requesting check above have already
+        // validated the operation.
+        $confirmedViaApi = false;
+        $singleId = (string)($mRow['single_id'] ?? '');
         try {
-            // Approve by flipping status to 'Member' directly in DB.
-            // The Circles API getMemberById()/addMember() fails on hidden circles
-            // (non-zero config bitmask) — same root cause as all other Circles API
-            // failures this session. A direct UPDATE is safe: requireAdminLevel()
-            // and the Requesting check above have already validated the operation.
-            $approveQb = $db->getQueryBuilder();
-            $approveQb->update('circles_member')
-                ->set('status', $approveQb->createNamedParameter('Member'))
-                ->set('level',  $approveQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                ->where($approveQb->expr()->eq('circle_id', $approveQb->createNamedParameter($teamId)))
-                ->andWhere($approveQb->expr()->eq('user_id',  $approveQb->createNamedParameter($userId)))
-                ->andWhere($approveQb->expr()->eq('status',  $approveQb->createNamedParameter('Requesting')))
-                ->executeStatement();
+            $circlesMgr = $this->getCirclesManager();
+            $circle = $circlesMgr->getCircle($teamId);
+            foreach ($circle->getInheritedMembers(false) as $m) {
+                if ($m->getUserId() === $userId
+                    && strcasecmp($m->getStatus(), 'Requesting') === 0
+                ) {
+                    if (method_exists($circlesMgr, 'confirmMemberRequest')) {
+                        $circlesMgr->confirmMemberRequest($m);
+                        $confirmedViaApi = true;
+                    }
+                    break;
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][MemberService] approveRequest: CirclesManager path unavailable — using DB fallback', [
+                'teamId' => $teamId, 'userId' => $userId,
+                'reason' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
 
-            $this->logger->info('[MemberService] approveRequest: member approved via direct DB update', [
-                'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
+        try {
+            if (!$confirmedViaApi) {
+                $approveQb = $db->getQueryBuilder();
+                $approveQb->update('circles_member')
+                    ->set('status', $approveQb->createNamedParameter('Member'))
+                    ->set('level',  $approveQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->where($approveQb->expr()->eq('circle_id', $approveQb->createNamedParameter($teamId)))
+                    ->andWhere($approveQb->expr()->eq('user_id',  $approveQb->createNamedParameter($userId)))
+                    ->andWhere($approveQb->expr()->eq('status',  $approveQb->createNamedParameter('Requesting')))
+                    ->executeStatement();
+            }
+
+            $this->logger->info('[TeamHub][MemberService] approveRequest: member approved', [
+                'teamId' => $teamId, 'userId' => $userId,
+                'viaApi' => $confirmedViaApi,
+                'singleId' => $singleId,
+                'app' => Application::APP_ID,
             ]);
 
             // Audit: admin approved a pending join request. Logged AFTER the
@@ -2045,10 +2294,12 @@ class MemberService {
             );
 
             // Add the newly approved member to the team's Talk room.
-            error_log('[TeamHub][MemberService] approveRequest: syncing approved user to Talk room userId=' . $userId);
+            $this->logger->debug('[TeamHub][MemberService] approveRequest: syncing approved user to Talk room', [
+                'userId' => $userId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
             $this->talkService->syncUserToTeamTalkRoom($teamId, $userId);
         } catch (\Exception $e) {
-            $this->logger->error('[MemberService] Error approving request', [
+            $this->logger->error('[TeamHub][MemberService] Error approving request', [
                 'teamId'    => $teamId,
                 'userId'    => $userId,
                 'exception' => $e,
@@ -2095,7 +2346,7 @@ class MemberService {
                 ->andWhere($rejectQb->expr()->eq('status',  $rejectQb->createNamedParameter('Requesting')))
                 ->executeStatement();
 
-            $this->logger->info('[MemberService] rejectRequest: request rejected via direct DB delete', [
+            $this->logger->info('[TeamHub][MemberService] rejectRequest: request rejected via direct DB delete', [
                 'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
             ]);
 
@@ -2112,7 +2363,7 @@ class MemberService {
                 null,
             );
         } catch (\Exception $e) {
-            $this->logger->error('[MemberService] Error rejecting request', [
+            $this->logger->error('[TeamHub][MemberService] Error rejecting request', [
                 'teamId'    => $teamId,
                 'userId'    => $userId,
                 'exception' => $e,
@@ -2339,7 +2590,7 @@ class MemberService {
                 }
                 $cRes->closeCursor();
 
-                $this->logger->debug('[MemberService] searchUsers: circle search', [
+                $this->logger->debug('[TeamHub][MemberService] searchUsers: circle search', [
                     'query'      => $query,
                     'teamId'     => $teamId,
                     'excluded'   => count($excludeIds),
@@ -2347,7 +2598,7 @@ class MemberService {
                     'app'        => Application::APP_ID,
                 ]);
             } catch (\Throwable $e) {
-                $this->logger->warning('[MemberService] searchUsers: circle search failed (non-fatal)', [
+                $this->logger->warning('[TeamHub][MemberService] searchUsers: circle search failed (non-fatal)', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }

@@ -1715,19 +1715,24 @@ export default {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
+/* v3.100.14: message-body background is a neutral separator, not a
+   state background — the 4px coloured border-left is the state signal.
+   Full-saturation on the whole message body would swamp the feed;
+   --color-background-dark is the SKILLS.md-permitted neutral surface
+   for visual separation on non-state rows. */
 .message-card--priority {
     border-left: 4px solid var(--color-error);
-    background: color-mix(in srgb, var(--color-error) 3%, var(--color-main-background));
+    background: var(--color-background-dark);
 }
 
 .message-card--question-solved {
     border-left: 4px solid var(--color-success);
-    background: color-mix(in srgb, var(--color-success) 2%, var(--color-main-background));
+    background: var(--color-background-dark);
 }
 
 .message-card--pinned {
     border-left: 4px solid var(--color-primary-element);
-    background: color-mix(in srgb, var(--color-primary-element) 3%, var(--color-main-background));
+    background: var(--color-background-dark);
 }
 
 .message-card__header {
@@ -1757,7 +1762,7 @@ export default {
 }
 
 .message-card__priority-badge {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     padding: 4px 10px;
     border-radius: var(--border-radius-pill);
     background: var(--color-error);
@@ -1788,7 +1793,7 @@ export default {
 
 .message-card__body {
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     line-height: 1.7;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -1914,7 +1919,7 @@ export default {
 .message-preview__image-caption {
     display: block;
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
     overflow: hidden;
@@ -1964,7 +1969,7 @@ export default {
 }
 
 .message-preview__provider {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1981,7 +1986,7 @@ export default {
 }
 
 .message-preview__desc {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     overflow: hidden;
     display: -webkit-box;
@@ -2019,9 +2024,12 @@ export default {
     transform: translateX(3px);
 }
 
+/* v3.100.14: full-saturation voted state per SKILLS.md
+   (was --color-primary-element-light). */
 .poll-option--voted {
     border-color: var(--color-primary-element);
-    background: var(--color-primary-element-light);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
 .poll-option__bar {
@@ -2044,7 +2052,7 @@ export default {
 
 .poll-option__text {
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 /* Right-side cluster: checkmark + vote count */
@@ -2092,7 +2100,7 @@ export default {
     background: var(--color-success);
     color: var(--color-main-background);
     border-radius: var(--border-radius-large);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
 }
 
@@ -2107,7 +2115,7 @@ export default {
 }
 
 .message-card--decision-finalized {
-    border-left-color: var(--color-warning, #c9a227);
+    border-left-color: var(--color-warning);
 }
 
 .message-card--decision-approved {
@@ -2125,31 +2133,35 @@ export default {
 }
 
 /* Decision badge in header */
+/* v3.100.14: full-saturation decision badge per SKILLS.md
+   (was --color-primary-element-light). */
 .message-card__decision-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     padding: 3px 8px;
     border-radius: var(--border-radius-pill);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
-    background: var(--color-primary-element-light);
-    color: var(--color-primary-element-text-dark, var(--color-main-text));
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
+/* v3.100.14: impact badges — full-saturation state per SKILLS.md
+   (were 16% color-mix soft tints). */
 .message-card__decision-badge--high {
-    background: color-mix(in srgb, var(--color-error) 16%, transparent);
+    background: var(--color-error);
     color: var(--color-error-text);
 }
 
 .message-card__decision-badge--medium {
-    background: color-mix(in srgb, var(--color-warning) 16%, transparent);
-    color: var(--color-warning-text, var(--color-main-text));
+    background: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .message-card__decision-badge--low {
-    background: color-mix(in srgb, var(--color-success) 16%, transparent);
-    color: var(--color-success-text, var(--color-main-text));
+    background: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .message-card__decision-badge-dot {
@@ -2208,7 +2220,7 @@ export default {
     gap: 12px;
     padding: 12px 16px;
     border-radius: var(--border-radius-large);
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 .decision-banner__body {
@@ -2224,16 +2236,19 @@ export default {
     opacity: 0.85;
 }
 
+/* v3.100.14: decision banners — full-saturation state per SKILLS.md
+   § "State-coloured backgrounds" (were 10-14% color-mix soft tints
+   with fallback #hex values that also violated the theme-token rule).
+   The comment on --approved referenced an older interpretation of the
+   rule; SKILLS.md's canonical pattern is fill + matching -text token. */
 .decision-banner--finalized {
-    background: color-mix(in srgb, var(--color-warning, #c9a227) 14%, var(--color-main-background));
-    border: 1px solid var(--color-warning, #c9a227);
-    color: var(--color-warning-text, #a05a00);
+    background: var(--color-warning);
+    border: 1px solid var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .decision-banner--approved {
-    /* Per project rule: use --color-success-text on a contrasting surface,
-     * not --color-main-background on a saturated --color-success. */
-    background: color-mix(in srgb, var(--color-success) 14%, var(--color-main-background));
+    background: var(--color-success);
     border: 1px solid var(--color-success);
     color: var(--color-success-text);
 }
@@ -2244,8 +2259,8 @@ export default {
 }
 
 .decision-banner--denied {
-    background: color-mix(in srgb, var(--color-error-text) 10%, var(--color-main-background));
-    border: 1px solid var(--color-error-text);
+    background: var(--color-error);
+    border: 1px solid var(--color-error);
     color: var(--color-error-text);
 }
 
@@ -2306,7 +2321,7 @@ export default {
     border-radius: var(--border-radius);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-family: inherit;
     box-sizing: border-box;
     resize: vertical;
@@ -2417,7 +2432,7 @@ export default {
 }
 
 .teamhub-image-dialog__divider {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     text-align: center;
     margin: 0;

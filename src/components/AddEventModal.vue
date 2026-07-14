@@ -135,13 +135,13 @@
             <div class="addevent-modal__field">
                 <div class="addevent-modal__attendees-header">
                     <label class="addevent-modal__label">{{ t('teamhub', 'Attendees') }}</label>
-                    <button
+                    <!-- v3.100.15: NcButton (tertiary). -->
+                    <NcButton
                         v-if="members.length > 0"
-                        type="button"
-                        class="addevent-modal__select-all"
+                        variant="tertiary"
                         @click="toggleSelectAll">
                         {{ allSelected ? t('teamhub', 'Deselect all') : t('teamhub', 'Select all') }}
-                    </button>
+                    </NcButton>
                 </div>
                 <div v-if="loadingMembers" class="addevent-modal__members-loading">
                     <NcLoadingIcon :size="16" />
@@ -447,7 +447,7 @@ export default {
     border-radius: var(--border-radius-large);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-family: inherit;
     box-sizing: border-box;
     transition: border-color 0.15s;
@@ -472,13 +472,13 @@ export default {
 
 .addevent-modal__field-error {
     display: block;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-error-text);
     margin-top: 4px;
 }
 
 .addevent-modal__hint {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 4px 0 0;
 }
@@ -533,21 +533,8 @@ export default {
     margin-bottom: 0;
 }
 
-.addevent-modal__select-all {
-    font-size: 12px;
-    color: var(--color-primary-element);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    text-decoration: underline;
-}
-
-.addevent-modal__select-all:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-    border-radius: 2px;
-}
+/* v3.100.15: .addevent-modal__select-all block retired — the raw
+   <button> is now NcButton (tertiary). */
 
 .addevent-modal__members {
     list-style: none;
@@ -573,13 +560,14 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-/* Error */
+/* v3.100.14: full-saturation error banner per SKILLS.md § "State-coloured
+   backgrounds" (was a 10% color-mix() soft tint). */
 .addevent-modal__error {
     font-size: 13px;
     color: var(--color-error-text);
     margin: 0 0 16px;
     padding: 10px 14px;
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
+    background: var(--color-error);
     border-radius: var(--border-radius-large);
     border: 1px solid var(--color-error);
 }

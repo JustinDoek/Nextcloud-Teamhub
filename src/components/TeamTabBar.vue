@@ -16,7 +16,7 @@
 
         <!--
             Draggable tabs.
-            Mouse: drag using the ⠿ handle.
+            Mouse: drag using the grip handle at the left of the tab.
             Keyboard: Tab/Shift+Tab to focus a tab, then Left/Right arrow to reorder.
         -->
         <draggable
@@ -42,7 +42,7 @@
                     @click="setView('talk')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <Chat :size="16" />
                     {{ t('teamhub', 'Chat') }}
                 </button>
@@ -60,7 +60,7 @@
                     @click="setView('files')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <Folder :size="16" />
                     {{ t('teamhub', 'Files') }}
                 </button>
@@ -78,7 +78,7 @@
                     @click="onCalendarTabClick"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <Calendar :size="16" />
                     {{ t('teamhub', 'Calendar') }}
                     <span v-if="resources.calendar.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} calendars', { n: resources.calendar.length })">{{ resources.calendar.length }}</span>
@@ -97,7 +97,7 @@
                     @click="onDeckTabClick"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <CardText :size="16" />
                     {{ t('teamhub', 'Deck') }}
                     <span v-if="resources.deck.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} boards', { n: resources.deck.length })">{{ resources.deck.length }}</span>
@@ -116,7 +116,7 @@
                     @click="setView('presence')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <OfficeBuildingIcon :size="16" />
                     {{ t('teamhub', 'Presence') }}
                 </button>
@@ -134,7 +134,7 @@
                     @click="setView('decisions')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <GavelIcon :size="16" />
                     {{ t('teamhub', 'Decisions') }}
                 </button>
@@ -152,9 +152,45 @@
                     @click="setView('timeline')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <TimelineIcon :size="16" />
                     {{ t('teamhub', 'Timeline') }}
+                </button>
+
+                <!-- Budget tab — Advanced projects only (v3.92.0) -->
+                <button
+                    v-else-if="tab.key === 'budget'"
+                    id="tab-budget"
+                    :key="'tab-budget'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'budget' }"
+                    :aria-selected="currentView === 'budget' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('budget')"
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
+                    <WalletOutlineIcon :size="16" />
+                    {{ t('teamhub', 'Budget') }}
+                </button>
+
+                <!-- Time investment tab — Advanced projects only (v3.96.0) -->
+                <button
+                    v-else-if="tab.key === 'time'"
+                    id="tab-time"
+                    :key="'tab-time'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'time' }"
+                    :aria-selected="currentView === 'time' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('time')"
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
+                    <ClockOutlineIcon :size="16" />
+                    {{ t('teamhub', 'Time') }}
                 </button>
 
                 <!-- External app tabs -->
@@ -170,7 +206,7 @@
                     @click="setView(tab.key)"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <img
                         v-if="tab.appId"
                         :src="appIconUrl(tab.appId)"
@@ -194,7 +230,7 @@
                     @click="setView(tab.key)"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <Web :size="14" />
                     {{ tab.label }}
                 </button>
@@ -211,7 +247,7 @@
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <span class="teamhub-tab-drag-handle" aria-hidden="true">⠿</span>
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <OpenInNew :size="14" />
                     {{ tab.label }}
                 </a>
@@ -316,7 +352,13 @@ import Web from 'vue-material-design-icons/Web.vue'
 import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
 import GavelIcon          from 'vue-material-design-icons/Gavel.vue'
 import TimelineIcon       from 'vue-material-design-icons/TimelineCheckOutline.vue'
+import WalletOutlineIcon  from 'vue-material-design-icons/WalletOutline.vue'
+import ClockOutlineIcon   from 'vue-material-design-icons/ClockOutline.vue'
 import ChevronDown        from 'vue-material-design-icons/ChevronDown.vue'
+// v3.100.14: replaces the ⠿ Braille character previously used as a
+// drag handle. See gui.md § 13 — the Braille glyph renders
+// inconsistently across fonts and is not localisable.
+import DragVariant        from 'vue-material-design-icons/DragVariant.vue'
 
 export default {
     name: 'TeamTabBar',
@@ -326,7 +368,7 @@ export default {
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
         OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon,
-        TimelineIcon, ChevronDown,
+        TimelineIcon, WalletOutlineIcon, ClockOutlineIcon, ChevronDown, DragVariant,
     },
 
     props: {
@@ -510,6 +552,10 @@ export default {
             case 'decisions':
                 return true
             case 'timeline':
+                return true
+            case 'budget':
+                return true
+            case 'time':
                 return true
             default:
                 // ext-* and link-* tabs always render
@@ -731,6 +777,8 @@ export default {
             case 'presence': return 'OfficeBuildingIcon'
             case 'decisions': return 'GavelIcon'
             case 'timeline': return 'TimelineIcon'
+            case 'budget': return 'WalletOutlineIcon'
+            case 'time': return 'ClockOutlineIcon'
             default:
                 if (tab.key.startsWith('link-')) return 'Web'
                 return 'Puzzle'
@@ -764,17 +812,23 @@ export default {
     display: contents;
 }
 
+/* v3.104.4: retired --border-radius-pill in favour of NcButton's
+   --border-radius-element (with --border-radius-large fallback for
+   older themes) so the tab shape lines up with the toolbar buttons
+   ("Time settings", "Add expense", etc.) sitting immediately below
+   the tab bar. Pill tabs next to rounded-rect buttons read as two
+   inconsistent shape languages. */
 .teamhub-tab {
     display: inline-flex;
     align-items: center;
     gap: 4px;
     padding: 6px 14px;
-    border-radius: var(--border-radius-pill);
+    border-radius: var(--border-radius-element, var(--border-radius-large, 8px));
     border: none;
     background: transparent;
     color: var(--color-text-maxcontrast);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     transition: background 0.15s, color 0.15s;
     text-decoration: none;
@@ -803,14 +857,18 @@ export default {
     border: 1px solid var(--color-border);
 }
 
+/* v3.100.14: was a <span> wrapping the ⠿ Braille character; now an
+   MDI DragVariant icon component (size handled via the :size prop, so
+   the font-size rule that sized the glyph is gone). */
 .teamhub-tab-drag-handle {
     cursor: grab;
     opacity: 0;
     transition: opacity 0.12s;
-    font-size: 13px;
     line-height: 1;
     color: var(--color-text-maxcontrast);
     user-select: none;
+    display: inline-flex;
+    align-items: center;
 }
 
 .teamhub-tab:hover .teamhub-tab-drag-handle {
@@ -825,7 +883,7 @@ export default {
 .teamhub-tab-dragging {
     cursor: grabbing;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-    border-radius: var(--border-radius-pill);
+    border-radius: var(--border-radius-element, var(--border-radius-large, 8px));
 }
 
 .teamhub-tab-add {
@@ -908,7 +966,7 @@ export default {
     background: transparent;
     color: var(--color-main-text);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     text-decoration: none;
     white-space: nowrap;
 }
@@ -917,9 +975,12 @@ export default {
     background: var(--color-background-hover);
 }
 
+/* v3.100.14: full-saturation active state per SKILLS.md, matching the
+   main tab-bar .teamhub-tab.active treatment (was
+   --color-primary-element-light). */
 .teamhub-tab-more-item.active {
-    background: var(--color-primary-element-light);
-    color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     font-weight: 600;
 }
 

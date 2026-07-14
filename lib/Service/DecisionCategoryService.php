@@ -41,6 +41,7 @@ class DecisionCategoryService {
         private DecisionCategoryApproverMapper  $approverMapper,
         private IDBConnection                   $db,
         private IUserManager                    $userManager,
+        private \Psr\Container\ContainerInterface $container,
         private LoggerInterface                 $logger,
     ) {}
 
@@ -323,6 +324,23 @@ class DecisionCategoryService {
     }
 
     private function findTeamOwnerUid(string $teamId): ?string {
+        // v3.100.8 (apps.md R-1) — resolve via CirclesManager first;
+        // fall back to a direct SELECT when the API is unavailable
+        // (background job with no session, hidden circle, missing Circles).
+        try {
+            $circlesMgr = $this->container->get(\OCA\Circles\CirclesManager::class);
+            $circle = $circlesMgr->getCircle($teamId);
+            $owner = $circle->getOwner();
+            $uid = $owner?->getUserId();
+            if (is_string($uid) && $uid !== '') {
+                return $uid;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][DecisionCategoryService] findTeamOwnerUid: CirclesManager path unavailable — using DB fallback', [
+                'teamId' => $teamId, 'reason' => $e->getMessage(),
+            ]);
+        }
+
         $qb = $this->db->getQueryBuilder();
         $qb->select('user_id')
             ->from('circles_member')

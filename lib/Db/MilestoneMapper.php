@@ -48,6 +48,31 @@ class MilestoneMapper extends QBMapper {
         return $this->findEntities($qb);
     }
 
+    /**
+     * All milestones across every team whose date has passed and that have
+     * not yet been auto-posted to the stream. One query — the hourly
+     * MilestoneAutoPostJob calls this once per sweep.
+     *
+     * Filters:
+     *   - milestone_date IS NOT NULL AND milestone_date <= $upToTs
+     *   - posted_at IS NULL
+     *
+     * @return Milestone[]
+     */
+    public function findDueUnposted(int $upToTs): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->isNotNull('milestone_date'))
+            ->andWhere($qb->expr()->lte(
+                'milestone_date',
+                $qb->createNamedParameter($upToTs, IQueryBuilder::PARAM_INT)
+            ))
+            ->andWhere($qb->expr()->isNull('posted_at'))
+            ->orderBy('milestone_date', 'ASC');
+        return $this->findEntities($qb);
+    }
+
     public function insertMilestone(
         string $teamId,
         string $label,

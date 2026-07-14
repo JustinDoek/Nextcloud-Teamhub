@@ -588,17 +588,22 @@ export default {
     padding: 0 6px;
     margin-left: 6px;
     border-radius: 9px;
-    background: #c8253f !important;
-    color: #ffffff !important;
+    /* v3.100.16: NC theme tokens (was hard-coded #c8253f red + #ffffff
+       with !important — the pinned hex didn't follow the dark theme
+       and the !important papered over other CSS bleed). The !important
+       stays because the widget tab bar's own :hover/:active rules
+       otherwise overwrite the badge fill. */
+    background: var(--color-error) !important;
+    color: var(--color-error-text) !important;
     /* Tokens — pill weight, slightly larger than the default pill size */
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: var(--th-widget-pill-weight);
     line-height: 1;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25), 0 1px 2px rgba(0,0,0,0.15);
 }
 
 .th-decisions-widget__tab--active .th-decisions-widget__tab-badge {
-    background: #c8253f !important;
-    color: #ffffff !important;
+    background: var(--color-error) !important;
+    color: var(--color-error-text) !important;
 }
 </style>

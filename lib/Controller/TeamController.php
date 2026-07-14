@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ActivityService;
+use OCA\TeamHub\Service\DeckService;
 use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
 use OCA\TeamHub\Service\MaintenanceService;
@@ -27,6 +28,8 @@ use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 class TeamController extends Controller {
+    use ExceptionResponseTrait;
+
     public function __construct(
         string $appName,
         IRequest $request,
@@ -41,10 +44,21 @@ class TeamController extends Controller {
         private TaskService $taskService,
         private TimelineService $timelineService,
         private MilestoneService $milestoneService,
+        // v3.98.2 — for the createDeckStack endpoint powering the Compass
+        // "Define workstreams" Planning-phase activity.
+        private DeckService $deckService,
         private IConfig $config,
         private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
+        private \OCP\App\IAppManager $appManager,
+        private \OCP\IDBConnection $db,
+        // Container is required only for optional-app class lookups
+        // (Deck's CardMapper, IntraVox's PageService) that we cannot
+        // import as constructor types without hard-linking to those
+        // apps at compile time. See the deckDiagnostic /
+        // intravoxDiagnostic endpoints.
+        private \Psr\Container\ContainerInterface $container,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -77,22 +91,16 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function createTeam(string $name, string $description = ''): JSONResponse {
         try {
             $team = $this->teamService->createTeam($name);
             return new JSONResponse($team, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
-            $this->logger->error('Failed to create team', [
-                'exception' => $e,
-                'app' => Application::APP_ID,
-            ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->exceptionResponse($e, 'Failed to create team');
         }
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function updateTeam(string $teamId): JSONResponse {
         try {
             $body = $this->request->getParams();
@@ -114,12 +122,9 @@ class TeamController extends Controller {
             // the full team list on the next navigation.
             return new JSONResponse(['success' => true, 'id' => $teamId]);
         } catch (\Throwable $e) {
-            $this->logger->error('Failed to update team', [
-                'teamId'    => $teamId,
-                'exception' => $e,
-                'app'       => Application::APP_ID,
+            return $this->exceptionResponse($e, 'Failed to update team', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
 
@@ -127,15 +132,32 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function searchUsers(): JSONResponse {
         try {
-            $q = $this->request->getParam('q', '');
-            if (strlen($q) < 2) {
+            $q = (string)$this->request->getParam('q', '');
+            // M-5 — bound the query. Search terms are always short in
+            // practice; without an upper bound a client can post arbitrarily
+            // large strings to a public endpoint.
+            if (strlen($q) < 2 || strlen($q) > 200) {
                 return new JSONResponse([]);
             }
             $teamId = (string)($this->request->getParam('teamId', ''));
+            // Reject obviously malformed teamIds cheaply — the mapper
+            // bind protects against injection but not against 10 000
+            // pointless SELECTs from a fuzzer.
+            if ($teamId !== '' && !preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $teamId)) {
+                return new JSONResponse([]);
+            }
             $users = $this->memberService->searchUsers($q, 10, $teamId);
             return new JSONResponse($users);
         } catch (\Throwable $e) {
-            return new JSONResponse([], Http::STATUS_INTERNAL_SERVER_ERROR);
+            // M-4 — log unexpected failures. Return a distinctive envelope
+            // so the frontend can tell "empty result" from "server error".
+            $this->logger->error('[TeamHub][TeamController] searchUsers failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(
+                ['error' => 'Search failed'],
+                Http::STATUS_INTERNAL_SERVER_ERROR,
+            );
         }
     }
 
@@ -147,7 +169,7 @@ class TeamController extends Controller {
             $data = $this->memberService->getTeamMembers($teamId);
             return new JSONResponse($data);
         } catch (\Throwable $e) {
-            $this->logger->error('[TeamController] Failed to get team members', [
+            $this->logger->error('[TeamHub][TeamController] Failed to get team members', [
                 'teamId' => $teamId,
                 'exception' => $e,
                 'app' => Application::APP_ID,
@@ -181,7 +203,7 @@ class TeamController extends Controller {
                 'talkAvailable'  => $talkAvailable,
             ]);
         } catch (\Throwable $e) {
-            $this->logger->error('[TeamController] Failed to get all effective members', [
+            $this->logger->error('[TeamHub][TeamController] Failed to get all effective members', [
                 'teamId' => $teamId,
                 'exception' => $e,
                 'app' => Application::APP_ID,
@@ -202,7 +224,7 @@ class TeamController extends Controller {
             $data = $this->memberService->getMembersForManage($teamId);
             return new JSONResponse($data);
         } catch (\Throwable $e) {
-            $this->logger->error('[TeamController] Failed to get manage members', [
+            $this->logger->error('[TeamHub][TeamController] Failed to get manage members', [
                 'teamId' => $teamId,
                 'exception' => $e,
                 'app' => Application::APP_ID,
@@ -234,7 +256,7 @@ class TeamController extends Controller {
             $apps = $this->teamService->getTeamApps($teamId);
             return new JSONResponse($apps);
         } catch (\Exception $e) {
-            $this->logger->error('[TeamController] getTeamApps failed', [
+            $this->logger->error('[TeamHub][TeamController] getTeamApps failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -295,7 +317,7 @@ class TeamController extends Controller {
 
             return new JSONResponse(['success' => true, 'results' => $results]);
         } catch (\Exception $e) {
-            $this->logger->error('[TeamController] updateTeamApps failed', [
+            $this->logger->error('[TeamHub][TeamController] updateTeamApps failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -321,7 +343,7 @@ class TeamController extends Controller {
             $result = $this->resourceService->deleteTeamResource($teamId, $resourceKey);
             return new JSONResponse(['success' => true, 'result' => $result]);
         } catch (\Exception $e) {
-            $this->logger->error('[TeamController] deleteTeamResource failed', [
+            $this->logger->error('[TeamHub][TeamController] deleteTeamResource failed', [
                 'teamId' => $teamId,
                 'app'    => $app,
                 'error'  => $e->getMessage(),
@@ -359,18 +381,35 @@ class TeamController extends Controller {
 
     #[NoAdminRequired]
     #[NoCSRFRequired]
+    public function getIntravoxTeamPage(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $team = $this->teamService->getTeam($teamId);
+            $page = $this->intravoxService->getTeamPage($teamId, $team['name'] ?? '');
+            return new JSONResponse($page);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
     public function createIntravoxPage(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
             $team   = $this->teamService->getTeam($teamId);
-            $result = $this->intravoxService->createPage($teamId, $team['name'] ?? '');
+            // Project Teams (v3.88.x) — optional projectMode ('basic'|'advanced')
+            // seeds the 9-element charter for Advanced projects only. Absent/other
+            // values keep the existing blank-page behaviour unchanged.
+            $projectMode = $this->request->getParam('projectMode');
+            $result = $this->intravoxService->createPage($teamId, $team['name'] ?? '', $projectMode);
             $this->intravoxService->invalidateSubPagesCache($teamId);
             if (isset($result['error'])) {
                 return new JSONResponse(['error' => $result['error']], Http::STATUS_BAD_REQUEST);
             }
             return new JSONResponse(['success' => true, 'result' => $result]);
         } catch (\Exception $e) {
-            $this->logger->error('[TeamController] createIntravoxPage failed', [
+            $this->logger->error('[TeamHub][TeamController] createIntravoxPage failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -387,7 +426,7 @@ class TeamController extends Controller {
             $this->intravoxService->invalidateSubPagesCache($teamId);
             return new JSONResponse(['success' => true, 'result' => $result]);
         } catch (\Exception $e) {
-            $this->logger->error('[TeamController] deleteIntravoxPage failed', [
+            $this->logger->error('[TeamHub][TeamController] deleteIntravoxPage failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -447,10 +486,8 @@ class TeamController extends Controller {
             $since = (int)($this->request->getParam('since', 0));
             $items = $this->activityService->getTeamActivity($teamId, $limit, $since);
             return new JSONResponse(['activities' => $items]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
         }
     }
 
@@ -461,10 +498,8 @@ class TeamController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
             $events = $this->activityService->getTeamCalendarEvents($teamId);
             return new JSONResponse($events);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
         }
     }
 
@@ -486,13 +521,10 @@ class TeamController extends Controller {
 
             $tasks = $this->taskService->getTeamTasks($teamId);
             return new JSONResponse($tasks);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->warning('[TeamHub][TeamController] getTeamTasks failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load team tasks', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -506,7 +538,13 @@ class TeamController extends Controller {
      *   from (int, required) — window start as Unix timestamp
      *   to   (int, required) — window end   as Unix timestamp
      *
-     * Returns: { events: [...] }
+     * Returns: { events: [...], stacks: [...] }
+     *
+     * `stacks` (Session 3, Planning-phase swimlane view) is the full,
+     * date-independent list of the team's connected Deck stacks (workstreams),
+     * ordered to match Deck's own stack order — so a stack with no cards in
+     * [from, to] can still render as an empty lane. Deck-specific and
+     * independently try-caught so a Deck failure never breaks `events`.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
@@ -531,15 +569,22 @@ class TeamController extends Controller {
             }
 
             $events = $this->timelineService->getEvents($teamId, $from, $to);
-            return new JSONResponse(['events' => $events]);
 
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->warning('[TeamHub][TeamController] getTimeline failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            try {
+                $stacks = $this->timelineService->getDeckStacks($teamId);
+            } catch (\Throwable $e) {
+                $stacks = [];
+                $this->logger->warning('[TeamHub][TeamController] getDeckStacks failed', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            return new JSONResponse(['events' => $events, 'stacks' => $stacks]);
+
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load timeline', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -562,10 +607,8 @@ class TeamController extends Controller {
             return new JSONResponse([
                 'timeline_enabled' => $stored === '1',
             ]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
         }
     }
 
@@ -590,13 +633,102 @@ class TeamController extends Controller {
             return new JSONResponse([
                 'timeline_enabled' => $enabled === '1',
             ]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'admin')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->warning('[TeamHub][TeamController] saveTimelineConfig failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save timeline config', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/budget/config
+     *
+     * Per-team on/off toggle for the Budget tab. Same NC-app-config storage
+     * pattern as the Timeline toggle: `budget_enabled_<teamId>` = "1"|"0",
+     * default "1" so newly-created Advanced projects show the tab out of
+     * the box. Only surfaced in the UI when project.mode === 'advanced' —
+     * this endpoint is Advanced-only in practice but is not gated on it here,
+     * mirroring how getTimelineConfig / saveTimelineConfig don't gate on the
+     * timeline being non-empty.
+     */
+    #[NoAdminRequired]
+    public function getBudgetConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $stored = $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1');
+            return new JSONResponse([
+                'budget_enabled' => $stored === '1',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/budget/config
+     * Body: { budget_enabled: 0|1 }.  Team admin required.
+     */
+    #[NoAdminRequired]
+    public function saveBudgetConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            $raw = $this->request->getParam('budget_enabled');
+            $enabled = (string)((int)(bool)$raw);
+            $this->config->setAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, $enabled);
+
+            return new JSONResponse([
+                'budget_enabled' => $enabled === '1',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save budget config', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/time/config
+     *
+     * Per-team on/off toggle for the Time investment tab (v3.96.0). Same
+     * NC-app-config storage pattern as the Budget toggle:
+     * `time_enabled_<teamId>` = "1"|"0", default "1" so newly-created Advanced
+     * projects show the tab out of the box. Only surfaced in the UI when
+     * project.mode === 'advanced'.
+     */
+    #[NoAdminRequired]
+    public function getTimeConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $stored = $this->config->getAppValue(Application::APP_ID, 'time_enabled_' . $teamId, '1');
+            return new JSONResponse([
+                'time_enabled' => $stored === '1',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/time/config
+     * Body: { time_enabled: 0|1 }.  Team admin required.
+     */
+    #[NoAdminRequired]
+    public function saveTimeConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            $raw = $this->request->getParam('time_enabled');
+            $enabled = (string)((int)(bool)$raw);
+            $this->config->setAppValue(Application::APP_ID, 'time_enabled_' . $teamId, $enabled);
+
+            return new JSONResponse([
+                'time_enabled' => $enabled === '1',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save time config', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -615,6 +747,57 @@ class TeamController extends Controller {
             return new JSONResponse(['items' => $this->milestoneService->listForTeam($teamId)]);
         } catch (\Exception $e) {
             return $this->milestoneErrorResponse($e, 'getMilestones');
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/milestones/pick (v3.97.5)
+     * Member-gated milestone list, used by the decision-compose picker.
+     * Same shape as getMilestones but only requires team membership. Data
+     * is already effectively visible to every member via the Timeline tab
+     * and the project-health widget.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function pickMilestones(string $teamId): JSONResponse {
+        try {
+            return new JSONResponse(['items' => $this->milestoneService->listForTeamAsMember($teamId)]);
+        } catch (\Exception $e) {
+            return $this->milestoneErrorResponse($e, 'pickMilestones');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/deck/stacks (v3.98.2)
+     * Body: { title: string (required, ≤255) }
+     *
+     * Creates a new stack on the team's Deck board. Admin-gated.
+     * Called from the ProjectSwimlanesModal — the Planning-phase
+     * "Define workstreams" activity. Team-creation no longer seeds
+     * default To do / In progress / Done stacks for Advanced projects;
+     * this endpoint is how admins add lanes as they're known.
+     */
+    #[NoAdminRequired]
+    public function createDeckStack(string $teamId): JSONResponse {
+        try {
+            // v3.98.2 — admin gate lives here, not in DeckService, to avoid
+            // the MemberService → ResourceService → DeckService cycle that
+            // NC's DI container walks into if DeckService takes a hard
+            // MemberService dependency. See DeckService::createStackOnTeamBoard
+            // docblock for the full story.
+            $this->memberService->requireAdminLevel($teamId);
+
+            $title = (string)($this->request->getParam('title', ''));
+            $result = $this->deckService->createStackOnTeamBoard($teamId, $title);
+            if (isset($result['error'])) {
+                $status = $result['error'] === 'Deck app not installed'
+                    ? Http::STATUS_NOT_FOUND
+                    : Http::STATUS_BAD_REQUEST;
+                return new JSONResponse(['error' => $result['error']], $status);
+            }
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to create stack');
         }
     }
 
@@ -638,6 +821,11 @@ class TeamController extends Controller {
 
             $row = $this->milestoneService->create($teamId, $label, $date, $user->getUID());
             return new JSONResponse($row, Http::STATUS_CREATED);
+        } catch (\OCA\TeamHub\Exception\LicenseGateException $e) {
+            return new JSONResponse([
+                'error' => $e->getMessage(), 'licenseGate' => true,
+                'enforcementLevel' => $e->getEnforcementLevel(),
+            ], Http::STATUS_FORBIDDEN);
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         } catch (\Exception $e) {
@@ -683,13 +871,8 @@ class TeamController extends Controller {
         }
     }
 
-    private function milestoneErrorResponse(\Exception $e, string $context): JSONResponse {
-        $status = (str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'admin'))
-            ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-        $this->logger->warning('[TeamHub][TeamController] ' . $context . ' failed', [
-            'error' => $e->getMessage(), 'app' => Application::APP_ID,
-        ]);
-        return new JSONResponse(['error' => $e->getMessage()], $status);
+    private function milestoneErrorResponse(\Throwable $e, string $context): JSONResponse {
+        return $this->exceptionResponse($e, ucfirst($context) . ' failed');
     }
 
     /**
@@ -714,13 +897,10 @@ class TeamController extends Controller {
 
             $result = $this->taskService->createTeamTask($teamId, $title, $duedate, $description, $calendarId);
             return new JSONResponse($result, Http::STATUS_CREATED);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->warning('[TeamHub][TeamController] createTeamTask failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to create team task', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -831,13 +1011,10 @@ class TeamController extends Controller {
 
             return new JSONResponse($files);
 
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'Access denied')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->error('[TeamHub][TeamController] getTeamFavoriteFiles failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load favorite files', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -880,13 +1057,10 @@ class TeamController extends Controller {
 
             return new JSONResponse($files);
 
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'Access denied')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->error('[TeamHub][TeamController] getTeamRecentFiles failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load recent files', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -1043,13 +1217,10 @@ class TeamController extends Controller {
             );
 
             return new JSONResponse($events);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->warning('[TeamHub][TeamController] getCalendarEventsForWeek failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load calendar events', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -1087,13 +1258,10 @@ class TeamController extends Controller {
 
             $result = $this->activityService->deleteCalendarEvents($teamId, $events);
             return new JSONResponse($result);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            $this->logger->warning('[TeamHub][TeamController] deleteCalendarEvents failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to delete calendar events', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -1233,7 +1401,11 @@ class TeamController extends Controller {
             $apps     = isset($body['apps']) && is_array($body['apps']) ? $body['apps'] : [];
             $teamName = isset($body['teamName']) ? (string)$body['teamName'] : '';
             $names    = isset($body['names']) && is_array($body['names']) ? $body['names'] : [];
-            $results  = $this->resourceService->createTeamResources($teamId, $apps, $teamName, $names);
+            // Project Teams (v3.90.x) — when 'advanced', DeckService seeds the
+            // "Project management" stack + starter cards. Any other value keeps
+            // today's behaviour unchanged.
+            $projectMode = isset($body['projectMode']) ? (string)$body['projectMode'] : null;
+            $results  = $this->resourceService->createTeamResources($teamId, $apps, $teamName, $names, $projectMode);
 
             // Persist the wizard's full app enabled/disabled state when provided.
             // The wizard sends appStates for ALL apps (both selected and deselected)
@@ -1294,9 +1466,9 @@ class TeamController extends Controller {
             $this->teamService->updateTeamConfig($teamId, $config);
             return new JSONResponse(['success' => true, 'config' => $config]);
         } catch (\Throwable $e) {
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+            return $this->exceptionResponse($e, 'Failed to update team config', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -1343,8 +1515,7 @@ class TeamController extends Controller {
 
             // Verify the target is already a member of this team. Team owners can only
             // transfer to existing members; promoting outsiders is an NC-admin action.
-            $db          = \OC::$server->get(\OCP\IDBConnection::class);
-            $targetLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $userId);
+            $targetLevel = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $userId);
             if ($targetLevel === 0) {
                 return new JSONResponse(
                     ['error' => 'Target user is not a member of this team'],
@@ -1357,11 +1528,9 @@ class TeamController extends Controller {
             $this->maintenanceService->assignOwner($teamId, $userId, false);
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
-            $msg = $e->getMessage();
-            $status = str_contains($msg, 'permissions') || str_contains($msg, 'member') || str_contains($msg, 'owner')
-                ? Http::STATUS_FORBIDDEN
-                : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $msg], $status);
+            return $this->exceptionResponse($e, 'Failed to transfer ownership', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -1370,7 +1539,8 @@ class TeamController extends Controller {
     public function intravoxDiagnostic(): JSONResponse {
         // Admin-only diagnostic: uses PHP Reflection to list all public methods
         // on IntraVox's PageService so we know exactly what to call.
-        if (!\OC::$server->get(\OCP\IGroupManager::class)->isAdmin(\OC::$server->get(\OCP\IUserSession::class)->getUser()?->getUID() ?? '')) {
+        $currentUid = $this->userSession->getUser()?->getUID();
+        if ($currentUid === null || !$this->groupManager->isAdmin($currentUid)) {
             return new JSONResponse(['error' => 'Admin required'], Http::STATUS_FORBIDDEN);
         }
         try {
@@ -1378,7 +1548,7 @@ class TeamController extends Controller {
             if (!$info['installed']) {
                 return new JSONResponse($info);
             }
-            $pageService = \OC::$server->get(\OCA\IntraVox\Service\PageService::class);
+            $pageService = $this->container->get(\OCA\IntraVox\Service\PageService::class);
             $ref = new \ReflectionClass($pageService);
             $methods = [];
             foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $m) {
@@ -1394,6 +1564,104 @@ class TeamController extends Controller {
             $info['methods'] = $methods;
             $info['class'] = $ref->getName();
             $info['file'] = $ref->getFileName();
+
+            // Optional content-format probe (v3.88.x) — pass ?pageId=<id> to see the
+            // raw shape IntraVox returns for an existing page's content, so TeamHub
+            // can learn the real field names before writing content (never guessed).
+            // Read-only: does not create, modify, or delete anything.
+            $pageId = $this->request->getParam('pageId');
+            if ($pageId !== null && $pageId !== '') {
+                $probe = ['pageId' => $pageId];
+                try {
+                    $probe['getPage'] = $pageService->getPage($pageId);
+                } catch (\Throwable $e) {
+                    $probe['getPage_error'] = $e->getMessage();
+                }
+                try {
+                    $probe['getCurrentPageContent'] = $pageService->getCurrentPageContent($pageId);
+                } catch (\Throwable $e) {
+                    $probe['getCurrentPageContent_error'] = $e->getMessage();
+                }
+                $info['contentProbe'] = $probe;
+            }
+
+            return new JSONResponse($info);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Reflection helper shared by the diagnostic endpoints — lists an object's
+     * own public method signatures (declaring-class filtered, so inherited
+     * framework methods don't clutter the output).
+     */
+    private function reflectPublicMethods(object $obj): array {
+        $ref = new \ReflectionClass($obj);
+        $methods = [];
+        foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $m) {
+            if ($m->getDeclaringClass()->getName() === $ref->getName()) {
+                $params = [];
+                foreach ($m->getParameters() as $p) {
+                    $type = $p->getType() ? $p->getType()->getName() : 'mixed';
+                    $params[] = $type . ' $' . $p->getName();
+                }
+                $methods[] = $m->getName() . '(' . implode(', ', $params) . ')';
+            }
+        }
+        return $methods;
+    }
+
+    // NC admin required — no #[NoAdminRequired] attribute intentionally omitted
+    #[NoCSRFRequired]
+    public function deckDiagnostic(): JSONResponse {
+        // Admin-only diagnostic (v3.90.x) — Deck card/assignee creation has no
+        // precedent anywhere in TeamHub (AddTaskModal.vue calls Deck's own OCS
+        // API from the frontend, bypassing this backend entirely, and has no
+        // assignee field at all). Lists CardMapper's real methods (expected to
+        // exist alongside the already-used StackMapper/BoardMapper/AclMapper)
+        // plus defensive probes for whichever class actually writes assignees,
+        // so the real API is confirmed before any write code is written.
+        // Read-only: does not create, modify, or delete anything.
+        $currentUid = $this->userSession->getUser()?->getUID();
+        if ($currentUid === null || !$this->groupManager->isAdmin($currentUid)) {
+            return new JSONResponse(['error' => 'Admin required'], Http::STATUS_FORBIDDEN);
+        }
+        try {
+            $info = ['installed' => $this->appManager->isInstalled('deck')];
+            if (!$info['installed']) {
+                return new JSONResponse($info);
+            }
+
+            try {
+                $cardMapper = $this->container->get(\OCA\Deck\Db\CardMapper::class);
+                $info['CardMapper'] = [
+                    'class'   => get_class($cardMapper),
+                    'methods' => $this->reflectPublicMethods($cardMapper),
+                ];
+            } catch (\Throwable $e) {
+                $info['CardMapper_error'] = $e->getMessage();
+            }
+
+            // Candidate assignee-write classes — probed defensively, each
+            // failure is reported rather than aborting the whole diagnostic.
+            $assigneeCandidates = [
+                'AssignedUsersMapper' => \OCA\Deck\Db\AssignedUsersMapper::class,
+                'CardService'         => \OCA\Deck\Service\CardService::class,
+                'AssignmentService'   => \OCA\Deck\Service\AssignmentService::class,
+            ];
+            foreach ($assigneeCandidates as $label => $className) {
+                try {
+                    $instance = $this->container->get($className);
+                    $info[$label] = [
+                        'class'   => get_class($instance),
+                        'methods' => $this->reflectPublicMethods($instance),
+                    ];
+                } catch (\Throwable $e) {
+                    $info[$label . '_error'] = $e->getMessage();
+                }
+            }
+
             return new JSONResponse($info);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()]);
@@ -1449,7 +1717,7 @@ class TeamController extends Controller {
 
             return new JSONResponse($result);
         } catch (\Throwable $e) {
-            $this->logger->error('[TeamController] searchAdminGroups failed', [
+            $this->logger->error('[TeamHub][TeamController] searchAdminGroups failed', [
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,
             ]);

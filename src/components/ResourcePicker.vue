@@ -153,19 +153,22 @@ export default {
     width: 100%;
 }
 
+/* v3.100.16: retired defensive hex fallbacks (`#ccc`, `#fff`, `#222`,
+   `#0082c9`) — NC always defines these tokens, so the fallbacks were
+   dead code that pinned specific values regardless of theme. */
 .resource-picker__select-el {
     width: 100%;
     min-height: 36px;
     padding: 4px 8px;
-    border: 1px solid var(--color-border, #ccc);
-    border-radius: var(--border-radius, 4px);
-    background: var(--color-main-background, #fff);
-    color: var(--color-main-text, #222);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
     font: inherit;
 }
 
 .resource-picker__select-el:focus-visible {
-    outline: 2px solid var(--color-primary-element, #0082c9);
+    outline: 2px solid var(--color-primary-element);
     outline-offset: 1px;
 }
 
@@ -177,7 +180,7 @@ export default {
 .resource-picker__error {
     display: block;
     margin-top: 4px;
-    color: var(--color-error-text, #8c0016);
-    font-size: 12px;
+    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
 }
 </style>

@@ -30,6 +30,24 @@ class MessageMapper {
     }
 
     /**
+     * Count question-type messages that have not been marked solved.
+     * Used by the project-health widget's Quality pillar.
+     */
+    public function countUnsolvedQuestions(string $teamId): int {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select($qb->createFunction('COUNT(*) AS cnt'))
+            ->from('teamhub_messages')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('message_type', $qb->createNamedParameter('question')))
+            ->andWhere($qb->expr()->eq('question_solved', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)));
+
+        $result = $qb->executeQuery();
+        $row    = $result->fetch();
+        $result->closeCursor();
+        return (int)($row['cnt'] ?? 0);
+    }
+
+    /**
      * Find non-pinned messages by team ID (pinned message is returned separately).
      */
     public function findByTeamId(string $teamId, int $limit = 50, int $offset = 0): array {

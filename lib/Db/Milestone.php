@@ -26,6 +26,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void     setCreatedBy(string $createdBy)
  * @method int      getCreatedAt()
  * @method void     setCreatedAt(int $createdAt)
+ * @method ?int     getPostedAt()
+ * @method void     setPostedAt(?int $postedAt)
  */
 class Milestone extends Entity {
 
@@ -34,9 +36,14 @@ class Milestone extends Entity {
     protected ?int    $milestoneDate = null;
     protected string $createdBy     = '';
     protected int    $createdAt     = 0;
+    // v3.97.0 — set by MilestoneAutoPostService when the milestone's date
+    // has passed and the hourly job has posted "Milestone reached: {label}"
+    // to the team stream. NULL until posted.
+    protected ?int   $postedAt      = null;
 
     public function __construct() {
         $this->addType('milestoneDate', 'integer');
         $this->addType('createdAt',     'integer');
+        $this->addType('postedAt',      'integer');
     }
 }

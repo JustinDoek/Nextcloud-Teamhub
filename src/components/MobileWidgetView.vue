@@ -107,6 +107,11 @@
                 <DecisionsWidget />
             </div>
 
+            <!-- v3.97.0 — Project Health widget on mobile -->
+            <div v-if="activeWidget === 'widget-project-health'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <ProjectHealthWidget @open-tab="$emit('set-view', $event)" />
+            </div>
+
             <!-- ─── External integration widgets ──────────────────── -->
             <template v-for="ext in teamWidgets">
                 <div
@@ -241,6 +246,8 @@ import IntegrationWidget from './IntegrationWidget.vue'
 import FilesWidget          from './FilesWidget.vue'
 import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
+import ProjectHealthWidget  from './ProjectHealthWidget.vue'
+import ViewDashboard        from 'vue-material-design-icons/ViewDashboard.vue'
 
 export default {
     name: 'MobileWidgetView',
@@ -253,11 +260,12 @@ export default {
         AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
         FileDocumentOutline, FilePlus, LocationExit, Plus, Puzzle,
-        TrashCan, VideoIcon,
+        TrashCan, VideoIcon, ViewDashboard,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
         IntravoxWidget, IntegrationWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
+        ProjectHealthWidget,
     },
 
     props: {
@@ -296,6 +304,8 @@ export default {
             'currentTeamId', 'resources',
             'teamWidgets', 'isCurrentUserDirectMember',
             'decisionsModuleEnabled', 'decisionsConfig',
+            // v3.97.0 — same gate as TeamWidgetGrid for the Project Health widget.
+            'budgetConfig', 'timeConfig', 'project',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -382,6 +392,22 @@ export default {
                     // TRANSLATORS: mobile navigation label for the Decisions widget
                     title: t('teamhub', 'Decisions'),
                     icon: 'GavelIcon',
+                })
+            }
+
+            // v3.97.0 — Project Health widget. Same gate as TeamWidgetGrid.
+            // Planning included so admins see the widget during setup, not
+            // only once execution starts.
+            if (this.project?.isProject
+                && this.project?.mode === 'advanced'
+                && (this.project?.phase === 'planning' || this.project?.phase === 'execution')
+                && this.budgetConfig?.can_view_budget
+                && this.timeConfig?.can_view_time) {
+                list.push({
+                    key: 'widget-project-health',
+                    // TRANSLATORS: mobile navigation label for the Project health widget
+                    title: t('teamhub', 'Project health'),
+                    icon: 'ViewDashboard',
                 })
             }
 
@@ -737,7 +763,7 @@ export default {
 }
 
 .teamhub-mobile-widget-title {
-    font-size: 16px;
+    font-size: var(--th-font-heading);
     font-weight: 600;
     margin: 0;
 }
@@ -776,7 +802,7 @@ export default {
 
 .teamhub-mobile-teaminfo__description {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     line-height: 1.5;
     color: var(--color-main-text);
 }
@@ -788,7 +814,7 @@ export default {
 }
 
 .teamhub-mobile-team-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     padding: 3px 8px;
     border-radius: var(--border-radius-pill, 999px);
     background: var(--color-background-dark);
@@ -805,7 +831,7 @@ export default {
 }
 
 .teamhub-mobile-teaminfo__owner-label {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     text-transform: uppercase;
     color: var(--color-text-maxcontrast);
     letter-spacing: 0.05em;
@@ -815,7 +841,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 /* ─── Members ──────────────────────────────────────────────── */
@@ -928,7 +954,7 @@ export default {
     border-radius: var(--border-radius);
     color: var(--color-main-text);
     text-align: left;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     cursor: pointer;
     transition: background 0.12s ease;
 }
@@ -1001,7 +1027,7 @@ export default {
 }
 
 .teamhub-mobile-icon-bar__label {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 500;
     line-height: 1.1;
     max-width: 64px;

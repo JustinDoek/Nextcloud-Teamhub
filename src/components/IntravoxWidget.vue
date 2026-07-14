@@ -92,30 +92,21 @@ export default {
                 const teamId = this.currentTeam?.id
                 if (!teamId) return
 
-                const teamNameLower = this.teamName.toLowerCase()
-                const slug = teamNameLower.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-
-                // 1. Find the team's main IntraVox page from the full page list
-                const response = await axios.get(generateUrl('/apps/intravox/api/pages'))
-                if (!response.data || !Array.isArray(response.data)) return
-
-                const pages = response.data
-                const existingTeamPage = pages.find(p =>
-                    p.title?.toLowerCase() === teamNameLower &&
-                    !p.uniqueId?.startsWith('template-')
-                ) || null
+                // Resolve the team's own IntraVox page unambiguously via the
+                // TeamHub backend, which disambiguates by PATH, not just title.
+                // Title-only matching (the old approach here, fetching
+                // /apps/intravox/api/pages in bulk and guessing) breaks once
+                // multiple teams share a page title — e.g. every Advanced
+                // project's page is titled "Contract" (translated).
+                const teamPageResp = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/teams/' + teamId + '/intravox/team-page')
+                )
+                const existingTeamPage = teamPageResp.data || null
 
                 if (existingTeamPage) {
-                    // Inject path and id since IntraVox API doesn't return them
-                    if (!existingTeamPage.path) {
-                        existingTeamPage.path = (this.intravoxParentPath || 'en/teamhub') + '/' + slug
-                    }
-                    if (!existingTeamPage.id) {
-                        existingTeamPage.id = slug
-                    }
                     this.teamPage = existingTeamPage
 
-                    // 2. Fetch sub-pages via TeamHub backend (uses getPageTree in-process)
+                    // Fetch sub-pages via TeamHub backend (uses getPageTree in-process)
                     try {
                         const subResp = await axios.get(
                             generateUrl('/apps/teamhub/api/v1/teams/' + teamId + '/intravox/subpages')
@@ -125,8 +116,6 @@ export default {
                         this.subPages = []
                     }
                 }
-
-                this.allPages = pages
 
                 this.$emit('pages-loaded', {
                     teamPage:    this.teamPage,

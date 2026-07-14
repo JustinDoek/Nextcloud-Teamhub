@@ -32,6 +32,7 @@ use Psr\Log\LoggerInterface;
  * Presence is derived from active rows in teamhub_team_app_resources.
  */
 class ResourceConnectController extends Controller {
+    use ExceptionResponseTrait;
 
     private const ALLOWED_APPS = ['talk', 'files', 'calendar', 'deck'];
 
@@ -92,15 +93,10 @@ class ResourceConnectController extends Controller {
 
             return new JSONResponse($result);
 
-        } catch (\Exception $e) {
-            $this->logger->warning('[TeamHub][ResourceConnectController] connect failed', [
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to connect resource', [
                 'teamId' => $teamId, 'app' => $app,
-                'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
             ]);
-            $status = (str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member'))
-                ? Http::STATUS_FORBIDDEN
-                : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 }

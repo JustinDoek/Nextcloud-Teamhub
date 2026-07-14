@@ -479,14 +479,14 @@ export default {
 
 <style scoped>
 .my-presence-panel { max-width: 900px; }
-.my-presence-panel__title { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
+.my-presence-panel__title { font-size: var(--th-font-heading-lg); font-weight: 600; margin: 0 0 6px; }
 .my-presence-panel__desc { font-size: 13px; color: var(--color-text-maxcontrast); margin: 0 0 24px; }
 
 .my-presence-loading { display: flex; justify-content: center; padding: 40px; }
 .my-presence-error { padding: 12px 16px; background: var(--color-error-background, var(--color-background-hover)); color: var(--color-error-text); border-radius: var(--border-radius); }
 
 .my-presence-section { margin-bottom: 36px; }
-.my-presence-section__title { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+.my-presence-section__title { font-size: var(--th-font-heading); font-weight: 600; margin: 0 0 4px; }
 .my-presence-section__desc { font-size: 13px; color: var(--color-text-maxcontrast); margin: 0 0 16px; }
 .my-presence-section--legend { margin-bottom: 24px; }
 
@@ -494,11 +494,11 @@ export default {
 .presence-grid__header,
 .presence-grid__row { display: grid; grid-template-columns: 80px repeat(7, 1fr); gap: 4px; min-width: 520px; }
 .presence-grid__day-label { text-align: center; font-size: 13px; font-weight: 500; color: var(--color-text-maxcontrast); padding: 4px 2px; }
-.presence-grid__half-label { font-size: 12px; color: var(--color-text-maxcontrast); display: flex; align-items: center; }
+.presence-grid__half-label { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); display: flex; align-items: center; }
 .presence-grid__cell { min-width: 60px; }
 
 .presence-grid__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.presence-grid__unsaved-hint { font-size: 12px; color: var(--color-warning-text, var(--color-text-maxcontrast)); }
+.presence-grid__unsaved-hint { font-size: var(--th-font-meta); color: var(--color-warning-text, var(--color-text-maxcontrast)); }
 
 .presence-legend__list { display: flex; flex-wrap: wrap; gap: 12px; }
 .presence-legend__item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -507,7 +507,14 @@ export default {
 
 .presence-picker-list { list-style: none; margin: 0; padding: 4px 0; }
 .presence-picker-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--border-radius); cursor: pointer; user-select: none; }
-.presence-picker-item:hover, .presence-picker-item:focus-visible { background: var(--color-background-hover); outline: none; }
+.presence-picker-item:hover { background: var(--color-background-hover); }
+/* v3.100.14 WCAG 2.4.7: previously grouped with :hover and set outline: none,
+   which silenced the keyboard focus ring entirely. Give focus its own ring. */
+.presence-picker-item:focus-visible {
+    background: var(--color-background-hover);
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: -2px;
+}
 .presence-picker-item--selected { background: var(--color-primary-light); }
 .presence-picker-item--clear { margin-top: 8px; border-top: 1px solid var(--color-border); border-radius: 0; padding-top: 12px; }
 .presence-picker-item__swatch { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; }
@@ -515,6 +522,6 @@ export default {
 .presence-picker-item__label { flex: 1; }
 .presence-picker-item__check { color: var(--color-primary); }
 .presence-picker-location { padding: 12px 12px 4px; display: flex; flex-direction: column; gap: 6px; }
-.presence-picker-location__label { font-size: 12px; color: var(--color-text-maxcontrast); }
+.presence-picker-location__label { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 .presence-picker-location__select { padding: 6px 10px; border-radius: var(--border-radius); border: 1px solid var(--color-border-dark); background: var(--color-main-background); color: var(--color-main-text); width: 100%; }
 </style>

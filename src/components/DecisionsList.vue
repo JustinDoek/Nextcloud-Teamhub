@@ -45,7 +45,7 @@
                         </span>
                     </div>
 
-                    <!-- Meta line: category · proposer · date.
+                    <!-- Meta line: category · milestone · proposer · date.
                          Impact and Level are not surfaced here — they live in
                          the detail panel where they're scannable. -->
                     <div class="th-decisions-list__meta">
@@ -53,6 +53,18 @@
                             <!-- TRANSLATORS: label preceding the category name on a decision row, e.g. "Category Beheer" -->
                             <span class="th-decisions-list__meta-label">{{ t('teamhub', 'Category') }}</span>
                             {{ d.category }}
+                        </span>
+                        <!-- v3.97.5 — milestone chip. Only rendered when the
+                             decision was linked to a milestone at propose time
+                             AND the milestone still exists (soft link: if it
+                             was deleted, milestoneLabel resolves to null and
+                             we hide the chip). -->
+                        <span
+                            v-if="d.milestoneLabel"
+                            class="th-decisions-list__meta-item th-decisions-list__milestone"
+                            :title="d.milestoneDate ? t('teamhub', 'Milestone: {label} — {date}', { label: d.milestoneLabel, date: d.milestoneDate }) : t('teamhub', 'Milestone: {label}', { label: d.milestoneLabel })">
+                            <FlagOutlineIcon :size="12" aria-hidden="true" />
+                            <span class="th-decisions-list__milestone-label">{{ d.milestoneLabel }}</span>
                         </span>
                         <span class="th-decisions-list__meta-item">
                             <!-- TRANSLATORS: short attribution line on a decision row, e.g. "by alice@example.com" -->
@@ -91,6 +103,7 @@ import GavelIcon               from 'vue-material-design-icons/Gavel.vue'
 import AlertCircleOutlineIcon  from 'vue-material-design-icons/AlertCircleOutline.vue'
 import CheckBoldIcon           from 'vue-material-design-icons/CheckBold.vue'
 import CloseIcon               from 'vue-material-design-icons/Close.vue'
+import FlagOutlineIcon         from 'vue-material-design-icons/FlagOutline.vue'
 
 export default {
     name: 'DecisionsList',
@@ -100,6 +113,7 @@ export default {
         AlertCircleOutlineIcon,
         CheckBoldIcon,
         CloseIcon,
+        FlagOutlineIcon,
     },
 
     emits: ['review-decision'],
@@ -266,14 +280,15 @@ export default {
     background: var(--color-border);
 }
 
+/* v3.100.16: accent bars use NC theme tokens (were --th-color-* hex). */
 .th-decisions-list__row--open       .th-decisions-list__accent { background: var(--color-primary-element); }
-.th-decisions-list__row--finalized  .th-decisions-list__accent { background: var(--th-color-warning); }
-.th-decisions-list__row--approved   .th-decisions-list__accent { background: var(--th-color-success); }
-.th-decisions-list__row--denied     .th-decisions-list__accent { background: var(--th-color-error); }
-.th-decisions-list__row--withdrawn  .th-decisions-list__accent { background: var(--th-color-neutral); }
+.th-decisions-list__row--finalized  .th-decisions-list__accent { background: var(--color-warning); }
+.th-decisions-list__row--approved   .th-decisions-list__accent { background: var(--color-success); }
+.th-decisions-list__row--denied     .th-decisions-list__accent { background: var(--color-error); }
+.th-decisions-list__row--withdrawn  .th-decisions-list__accent { background: var(--color-text-maxcontrast); }
 /* Legacy fallbacks for stale rows */
 .th-decisions-list__row--proposed   .th-decisions-list__accent { background: var(--color-primary-element); }
-.th-decisions-list__row--decided    .th-decisions-list__accent { background: var(--th-color-success); }
+.th-decisions-list__row--decided    .th-decisions-list__accent { background: var(--color-success); }
 
 /* ── Row body — clickable two-line layout ── */
 .th-decisions-list__body {
@@ -346,6 +361,25 @@ export default {
     letter-spacing: 0.04em;
 }
 
+/* v3.97.5 — milestone chip on the meta line. Sits next to the category
+ * chip; small flag icon + label. Uses the same colour token as impact
+ * pills to signal "project artifact linkage". */
+.th-decisions-list__milestone {
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    font-weight: 600;
+    font-size: var(--th-font-micro);
+    gap: 3px;
+}
+.th-decisions-list__milestone-label {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Date pushed to the right edge of the meta line */
 .th-decisions-list__date {
     margin-left: auto;
@@ -368,7 +402,7 @@ export default {
     gap: 4px;
     padding: 4px 8px;
     /* Tokens — pill-sized text */
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: var(--th-widget-pill-weight);
     border-radius: 12px;
     border: 1px solid transparent;
@@ -389,14 +423,15 @@ export default {
     cursor: not-allowed;
 }
 
+/* v3.100.16: review action uses NC theme tokens (was --th-color-* hex). */
 .th-decisions-list__action--review {
-    color: var(--th-color-success);
-    border-color: var(--th-color-success);
+    color: var(--color-success-text);
+    border-color: var(--color-success);
 }
 
 .th-decisions-list__action--review:not(:disabled):hover {
-    background: var(--th-color-success);
-    color: #fff;
+    background: var(--color-success);
+    color: var(--color-success-text);
 }
 
 @media (max-width: 320px) {

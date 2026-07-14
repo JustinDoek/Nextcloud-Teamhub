@@ -628,8 +628,14 @@ export default {
     border-radius: var(--border-radius-large);
 }
 
+/* v3.100.14: full "solved" state is already carried by the individual
+   .comment--solved chip inside the section (green fill). Dropping the
+   whole-panel 5% success tint (was a color-mix soft tint) keeps the
+   panel readable and avoids washing the entire comment thread green.
+   Neutral grouping panel per SKILLS.md § "State-coloured backgrounds"
+   ("Non-state surfaces … keep using --color-background-dark as before"). */
 .comments-section--solved {
-    background: color-mix(in srgb, var(--color-success) 5%, var(--color-background-dark));
+    background: var(--color-background-dark);
 }
 
 .comments-section__loading { 
@@ -672,25 +678,27 @@ export default {
     color: var(--color-main-background);
 }
 
-/* Decision: highlight the recorded answer */
+/* Decision: highlight the recorded answer
+   v3.100.14: full-saturation success per SKILLS.md § "State-coloured
+   backgrounds" (was a 14% color-mix soft tint). */
 .comment--decided-answer {
-    background: color-mix(in srgb, var(--color-success) 14%, var(--color-main-background));
+    background: var(--color-success);
     border: 2px solid var(--color-success);
     border-radius: var(--border-radius-large);
     padding: 8px;
     color: var(--color-success-text);
 }
 
+/* v3.100.14: full-saturation success badge (was a 22% color-mix soft tint). */
 .comment__decision-answer-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 10px;
-    /* Per project rule: --color-success-text on a soft-tinted background. */
-    background: color-mix(in srgb, var(--color-success) 22%, var(--color-main-background));
+    background: var(--color-success);
     border: 1px solid var(--color-success);
     color: var(--color-success-text);
 }
@@ -713,7 +721,7 @@ export default {
 }
 
 .comment__date { 
-    font-size: 11px; 
+    font-size: var(--th-font-micro); 
     color: var(--color-text-maxcontrast); 
 }
 
@@ -721,7 +729,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 10px;

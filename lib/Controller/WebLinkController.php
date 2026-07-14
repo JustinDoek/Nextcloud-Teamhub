@@ -12,14 +12,18 @@ use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
+use Psr\Log\LoggerInterface;
 
 class WebLinkController extends Controller {
+    use ExceptionResponseTrait;
+
     public function __construct(
         string $appName,
         IRequest $request,
         private WebLinkService $webLinkService,
         private MemberService $memberService,
         private MessageService $messageService,
+        private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
     }
@@ -45,8 +49,10 @@ class WebLinkController extends Controller {
         try {
             $links = $this->webLinkService->getTeamLinks($teamId);
             return new JSONResponse($links);
-        } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to list links', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -56,10 +62,10 @@ class WebLinkController extends Controller {
             $this->requireLinkLevel($teamId);
             $link = $this->webLinkService->createLink($teamId, $title, $url);
             return new JSONResponse($link, Http::STATUS_CREATED);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to create link', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -69,10 +75,10 @@ class WebLinkController extends Controller {
             $this->requireLinkLevel($teamId);
             $link = $this->webLinkService->updateLink($linkId, $title, $url, $sortOrder);
             return new JSONResponse($link);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to update link', [
+                'teamId' => $teamId, 'linkId' => $linkId,
+            ]);
         }
     }
 
@@ -82,10 +88,10 @@ class WebLinkController extends Controller {
             $this->requireLinkLevel($teamId);
             $this->webLinkService->deleteLink($linkId);
             return new JSONResponse(['success' => true]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to delete link', [
+                'teamId' => $teamId, 'linkId' => $linkId,
+            ]);
         }
     }
 }

@@ -372,7 +372,7 @@ export default {
 .delete-events-modal__day-label {
     margin: 0;
     padding: 6px 14px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -420,7 +420,7 @@ export default {
 }
 
 .delete-events-modal__event-title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     color: var(--color-main-text);
     overflow: hidden;
@@ -429,7 +429,7 @@ export default {
 }
 
 .delete-events-modal__event-time {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -439,7 +439,7 @@ export default {
 
 /* ── Footer ── */
 .delete-events-modal__selection-count {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0 0 12px;
 }

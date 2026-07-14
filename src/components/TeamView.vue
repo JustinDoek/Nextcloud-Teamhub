@@ -16,6 +16,84 @@
         <!-- ── Content area ─────────────────────────────────────────── -->
         <div class="teamhub-content">
 
+            <!-- Project phase stepper — advanced project teams only, on the Home view.
+                 v3.103.5: hidden on mobile. On phones (isMobile) the stepper
+                 stacks ABOVE MobileWidgetView inside .teamhub-content, which
+                 has overflow:hidden — the stepper eats vertical space and
+                 pushes the mobile icon-bar + FAB off-screen so users can't
+                 reach the widget-picker or the Add-message button. Setup
+                 flows belong on desktop; mobile is consumption. -->
+            <ProjectPhaseStepper
+                v-if="isAdvancedProject && !isMobile"
+                v-show="currentView === 'msgstream'"
+                :phase="project.phase"
+                :can-manage="isTeamAdmin"
+                @show-info="showProjectGuide = true" />
+
+            <!-- Project Compass panel — v3.98.0, folds in the pre-3.98.0
+                 auto-open ProjectPhaseGuide dialog behaviour. Advanced
+                 project teams only, on Home view. Setup checklist + Next
+                 up prompt; Walkthrough button opens the phase Guide on
+                 demand.
+                 v3.98.4 — moderator/admin only. Almost every checklist
+                 item requires admin (advance phase, set dates, add
+                 milestones, set budget total, define workstreams); a
+                 regular member seeing a panel of buttons that all 403 is
+                 friction, not guidance. Members still get the phase
+                 stepper + health widget + message stream, which cover
+                 read-only visibility. -->
+            <!-- v3.103.5: also hidden on mobile — same reason as the phase
+                 stepper above. The Compass is a substantial admin-only
+                 setup surface (checklist + next-up prompt + jump-links to
+                 Manage Team) that on a phone shoves the entire widget
+                 icon-bar + FAB off-screen. Admins do project setup on
+                 desktop; mobile users keep the raw MobileWidgetView. -->
+            <ProjectCompassPanel
+                v-if="isAdvancedProject && isTeamModerator && !isMobile"
+                v-show="currentView === 'msgstream'"
+                @open-manage-team-section="openManageTeam"
+                @set-view="setView"
+                @invite="showInviteModal = true"
+                @advance-phase="onCompassAdvancePhase"
+                @open-swimlanes-modal="showSwimlanesModal = true"
+                @generate-closing-artifact="showClosingArtifactModal = true"
+                @archive-team="showArchivePolicyModal = true"
+                @open-add-meeting="showAddMeeting = true" />
+
+            <!-- v3.99.0 — Closing artifact generator + archive-policy warning. -->
+            <ClosingArtifactModal
+                v-if="isAdvancedProject && isTeamAdmin"
+                :open="showClosingArtifactModal"
+                @update:open="showClosingArtifactModal = $event"
+                @generated="onClosingArtifactGenerated" />
+
+            <ArchivePolicyWarningModal
+                v-if="isAdvancedProject"
+                :open="showArchivePolicyModal"
+                @update:open="showArchivePolicyModal = $event"
+                @confirm="onArchivePolicyConfirmed" />
+
+            <!-- v3.98.2 — Planning-phase "Define workstreams" modal.
+                 Opens from the Compass; adds lanes to the team's Deck
+                 board via POST /deck/stacks. Emits lanes-changed on
+                 success so the Compass refetches readiness. -->
+            <ProjectSwimlanesModal
+                v-if="isAdvancedProject"
+                :open="showSwimlanesModal"
+                @update:open="showSwimlanesModal = $event"
+                @lanes-changed="onLanesChanged" />
+
+            <!-- Project phase Guide — v3.98.0 no longer auto-opens on team
+                 creation. Kept as an on-demand walkthrough dialog, opened
+                 from ProjectCompassPanel's Walkthrough button and from
+                 the phase stepper info button. -->
+            <ProjectPhaseGuide
+                v-if="isAdvancedProject && isTeamAdmin"
+                :open="showProjectGuide"
+                :phase="project.phase"
+                @update:open="showProjectGuide = $event"
+                @open-project-settings="onOpenProjectSettingsFromGuide" />
+
             <!-- Home view — widget grid -->
             <TeamWidgetGrid
                 v-show="currentView === 'msgstream'"
@@ -93,14 +171,23 @@
                 @propose-decision="openCompose"
                 @propose-decision-superseding="openDecisionCompose" />
 
-            <!-- Timeline tab — visual timeline of Calendar, Deck and Decisions events.
-                 Uses the same AppEmbed iframe pattern as Talk/Files/Calendar/Deck, with
-                 controls (period nav, view-mode dropdown, source toggles) rendered in
-                 the embed bar exactly like Calendar's pattern — the iframe itself holds
-                 no control UI, only the rendered timeline canvas.
+            <!-- Timeline tab — Advanced-mode projects get the Planning-phase
+                 swimlane view (Session 3): a native Vue component with Deck
+                 stacks as workstream lanes, instead of the classic
+                 source-banded Timeline iframe below. -->
+            <ProjectSwimlaneView
+                v-if="(preloadedViews.has('timeline') || currentView === 'timeline') && currentTeamId && isAdvancedProject"
+                v-show="currentView === 'timeline'" />
+
+            <!-- Timeline tab (Basic-mode teams) — visual timeline of Calendar, Deck and
+                 Decisions events. Uses the same AppEmbed iframe pattern as
+                 Talk/Files/Calendar/Deck, with controls (period nav, view-mode dropdown,
+                 source toggles) rendered in the embed bar exactly like Calendar's
+                 pattern — the iframe itself holds no control UI, only the rendered
+                 timeline canvas.
                  preload=false: the page fetches its own data, no need to warm it up. -->
             <AppEmbed
-                v-if="(preloadedViews.has('timeline') || currentView === 'timeline') && currentTeamId"
+                v-else-if="(preloadedViews.has('timeline') || currentView === 'timeline') && currentTeamId"
                 v-show="currentView === 'timeline'"
                 ref="timelineEmbed"
                 :url="timelineUrl"
@@ -111,6 +198,23 @@
                 @action="onTimelineEmbedAction"
                 @select="onTimelineEmbedSelect"
                 @menu-toggle="onTimelineEmbedMenuToggle" />
+
+            <!-- Budget tab — Advanced-mode projects only. Per-lane
+                 view_min_level filters visible lanes server-side; the tab is
+                 registered for every Advanced project (owner can toggle a
+                 lane's visibility down to admin-only from Manage Team). -->
+            <ProjectBudgetView
+                v-if="(preloadedViews.has('budget') || currentView === 'budget') && currentTeamId && isAdvancedProject"
+                v-show="currentView === 'budget'"
+                @open-project-settings="openManageTeam" />
+
+            <!-- Time investment tab (v3.96.0) — Advanced-mode projects only.
+                 timeConfig.can_view_time is precomputed server-side (role
+                 floor OR project-member row). -->
+            <ProjectTimeView
+                v-if="(preloadedViews.has('time') || currentView === 'time') && currentTeamId && isAdvancedProject"
+                v-show="currentView === 'time'"
+                @open-project-settings="openManageTeam" />
 
             <!-- External menu_item integrations — preloaded by registry_id -->
             <template v-for="menuItem in externalMenuItems">
@@ -284,6 +388,7 @@ import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { showError, showSuccess } from '@nextcloud/dialogs'
+import { getCurrentUser } from '@nextcloud/auth'
 import { NcButton, NcDialog, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
 
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
@@ -310,9 +415,18 @@ import DeleteEventsModal from './DeleteEventsModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
+import ProjectSwimlaneView from './ProjectSwimlaneView.vue'
+import ProjectBudgetView from './ProjectBudgetView.vue'
+import ProjectTimeView from './ProjectTimeView.vue'
 import TeamPresenceView   from './TeamPresenceView.vue'
 import TeamDecisionsView  from './TeamDecisionsView.vue'
 import ComposeDecisionModal from './ComposeDecisionModal.vue'
+import ProjectPhaseStepper from './ProjectPhaseStepper.vue'
+import ProjectPhaseGuide from './ProjectPhaseGuide.vue'
+import ProjectCompassPanel from './ProjectCompassPanel.vue'
+import ProjectSwimlanesModal from './ProjectSwimlanesModal.vue'
+import ClosingArtifactModal from './ClosingArtifactModal.vue'
+import ArchivePolicyWarningModal from './ArchivePolicyWarningModal.vue'
 
 function debounce(fn, delay) {
     let timer = null
@@ -362,10 +476,16 @@ export default {
         CalendarIcon, GavelIcon, CardTextIcon, FilterVariant, Printer,
         TeamTabBar, TeamWidgetGrid,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
-        AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed,
+        AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
         TeamPresenceView,
         TeamDecisionsView,
         ComposeDecisionModal,
+        ProjectPhaseStepper,
+        ProjectPhaseGuide,
+        ProjectCompassPanel,
+        ProjectSwimlanesModal,
+        ClosingArtifactModal,
+        ArchivePolicyWarningModal,
     },
 
     data() {
@@ -451,6 +571,13 @@ export default {
             // Compose-decision modal (Session A) — opened by widget header `+`
             // and by TeamDecisionsView's Propose button. Single instance.
             composeDecisionOpen: false,
+            // Project-owner onboarding (v3.90.x) — controls ProjectPhaseGuide visibility.
+            showProjectGuide: false,
+            // v3.98.2 — Planning-phase workstreams modal (opened from Compass).
+            showSwimlanesModal: false,
+            // v3.99.0 — Closing-phase modals (opened from Compass).
+            showClosingArtifactModal: false,
+            showArchivePolicyModal: false,
             widgetDynamicActions: {},
             // Set of view keys whose iframe has been rendered at least once.
             // Once a view is in this set the AppEmbed is kept in the DOM
@@ -466,9 +593,49 @@ export default {
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
-            'timelineConfig',
+            'timelineConfig', 'budgetConfig', 'timeConfig', 'project',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
+
+        /**
+         * Project Teams (v3.88.0) — true only for teams created from the Project
+         * template in Advanced mode. Gates the phase stepper on the Home view.
+         * Basic projects (and non-project teams) never show lifecycle UI.
+         */
+        isAdvancedProject() {
+            return !!this.project?.isProject && this.project?.mode === 'advanced'
+        },
+
+        /**
+         * Project-owner onboarding (v3.90.x) — same level-≥8 check as
+         * TeamWidgetGrid's isTeamAdmin. Gates the phase-guide info button and
+         * auto-popup: regular members can't act on "advance a phase" (that's
+         * admin-gated server-side too), so showing them the guide would be
+         * confusing rather than useful.
+         */
+        isTeamAdmin() {
+            if (!this.members?.length) return false
+            const uid = getCurrentUser()?.uid
+            if (!uid) return false
+            const m = this.members.find(m => m.userId === uid)
+            return m && m.level >= 8
+        },
+
+        /**
+         * v3.98.4 — level ≥ 4. Gate for the Project Compass panel — almost
+         * every checklist item is admin-only, but Invite works from
+         * moderator upward and this component's showInviteModal handler
+         * is what the Compass emits into. Keeping the audience at
+         * moderator+ instead of admin-only means Invite retains a useful
+         * home for people at that level.
+         */
+        isTeamModerator() {
+            if (!this.members?.length) return false
+            const uid = getCurrentUser()?.uid
+            if (!uid) return false
+            const m = this.members.find(m => m.userId === uid)
+            return m && m.level >= 4
+        },
 
         /**
          * NC 34 / Deck 1.18+ only — whether deck_dependent_cards exists on
@@ -923,6 +1090,12 @@ export default {
                 this.loadLayout(newId)
             }
         },
+        // Project-owner onboarding (v3.90.x) — members (and thus isTeamAdmin)
+        // resolve independently of loadLayout's project fact; whichever finishes
+        // last is the one that actually triggers the auto-popup (idempotent).
+        isTeamAdmin() {
+            this.maybeShowProjectGuideForNewTeam()
+        },
         // When ManageTeamView updates presenceConfig in the store (e.g. enabling
         // the presence tab toggle), rebuild the tab list immediately so the
         // Presence tab appears/disappears without a page reload.
@@ -940,6 +1113,34 @@ export default {
             },
         },
         timelineConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
+        // Budget tab appears once (a) the project fact confirms Advanced mode
+        // AND (b) budget_enabled is true. Both arrive with the layout bundle,
+        // but project may commit slightly before budgetConfig, and the tab
+        // list is initially built while `project` still says isProject=false.
+        // Rebuild on either change so the tab shows up as soon as the flag
+        // that finally unlocks it flips.
+        budgetConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
+        // Same rebuild-on-flip pattern as budgetConfig — the Time tab appears
+        // once (a) project fact confirms Advanced mode AND (b) time_enabled
+        // is true AND (c) can_view_time is true. All arrive with the layout
+        // bundle but may commit slightly out of order.
+        timeConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
+        project: {
             deep: true,
             handler() {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
@@ -1071,7 +1272,7 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
@@ -1138,6 +1339,24 @@ export default {
                 if (data.timelineConfig) {
                     this.SET_TIMELINE_CONFIG(data.timelineConfig)
                 }
+                // Budget integration (v3.92.0) — per-team toggle rides along
+                // with the layout, same pattern as timelineConfig.
+                if (data.budgetConfig) {
+                    this.SET_BUDGET_CONFIG(data.budgetConfig)
+                }
+                // Time investment integration (v3.96.0) — same pattern.
+                if (data.timeConfig) {
+                    this.SET_TIME_CONFIG(data.timeConfig)
+                }
+                // Project Teams (v3.88.0) — project fact rides along with the layout.
+                if (data.project) {
+                    this.SET_PROJECT(data.project)
+                }
+                // Project-owner onboarding (v3.90.x) — project is ready now; members
+                // may or may not be (fetchMembers resolves independently via the
+                // store's selectTeam action) — the isTeamAdmin watcher below covers
+                // that ordering. Idempotent, so calling from both places is safe.
+                this.maybeShowProjectGuideForNewTeam()
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
                 this.applySnap()
@@ -1198,6 +1417,20 @@ export default {
             // Mirrors showDecisionsWidget computed in TeamWidgetGrid.
             if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
                 active.add('widget-decisions')
+            }
+            // v3.97.3 — Project Health widget. Same gate as
+            // TeamWidgetGrid.showProjectHealthWidget. Without this entry,
+            // applySnap() treats the widget as inactive and parks it at
+            // y=9999 (off-screen), which is what Justin was seeing after
+            // 3.97.0–.2. Missing this method was the root cause, not the
+            // DEFAULT_LAYOUT position or the merge logic.
+            const phase = this.project && this.project.phase
+            if (this.project && this.project.isProject
+                && this.project.mode === 'advanced'
+                && (phase === 'planning' || phase === 'execution')
+                && this.budgetConfig && this.budgetConfig.can_view_budget
+                && this.timeConfig && this.timeConfig.can_view_time) {
+                active.add('widget-project-health')
             }
             // Dynamic integration widgets.
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
@@ -1343,6 +1576,28 @@ export default {
             if (this.timelineConfig && this.timelineConfig.timeline_enabled !== false) {
                 tabs.push({ key: 'timeline', label: t('teamhub', 'Timeline'), icon: 'TimelineCheckOutline' })
             }
+            // Budget tab — Advanced-mode projects only. Three gates:
+            //  (a) the per-team on/off toggle in Manage Team → Integrations
+            //      (default on).
+            //  (b) the project-level view floor — a caller below the floor
+            //      doesn't see the tab UNLESS
+            //  (c) they are a named editor on any of the project's lanes.
+            // (b)+(c) are precomputed server-side as budgetConfig.can_view_budget.
+            if (this.isAdvancedProject
+                && this.budgetConfig
+                && this.budgetConfig.budget_enabled !== false
+                && this.budgetConfig.can_view_budget !== false) {
+                tabs.push({ key: 'budget', label: t('teamhub', 'Budget'), icon: 'WalletOutline' })
+            }
+            // Time tab — Advanced-mode projects only. Same three-gate pattern
+            // as Budget. can_view_time is precomputed server-side (role floor
+            // OR named project-participant row).
+            if (this.isAdvancedProject
+                && this.timeConfig
+                && this.timeConfig.time_enabled !== false
+                && this.timeConfig.can_view_time !== false) {
+                tabs.push({ key: 'time', label: t('teamhub', 'Time'), icon: 'ClockOutline' })
+            }
             ;(this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
             ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
@@ -1370,7 +1625,7 @@ export default {
         syncExtTabs() {
             const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence', 'decisions', 'timeline'])
+            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence', 'decisions', 'timeline', 'budget', 'time'])
             this.orderedTabs = [
                 ...this.orderedTabs.filter(t => builtinKeys.has(t.key)),
                 ...extTabs,
@@ -1410,6 +1665,112 @@ export default {
         },
 
         openManageTeam() { this.$emit('show-manage-team') },
+
+        /**
+         * Project-owner onboarding (v3.90.x) — one-shot auto-popup right after an
+         * Advanced project team is created. Called from both loadLayout (once
+         * `project` is ready) and the isTeamAdmin watcher (once `members` is
+         * ready) since the two resolve independently and whichever finishes
+         * last is the one that actually shows the guide. Idempotent: no-ops
+         * unless the store's justCreatedAdvancedProjectTeamId flag matches this
+         * exact team, and clears the flag on success so it never fires again.
+         */
+        /**
+         * v3.98.0 — auto-opening of the ProjectPhaseGuide dialog is folded
+         * into the ProjectCompassPanel. Landing on the Compass gives the
+         * owner the persistent setup checklist immediately; the phase
+         * walkthrough is still reachable on demand via the Compass
+         * "Walkthrough" button and the stepper's info button, but no
+         * longer pops up unprompted. This method still clears the
+         * one-shot flag so it doesn't linger in the store — kept as a
+         * no-op-except-cleanup for backward compat with legacy state.
+         */
+        maybeShowProjectGuideForNewTeam() {
+            const flagTeamId = this.$store.state.justCreatedAdvancedProjectTeamId
+            if (flagTeamId && flagTeamId === this.currentTeamId) {
+                this.$store.commit('SET_JUST_CREATED_ADVANCED_PROJECT', null)
+            }
+        },
+
+        /**
+         * Compass "Advance phase" CTA — fires the setPhase endpoint with
+         * the next phase. Frontend gates the button on admin already, but
+         * the backend still requires admin level (defence-in-depth).
+         */
+        async onCompassAdvancePhase(nextPhase) {
+            if (!nextPhase) return
+            if (!this.isTeamAdmin) return
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/project/phase`),
+                    { phase: nextPhase },
+                )
+                this.SET_PROJECT(data)
+            } catch (e) {
+                showError(t('teamhub', 'Failed to advance phase: {error}', {
+                    error: e?.response?.data?.error || e?.message || t('teamhub', 'Unknown error'),
+                }))
+            }
+        },
+
+        /**
+         * v3.98.2 — a workstream lane was created via ProjectSwimlanesModal.
+         * Re-commit the current project fact so the Compass's watch on
+         * `project` fires and it refetches the readiness envelope; the
+         * workstreams_defined item flips to done once the stack count > 1.
+         * Cheaper than plumbing a dedicated "refresh compass" signal —
+         * the store already recomputes on project mutation.
+         */
+        onLanesChanged() {
+            this.SET_PROJECT({ ...this.project })
+        },
+
+        /**
+         * v3.99.0 — the Closing artifact was just generated. Update the
+         * project fact so closing_artifact_at reflects the fresh time,
+         * which flips the closing_artifact readiness item to done. The
+         * modal itself shows the file path — we don't need to open it.
+         */
+        onClosingArtifactGenerated(data) {
+            this.SET_PROJECT({
+                ...this.project,
+                closingArtifactAt: data.generatedAt,
+            })
+        },
+
+        /**
+         * v3.99.0 — user confirmed team archival via the policy warning
+         * modal. Fires the existing archive endpoint. On success, App.vue
+         * will clear the current team on the next fetch.
+         */
+        async onArchivePolicyConfirmed() {
+            this.showArchivePolicyModal = false
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/archive`),
+                )
+                showSuccess(t('teamhub', 'Team archive started'))
+                // Bounce the user out of the team view — the team is
+                // gone (or soft-deleted). Emitting team-left tells
+                // App.vue to clear currentTeamId and show the sidebar.
+                this.$emit('team-left')
+            } catch (e) {
+                showError(t('teamhub', 'Failed to archive team: {error}', {
+                    error: e?.response?.data?.error || e?.message || t('teamhub', 'Unknown error'),
+                }))
+            }
+        },
+
+        /**
+         * "Open Project settings" clicked inside ProjectPhaseGuide — reuses the
+         * same deep-link-to-a-tab pattern as the resource-warning strip's
+         * "Open settings →" (SET_RESOURCE_WARNING_FOCUS), but for the Project tab.
+         */
+        onOpenProjectSettingsFromGuide() {
+            this.SET_PROJECT_TAB_FOCUS(true)
+            this.showProjectGuide = false
+            this.$emit('show-manage-team')
+        },
 
         /**
          * Returns true when a stored link URL is a Nextcloud-relative path
@@ -1703,7 +2064,7 @@ export default {
     background: var(--color-background-hover);
     cursor: pointer;
     text-align: left;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     color: var(--color-main-text);
     transition: background 0.15s;
 }
@@ -1757,7 +2118,7 @@ export default {
     border-radius: var(--border-radius-large);
     border: 2px solid var(--color-border);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     transition: border-color 0.15s, background 0.15s;
 }
 
@@ -1776,13 +2137,12 @@ export default {
 </style>
 
 <style>
-body[data-themes*="dark"] .teamhub-home-view {
-    background: #000000;
-}
-
-/* Mobile keeps the standard NC theme background regardless of dark mode —
-   the MobileWidgetView body itself already adapts to dark mode through
-   var(--color-main-background). */
+/* v3.100.16: the dark-mode background override was retired.
+   .teamhub-home-view now uses --color-background-dark which is already
+   theme-aware (dark in dark mode, light-grey in light mode), so the
+   explicit #000000 override became redundant. The mobile override
+   remains because MobileWidgetView owns its own canvas and shouldn't
+   inherit the parent backdrop. */
 body[data-themes*="dark"] .teamhub-home-view--mobile {
     background: var(--color-main-background);
 }

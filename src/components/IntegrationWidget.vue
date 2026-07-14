@@ -407,9 +407,10 @@ export default {
     opacity: 0.7;
 }
 
-.teamhub-int-widget__state--error { color: var(--th-color-error); }
+/* v3.100.16: NC theme tokens (were --th-color-error hex). */
+.teamhub-int-widget__state--error { color: var(--color-error-text); }
 .teamhub-int-widget__state--error .teamhub-int-widget__state-icon {
-    color: var(--th-color-error);
+    color: var(--color-error-text);
     opacity: 0.6;
 }
 
@@ -449,7 +450,7 @@ a.teamhub-int-widget__item-link:hover {
     width: 38px;
     height: 38px;
     border-radius: var(--border-radius-large);
-    background: var(--color-background-dark, #f4f4f4);
+    background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
 }
@@ -463,7 +464,7 @@ a.teamhub-int-widget__item-link:hover {
 }
 
 .teamhub-int-widget__item-label {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     color: var(--color-main-text);
     overflow: hidden;
@@ -472,7 +473,7 @@ a.teamhub-int-widget__item-link:hover {
 }
 
 .teamhub-int-widget__item-value {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
     overflow: hidden;
@@ -485,9 +486,10 @@ a.teamhub-int-widget__item-link:hover {
     min-width: 320px;
 }
 
+/* v3.100.16: NC theme token (was --th-color-error hex). */
 .teamhub-int-widget__error-msg {
-    font-size: 14px;
-    color: var(--th-color-error);
+    font-size: var(--th-font-body);
+    color: var(--color-error-text);
     margin: 0 0 12px;
 }
 

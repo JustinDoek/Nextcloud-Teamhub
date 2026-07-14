@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\PendingDeletion;
 use OCA\TeamHub\Db\PendingDeletionMapper;
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Files\IRootFolder;
@@ -97,7 +98,7 @@ class ArchiveService {
 
         $level = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $uid);
         if ($level < 9) {
-            throw new \Exception('Only the team owner can archive a team.');
+            throw new AccessDeniedException('Only the team owner can archive a team.');
         }
 
         // ── 2. Pre-check ────────────────────────────────────────────────────
@@ -345,7 +346,7 @@ class ArchiveService {
 
         $level = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $uid);
         if ($level < 9) {
-            throw new \Exception('Only the team owner can delete a team.');
+            throw new AccessDeniedException('Only the team owner can delete a team.');
         }
 
         // 2. Pre-check — refuse to overlap an existing pending row
@@ -607,7 +608,12 @@ class ArchiveService {
                 $measured  = disk_free_space($destLocalPath);
                 $freeBytes = ($measured !== false) ? (int)$measured : null;
             }
-        } catch (\Throwable) {}
+        } catch (\Throwable) {
+            // Non-fatal — $freeBytes stays null; the caller falls back
+            // to the configured max_bytes ceiling without a disk-space
+            // pre-check. Applies to object storage backends where a
+            // local path can't be resolved.
+        }
 
         $freeBytesSafe    = ($freeBytes !== null) ? (int)($freeBytes * 0.90) : null;
         $effectiveCeiling = $maxBytes;
@@ -749,7 +755,7 @@ class ArchiveService {
                 }
             } catch (\Throwable $e) {
                 // Keep the raw /f/ID as fallback — resolution failed (e.g. deleted folder)
-                $this->logger->debug('[ArchiveService] getAdminSettings — could not resolve /f/ node', [
+                $this->logger->debug('[TeamHub][ArchiveService] getAdminSettings — could not resolve /f/ node', [
                     'path' => $archivePath, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -2869,8 +2875,22 @@ HTML;
 
             $fileId = (int)$row['file_source'];
 
-            // oc_filecache.size for a folder = recursive total of all children.
-            // NC keeps this accurate via the storage scanner.
+            // v3.100.8 (apps.md R-7) — resolve size via IRootFolder
+            // (fully public OCP API). NC keeps folder size accurate as
+            // the recursive total of all children via the storage scanner.
+            try {
+                $rootFolder = $this->container->get(\OCP\Files\IRootFolder::class);
+                $nodes = $rootFolder->getById($fileId);
+                if (!empty($nodes)) {
+                    return max(0, (int)$nodes[0]->getSize());
+                }
+            } catch (\Throwable $e) {
+                $this->logger->debug('[TeamHub][ArchiveService] estimateFolderSize: IRootFolder path unavailable — using DB fallback', [
+                    'fileId' => $fileId, 'reason' => $e->getMessage(),
+                    'app' => Application::APP_ID,
+                ]);
+            }
+
             $cqb  = $this->db->getQueryBuilder();
             $cres = $cqb->select('size')
                 ->from('filecache')

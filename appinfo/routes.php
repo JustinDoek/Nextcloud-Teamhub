@@ -23,6 +23,7 @@ return [
         ['name' => 'team#getAdminSettings',       'url' => '/api/v1/admin/settings',                         'verb' => 'GET'],
         ['name' => 'team#saveAdminSettings',      'url' => '/api/v1/admin/settings',                         'verb' => 'POST'],
         ['name' => 'team#intravoxDiagnostic',     'url' => '/api/v1/admin/intravox-diagnostic',              'verb' => 'GET'],
+        ['name' => 'team#deckDiagnostic',         'url' => '/api/v1/admin/deck-diagnostic',                  'verb' => 'GET'],
         ['name' => 'team#searchAdminGroups',      'url' => '/api/v1/admin/groups/search',                    'verb' => 'GET'],
         ['name' => 'team#getAllowedInviteTypes',  'url' => '/api/v1/invite-types',                            'verb' => 'GET'],
 
@@ -80,6 +81,7 @@ return [
         ['name' => 'team#createIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'POST'],
         ['name' => 'team#deleteIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'DELETE'],
         ['name' => 'team#getIntravoxSubPages',    'url' => '/api/v1/teams/{teamId}/intravox/subpages',       'verb' => 'GET'],
+        ['name' => 'team#getIntravoxTeamPage',    'url' => '/api/v1/teams/{teamId}/intravox/team-page',      'verb' => 'GET'],
         ['name' => 'team#invalidateIntravoxCache', 'url' => '/api/v1/teams/{teamId}/intravox/subpages/cache', 'verb' => 'DELETE'],
 
         // Team actions
@@ -302,9 +304,54 @@ return [
         ['name' => 'team#getTimelineConfig',  'url' => '/api/v1/teams/{teamId}/timeline/config', 'verb' => 'GET'],
         ['name' => 'team#saveTimelineConfig', 'url' => '/api/v1/teams/{teamId}/timeline/config', 'verb' => 'PUT'],
 
+        // Project Teams (v3.88.0) — persisted project-ness + Basic/Advanced mode
+        // + PMC phase. get is team-member-gated; save + setPhase require team admin.
+        // setPhase is valid only on advanced projects.
+        ['name' => 'project#get',       'url' => '/api/v1/teams/{teamId}/project',        'verb' => 'GET'],
+        ['name' => 'project#save',      'url' => '/api/v1/teams/{teamId}/project',        'verb' => 'PUT'],
+        ['name' => 'project#setPhase',  'url' => '/api/v1/teams/{teamId}/project/phase',  'verb' => 'PUT'],
+        ['name' => 'project#getHealth',    'url' => '/api/v1/teams/{teamId}/project/health',    'verb' => 'GET'],
+        ['name' => 'project#getReadiness',             'url' => '/api/v1/teams/{teamId}/project/readiness',              'verb' => 'GET'],
+        ['name' => 'project#setMark',                  'url' => '/api/v1/teams/{teamId}/project/marks/{markType}',       'verb' => 'PUT'],
+        ['name' => 'project#generateClosingArtifact',  'url' => '/api/v1/teams/{teamId}/project/closing/generate',       'verb' => 'POST'],
+        ['name' => 'project#getClosingStatus',         'url' => '/api/v1/teams/{teamId}/project/closing/status',         'verb' => 'GET'],
+        ['name' => 'project#getArchivePolicy',         'url' => '/api/v1/teams/{teamId}/project/closing/archive-policy', 'verb' => 'GET'],
+
+        // Project Budget (v3.92.0, Track E Session 4) — Execution-phase budget
+        // page. get is member-gated (per-lane view_min_level filters the
+        // response inside the service). setTotal + updateLane require team
+        // admin. Expense CRUD is per-lane edit_min_level-gated.
+        ['name' => 'team#getBudgetConfig',  'url' => '/api/v1/teams/{teamId}/budget/config',                                  'verb' => 'GET'],
+        ['name' => 'team#saveBudgetConfig', 'url' => '/api/v1/teams/{teamId}/budget/config',                                  'verb' => 'PUT'],
+        ['name' => 'budget#get',           'url' => '/api/v1/teams/{teamId}/budget',                                          'verb' => 'GET'],
+        ['name' => 'budget#setTotal',      'url' => '/api/v1/teams/{teamId}/budget',                                          'verb' => 'PUT'],
+        ['name' => 'budget#updateLane',    'url' => '/api/v1/teams/{teamId}/budget/lanes/{laneId}',                            'verb' => 'PUT'],
+        ['name' => 'budget#addExpense',    'url' => '/api/v1/teams/{teamId}/budget/lanes/{laneId}/expenses',                   'verb' => 'POST'],
+        ['name' => 'budget#updateExpense', 'url' => '/api/v1/teams/{teamId}/budget/lanes/{laneId}/expenses/{expenseId}',       'verb' => 'PUT'],
+        ['name' => 'budget#deleteExpense', 'url' => '/api/v1/teams/{teamId}/budget/lanes/{laneId}/expenses/{expenseId}',       'verb' => 'DELETE'],
+
+        // Project Time investment (v3.96.0, Track E Session 5) — Execution-phase
+        // per-member available hours + per-Deck-card time logs. get is member +
+        // tab-visibility gated (view-floor OR project-member row). Config
+        // writes require team admin. Log writes require the caller to be a
+        // live Deck-card assignee (admins can log on behalf).
+        ['name' => 'team#getTimeConfig',   'url' => '/api/v1/teams/{teamId}/time/config',                    'verb' => 'GET'],
+        ['name' => 'team#saveTimeConfig',  'url' => '/api/v1/teams/{teamId}/time/config',                    'verb' => 'PUT'],
+        ['name' => 'time#get',             'url' => '/api/v1/teams/{teamId}/time',                           'verb' => 'GET'],
+        ['name' => 'time#setConfig',       'url' => '/api/v1/teams/{teamId}/time',                           'verb' => 'PUT'],
+        ['name' => 'time#loggableCards',   'url' => '/api/v1/teams/{teamId}/time/loggable-cards',            'verb' => 'GET'],
+        ['name' => 'time#upsertMember',    'url' => '/api/v1/teams/{teamId}/time/members/{userId}',          'verb' => 'PUT'],
+        ['name' => 'time#removeMember',    'url' => '/api/v1/teams/{teamId}/time/members/{userId}',          'verb' => 'DELETE'],
+        ['name' => 'time#getMemberLogs',   'url' => '/api/v1/teams/{teamId}/time/members/{userId}/logs',     'verb' => 'GET'],
+        ['name' => 'time#addLog',          'url' => '/api/v1/teams/{teamId}/time/logs',                      'verb' => 'POST'],
+        ['name' => 'time#updateLog',       'url' => '/api/v1/teams/{teamId}/time/logs/{logId}',              'verb' => 'PUT'],
+        ['name' => 'time#deleteLog',       'url' => '/api/v1/teams/{teamId}/time/logs/{logId}',              'verb' => 'DELETE'],
+
         // Timeline Milestones (v3.78.2) — admin-managed marker lines on the
         // Timeline tab. Managed from Manage Team → Integration settings.
         ['name' => 'team#getMilestones',    'url' => '/api/v1/teams/{teamId}/milestones',                'verb' => 'GET'],
+        ['name' => 'team#pickMilestones',   'url' => '/api/v1/teams/{teamId}/milestones/pick',           'verb' => 'GET'],
+        ['name' => 'team#createDeckStack',  'url' => '/api/v1/teams/{teamId}/deck/stacks',               'verb' => 'POST'],
         ['name' => 'team#createMilestone',  'url' => '/api/v1/teams/{teamId}/milestones',                'verb' => 'POST'],
         ['name' => 'team#updateMilestone',  'url' => '/api/v1/teams/{teamId}/milestones/{milestoneId}', 'verb' => 'PUT'],
         ['name' => 'team#deleteMilestone',  'url' => '/api/v1/teams/{teamId}/milestones/{milestoneId}', 'verb' => 'DELETE'],
@@ -356,6 +403,17 @@ return [
         ['name' => 'decision#listExternalLinks',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/external-links',          'verb' => 'GET'],
         ['name' => 'decision#createExternalLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/external-links',          'verb' => 'POST'],
         ['name' => 'decision#deleteExternalLink',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/external-links/{linkId}', 'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
+        // Licensing (v3.100.0, Track F). Admin endpoints are admin-gated
+        // in the controller; entitlements is member-callable so the
+        // CreateTeamView wizard can grey out Advanced upfront.
+        // ----------------------------------------------------------------
+        ['name' => 'license#getStatus',    'url' => '/api/v1/admin/license',         'verb' => 'GET'],
+        ['name' => 'license#saveKey',      'url' => '/api/v1/admin/license',         'verb' => 'PUT'],
+        ['name' => 'license#refresh',      'url' => '/api/v1/admin/license/refresh', 'verb' => 'POST'],
+        ['name' => 'license#requestTrial', 'url' => '/api/v1/admin/license/trial',   'verb' => 'POST'],
+        ['name' => 'license#entitlements', 'url' => '/api/v1/license/entitlements',  'verb' => 'GET'],
     ],
 ];
 // Note: just checking structure

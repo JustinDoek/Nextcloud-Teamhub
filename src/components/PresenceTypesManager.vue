@@ -489,7 +489,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: normal;
     padding: 2px 6px;
     border-radius: var(--border-radius-pill, 12px);
@@ -499,7 +499,7 @@ export default {
 .presence-type-row__meta {
     display: flex;
     gap: 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin-top: 2px;
 }
@@ -516,7 +516,7 @@ export default {
     padding: 8px 0;
 }
 .presence-form__hint {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0;
 }

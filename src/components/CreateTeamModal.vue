@@ -386,7 +386,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -398,7 +398,7 @@ export default {
 
 .ctm__step--done .ctm__step-num {
     background: var(--color-success);
-    color: #fff;
+    color: var(--color-success-text);
 }
 
 .ctm__step-label {
@@ -456,15 +456,30 @@ export default {
 .ctm__type--collaboration .ctm__type-icon { color: var(--color-primary-element); }
 .ctm__type--department .ctm__type-icon { color: var(--color-success); }
 
+/* v3.100.14: split hover from selected per SKILLS.md § "State-coloured
+   backgrounds". Hover is transient feedback (neutral background-hover);
+   selected is the persistent state and gets the matching full-saturation
+   fill + text pair. Previously both were the same soft tint (--color-*-hover
+   or -light used as a background), so selected and hover looked identical
+   and the selected chip washed out against the canvas. */
 .ctm__type:hover { border-color: var(--color-primary-element); background: var(--color-background-hover); }
-.ctm__type--project:hover,
-.ctm__type--project.ctm__type--selected { border-color: var(--color-warning); background: var(--color-warning-hover, rgba(232, 131, 16, 0.08)); }
-.ctm__type--collaboration:hover,
-.ctm__type--collaboration.ctm__type--selected { border-color: var(--color-primary-element); background: var(--color-primary-element-light); }
-.ctm__type--department:hover,
-.ctm__type--department.ctm__type--selected { border-color: var(--color-success); background: var(--color-success-hover, rgba(46, 181, 43, 0.08)); }
+.ctm__type--project.ctm__type--selected {
+    border-color: var(--color-warning);
+    background: var(--color-warning);
+    color: var(--color-warning-text);
+}
+.ctm__type--collaboration.ctm__type--selected {
+    border-color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+}
+.ctm__type--department.ctm__type--selected {
+    border-color: var(--color-success);
+    background: var(--color-success);
+    color: var(--color-success-text);
+}
 .ctm__type-name { font-weight: 600; font-size: 13px; }
-.ctm__type-desc { font-size: 11px; color: var(--color-text-maxcontrast); line-height: 1.3; }
+.ctm__type-desc { font-size: var(--th-font-micro); color: var(--color-text-maxcontrast); line-height: 1.3; }
 
 /* Member search */
 .ctm__member-search { position: relative; }
@@ -508,7 +523,7 @@ export default {
     padding: 3px 8px 3px 4px;
     background: var(--color-background-dark);
     border-radius: var(--border-radius-pill);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
 }
 
 .ctm__chip-remove {
@@ -525,7 +540,7 @@ export default {
 
 /* App checkboxes */
 .ctm__hint {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0 0 10px;
 }

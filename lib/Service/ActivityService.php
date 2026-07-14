@@ -4,11 +4,15 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\AuditLogMapper;
+use OCA\TeamHub\Exception\AppNotAvailableException;
 use OCP\App\IAppManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use OCA\TeamHub\Service\AuditService;
+use OCA\TeamHub\Service\BudgetService;
+use OCA\TeamHub\Service\TimeService;
 
 /**
  * ActivityService — team activity feed and calendar event read/write.
@@ -28,6 +32,9 @@ class ActivityService {
         private ContainerInterface $container,
         private LoggerInterface $logger,
         private AuditService $auditService,
+        private AuditLogMapper $auditLogMapper,
+        private TimeService $timeService,
+        private BudgetService $budgetService,
     ) {
     }
 
@@ -118,7 +125,7 @@ class ActivityService {
                     $conditions[] = ['deck_card_ids' => $allCardIds];
                 }
             } catch (\Throwable $e) {
-                $this->logger->warning('[ActivityService] deck card ID lookup failed', [
+                $this->logger->warning('[TeamHub][ActivityService] deck card ID lookup failed', [
                     'boardIds' => $deckBoardIds,
                     'error'    => $e->getMessage(),
                     'app'      => Application::APP_ID,
@@ -231,7 +238,7 @@ class ActivityService {
             $result->closeCursor();
 
         } catch (\Throwable $e) {
-            $this->logger->error('[ActivityService] getTeamActivity query failed', [
+            $this->logger->error('[TeamHub][ActivityService] getTeamActivity query failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -296,7 +303,107 @@ class ActivityService {
             }
         }
 
+        // TeamHub-native project events (time logs + budget expenses,
+        // v3.96.0). Merged in from teamhub_audit_log with per-caller
+        // role gating so a time entry only surfaces here for users who
+        // can also see the Time tab, and an expense only for users who
+        // can see the Budget tab. See fetchProjectAuditActivity below.
+        try {
+            $teamHubItems = $this->fetchProjectAuditActivity($teamId, $user->getUID(), $limit, $since);
+            if (!empty($teamHubItems)) {
+                $items = array_merge($items, $teamHubItems);
+                // Re-sort newest-first by datetime (ISO 8601 sorts lexically).
+                usort($items, static fn(array $a, array $b): int => strcmp((string)$b['datetime'], (string)$a['datetime']));
+                if (count($items) > $limit) {
+                    $items = array_slice($items, 0, $limit);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Non-fatal — activity feed keeps working with NC-native rows.
+            $this->logger->debug('[TeamHub][ActivityService] TeamHub audit merge failed: ' . $e->getMessage(), [
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+        }
+
         return $items;
+    }
+
+    /**
+     * Pull TeamHub project events (time logs + budget expenses) out of
+     * teamhub_audit_log and shape them into activity-feed items.
+     *
+     * Role gating uses the same tab-visibility checks the /layout bundle
+     * uses:
+     *   - time events only appear if $userId can view the Time tab
+     *   - expense events only appear if $userId can view the Budget tab
+     * A caller who can view one but not the other sees a partial merge —
+     * that mirrors the tab visibility exactly (no over-share, no
+     * hidden-tab data leak into the feed).
+     *
+     * @return array<int, array<string, mixed>>  activity-feed item shape
+     */
+    private function fetchProjectAuditActivity(string $teamId, string $userId, int $limit, int $since): array {
+        $wantedTypes = [];
+        if ($this->timeService->canUserViewTimeTab($teamId, $userId)) {
+            $wantedTypes[] = 'project.time_log_added';
+            $wantedTypes[] = 'project.time_log_updated';
+            $wantedTypes[] = 'project.time_log_deleted';
+        }
+        if ($this->budgetService->canUserViewBudgetTab($teamId, $userId)) {
+            $wantedTypes[] = 'project.expense_added';
+            $wantedTypes[] = 'project.expense_updated';
+            $wantedTypes[] = 'project.expense_deleted';
+        }
+        if (empty($wantedTypes)) {
+            return [];
+        }
+
+        // 30-day default window matches the frontend's `since` header. Cap at
+        // $limit — anything older is out of scope for the "past 30 days" feed.
+        $fromTs = $since > 0 ? $since : (time() - 30 * 86400);
+        $rows = $this->auditLogMapper->findByTeam($teamId, 0, $limit, $wantedTypes, $fromTs, null);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $eventType = (string)($row['event_type'] ?? '');
+            $meta      = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
+
+            $out[] = [
+                'activity_id' => 'th-' . $row['id'],   // string key — avoids id collisions with NC's activity_id
+                'app'         => 'teamhub',
+                'type'        => $eventType,
+                'user'        => (string)($row['actor_uid'] ?? ''),
+                'subject'     => $eventType,           // frontend maps to a localized template
+                'message'     => '',
+                'datetime'    => (new \DateTime('@' . (int)$row['created_at']))->format(\DateTime::ATOM),
+                'icon'        => $this->activityIconForTeamHub($eventType),
+                'link'        => '',
+                'object_type' => (string)($row['target_type'] ?? ''),
+                'object_id'   => (string)($row['target_id'] ?? ''),
+                'file'        => '',
+                'board_name'  => '',
+                'card_title'  => '',
+                // subjectparams carries the structured detail so the frontend
+                // can render "Alice logged 1h 30m on {card}" etc. without a
+                // second fetch. Kept minimal — only fields the feed needs.
+                'subjectparams' => [
+                    'minutes'         => isset($meta['minutes']) ? (int)$meta['minutes'] : null,
+                    'projected_minor' => isset($meta['projectedMinor']) ? (int)$meta['projectedMinor'] : null,
+                    'real_minor'      => isset($meta['realMinor'])      ? (int)$meta['realMinor']      : null,
+                    'for_user_id'     => (string)($meta['forUserId'] ?? ''),
+                    'card_id'         => isset($meta['cardId']) ? (int)$meta['cardId'] : null,
+                    'lane_id'         => isset($meta['laneId']) ? (int)$meta['laneId'] : null,
+                ],
+            ];
+        }
+        return $out;
+    }
+
+    /** Map a TeamHub audit event type to a Material Design icon name. */
+    private function activityIconForTeamHub(string $eventType): string {
+        if (str_starts_with($eventType, 'project.time_log_'))  return 'ClockOutline';
+        if (str_starts_with($eventType, 'project.expense_'))   return 'WalletOutline';
+        return 'Bell';
     }
 
     /** Map app+type to a Material Design icon name for the frontend. */
@@ -438,7 +545,7 @@ class ActivityService {
                             'calendarName' => $calName,
                         ];
                     } catch (\Exception $e) {
-                        $this->logger->warning('[ActivityService] Error parsing calendar event', [
+                        $this->logger->warning('[TeamHub][ActivityService] Error parsing calendar event', [
                             'exception' => $e,
                             'app'       => Application::APP_ID,
                         ]);
@@ -451,7 +558,7 @@ class ActivityService {
             return array_slice($events, 0, $limit);
 
         } catch (\Exception $e) {
-            $this->logger->error('[ActivityService] Error getting calendar events', [
+            $this->logger->error('[TeamHub][ActivityService] Error getting calendar events', [
                 'teamId'    => $teamId,
                 'exception' => $e,
                 'app'       => Application::APP_ID,
@@ -488,7 +595,7 @@ class ActivityService {
         }
 
         if (!$this->appManager->isInstalled('calendar')) {
-            throw new \Exception('Calendar app is not installed');
+            throw new AppNotAvailableException('Calendar app is not installed');
         }
 
         $db = $this->container->get(\OCP\IDBConnection::class);
@@ -532,34 +639,57 @@ class ActivityService {
         // behaviour for existing callers that don't pass the flag.
         $talkUrl = null;
         if ($includeTalk && $this->appManager->isInstalled('spreed')) {
+            // v3.100.8 (apps.md R-4) — resolve the circle-scoped Talk room
+            // via Talk Manager first; fall back to the QB path when the API
+            // is unavailable or refuses (typically hidden circles).
+            $token = null;
             try {
-                $talkQb  = $db->getQueryBuilder();
-                $talkRes = $talkQb->select('a.room_id')
-                    ->from('talk_attendees', 'a')
-                    ->where($talkQb->expr()->eq('a.actor_type', $talkQb->createNamedParameter('circles')))
-                    ->andWhere($talkQb->expr()->eq('a.actor_id', $talkQb->createNamedParameter($teamId)))
-                    ->setMaxResults(1)
-                    ->executeQuery();
-                $talkRow = $talkRes->fetch();
-                $talkRes->closeCursor();
-
-                if ($talkRow) {
-                    $roomQb  = $db->getQueryBuilder();
-                    $roomRes = $roomQb->select('token')
-                        ->from('talk_rooms')
-                        ->where($roomQb->expr()->eq('id', $roomQb->createNamedParameter((int)$talkRow['room_id'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->setMaxResults(1)
-                        ->executeQuery();
-                    $roomRow = $roomRes->fetch();
-                    $roomRes->closeCursor();
-
-                    if ($roomRow) {
-                        $urlGenerator = $this->container->get(\OCP\IURLGenerator::class);
-                        $talkUrl = $urlGenerator->linkToRouteAbsolute('spreed.Page.showCall', ['token' => $roomRow['token']]);
-                    }
+                $roomManager = $this->container->get(\OCA\Talk\Manager::class);
+                $room = $roomManager->getRoomForActor('circles', $teamId);
+                if ($room !== null) {
+                    $token = (string)$room->getToken();
                 }
             } catch (\Throwable $e) {
-                // Talk lookup failure is non-fatal — continue without Talk URL
+                $this->logger->debug('[TeamHub][ActivityService] Talk-room resolution via Manager unavailable — using DB fallback', [
+                    'teamId' => $teamId, 'reason' => $e->getMessage(),
+                    'app' => Application::APP_ID,
+                ]);
+            }
+
+            if ($token === null) {
+                try {
+                    $talkQb  = $db->getQueryBuilder();
+                    $talkRes = $talkQb->select('a.room_id')
+                        ->from('talk_attendees', 'a')
+                        ->where($talkQb->expr()->eq('a.actor_type', $talkQb->createNamedParameter('circles')))
+                        ->andWhere($talkQb->expr()->eq('a.actor_id', $talkQb->createNamedParameter($teamId)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    $talkRow = $talkRes->fetch();
+                    $talkRes->closeCursor();
+
+                    if ($talkRow) {
+                        $roomQb  = $db->getQueryBuilder();
+                        $roomRes = $roomQb->select('token')
+                            ->from('talk_rooms')
+                            ->where($roomQb->expr()->eq('id', $roomQb->createNamedParameter((int)$talkRow['room_id'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->setMaxResults(1)
+                            ->executeQuery();
+                        $roomRow = $roomRes->fetch();
+                        $roomRes->closeCursor();
+
+                        if ($roomRow) {
+                            $token = (string)$roomRow['token'];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // Talk lookup failure is non-fatal — continue without Talk URL
+                }
+            }
+
+            if ($token !== null) {
+                $urlGenerator = $this->container->get(\OCP\IURLGenerator::class);
+                $talkUrl = $urlGenerator->linkToRouteAbsolute('spreed.Page.showCall', ['token' => $token]);
             }
         }
 
@@ -771,8 +901,8 @@ class ActivityService {
         }
 
         // Book RoomVox via its public API BEFORE writing the calendar event.
-        // If booking fails, we abort the whole operation per Justin's
-        // session-9 decision (option A — surface, don't degrade). This is
+        // If booking fails, we abort the whole operation
+        // (option A — surface, don't degrade). This is
         // the actual booking that propagates through to RoomVox's admin
         // overview; the calendar event we write afterward is a record of
         // the same booking, not an iTIP request.
@@ -1155,7 +1285,7 @@ class ActivityService {
                             'calendarName' => $calName,
                         ];
                     } catch (\Throwable $e) {
-                        $this->logger->warning('[ActivityService] Error parsing VEVENT in week query', [
+                        $this->logger->warning('[TeamHub][ActivityService] Error parsing VEVENT in week query', [
                             'uri'       => $row['uri'] ?? '',
                             'exception' => $e,
                             'app'       => Application::APP_ID,
@@ -1169,7 +1299,7 @@ class ActivityService {
             return $events;
 
         } catch (\Exception $e) {
-            $this->logger->error('[ActivityService] getTeamCalendarEventsForWeek failed', [
+            $this->logger->error('[TeamHub][ActivityService] getTeamCalendarEventsForWeek failed', [
                 'teamId'    => $teamId,
                 'exception' => $e,
                 'app'       => Application::APP_ID,
@@ -1199,7 +1329,7 @@ class ActivityService {
         }
 
         if (!$this->appManager->isInstalled('calendar')) {
-            throw new \Exception('Calendar app is not installed');
+            throw new AppNotAvailableException('Calendar app is not installed');
         }
 
         $caldav  = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
@@ -1220,7 +1350,7 @@ class ActivityService {
                 $caldav->deleteCalendarObject($calendarId, $uri);
                 $deleted++;
 
-                $this->logger->debug('[ActivityService] Deleted calendar event', [
+                $this->logger->debug('[TeamHub][ActivityService] Deleted calendar event', [
                     'teamId'     => $teamId,
                     'calendarId' => $calendarId,
                     'uri'        => $uri,
@@ -1237,7 +1367,7 @@ class ActivityService {
                 );
             } catch (\Throwable $e) {
                 $errors++;
-                $this->logger->warning('[ActivityService] Failed to delete calendar event', [
+                $this->logger->warning('[TeamHub][ActivityService] Failed to delete calendar event', [
                     'teamId'     => $teamId,
                     'calendarId' => $calendarId,
                     'uri'        => $uri,

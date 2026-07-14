@@ -392,7 +392,7 @@ class TelemetryService {
      * humans actually have access to at least one TeamHub team on this
      * instance.
      */
-    private function countUniqueTeamMembers(): int {
+    public function countUniqueTeamMembers(): int {
         try {
             // SELECT DISTINCT user_id over the join, deduplicate in PHP via
             // an associative array. Avoids needing COUNT(DISTINCT col) which
@@ -423,7 +423,7 @@ class TelemetryService {
             $result->closeCursor();
             return count($seen);
         } catch (\Throwable $e) {
-            $this->logger->debug('[TelemetryService] countUniqueTeamMembers failed: ' . $e->getMessage(), [
+            $this->logger->debug('[TeamHub][TelemetryService] countUniqueTeamMembers failed: ' . $e->getMessage(), [
                 'app' => Application::APP_ID,
             ]);
             return 0;

@@ -22,19 +22,262 @@ class DeckService {
         private ContainerInterface $container,
         private LoggerInterface $logger,
         private DbIntrospectionService $dbIntrospection,
+        // v3.99.4 — lanes → decisions categories. DecisionCategoryService
+        // and DecisionTeamConfigMapper have narrow deps (no MemberService
+        // transitively, no ResourceService), so injecting them here
+        // doesn't reintroduce the MemberService → ResourceService →
+        // DeckService cycle we already fixed once.
+        private DecisionCategoryService     $decisionCategoryService,
+        private \OCA\TeamHub\Db\DecisionTeamConfigMapper $decisionTeamConfigMapper,
+        private \OCP\IConfig $config,
     ) {}
+
+    /**
+     * v3.98.2 — create a new Deck stack on the team's board. Called from the
+     * ProjectSwimlanesModal (Planning-phase "Define workstreams" activity)
+     * so admins can add lanes as they're known, without being forced to
+     * provide them upfront at team creation.
+     *
+     * AUTH: the caller (TeamController::createDeckStack) enforces admin
+     * level via MemberService::requireAdminLevel. We deliberately do NOT
+     * inject MemberService here because MemberService transitively depends
+     * on ResourceService, which depends on DeckService — the cycle blows
+     * up NC's DI container at first construct. Same pattern the other
+     * DeckService methods already follow (createDeckBoard, deleteDeckBoard,
+     * etc.): controller gates, service does the work.
+     *
+     * Resolves the team's board via `deck_board_acl` / `deck_acl` (same
+     * fallback pattern used by TimelineService). If more than one board is
+     * shared with the team the FIRST is used — Advanced projects always
+     * have exactly one team-board, so this branch is effectively picking
+     * the only candidate for the case that matters.
+     *
+     * Order is computed as MAX(existing order) + 1 for that board so new
+     * stacks always land at the right edge in Deck.
+     *
+     * @return array{stackId:int, title:string, boardId:int, order:int}|array{error:string}
+     */
+    public function createStackOnTeamBoard(string $teamId, string $title): array {
+        if (!$this->appManager->isInstalled('deck')) {
+            return ['error' => 'Deck app not installed'];
+        }
+
+        $title = trim($title);
+        if ($title === '') {
+            return ['error' => 'title is required'];
+        }
+        if (mb_strlen($title) > 255) {
+            $title = mb_substr($title, 0, 255);
+        }
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // ── Resolve the team's board — registry first, ACL fallback ──────
+        $boardId = null;
+        foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+            try {
+                $qb = $db->getQueryBuilder();
+                $qb->select('board_id')
+                    ->from($aclTable)
+                    ->where($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
+                    ->setMaxResults(1);
+                $res = $qb->executeQuery();
+                $row = $res->fetch();
+                $res->closeCursor();
+                if ($row && !empty($row['board_id'])) {
+                    $boardId = (int)$row['board_id'];
+                    break;
+                }
+            } catch (\Throwable $e) {
+                // Table absent on this install — try the next one.
+            }
+        }
+
+        if ($boardId === null) {
+            return ['error' => 'No Deck board is shared with this team'];
+        }
+
+        // ── Compute next order value on this board ──────────────────────
+        // `order` is a reserved word in every supported RDBMS. NC's
+        // QueryBuilder auto-quotes identifiers via helpQuote() so the
+        // string `'order'` passed here becomes `` `order` `` on MySQL /
+        // `"order"` on Postgres in the emitted SQL. We still compute
+        // MAX in PHP (rather than SQL-side MAX(`order`)) because
+        // aggregate expressions do NOT go through helpQuote() and would
+        // need explicit `->createFunction()` wrapping per platform.
+        // Same rationale as BackfillDeckStackOrder.
+        $nextOrder = 0;
+        try {
+            $qb = $db->getQueryBuilder();
+            $qb->select('order')
+                ->from('deck_stacks')
+                ->where($qb->expr()->eq('board_id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->isNotNull('order'));
+            $res = $qb->executeQuery();
+            $max = -1;
+            while ($r = $res->fetch()) {
+                $v = $r['order'] ?? null;
+                if (is_numeric($v) && (int)$v > $max) $max = (int)$v;
+            }
+            $res->closeCursor();
+            $nextOrder = $max + 1;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][DeckService] createStackOnTeamBoard order lookup failed: ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+        }
+
+        // ── Insert via Deck's StackMapper (preferred) ────────────────────
+        $stackId = null;
+        try {
+            $stackMapper = $this->container->get(\OCA\Deck\Db\StackMapper::class);
+            $stack = new \OCA\Deck\Db\Stack();
+            $stack->setTitle($title);
+            $stack->setBoardId($boardId);
+            $stack->setOrder($nextOrder);
+            $stack = $stackMapper->insert($stack);
+            $stackId = (int)$stack->getId();
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][DeckService] StackMapper insert failed, using QB fallback: ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+        }
+
+        // ── Fallback: direct QB insert (same shape createDeckBoard uses) ─
+        if ($stackId === null) {
+            try {
+                $stackCols = $this->dbIntrospection->getTableColumns('deck_stacks');
+                $qb = $db->getQueryBuilder();
+                $qb->insert('deck_stacks')
+                    ->setValue('title',    $qb->createNamedParameter($title))
+                    ->setValue('board_id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->setValue('order',    $qb->createNamedParameter($nextOrder, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->setValue('last_modified', $qb->createNamedParameter(time(), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+                if (in_array('deleted_at', $stackCols, true)) {
+                    $qb->setValue('deleted_at', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+                }
+                $qb->executeStatement();
+                $stackId = (int)$db->lastInsertId();
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][DeckService] createStackOnTeamBoard fallback insert failed: ' . $e->getMessage(), [
+                    'app' => Application::APP_ID,
+                ]);
+                return ['error' => 'Failed to create stack'];
+            }
+        }
+
+        // v3.99.1 — bump the parent board's last_modified so Deck's UI
+        // cache invalidates and the new stack appears on next refresh.
+        // Deck's frontend keys off board.last_modified when deciding
+        // whether to refetch the stack list; without this bump, an
+        // unchanged board stamp meant the newly inserted stack stayed
+        // invisible until an unrelated write (or a hard reload) forced
+        // a resync.
+        //
+        // apps.md W-7 note: not an OCP-gap workaround — Deck's cache
+        // contract is the column value, not a method call. `BoardService::update`
+        // does the same UPDATE but also fires BoardUpdatedEvent, which
+        // triggers a spurious "user renamed board" activity entry — wrong
+        // for a stack-insert. Raw UPDATE is the correct pattern here.
+        try {
+            $qb = $db->getQueryBuilder();
+            $qb->update('deck_boards')
+                ->set('last_modified', $qb->createNamedParameter(time(), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->where($qb->expr()->eq('id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+            $qb->executeStatement();
+        } catch (\Throwable $e) {
+            // Non-fatal — the stack is already saved. Log for diagnosis
+            // if the UI-refresh regression comes back.
+            $this->logger->debug('[TeamHub][DeckService] createStackOnTeamBoard: bumping board.last_modified failed: ' . $e->getMessage(), [
+                'boardId' => $boardId,
+                'app'     => Application::APP_ID,
+            ]);
+        }
+
+        // v3.99.4 — mirror the lane title into a Decisions category so
+        // proposals about this workstream can be filed there. Only fires
+        // when Decisions is enabled globally AND for this team. Non-fatal:
+        // the stack write already succeeded; a category failure just
+        // means the admin has to create it manually later.
+        $this->maybeSeedCategoryForStack($teamId, $title);
+
+        $this->logger->info('[TeamHub][DeckService] createStackOnTeamBoard', [
+            'teamId'  => $teamId,
+            'boardId' => $boardId,
+            'stackId' => $stackId,
+            'title'   => $title,
+            'order'   => $nextOrder,
+            'app'     => Application::APP_ID,
+        ]);
+
+        return [
+            'stackId' => $stackId,
+            'title'   => $title,
+            'boardId' => $boardId,
+            'order'   => $nextOrder,
+        ];
+    }
+
+    /**
+     * v3.99.4 — best-effort mirror of a new Deck lane into a Decisions
+     * category. Silent skip when:
+     *   - Decisions module isn't globally enabled
+     *   - Decisions isn't enabled for this team
+     *   - A category with the same name already exists (createCategory
+     *     throws InvalidArgumentException on duplicate — swallowed)
+     *   - Any other failure — the primary stack write is done, we just
+     *     lose the mirror
+     */
+    private function maybeSeedCategoryForStack(string $teamId, string $title): void {
+        try {
+            $globalEnabled = $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1';
+            if (!$globalEnabled) {
+                return;
+            }
+            $teamRow = $this->decisionTeamConfigMapper->findByTeam($teamId);
+            if ($teamRow === null || $teamRow->getDecisionsEnabled() !== 1) {
+                return;
+            }
+
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            if ($uid === '') {
+                return;
+            }
+
+            $this->decisionCategoryService->createCategory($teamId, $title, $uid);
+            $this->logger->info('[TeamHub][DeckService] createStackOnTeamBoard: mirrored lane into Decisions category', [
+                'teamId' => $teamId, 'title' => $title, 'app' => Application::APP_ID,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            // Duplicate — no-op.
+            $this->logger->debug('[TeamHub][DeckService] createStackOnTeamBoard: category mirror skipped (duplicate): ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DeckService] createStackOnTeamBoard: category mirror failed: ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+        }
+    }
 
     /**
      * Create a Deck board owned by $uid, shared with the team circle, and with
      * edit permissions set for all circle members.
      *
-     * @param string      $teamId   Team / circle unique ID
-     * @param string      $teamName Board title
-     * @param string      $uid      NC user ID of the team creator (board owner)
-     * @param string|null $colour   6-char hex colour without '#' (e.g. '0082c9').
-     *                              Defaults to Nextcloud blue when null.
+     * @param string      $teamId      Team / circle unique ID
+     * @param string      $teamName    Board title
+     * @param string      $uid         NC user ID of the team creator (board owner)
+     * @param string|null $colour      6-char hex colour without '#' (e.g. '0082c9').
+     *                                 Defaults to Nextcloud blue when null.
+     * @param string|null $projectMode Project Teams (v3.90.x) — when 'advanced', a
+     *                                 4th "Project management" stack is added with 4
+     *                                 starter cards, each due 7 days out and assigned
+     *                                 to $uid, to give a rolling start. Any other value
+     *                                 (null or 'basic') keeps today's 3-stack, no-card
+     *                                 behaviour exactly — no regression.
      */
-    public function createDeckBoard(string $teamId, string $teamName, string $uid, ?string $colour = null): array {
+    public function createDeckBoard(string $teamId, string $teamName, string $uid, ?string $colour = null, ?string $projectMode = null): array {
 
         if (!$this->appManager->isInstalled('deck')) {
             return ['error' => 'Deck app not installed'];
@@ -54,7 +297,7 @@ class DeckService {
             $board   = $boardMapper->insert($board);
             $boardId = $board->getId();
         } catch (\Throwable $e) {
-            $this->logger->warning('[DeckService] Deck BoardMapper failed, using QB fallback', [
+            $this->logger->warning('[TeamHub][DeckService] Deck BoardMapper failed, using QB fallback', [
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,
             ]);
@@ -78,63 +321,75 @@ class DeckService {
             $boardId = (int)$db->lastInsertId();
         }
 
-        // ── Resolve the creator's language and pull stack titles from
-        //    Deck's own translation catalogue ──────────────────────────────
-        // Reuses Deck's existing translations (these three strings have been
-        // in Deck since v1.0) rather than duplicating them into TeamHub's PO
-        // files. Falls back to English when Deck's catalogue lacks the
-        // language or the string — IL10N::t() returns the source string in
-        // that case, which is the correct visible default.
-        $stackTitles = $this->translateDefaultStackTitles($uid);
+        // ── Default stacks (Basic teams only) ────────────────────────────
+        // v3.98.2 — Advanced projects no longer receive the To do / In
+        // progress / Done starter stacks. The Compass "Define workstreams"
+        // Planning-phase activity walks admins through defining their real
+        // project lanes via ProjectSwimlanesModal; forcing a set of default
+        // stacks upfront was the exact wrong model for a lifecycle-driven
+        // project. Basic teams (no lifecycle,
+        // no Compass) keep the classic Deck defaults so nothing regresses
+        // for them.
+        //
+        // Reuses Deck's existing translation catalogue for the three
+        // strings — they've been in Deck since v1.0 — rather than
+        // duplicating them into TeamHub's PO files.
+        if ($projectMode !== 'advanced') {
+            $stackTitles = $this->translateDefaultStackTitles($uid);
 
-        // ── Create default stacks via Deck's StackMapper (preferred) ─────────
-        // Mirrors the BoardMapper path above. Deck's Stack entity carries the
-        // setters that produce a valid row (including `order`, which the Deck
-        // UI requires to be non-NULL for renaming to be enabled).
-        $stacksCreated = false;
-        try {
-            $stackMapper = $this->container->get(\OCA\Deck\Db\StackMapper::class);
-            foreach ($stackTitles as $idx => $stackTitle) {
-                $stack = new \OCA\Deck\Db\Stack();
-                $stack->setTitle($stackTitle);
-                $stack->setBoardId($boardId);
-                $stack->setOrder($idx);
-                $stackMapper->insert($stack);
+            // ── Create default stacks via Deck's StackMapper (preferred) ─
+            $stacksCreated = false;
+            try {
+                $stackMapper = $this->container->get(\OCA\Deck\Db\StackMapper::class);
+                foreach ($stackTitles as $idx => $stackTitle) {
+                    $stack = new \OCA\Deck\Db\Stack();
+                    $stack->setTitle($stackTitle);
+                    $stack->setBoardId($boardId);
+                    $stack->setOrder($idx);
+                    $stackMapper->insert($stack);
+                }
+                $stacksCreated = true;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][DeckService] Deck StackMapper failed, using QB fallback', [
+                    'error' => $e->getMessage(),
+                    'app'   => Application::APP_ID,
+                ]);
             }
-            $stacksCreated = true;
-        } catch (\Throwable $e) {
-            $this->logger->warning('[DeckService] Deck StackMapper failed, using QB fallback', [
-                'error' => $e->getMessage(),
-                'app'   => Application::APP_ID,
-            ]);
-        }
 
-        // ── Fallback: QB insert into deck_stacks ──────────────────────────────
-        // `order` is a required column since Deck 1.0 — always set it, do not
-        // gate on introspection. Stacks with NULL order cannot be renamed in
-        // the Deck UI until the user reshuffles them.
-        if (!$stacksCreated) {
-            $stackCols = $this->dbIntrospection->getTableColumns('deck_stacks');
-            foreach ($stackTitles as $idx => $stackTitle) {
-                try {
-                    $qb = $db->getQueryBuilder();
-                    $qb->insert('deck_stacks')
-                       ->setValue('title',    $qb->createNamedParameter($stackTitle))
-                       ->setValue('board_id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                       ->setValue('order',    $qb->createNamedParameter($idx, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                       ->setValue('last_modified', $qb->createNamedParameter(time(), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
-                    if (in_array('deleted_at', $stackCols, true)) {
-                        $qb->setValue('deleted_at', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+            // ── Fallback: QB insert into deck_stacks ─────────────────────
+            if (!$stacksCreated) {
+                $stackCols = $this->dbIntrospection->getTableColumns('deck_stacks');
+                foreach ($stackTitles as $idx => $stackTitle) {
+                    try {
+                        $qb = $db->getQueryBuilder();
+                        $qb->insert('deck_stacks')
+                           ->setValue('title',    $qb->createNamedParameter($stackTitle))
+                           ->setValue('board_id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                           ->setValue('order',    $qb->createNamedParameter($idx, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                           ->setValue('last_modified', $qb->createNamedParameter(time(), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+                        if (in_array('deleted_at', $stackCols, true)) {
+                            $qb->setValue('deleted_at', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+                        }
+                        $qb->executeStatement();
+                    } catch (\Throwable $e) {
+                        $this->logger->warning('[TeamHub][DeckService] Deck stack insert failed', [
+                            'stack' => $stackTitle,
+                            'error' => $e->getMessage(),
+                            'app'   => Application::APP_ID,
+                        ]);
                     }
-                    $qb->executeStatement();
-                } catch (\Throwable $e) {
-                    $this->logger->warning('[DeckService] Deck stack insert failed', [
-                        'stack' => $stackTitle,
-                        'error' => $e->getMessage(),
-                        'app'   => Application::APP_ID,
-                    ]);
                 }
             }
+        }
+
+        // ── Project Teams (v3.90.x, revised 3.98.2) — "Project management"
+        //    stack + starter cards for Advanced projects. Now the ONLY
+        //    starter stack for Advanced projects; it lands at order=0
+        //    since no default stacks precede it. Failure here never aborts
+        //    board creation — a missing starter stack is recoverable, an
+        //    unshared/unusable board is not.
+        if ($projectMode === 'advanced') {
+            $this->seedProjectManagementStack($boardId, 0, $uid, $db);
         }
 
         // ── Share board with circle via Deck's AclMapper (preferred) ─────────
@@ -162,7 +417,7 @@ class DeckService {
             $aclMapper->insert($acl);
             $circleAdded = true;
         } catch (\Throwable $e) {
-            $this->logger->warning('[DeckService] Deck AclMapper failed, trying PermissionService', [
+            $this->logger->warning('[TeamHub][DeckService] Deck AclMapper failed, trying PermissionService', [
                 'error' => $e->getMessage(),
                 'trace' => substr($e->getTraceAsString(), 0, 500),
                 'app'   => Application::APP_ID,
@@ -181,7 +436,7 @@ class DeckService {
                     $circleAdded = true;
                 }
             } catch (\Throwable $e) {
-                $this->logger->warning('[DeckService] Deck BoardService::addAcl failed, trying QB fallback', [
+                $this->logger->warning('[TeamHub][DeckService] Deck BoardService::addAcl failed, trying QB fallback', [
                     'error' => $e->getMessage(),
                     'trace' => substr($e->getTraceAsString(), 0, 500),
                     'app'   => Application::APP_ID,
@@ -222,7 +477,7 @@ class DeckService {
                     $circleAdded = true;
                     break;
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[DeckService] Deck ACL QB insert failed', [
+                    $this->logger->warning('[TeamHub][DeckService] Deck ACL QB insert failed', [
                         'table' => $aclTable,
                         'error' => $e->getMessage(),
                         'trace' => substr($e->getTraceAsString(), 0, 500),
@@ -233,7 +488,7 @@ class DeckService {
         }
 
         if (!$circleAdded) {
-            $this->logger->error('[DeckService] Deck: all circle ACL strategies failed', [
+            $this->logger->error('[TeamHub][DeckService] Deck: all circle ACL strategies failed', [
                 'boardId' => $boardId,
                 'teamId'  => $teamId,
                 'app'     => Application::APP_ID,
@@ -302,7 +557,7 @@ class DeckService {
             }
             return $out;
         } catch (\Throwable $e) {
-            $this->logger->error('[DeckService] listOwnedBoards failed', [
+            $this->logger->error('[TeamHub][DeckService] listOwnedBoards failed', [
                 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return [];
@@ -393,7 +648,7 @@ class DeckService {
                 $aclMapper->insert($acl);
                 $circleAdded = true;
             } catch (\Throwable $e) {
-                $this->logger->warning('[DeckService] connectExistingBoard: AclMapper failed', [
+                $this->logger->warning('[TeamHub][DeckService] connectExistingBoard: AclMapper failed', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -407,7 +662,7 @@ class DeckService {
                         $circleAdded = true;
                     }
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[DeckService] connectExistingBoard: BoardService::addAcl failed', [
+                    $this->logger->warning('[TeamHub][DeckService] connectExistingBoard: BoardService::addAcl failed', [
                         'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
@@ -438,7 +693,7 @@ class DeckService {
                         $circleAdded = true;
                         break;
                     } catch (\Throwable $e) {
-                        $this->logger->warning('[DeckService] connectExistingBoard: QB insert failed', [
+                        $this->logger->warning('[TeamHub][DeckService] connectExistingBoard: QB insert failed', [
                             'table' => $aclTable, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                         ]);
                     }
@@ -459,7 +714,7 @@ class DeckService {
             ];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[DeckService] connectExistingBoard failed', [
+            $this->logger->error('[TeamHub][DeckService] connectExistingBoard failed', [
                 'teamId' => $teamId, 'boardId' => $boardId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -601,7 +856,7 @@ class DeckService {
                 ->andWhere($dqb->expr()->eq('type',        $dqb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->debug('[DeckService] suspendDeckAccess: circle ACL row removed', [
+            $this->logger->debug('[TeamHub][DeckService] suspendDeckAccess: circle ACL row removed', [
                 'teamId' => $teamId, 'boardId' => $boardId, 'table' => $aclTable,
                 'app' => Application::APP_ID,
             ]);
@@ -612,7 +867,7 @@ class DeckService {
                 'type'      => 7,
             ];
         } catch (\Throwable $e) {
-            $this->logger->error('[DeckService] suspendDeckAccess failed', [
+            $this->logger->error('[TeamHub][DeckService] suspendDeckAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return null;
@@ -701,14 +956,14 @@ class DeckService {
             // that wasn't set cleanly by the INSERT.
             $this->enforceAclEditPermissions($boardId, $teamId, $db);
 
-            $this->logger->debug('[DeckService] resumeDeckAccess: circle ACL row re-inserted', [
+            $this->logger->debug('[TeamHub][DeckService] resumeDeckAccess: circle ACL row re-inserted', [
                 'teamId' => $teamId, 'boardId' => $boardId, 'table' => $aclTable,
                 'app' => Application::APP_ID,
             ]);
 
             return true;
         } catch (\Throwable $e) {
-            $this->logger->error('[DeckService] resumeDeckAccess failed', [
+            $this->logger->error('[TeamHub][DeckService] resumeDeckAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return false;
@@ -731,7 +986,7 @@ class DeckService {
                     ->executeStatement();
 
                 if ($affected > 0) {
-                    $this->logger->debug('[DeckService] removeBoardAccess: circle ACL row removed', [
+                    $this->logger->debug('[TeamHub][DeckService] removeBoardAccess: circle ACL row removed', [
                         'teamId' => $teamId, 'boardId' => $boardId,
                         'table' => $table, 'app' => Application::APP_ID,
                     ]);
@@ -741,7 +996,7 @@ class DeckService {
                 // Table may not exist on this Deck version — try the next one.
             }
         }
-        $this->logger->warning('[DeckService] removeBoardAccess: no ACL row found', [
+        $this->logger->warning('[TeamHub][DeckService] removeBoardAccess: no ACL row found', [
             'teamId' => $teamId, 'boardId' => $boardId, 'app' => Application::APP_ID,
         ]);
         return false;
@@ -809,12 +1064,12 @@ class DeckService {
                 ->where($bqb->expr()->eq('id', $bqb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->info('[DeckService] deleteBoardById: board deleted', [
+            $this->logger->info('[TeamHub][DeckService] deleteBoardById: board deleted', [
                 'boardId' => $boardId, 'app' => Application::APP_ID,
             ]);
             return ['deleted' => true, 'board_id' => $boardId];
         } catch (\Throwable $e) {
-            $this->logger->error('[DeckService] deleteBoardById failed', [
+            $this->logger->error('[TeamHub][DeckService] deleteBoardById failed', [
                 'boardId' => $boardId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
@@ -868,7 +1123,7 @@ class DeckService {
                     }
                     $sres->closeCursor();
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[DeckService] deleteDeckBoard: card delete failed', [
+                    $this->logger->warning('[TeamHub][DeckService] deleteDeckBoard: card delete failed', [
                         'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
@@ -882,7 +1137,7 @@ class DeckService {
                         ->where($dqb->expr()->eq('board_id', $dqb->createNamedParameter($boardId)))
                         ->executeStatement();
                 } catch (\Throwable $e) {
-                    $this->logger->warning('[DeckService] deleteDeckBoard: stack delete failed', [
+                    $this->logger->warning('[TeamHub][DeckService] deleteDeckBoard: stack delete failed', [
                         'table' => $tbl, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
@@ -909,7 +1164,7 @@ class DeckService {
             return ['deleted' => true, 'detail' => "Deck board {$boardId} deleted"];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[DeckService] deleteDeckBoard failed', [
+            $this->logger->error('[TeamHub][DeckService] deleteDeckBoard failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
@@ -1035,7 +1290,7 @@ class DeckService {
             }
             $result->closeCursor();
         } catch (\Throwable $e) {
-            $this->logger->warning('[DeckService] getCardsByIds failed', [
+            $this->logger->warning('[TeamHub][DeckService] getCardsByIds failed', [
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,
             ]);
@@ -1108,7 +1363,217 @@ class DeckService {
                 (string)$l->t('Done'),
             ];
         } catch (\Throwable $e) {
-            $this->logger->warning('[DeckService] Could not resolve translated stack titles, falling back to English', [
+            $this->logger->warning('[TeamHub][DeckService] Could not resolve translated stack titles, falling back to English', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return $defaults;
+        }
+    }
+
+    /**
+     * Project Teams (v3.90.x) — "Project management" stack + 4 starter cards
+     * for Advanced projects, to give a rolling start. Each card is assigned to
+     * $uid (the team creator) and due 7 days out.
+     *
+     * Card creation confirmed empirically via the admin-only deck-diagnostic
+     * probe (reflection on live Deck classes, no precedent existed anywhere in
+     * TeamHub before this — AddTaskModal.vue calls Deck's own OCS API from the
+     * frontend and never touches this backend):
+     *   OCA\Deck\Service\CardService::create(string $title, int $stackId,
+     *     string $type, int $order, string $owner, string $description, mixed $duedate)
+     *   OCA\Deck\Service\AssignmentService::assignUser(int $cardId, string $userId, int $type)
+     *     — $type=0 for a plain user assignment, confirmed against the SAME
+     *     convention already used for board ACLs above (0=user, 1=group, 7=circle)
+     *     and TimelineService's existing deck_card_assigned_users read filter.
+     *
+     * Non-fatal throughout — a missing starter stack/card is recoverable
+     * (the owner can add it manually), so failures are logged, never thrown.
+     */
+    private function seedProjectManagementStack(int $boardId, int $order, string $uid, \OCP\IDBConnection $db): void {
+        try {
+            $extras = $this->translateProjectManagementExtras($uid);
+
+            $stackMapper = $this->container->get(\OCA\Deck\Db\StackMapper::class);
+            $stack = new \OCA\Deck\Db\Stack();
+            $stack->setTitle($extras['stackTitle']);
+            $stack->setBoardId($boardId);
+            $stack->setOrder($order);
+            $stack = $stackMapper->insert($stack);
+            $stackId = $stack->getId();
+
+            $cardService = $this->container->get(\OCA\Deck\Service\CardService::class);
+            $dueDate = new \DateTime('@' . (time() + 7 * 86400));
+
+            foreach ($extras['cardTitles'] as $idx => $cardTitle) {
+                try {
+                    // CardService::create() returns OCA\Deck\Model\CardDetails,
+                    // whose accessor for the new card's id could not be confirmed
+                    // (getId() doesn't exist on it, and reflection can't reveal a
+                    // return value's runtime shape — confirmed via the
+                    // deck-diagnostic probe and a follow-up trace: the same
+                    // "Cannot use object of type CardDetails as array" error
+                    // persisted through several accessor attempts and did not
+                    // originate from TeamHub's own extraction code). Sidestepped
+                    // entirely by looking the card up directly afterwards — the
+                    // same "fall back to direct DB access when Deck's own layer
+                    // proves unreliable" precedent TimelineService already
+                    // established for reading assignees (see its docblock).
+                    $cardService->create($cardTitle, $stackId, 'plain', $idx, $uid, '', $dueDate);
+
+                    $cardId = $this->findCardIdByStackAndTitle($db, $stackId, $cardTitle);
+                    if ($cardId !== null) {
+                        $this->assignCardToUser($db, $cardId, $uid);
+                    } else {
+                        $this->logger->warning('[TeamHub][DeckService] Project management starter card: could not find card id after creation', [
+                            'card' => $cardTitle, 'stackId' => $stackId, 'app' => Application::APP_ID,
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][DeckService] Project management starter card failed', [
+                        'card' => $cardTitle, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DeckService] Project management stack seeding failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+    }
+
+    /**
+     * Look up a just-created card's id by (stack_id, title) — sidesteps
+     * CardService::create()'s CardDetails return value entirely (see
+     * seedProjectManagementStack). Picks the most recently created match;
+     * safe here because the stack is freshly created moments earlier, so
+     * there is no pre-existing card that could share the title.
+     */
+    private function findCardIdByStackAndTitle(\OCP\IDBConnection $db, int $stackId, string $title): ?int {
+        $qb = $db->getQueryBuilder();
+        $result = $qb->select('id')
+            ->from('deck_cards')
+            ->where($qb->expr()->eq('stack_id', $qb->createNamedParameter($stackId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('title', $qb->createNamedParameter($title)))
+            ->orderBy('id', 'DESC')
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+        return $row ? (int)$row['id'] : null;
+    }
+
+    /**
+     * Assign $uid to $cardId — direct DB write, mirroring the exact
+     * (table, participantColumn) variant detection TimelineService already
+     * uses for READING assignees (deck_card_assigned_users vs
+     * deck_assigned_users; participant_uid vs participant — confirmed to
+     * differ across Deck versions/installs, see TimelineService's docblock).
+     * Bypasses AssignmentService::assignUser(), which threw an unexplained
+     * "Cannot use object of type CardDetails as array" on every call in
+     * testing — likely triggered by one of its own injected dependencies
+     * (NotificationHelper/ActivityManager), not by TeamHub's input, and not
+     * worth chasing further given this codebase's own established fallback.
+     *
+     * Does NOT gate on DbIntrospectionService::getTableColumns() — per
+     * TimelineService's own hard-won lesson (3.86.1), introspection can
+     * silently return [] for a table that genuinely exists but is low-row-
+     * count or where INFORMATION_SCHEMA access is restricted. Tries the
+     * INSERT directly per variant instead; a missing table throws
+     * SQLSTATE[42S02] and moves to the next variant. A missing `type` column
+     * retries the same (table, participantColumn) pair without it.
+     */
+    private function assignCardToUser(\OCP\IDBConnection $db, int $cardId, string $uid): void {
+        $variants = [
+            ['deck_card_assigned_users', 'participant_uid'],
+            ['deck_card_assigned_users', 'participant'],
+            ['deck_assigned_users',      'participant_uid'],
+            ['deck_assigned_users',      'participant'],
+        ];
+        foreach ($variants as [$table, $participantColumn]) {
+            if ($this->tryInsertAssignment($db, $table, $participantColumn, $cardId, $uid, true)) {
+                return;
+            }
+        }
+        $this->logger->warning('[TeamHub][DeckService] assignCardToUser: no working table variant found', [
+            'cardId' => $cardId, 'app' => Application::APP_ID,
+        ]);
+    }
+
+    /**
+     * One INSERT attempt for a single (table, participantColumn) variant.
+     * Mirrors TimelineService::fetchDeckAssigneesForVariant's two-failure-mode
+     * handling: a missing table (SQLSTATE[42S02]) returns false so the caller
+     * moves to the next variant; a missing `type` column retries the same
+     * table/column pair once without it, since `type` isn't present on every
+     * Deck version's assignee table.
+     */
+    private function tryInsertAssignment(\OCP\IDBConnection $db, string $table, string $participantColumn, int $cardId, string $uid, bool $withType): bool {
+        try {
+            $qb = $db->getQueryBuilder();
+            $qb->insert($table)
+                ->setValue('card_id', $qb->createNamedParameter($cardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->setValue($participantColumn, $qb->createNamedParameter($uid));
+            if ($withType) {
+                // Deck convention: 0=user, 1=group, 2=circle (confirmed via
+                // TimelineService's existing read-side type filter).
+                $qb->setValue('type', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+            }
+            $qb->executeStatement();
+            return true;
+        } catch (\Throwable $e) {
+            $msg = $e->getMessage();
+            if ($withType && !str_contains($msg, '42S02') && !str_contains($msg, 'not found')) {
+                // Table exists but rejected the `type` column — retry without it.
+                return $this->tryInsertAssignment($db, $table, $participantColumn, $cardId, $uid, false);
+            }
+            $this->logger->debug('[TeamHub][DeckService] assignCardToUser variant failed, trying next', [
+                'table' => $table, 'participantColumn' => $participantColumn,
+                'error' => $msg, 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Translated "Project management" stack title + 4 starter-card titles for
+     * Advanced projects. Same per-user language resolution as
+     * translateDefaultStackTitles, kept as its own independent method rather
+     * than refactored to share code with that already-shipped (3.85.5) method,
+     * to avoid any risk of regressing its tested fallback behaviour.
+     */
+    private function translateProjectManagementExtras(string $uid): array {
+        $defaults = [
+            'stackTitle' => 'Project management',
+            'cardTitles' => [
+                'Invite project members',
+                'Create project contract',
+                'Add project milestones',
+                'Schedule the planning kickoff meeting',
+            ],
+        ];
+        try {
+            $config      = $this->container->get(\OCP\IConfig::class);
+            $l10nFactory = $this->container->get(\OCP\L10N\IFactory::class);
+
+            $language = $config->getUserValue($uid, 'core', 'lang', '');
+            if ($language === '') {
+                $language = $config->getSystemValue('default_language', 'en');
+            }
+
+            $l = $l10nFactory->get(Application::APP_ID, $language);
+            return [
+                // TRANSLATORS: 4th Deck stack (kanban column) on an Advanced project's board, always present alongside To do/In progress/Done
+                'stackTitle' => (string)$l->t('Project management'),
+                'cardTitles' => [
+                    (string)$l->t('Invite project members'),
+                    (string)$l->t('Create project contract'),
+                    (string)$l->t('Add project milestones'),
+                    (string)$l->t('Schedule the planning kickoff meeting'),
+                ],
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DeckService] Could not resolve translated project management titles, falling back to English', [
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,
             ]);

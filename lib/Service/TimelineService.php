@@ -35,7 +35,7 @@ use Psr\Log\LoggerInterface;
  *     meta:    object   — source-specific extras (calendarName, impact, boardName, …)
  *   }
  *
- * Decision events (option B, per Justin): each decision produces up to TWO
+ * Decision events (option B): each decision produces up to TWO
  * events — a "proposed" event at created_at and a "decided"/"withdrawn" event
  * at decided_at / withdrawn_at. Every decision event's meta also carries:
  *   - linkedCardIds (v3.78.5) — Deck card IDs linked via "Link tasks"
@@ -48,11 +48,22 @@ use Psr\Log\LoggerInterface;
  *     "Message ↔ decision" overlay to draw a connector arrow from that
  *     post's chip to this decision's "proposed" chip.
  *
- * Deck events: each card produces up to TWO events — a "created" event at
- * created_at and a "due" event at due_date (when set). meta also carries
+ * Deck events: each card produces up to FOUR events — "created" at
+ * last_modified (Deck has no created_at column, so this is a proxy), "start"
+ * at startdate (Session 3, NC 34 / Deck 1.16+ only — deck_cards.startdate,
+ * a nullable `datetime` column; absent entirely on older Deck, never
+ * backfilled with a proxy the way "created" is), "due" at due_date (when
+ * set), and "completed" at the done timestamp. meta also carries
  * blockedByCardIds (v3.78.8, NC 34 / Deck 1.18+ only) — the Deck card IDs
  * this card depends on, used by the frontend's opt-in "Deck card
- * dependencies" overlay.
+ * dependencies" overlay. stackId/stackOrder (Session 3, Planning-phase
+ * swimlane view) identify the card's Deck stack so the frontend can group
+ * events into lanes without string-matching stackName, which isn't
+ * guaranteed unique across boards. See getDeckStacks() for the full,
+ * date-independent lane list (including empty lanes). The swimlane view's
+ * Gantt bar spans a card's "start" and "due" events when both exist, and
+ * falls back to a single due-only marker on installs/cards without a start
+ * date.
  *
  * Milestone events: each dated milestone (lib/Service/MilestoneService)
  * produces exactly ONE event. The frontend renders these as a full-height
@@ -87,7 +98,7 @@ class TimelineService {
      * @return array<int, array<string, mixed>>
      */
     public function getEvents(string $teamId, int $from, int $to): array {
-        $this->logger->debug('[TimelineService] getEvents teamId=' . $teamId . ' from=' . $from . ' to=' . $to, ['app' => Application::APP_ID]);
+        $this->logger->debug('[TeamHub][TimelineService] getEvents teamId=' . $teamId . ' from=' . $from . ' to=' . $to, ['app' => Application::APP_ID]);
 
         $events = [];
 
@@ -96,7 +107,7 @@ class TimelineService {
         try {
             $events = array_merge($events, $this->fetchCalendarEvents($teamId, $from, $to));
         } catch (\Throwable $e) {
-            $this->logger->warning('[TimelineService] calendar fetch failed', [
+            $this->logger->warning('[TeamHub][TimelineService] calendar fetch failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -104,7 +115,7 @@ class TimelineService {
         try {
             $events = array_merge($events, $this->fetchDecisionEvents($teamId, $from, $to));
         } catch (\Throwable $e) {
-            $this->logger->warning('[TimelineService] decisions fetch failed', [
+            $this->logger->warning('[TeamHub][TimelineService] decisions fetch failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -112,7 +123,7 @@ class TimelineService {
         try {
             $events = array_merge($events, $this->fetchDeckEvents($teamId, $from, $to));
         } catch (\Throwable $e) {
-            $this->logger->warning('[TimelineService] deck fetch failed', [
+            $this->logger->warning('[TeamHub][TimelineService] deck fetch failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -120,7 +131,7 @@ class TimelineService {
         try {
             $events = array_merge($events, $this->fetchMessageEvents($teamId, $from, $to));
         } catch (\Throwable $e) {
-            $this->logger->warning('[TimelineService] messages fetch failed', [
+            $this->logger->warning('[TeamHub][TimelineService] messages fetch failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -128,7 +139,7 @@ class TimelineService {
         try {
             $events = array_merge($events, $this->fetchMilestoneEvents($teamId, $from, $to));
         } catch (\Throwable $e) {
-            $this->logger->warning('[TimelineService] milestones fetch failed', [
+            $this->logger->warning('[TeamHub][TimelineService] milestones fetch failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -141,7 +152,7 @@ class TimelineService {
         // IUserManager::get() hits an in-process cache for repeated UIDs.
         $this->resolveDisplayNames($events);
 
-        $this->logger->debug('[TimelineService] getEvents: returning ' . count($events) . ' events', ['app' => Application::APP_ID]);
+        $this->logger->debug('[TeamHub][TimelineService] getEvents: returning ' . count($events) . ' events', ['app' => Application::APP_ID]);
         return $events;
     }
 
@@ -377,7 +388,7 @@ class TimelineService {
                     ];
 
                 } catch (\Throwable $e) {
-                    $this->logger->debug('[TimelineService] skipped calendar object', [
+                    $this->logger->debug('[TeamHub][TimelineService] skipped calendar object', [
                         'uri' => $row['uri'], 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                     ]);
                 }
@@ -562,33 +573,19 @@ class TimelineService {
     // =========================================================================
 
     /**
-     * Fetch Deck cards connected to this team. Each card produces up to two
-     * events:
-     *  - "created"  at card created_at (when in range)
-     *  - "due"      at card due_date   (when set and in range)
+     * Resolve the Deck board(s) connected to $teamId and every non-deleted
+     * stack on them. Shared by fetchDeckEvents() (date-windowed card fetch)
+     * and getDeckStacks() (the full, date-independent lane list used by the
+     * Planning-phase swimlane view — a stack with zero cards in the current
+     * window still needs to render as an empty lane).
      *
-     * Board lookup follows the same ACL-table fallback as DeckService:
-     * deck_board_acl → deck_acl, type=7 (circle) where participant=teamId.
+     * PRIMARY board source: TeamHub's own registry (teamhub_team_app_resources).
+     * FALLBACK: scan the Deck ACL tables (deck_board_acl → deck_acl, type=7
+     * =circle, participant=teamId). Won't hurt when both are present — union.
      *
-     * @return array<int, array<string, mixed>>
+     * @return array{stacks: array<int, array{board_id:int, board_title:string, title:string, order:int|null}>, boardIds: array<int, int>}
      */
-    private function fetchDeckEvents(string $teamId, int $from, int $to): array {
-        if (!$this->appManager->isInstalled('deck')) {
-            $this->logger->debug('[TimelineService] Deck: app not installed, skipping', ['app' => Application::APP_ID]);
-            return [];
-        }
-
-        $this->logger->debug('[TimelineService] Deck: fetching for teamId=' . $teamId, ['app' => Application::APP_ID]);
-
-        // ── 1. Find board IDs for this team ───────────────────────────────────
-        // PRIMARY: TeamHub's own registry (teamhub_team_app_resources). This is
-        // the source of truth used by ResourceService for the Deck tab — boards
-        // that were connected to the team via TeamHub's flow are here. The Deck
-        // tab works because of this table, so the timeline must use it too.
-        //
-        // FALLBACK: scan the Deck ACL tables. Useful only on installs where the
-        // ACL row exists but the registry doesn't yet (corruption, or future
-        // discovery flows). Won't hurt when both are present — we union.
+    private function resolveTeamDeckStacks(string $teamId): array {
         $boardIds = [];
 
         // ── 1a. Registry (primary)
@@ -597,9 +594,9 @@ class TimelineService {
             foreach ($registryRows as $row) {
                 $boardIds[(int)$row->getResourceId()] = true;
             }
-            $this->logger->debug('[TimelineService] Deck: registry yielded ' . count($registryRows) . ' board(s) for team ' . $teamId, ['app' => Application::APP_ID]);
+            $this->logger->debug('[TeamHub][TimelineService] Deck: registry yielded ' . count($registryRows) . ' board(s) for team ' . $teamId, ['app' => Application::APP_ID]);
         } catch (\Throwable $e) {
-            $this->logger->debug('[TimelineService] Deck: registry lookup failed: ' . $e->getMessage(), ['app' => Application::APP_ID]);
+            $this->logger->debug('[TeamHub][TimelineService] Deck: registry lookup failed: ' . $e->getMessage(), ['app' => Application::APP_ID]);
         }
 
         // ── 1b. ACL fallback
@@ -619,19 +616,19 @@ class TimelineService {
                     $count++;
                 }
                 $ares->closeCursor();
-                $this->logger->debug('[TimelineService] Deck: ACL ' . $aclTable . ' yielded ' . $count . ' rows', ['app' => Application::APP_ID]);
+                $this->logger->debug('[TeamHub][TimelineService] Deck: ACL ' . $aclTable . ' yielded ' . $count . ' rows', ['app' => Application::APP_ID]);
             } catch (\Throwable $e) {
-                $this->logger->debug('[TimelineService] Deck: ACL ' . $aclTable . ' not present (' . $e->getMessage() . ')', ['app' => Application::APP_ID]);
+                $this->logger->debug('[TeamHub][TimelineService] Deck: ACL ' . $aclTable . ' not present (' . $e->getMessage() . ')', ['app' => Application::APP_ID]);
             }
         }
 
         if (empty($boardIds)) {
-            $this->logger->debug('[TimelineService] Deck: no boards found for team ' . $teamId, ['app' => Application::APP_ID]);
-            return [];
+            $this->logger->debug('[TeamHub][TimelineService] Deck: no boards found for team ' . $teamId, ['app' => Application::APP_ID]);
+            return ['stacks' => [], 'boardIds' => []];
         }
 
         $boardIdList = array_keys($boardIds);
-        $this->logger->debug('[TimelineService] Deck: total ' . count($boardIdList) . ' board(s): ' . implode(',', $boardIdList), ['app' => Application::APP_ID]);
+        $this->logger->debug('[TeamHub][TimelineService] Deck: total ' . count($boardIdList) . ' board(s): ' . implode(',', $boardIdList), ['app' => Application::APP_ID]);
 
         // ── 2. Fetch stacks for those boards ─────────────────────────────────
         // Deliberately DO NOT filter b.archived=0 anymore. The user's two
@@ -644,8 +641,21 @@ class TimelineService {
         $stackCols          = $this->dbIntrospection->getTableColumns('deck_stacks');
         $stackHasDeletedAt  = in_array('deleted_at', $stackCols, true);
 
-        $sqb = $this->db->getQueryBuilder();
-        $sqb->select('s.id', 's.title', 's.board_id', 'b.title AS board_title')
+        // Deck's stack-ordering column is literally named `order` (a reserved
+        // word in most SQL dialects — safe here since it's only ever
+        // referenced through IQueryBuilder, never raw SQL, which handles
+        // identifier quoting on both MySQL/MariaDB and Postgres). Some
+        // installs may have stacks with order IS NULL (predate the
+        // BackfillDeckStackOrder repair step) — sorted deterministically in
+        // getDeckStacks() rather than relying on DB-default NULL ordering.
+        $stackHasOrder = in_array('order', $stackCols, true);
+
+        $sqb        = $this->db->getQueryBuilder();
+        $selectCols = ['s.id', 's.title', 's.board_id', 'b.title AS board_title'];
+        if ($stackHasOrder) {
+            $selectCols[] = 's.order';
+        }
+        $sqb->select(...$selectCols)
             ->from('deck_stacks', 's')
             ->leftJoin('s', 'deck_boards', 'b', $sqb->expr()->eq('s.board_id', 'b.id'))
             ->where($sqb->expr()->in('s.board_id',
@@ -668,11 +678,80 @@ class TimelineService {
                 'board_id'    => (int)$srow['board_id'],
                 'board_title' => (string)($srow['board_title'] ?? ''),
                 'title'       => (string)$srow['title'],
+                'order'       => isset($srow['order']) ? (int)$srow['order'] : null,
             ];
         }
         $sres->closeCursor();
 
-        $this->logger->debug('[TimelineService] Deck: found ' . count($stacks) . ' stack(s) across ' . count($boardIdList) . ' board(s)', ['app' => Application::APP_ID]);
+        $this->logger->debug('[TeamHub][TimelineService] Deck: found ' . count($stacks) . ' stack(s) across ' . count($boardIdList) . ' board(s)', ['app' => Application::APP_ID]);
+
+        return ['stacks' => $stacks, 'boardIds' => $boardIdList];
+    }
+
+    /**
+     * Ordered list of Deck stacks (workstreams) for $teamId's connected
+     * board(s), for the Planning-phase swimlane view. Independent of any
+     * date window — a stack with zero cards in the currently-viewed range
+     * still needs to render as an (empty) lane, so this doesn't reuse
+     * fetchDeckEvents()'s card-filtered result.
+     *
+     * Sorted by Deck's own stack order (NULLs last, tie-broken by stackId)
+     * so lane order matches the order stacks appear in the Deck app itself
+     * — including the "Project management" stack (v3.90.0), which has no
+     * special marker beyond its order position and title.
+     *
+     * @return array<int, array{stackId:int, boardId:int, boardTitle:string, stackTitle:string, order:int|null}>
+     */
+    public function getDeckStacks(string $teamId): array {
+        if (!$this->appManager->isInstalled('deck')) {
+            return [];
+        }
+
+        $resolved = $this->resolveTeamDeckStacks($teamId);
+
+        $list = [];
+        foreach ($resolved['stacks'] as $stackId => $stack) {
+            $list[] = [
+                'stackId'    => $stackId,
+                'boardId'    => $stack['board_id'],
+                'boardTitle' => $stack['board_title'],
+                'stackTitle' => $stack['title'],
+                'order'      => $stack['order'],
+            ];
+        }
+
+        usort($list, function (array $a, array $b): int {
+            if ($a['order'] === null && $b['order'] !== null) return 1;
+            if ($a['order'] !== null && $b['order'] === null) return -1;
+            if ($a['order'] !== $b['order']) return $a['order'] <=> $b['order'];
+            return $a['stackId'] <=> $b['stackId'];
+        });
+
+        return $list;
+    }
+
+    /**
+     * Fetch Deck cards connected to this team. Each card produces up to two
+     * events:
+     *  - "created"  at card created_at (when in range)
+     *  - "due"      at card due_date   (when set and in range)
+     *
+     * Board lookup follows the same ACL-table fallback as DeckService:
+     * deck_board_acl → deck_acl, type=7 (circle) where participant=teamId.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchDeckEvents(string $teamId, int $from, int $to): array {
+        if (!$this->appManager->isInstalled('deck')) {
+            $this->logger->debug('[TeamHub][TimelineService] Deck: app not installed, skipping', ['app' => Application::APP_ID]);
+            return [];
+        }
+
+        $this->logger->debug('[TeamHub][TimelineService] Deck: fetching for teamId=' . $teamId, ['app' => Application::APP_ID]);
+
+        $resolved    = $this->resolveTeamDeckStacks($teamId);
+        $stacks      = $resolved['stacks'];
+        $boardIdList = $resolved['boardIds'];
 
         if (empty($stacks)) {
             return [];
@@ -717,9 +796,10 @@ class TimelineService {
             // Deck's schema looks like on this install.
             if (!$loggedRowKeys) {
                 $loggedRowKeys = true;
-                $this->logger->debug('[TimelineService] Deck: deck_cards row keys = ' . implode(',', array_keys($crow))
+                $this->logger->debug('[TeamHub][TimelineService] Deck: deck_cards row keys = ' . implode(',', array_keys($crow))
                     . ' | sample: last_modified=' . var_export($crow['last_modified'] ?? '<missing>', true)
-                    . ' duedate=' . var_export($crow['duedate'] ?? '<missing>', true),
+                    . ' duedate=' . var_export($crow['duedate'] ?? '<missing>', true)
+                    . ' startdate=' . var_export($crow['startdate'] ?? '<missing>', true),
                     ['app' => Application::APP_ID]);
             }
 
@@ -742,6 +822,8 @@ class TimelineService {
             $meta = [
                 'boardName'   => $stack['board_title'],
                 'stackName'   => $stack['title'],
+                'stackId'     => $stackId,
+                'stackOrder'  => $stack['order'] ?? null,
                 'cardId'      => $cardId,
                 'description' => $description,
             ];
@@ -787,7 +869,40 @@ class TimelineService {
                 }
             }
 
-            // Event 2 — "Due" at due date. Deck stores this as an integer Unix
+            // Event 2 — "Start" at the card's planned start date (Session 3,
+            // Planning-phase swimlane view). NC 34 / Deck 1.16+ only —
+            // deck_cards.startdate, added via Deck migration
+            // Version11002Date20260312000000.php as a nullable `datetime`
+            // column — unlike duedate, which is a plain integer column.
+            // parseTimestamp() already handles both raw ints and datetime
+            // strings, so no extra parsing branch is needed here. Absent
+            // entirely on older Deck installs (SELECT * simply has no
+            // 'startdate' key there, same degrade-gracefully convention as
+            // every other optional column in this method) — deliberately NOT
+            // backfilled with a proxy the way `created` uses last_modified,
+            // by design: don't invent a concept newer Deck already
+            // owns. The frontend's Gantt bar falls back to a due-only marker
+            // when no start event exists for a card.
+            $startRaw = $crow['startdate'] ?? null;
+            if ($startRaw !== null && $startRaw !== '' && $startRaw !== 0 && $startRaw !== '0') {
+                $startTs = $this->parseTimestamp($startRaw);
+                if ($startTs !== null && $startTs >= $from && $startTs <= $to) {
+                    $events[] = [
+                        'id'      => 'deck-' . $cardId . '-start',
+                        'source'  => 'deck',
+                        'type'    => 'start',
+                        'title'   => $title,
+                        'date'    => (new \DateTimeImmutable('@' . $startTs))->format('c'),
+                        'endDate' => null,
+                        'allDay'  => true,
+                        'url'     => $deckCardUrl,
+                        'meta'    => array_merge($meta, ['eventRole' => 'start']),
+                    ];
+                    $emittedEither = true;
+                }
+            }
+
+            // Event 3 — "Due" at due date. Deck stores this as an integer Unix
             // timestamp in 'duedate' (NOT 'due_date'). 0 is the sentinel for
             // "no due date". Still emitted for completed cards — the frontend
             // uses the `completed` meta flag to choose which to show by default.
@@ -815,7 +930,7 @@ class TimelineService {
                 }
             }
 
-            // Event 3 — "Completed" at the done timestamp.
+            // Event 4 — "Completed" at the done timestamp.
             if ($completedTs !== null && $completedTs >= $from && $completedTs <= $to) {
                 $events[] = [
                     'id'      => 'deck-' . $cardId . '-completed',
@@ -833,6 +948,7 @@ class TimelineService {
 
             if (!$emittedEither) {
                 $hasNoDates = ($createdRaw === null || $createdRaw === '' || $createdRaw === 0 || $createdRaw === '0')
+                           && ($startRaw === null   || $startRaw === ''   || $startRaw === 0   || $startRaw === '0')
                            && ($dueRaw === null     || $dueRaw === ''     || $dueRaw === 0     || $dueRaw === '0')
                            && ($doneRaw === null    || $doneRaw === ''    || $doneRaw === 0    || $doneRaw === '0');
                 if ($hasNoDates) {
@@ -878,7 +994,7 @@ class TimelineService {
                 ['deck_assigned_users',      'participant'],
             ];
 
-            $this->logger->debug('[TimelineService] Deck assignees: starting lookup'
+            $this->logger->debug('[TeamHub][TimelineService] Deck assignees: starting lookup'
                 . ' cards=' . count(array_unique($allCardIds)),
                 ['app' => Application::APP_ID]);
 
@@ -897,7 +1013,7 @@ class TimelineService {
                     // missing `type` column (retry same variant unfiltered).
                     $msg = $e->getMessage();
                     if (str_contains($msg, '42S02') || str_contains($msg, 'not found')) {
-                        $this->logger->debug('[TimelineService] Deck assignees: ' . $aTable . ' not present, trying next variant',
+                        $this->logger->debug('[TeamHub][TimelineService] Deck assignees: ' . $aTable . ' not present, trying next variant',
                             ['app' => Application::APP_ID]);
                         continue;
                     }
@@ -906,7 +1022,7 @@ class TimelineService {
                             $aTable, $partCol, array_unique($allCardIds), false
                         );
                     } catch (\Throwable $e2) {
-                        $this->logger->debug('[TimelineService] Deck assignees: ' . $aTable . '/' . $partCol
+                        $this->logger->debug('[TeamHub][TimelineService] Deck assignees: ' . $aTable . '/' . $partCol
                             . ' failed both with and without type filter: ' . $e2->getMessage(),
                             ['app' => Application::APP_ID]);
                         continue;
@@ -918,7 +1034,7 @@ class TimelineService {
                 break;
             }
 
-            $this->logger->debug('[TimelineService] Deck assignees: lookup done'
+            $this->logger->debug('[TeamHub][TimelineService] Deck assignees: lookup done'
                 . ' hit=' . ($hit ?: '<none>')
                 . ' cardsWithAssignees=' . count($assigneesByCard),
                 ['app' => Application::APP_ID]);
@@ -982,16 +1098,16 @@ class TimelineService {
                     unset($ev);
                 }
 
-                $this->logger->debug('[TimelineService] Deck: card dependencies — '
+                $this->logger->debug('[TeamHub][TimelineService] Deck: card dependencies — '
                     . $depRowCount . ' row(s) across ' . count($blockedByMap) . ' blocked card(s)',
                     ['app' => Application::APP_ID]);
             } catch (\Throwable $e) {
-                $this->logger->debug('[TimelineService] Deck: dependency fetch failed: ' . $e->getMessage(),
+                $this->logger->debug('[TeamHub][TimelineService] Deck: dependency fetch failed: ' . $e->getMessage(),
                     ['app' => Application::APP_ID]);
             }
         }
 
-        $this->logger->debug('[TimelineService] Deck: window=[' . $from . ',' . $to . '] cardsTotal=' . $totalCards
+        $this->logger->debug('[TeamHub][TimelineService] Deck: window=[' . $from . ',' . $to . '] cardsTotal=' . $totalCards
             . ' deleted=' . $skippedDeleted . ' archived=' . $skippedArchived
             . ' noDates=' . $skippedNoDates . ' outOfRange=' . $skippedOutOfRange
             . ' eventsEmitted=' . count($events), ['app' => Application::APP_ID]);
@@ -1074,7 +1190,7 @@ class TimelineService {
         }
         $res->closeCursor();
 
-        $this->logger->debug('[TimelineService] Messages: window=[' . $from . ',' . $to . '] events=' . count($events), ['app' => Application::APP_ID]);
+        $this->logger->debug('[TeamHub][TimelineService] Messages: window=[' . $from . ',' . $to . '] events=' . count($events), ['app' => Application::APP_ID]);
         return $events;
     }
 
@@ -1121,7 +1237,7 @@ class TimelineService {
             ];
         }
 
-        $this->logger->debug('[TimelineService] Milestones: window=[' . $from . ',' . $to . '] events=' . count($events), ['app' => Application::APP_ID]);
+        $this->logger->debug('[TeamHub][TimelineService] Milestones: window=[' . $from . ',' . $to . '] events=' . count($events), ['app' => Application::APP_ID]);
         return $events;
     }
 

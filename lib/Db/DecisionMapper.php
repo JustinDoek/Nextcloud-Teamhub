@@ -210,6 +210,57 @@ class DecisionMapper extends QBMapper {
     }
 
     /**
+     * Count decisions in one of the given statuses. Used by the project-health
+     * widget's Quality pillar ("open" = status in ['open','finalized']).
+     *
+     * @param string[] $statuses
+     */
+    public function countByTeamAndStatus(string $teamId, array $statuses): int {
+        if (empty($statuses)) {
+            return 0;
+        }
+        $qb = $this->db->getQueryBuilder();
+        $r = $qb->select($qb->func()->count('*', 'cnt'))
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->in(
+                'status',
+                $qb->createNamedParameter($statuses, IQueryBuilder::PARAM_STR_ARRAY)
+            ))
+            ->executeQuery();
+        $val = $r->fetchOne();
+        $r->closeCursor();
+        return (int)$val;
+    }
+
+    /**
+     * v3.99.7 — decisions in one of the given statuses that are linked to
+     * a milestone. Used by the project-health widget's Milestones pillar:
+     * if a milestone-linked decision is still open/finalised and today is
+     * within N days of the milestone date, that milestone flips to
+     * at-risk in the widget. Returns entities so the caller can read
+     * milestone_id + status.
+     *
+     * @param string[] $statuses
+     * @return Decision[]
+     */
+    public function findWithMilestoneByTeamAndStatus(string $teamId, array $statuses): array {
+        if (empty($statuses)) {
+            return [];
+        }
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->isNotNull('milestone_id'))
+            ->andWhere($qb->expr()->in(
+                'status',
+                $qb->createNamedParameter($statuses, IQueryBuilder::PARAM_STR_ARRAY)
+            ));
+        return $this->findEntities($qb);
+    }
+
+    /**
      * Distinct non-null categories used in a team — for the filter picker.
      *
      * @return string[]

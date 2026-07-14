@@ -35,6 +35,18 @@ List milestones for a team, ordered dated-ascending then undated-last.
 
 ---
 
+### `GET /api/v1/teams/{teamId}/milestones/pick` (v3.97.5)
+
+Member-gated variant of the list endpoint used by the decision-compose milestone picker. Same response shape as `/milestones`, no write side effects.
+
+**Auth**: team **member** required. Milestones are already visible to every member via Timeline red-marker rendering and the project-health widget's Milestones pillar, so exposing id/label/date at member scope adds no new leak — it just avoids escalating the compose caller to admin-only just to render the picker.
+
+**Response 200**: `{ "items": [ ... ] }` — same item shape as `/milestones`.
+
+**Failures**: `403` — not a team member.
+
+---
+
 ### `POST /api/v1/teams/{teamId}/milestones`
 
 Create a milestone.
@@ -101,6 +113,8 @@ Fetch aggregated timeline events for a team within a date window.
       "meta": {
         "boardName": "Q3 Planning",
         "stackName": "In Progress",
+        "stackId": 17,
+        "stackOrder": 2,
         "cardId": 42,
         "eventRole": "due",
         "overdue": false,
@@ -108,21 +122,35 @@ Fetch aggregated timeline events for a team within a date window.
         "blockedByCardIds": [17]
       }
     }
+  ],
+  "stacks": [
+    {
+      "stackId": 17,
+      "boardId": 3,
+      "boardTitle": "Q3 Planning",
+      "stackTitle": "In Progress",
+      "order": 2
+    }
   ]
 }
 ```
+
+**`stacks`** (added 3.91.0) is the full, date-independent, order-sorted list of Deck stacks connected to this team — used by the Planning-phase swimlane view so a stack with zero cards in the requested window still renders as an empty lane. NULL `order` values sort last, tie-broken by `stackId`. Deck-specific and independently try-caught server-side; if Deck fails, `stacks: []` is returned without breaking `events`.
 
 **Sources** emitted: `calendar`, `decisions`, `deck`, `messages`, `milestone`.
 
 **Event types per source**:
 - `calendar`: `event`
 - `decisions`: `proposed` | `decided` | `withdrawn`
-- `deck`: `created` | `due` | `completed`
+- `deck`: `created` | `start` | `due` | `completed`
 - `messages`: `posted`
 - `milestone`: `milestone` (dated milestones only — see Milestone endpoints above)
 
+**`start` event** (added 3.91.0) — Deck 1.16+ (NC 34+) only — emitted when `deck_cards.startdate` is non-null. Absent on older Deck installs. The swimlane view uses `start` + `due` to draw a bar spanning both; falls back to a due-only single-day marker when `start` is missing.
+
 **`meta` additions since 3.78.0** (all optional, presence depends on data):
 - `decisions` events: `linkedCardIds` (int[], 3.78.5) — Deck cards linked via "Link tasks", resolved from `task_path`. `sourceMessageId` (int, 3.78.9) — the `teamhub_messages` row that announced this proposal; `0` if none.
+- `deck` events (all types, 3.91.0): `stackId` (int) and `stackOrder` (int|null) — the card's Deck stack identifier and its ordering position, so the frontend can group events into lanes without string-matching `stackName` (which isn't guaranteed unique across boards). `stackOrder` may be null on installs predating the Deck `BackfillDeckStackOrder` repair step.
 - `deck` events (`eventRole: 'created'` only): `blockedByCardIds` (int[], 3.78.8) — Deck card IDs this card depends on. **NC 34 / Deck 1.18+ only** — absent entirely on older installs, never an empty array as a false signal of "checked, no dependencies."
 - **Popover-detail additions (3.86.0)** — all optional, present only when data exists:
   - `calendar` events: `description` (string, truncated 280), `organizer` (string — `CN` or mailto-stripped), `attendeeCount` (int).
@@ -221,6 +249,14 @@ Existing endpoint — now also returns `timelineConfig` in its response so the f
 `card_dependencies_supported` (3.78.8) — whether `deck_dependent_cards` exists on this install (`TimelineService::isCardDependencySupported()`, via `DbIntrospectionService`). Gates whether the "Deck card dependencies" connector toggle appears in the Timeline filter menu at all.
 
 Also added `mergeNewTabs()` post-processing on `tabOrder` — saved `tab_order_json` rows automatically pick up new built-in tabs (Timeline included) on every GET without ever needing a re-save.
+
+**Response addition (3.88.0)** — `project` (in both team-row and cascade-to-default branches), same shape as the Project Teams endpoints below. Lets the frontend show the project phase stepper immediately on team open without a second request; membership is already verified earlier in `getLayout()`, so `LayoutController::projectFacts()` degrades to `{isProject:false, ...}` on any failure rather than breaking the whole layout response.
+```json
+{
+  "...": "...",
+  "project": { "isProject": true, "mode": "advanced", "phase": "planning", "startDate": null, "targetEnd": null }
+}
+```
 
 ---
 
@@ -377,6 +413,494 @@ NC's unified search calls `IProvider::search` on every registered provider. Team
 | `DecisionSearchProvider` (pre-existing) | `teamhub-decisions` | 51 | Decisions in teams the searcher belongs to. |
 
 Order values are hardcoded in each provider's `getOrder()`. NC has no admin UI to reorder providers — to change ordering, edit the values in source.
+
+---
+
+## Project Teams endpoints (added 3.88.0)
+
+Persisted project-ness for teams created from the "Project" template — the keystone that later phase-aware tooling (charter template, swimlane board, budget page, dashboard) hangs off. A team without a `teamhub_project` row is not a project; `mode` (`basic`|`advanced`) is the lifecycle discriminator; `phase` is meaningful only for `advanced` and walks `initiation → planning → execution → closing`. See DESIGN.md §2.36.
+
+### `GET /api/v1/teams/{teamId}/project`
+
+Project facts for a team.
+
+**Auth**: team **member** required (`ProjectService::getForTeam` calls `MemberService::requireMemberLevel`).
+
+**Response 200**:
+```json
+{ "isProject": true, "mode": "advanced", "phase": "planning", "startDate": null, "targetEnd": null }
+```
+For a non-project team: `{ "isProject": false, "mode": null, "phase": null, "startDate": null, "targetEnd": null }`.
+
+**Failures**: `401` — not authenticated. `403` — not a team member.
+
+---
+
+### `PUT /api/v1/teams/{teamId}/project`
+
+Create or update the project record. Called by the create wizard (Project template, any mode) and by the "Upgrade to Advanced" action in Manage Team → Project.
+
+**Auth**: team **admin** required (`ProjectService::upsert` calls `MemberService::requireAdminLevel`).
+
+**Body**: `{ "mode": "basic" | "advanced", "start_date": 1754006400, "target_end": null }` — `mode` required; `start_date`/`target_end` optional Unix timestamps (UTC midnight), omit or `null` to leave/clear.
+
+**Response 200**: same shape as `GET`. Creating with `mode="advanced"` and no existing phase seeds `phase="planning"`. Updating an existing `advanced` row to `mode="basic"` clears `phase` to `null`; updating `basic` → `advanced` seeds `phase="planning"` if none was set.
+
+**Failures**: `400` — `mode` missing or not one of `basic`/`advanced`. `403` — not a team admin.
+
+**Audit**: `project.created` (first row) or `project.mode_changed` / `project.updated` (subsequent writes, diff-gated — no event if nothing changed).
+
+---
+
+### `PUT /api/v1/teams/{teamId}/project/phase`
+
+Advance/set the lifecycle phase. Advanced projects only.
+
+**Auth**: team **admin** required.
+
+**Body**: `{ "phase": "initiation" | "planning" | "execution" | "closing" }`.
+
+**Response 200**: same shape as `GET`.
+
+**Failures**: `400` — `phase` missing, not a valid phase, or the project is `mode="basic"` (phase only applies to advanced projects). `403` — not a team admin.
+
+**Audit**: `project.phase_changed` (skipped as a no-op if the phase is unchanged — no audit noise).
+
+---
+
+### `GET /api/v1/teams/{teamId}/project/health` (v3.97.0)
+
+Aggregation endpoint feeding the Execution-phase **Project health** widget (Track E Session 6). Membership + tab-visibility gated.
+
+**Auth**: team **member** required (`MemberService::requireMemberLevel`). Additionally requires both `budgetService::canUserViewBudgetTab` and `timeService::canUserViewTimeTab` to be true — non-eligible viewers get a `canView: false` envelope with zero counts (the widget hides itself in that case; no 403 for viewer denial). Non-members still 403 via the standard mapper.
+
+**Body**: none.
+
+**Response 200** (eligible viewer, Advanced project in Execution phase):
+```json
+{
+    "canView": true,
+    "phase": "execution",
+    "budgetTime": {
+        "lanesOverBudget": 2,
+        "projectOverBudget": false,
+        "membersOverHours": 1
+    },
+    "milestones": {
+        "total": 3,
+        "upcoming": [
+            {
+                "id": 42,
+                "label": "Beta launch",
+                "date": "2026-08-15",
+                "dateTs": 1755216000,
+                "ownedTotal": 8,
+                "ownedDone": 5,
+                "ownedSlipping": 1,
+                "status": "slipping",
+                "isPast": false
+            }
+        ]
+    },
+    "quality": {
+        "openDecisions": 2,
+        "unsolvedQuestions": 4,
+        "decisionsEnabled": true
+    }
+}
+```
+
+**Response 200** (non-eligible viewer — below either floor, non-project team, Basic mode, or wrong phase):
+```json
+{
+    "canView": false,
+    "phase": null,
+    "budgetTime": { "lanesOverBudget": 0, "projectOverBudget": false, "membersOverHours": 0 },
+    "milestones": { "total": 0, "upcoming": [] },
+    "quality": { "openDecisions": 0, "unsolvedQuestions": 0, "decisionsEnabled": false }
+}
+```
+
+**Rules**:
+- `budgetTime.lanesOverBudget` — count of Budget lanes where `spentRealMinor > allocatedMinor` (lanes without an allocation are ignored).
+- `budgetTime.projectOverBudget` — `true` when `spentRealMinor > totalMinor` at the project level, else `false` (also `false` when there's no total set).
+- `budgetTime.membersOverHours` — count of members where `loggedMinutes > availableMinutes`. Uncapped members (`availableMinutes = 0`) are excluded.
+- `milestones.upcoming` — up to 5 milestones, ordered future-first (nearest first), padded with the most-recent past milestones if fewer than 5 future milestones exist. Only *dated* milestones are considered (undated milestones have no interval to own cards from).
+- **Milestone ownership rule**: milestone M owns every Deck card whose `duedate` falls in the range `(previous_milestone.date, M.date]`. For the first milestone, "previous" is `project.startDate`; if `startDate` is unset, the first milestone owns every card up to its own date.
+- **Milestone status**: `on-track` — all owned cards are `done`. `at-risk` — some owned cards still open but none past their own `duedate`. `slipping` — some owned cards open AND at least one is past its `duedate`.
+- `quality.openDecisions` — count of decisions with `status IN ('open', 'finalized')`. Always `0` when the Decisions module isn't enabled for the team (see `quality.decisionsEnabled`).
+- `quality.unsolvedQuestions` — count of question-type messages where `question_solved = 0`.
+
+**Failures**: `401` — not authenticated. `403` — not a team member. `500` — mapper/DB error.
+
+**Frontend contract**: `ProjectHealthWidget.vue` fetches on mount, on `currentTeamId` change, and on window focus / tab visibility change. Errors are shown inline with the last successful payload preserved so admins know figures may be stale. Each tile has quick-jump buttons emitting `open-tab` → `set-view` to Budget / Time / Timeline / Messages.
+
+---
+
+### `GET /api/v1/teams/{teamId}/project/readiness` (v3.98.0)
+
+Powers the Project Compass panel on the team Home view. Returns the phase-appropriate setup checklist with per-item done/pending status and jump-link targets.
+
+**Auth**: team **member** required. Every check reads data the caller already has access to via other endpoints — no privilege escalation.
+
+**Body**: none.
+
+**Response 200** (Advanced project, Planning phase):
+```json
+{
+    "isProject": true,
+    "phase": "planning",
+    "nextPhase": "execution",
+    "readyToAdvance": false,
+    "items": [
+        {
+            "id": "project_dates",
+            "done": true,
+            "label": "Set project start and target end dates",
+            "hint": "Anchors the timeline so milestones and the health widget have a range to report against.",
+            "link": { "target": "manage-team", "tab": "project", "section": "top" }
+        },
+        {
+            "id": "members_invited",
+            "done": true,
+            "label": "Invite the project team",
+            "hint": "At least one other member so work has someone to be assigned to.",
+            "link": { "target": "invite-modal" }
+        },
+        {
+            "id": "milestones_added",
+            "done": false,
+            "label": "Add at least one dated milestone",
+            "hint": "Milestones own the Deck cards due before them and feed the project-health widget.",
+            "link": { "target": "manage-team", "tab": "project", "section": "milestones" }
+        }
+    ]
+}
+```
+
+**Response 200** (non-project / non-Advanced team):
+```json
+{
+    "isProject": false,
+    "phase": null,
+    "nextPhase": null,
+    "readyToAdvance": false,
+    "items": []
+}
+```
+
+**Item shape**:
+- `id` — stable string identifier per check.
+- `done` — boolean; the "Next up" prompt shows the first `done: false` item.
+- `label` — one-line action title.
+- `hint` — one-line explanation of why this matters.
+- `link.target` — routing hint: `manage-team` (set `SET_MANAGE_TEAM_DEEP_LINK`), `set-view` (emit `set-view`), or `invite-modal` (emit `invite`).
+- `link.tab` + `link.section` — set only when `target === 'manage-team'`. `section` matches a `data-section` anchor on ManageTeamView; use `"top"` for no scroll.
+- `link.view` — set only when `target === 'set-view'` (e.g. `budget`, `time`, `timeline`, `msgstream`).
+
+**Phase items**:
+
+| Phase | Items |
+|---|---|
+| planning | project_dates, members_invited, milestones_added, budget_total (if budget integration enabled), time_capacity (if time integration enabled) |
+| execution | first_expense (if budget), first_timelog (if time), milestones_on_track, within_bounds |
+| closing | none (Session 7 will define) |
+
+**`readyToAdvance`** is `true` when every item is `done` and `nextPhase !== null`. The frontend surfaces this as an "Advance phase" CTA; the actual advance calls the existing `PUT /project/phase` endpoint, which still requires admin level.
+
+**Failures**: `401` — not authenticated. `403` — not a team member. `500` — mapper/DB error.
+
+**Frontend contract**: `ProjectCompassPanel.vue` fetches on mount, on `currentTeamId` change, on window focus, on tab visibility change, and on any `project` / `budgetConfig` / `timeConfig` Vuex mutation.
+
+---
+
+### `POST /api/v1/teams/{teamId}/project/closing/generate` (v3.99.0)
+
+Renders the Closing artifact into the team's Files folder (`Project Closing/`). Overwrites existing files if re-run. On success stamps `teamhub_project.closing_artifact_at`, which flips the Compass `closing_artifact` readiness item to done.
+
+**Auth**: team **admin** required.
+
+**Body**: none.
+
+**Response 200**: `{ "filePath": "/…/Project Closing", "generatedAt": 1720444800 }`
+
+**Failures**: `400` — team has no Files folder to write into, or write failed. `403` — not admin. `500` — mapper/DB error stamping timestamp.
+
+---
+
+### `GET /api/v1/teams/{teamId}/project/closing/status` (v3.99.0)
+
+**Auth**: team **member** required.
+
+**Response 200**: `{ "generated": bool, "generatedAt": int|null, "filePath": string|null }`. Never throws — returns `generated=false` on any read failure.
+
+---
+
+### `GET /api/v1/teams/{teamId}/project/closing/archive-policy` (v3.99.0)
+
+Returns the effective admin archive settings so the frontend can render an informed confirmation before team archival.
+
+**Auth**: team **member** required.
+
+**Response 200**: `{ "archiveBeforeDelete": bool, "archiveMode": "hard"|"soft30"|"soft60", "dataLossWarning": bool }`
+
+`dataLossWarning` is `true` when `archiveBeforeDelete === false && archiveMode === 'hard'` — no archive bundle AND immediate hard delete. The `ArchivePolicyWarningModal` renders a red alert in that case; otherwise a plain policy description.
+
+---
+
+## IntraVox page creation (`projectMode` param added 3.89.0)
+
+### `POST /api/v1/teams/{teamId}/intravox/page`
+
+Creates the team's IntraVox documentation page. Pre-existing endpoint; not previously documented here.
+
+**Auth**: team **admin** required (`MemberService::requireAdminLevel`).
+
+**Body** (3.89.0): `{ "projectMode": "basic" | "advanced" | null }` — optional. When `"advanced"`, the page is seeded with the 9-element PMC project-definition charter (`IntravoxService::buildProjectCharterLayout`), rendered in the creating user's NC language. Any other value (including absent/`null`/`"basic"`) creates the page exactly as before this session — a blank canvas with just a title.
+
+**Response 200**: `{ "success": true, "result": { "page_created": true, "page_id": "..." } }`.
+
+**Failures**: `400` — IntraVox not installed, or `PageService` threw (message passed through).
+
+**Note**: creation and content-seeding are two internal calls (`PageService::createPage` then `updatePage`) — `createPage()` does not accept `layout` inline. See DESIGN.md §2.38.
+
+---
+
+## IntraVox diagnostic (content probe added 3.88.x)
+
+### `GET /api/v1/admin/intravox-diagnostic`
+
+Admin-only diagnostic — lists `PageService`'s public method signatures via PHP reflection. Pre-existing endpoint.
+
+**Auth**: NC **server admin** required (`IGroupManager::isAdmin`).
+
+**Query params** (3.88.x addition): `?pageId=<id>` — when present, additionally calls `getPage($pageId)` and `getCurrentPageContent($pageId)` on that page and includes the raw output under `contentProbe`. Read-only; does not create, modify, or delete anything. Useful for inspecting IntraVox's real content/layout shape when extending the integration further.
+
+**Response 200**: `{ installed, methods: [...], class, file, contentProbe?: { pageId, getPage, getCurrentPageContent } }`.
+
+---
+
+## IntraVox team-page lookup (added 3.90.0)
+
+### `GET /api/v1/teams/{teamId}/intravox/team-page`
+
+Returns the requesting team's own IntraVox page — the same underlying data the widget used to get by fetching `/apps/intravox/api/pages` in bulk and matching by title client-side. That approach became ambiguous once every Advanced project's page shares the literal title "Contract" (`IntravoxService::CONTRACT_TITLES`, §2.38): with two or more Advanced project teams, title alone can no longer tell them apart. This endpoint disambiguates server-side by confirming each title-candidate's actual folder **path** via `IntravoxService::getTeamPage()` — see DESIGN.md §2.41.
+
+**Auth**: team **member** required (`MemberService::requireMemberLevel`).
+
+**Response 200**: the full IntraVox `getPage()` payload for the team's own page (`{ uniqueId, title, path, id, layout, ... }`), or `null` if the team has no page yet.
+
+**Failures**: `400` — not a team member, or an internal error (message passed through).
+
+**Caching**: 5 minutes server-side (`teamhub_intravox_teampage_{teamId}`), invalidated by `IntravoxService::invalidateSubPagesCache()` on page create/delete — same cache lifecycle as the existing sub-pages endpoint below.
+
+**Consumed by**: `src/components/IntravoxWidget.vue` (`initDocumentationPage()`), replacing the old bulk-fetch-and-guess call.
+
+---
+
+## Deck diagnostic (added 3.90.0)
+
+### `GET /api/v1/admin/deck-diagnostic`
+
+Admin-only diagnostic — lists `\OCA\Deck\Db\CardMapper`'s public method signatures via PHP reflection, plus defensive probes (each failure reported independently, not fatal to the response) for `AssignedUsersMapper`, `CardService`, and `AssignmentService` — whichever of these actually writes a card assignee had no prior precedent anywhere in TeamHub. Same pattern as `intravox-diagnostic` above; kept permanently as a reusable discovery tool for future Deck-API questions.
+
+**Auth**: NC **server admin** required (`IGroupManager::isAdmin`). Read-only — creates, modifies, and deletes nothing.
+
+**Response 200**: `{ installed, CardMapper?: { class, methods }, CardMapper_error?, AssignedUsersMapper?: {...}, AssignedUsersMapper_error?, CardService?: {...}, CardService_error?, AssignmentService?: {...}, AssignmentService_error? }`.
+
+---
+
+## Deck resource creation (`projectMode` param added 3.90.0)
+
+### `POST /api/v1/teams/{teamId}/create-resources`
+
+Provisions a team's Talk room, Deck board, Calendar, and/or Files resources on creation. Pre-existing endpoint; not previously documented here.
+
+**Auth**: team **admin** required (`MemberService::requireAdminLevel`).
+
+**Body** (3.90.0 addition): `{ "apps": [...], "teamName": "...", "names": {...}, "appStates": [...], "projectMode": "basic" | "advanced" | null }` — `projectMode` is optional. When `"advanced"` and `apps` includes `"deck"`, the created Deck board's 3 default stacks (To do / In progress / Done) are followed by a 4th "Project management" stack pre-populated with 4 starter cards (Invite project members, Create project contract, Add project milestones, Schedule the planning kickoff meeting), each assigned to the team creator with a due date 7 days out. Any other value (including absent/`null`/`"basic"`) creates the Deck board exactly as before this session. See DESIGN.md §2.40.
+
+**Response 200**: per-app results object; always HTTP 200, per-app errors surface inside the payload rather than as an HTTP failure status.
+
+---
+
+## Budget endpoints (added 3.92.0)
+
+Execution-phase project budget — a project-wide total + currency plus one budget lane per Deck stack ("workstream"). Each lane records `allocated_minor`, `view_min_level` (who sees the lane), and `edit_min_level` (who can add or change expenses in the lane). Expenses live under a lane.
+
+All amounts are BIGINT minor units (cents) — safe integer arithmetic, portable across MySQL/MariaDB/Postgres.
+
+### `GET /api/v1/teams/{teamId}/budget`
+
+Full Budget page payload. Membership-gated. Per-lane `view_min_level` filters lanes the caller cannot see — hidden lanes never appear in the response and never contribute to the rollup.
+
+**Auth**: team **member** required (`BudgetService::getProjectBudget` → `MemberService::requireMemberLevel`). Non-project teams get an "empty envelope" response with `isProject: false` and no lanes.
+
+**Side effect (read-only from the caller's perspective)**: reconciles `teamhub_budget_lane` rows against the team's live Deck stacks — auto-inserts a lane row with defaults (`view_min_level=1`, `edit_min_level=8`, `allocated_minor=null`) for every stack that doesn't have one. Lanes for deleted stacks are retained but hidden from the response.
+
+**Response 200**:
+```json
+{
+  "isProject": true,
+  "currency": "EUR",
+  "totalMinor": 1000000,
+  "budgetViewMinLevel": 1,
+  "allocatedMinor": 750000,
+  "spentProjectedMinor": 320000,
+  "spentRealMinor": 240000,
+  "lanes": [
+    {
+      "laneId": 42,
+      "deckStackId": 100,
+      "stackTitle": "To do",
+      "stackOrder": 999,
+      "boardId": 5,
+      "boardTitle": "Project team ABC",
+      "allocatedMinor": 250000,
+      "viewMinLevel": 1,
+      "editMinLevel": 8,
+      "editors": [
+        { "uid": "alice", "displayName": "Alice Anderson" },
+        { "uid": "bob",   "displayName": "Bob Bakker" }
+      ],
+
+      "canView": true,
+      "canEdit": false,
+      "spentProjectedMinor": 100000,
+      "spentRealMinor": 80000,
+      "remainingProjectedMinor": 150000,
+      "remainingRealMinor": 170000,
+      "expenses": [
+        { "id": 7, "laneId": 42, "description": "Software licence", "projectedMinor": 20000, "realMinor": 19999, "incurredAt": 1751328000, "createdBy": "jane", "createdAt": 1751328123, "updatedAt": 1751328123 }
+      ]
+    }
+  ]
+}
+```
+
+### `PUT /api/v1/teams/{teamId}/budget`
+
+Set the project's total budget and currency. Only valid on `mode === 'advanced'` projects. Refuses when `total_minor` is less than the current sum of lane allocations.
+
+**Auth**: team **admin** required.
+
+**Body**: `{ "total_minor": 1000000 | null, "currency": "EUR" | null, "budget_view_min_level": 1 | 4 | 8 }`. `total_minor` and `currency` are nullable (null = clear). `budget_view_min_level` (added 3.94.0) is the project-level role floor for Budget-tab visibility — a member sees the tab when their team role is at or above this level OR they are a named editor on any workstream.
+
+**Response 200**: full budget envelope, same shape as GET.
+
+**Errors**: 400 for invalid currency (not a 3-letter code) or negative total or lane-sum-exceeds-total; 403 for non-admin.
+
+### `PUT /api/v1/teams/{teamId}/budget/lanes/{laneId}`
+
+Update one lane's allocation + view/edit min-levels. The lane must belong to `{teamId}` and its Deck stack must still exist on the team's board.
+
+**Auth**: team **admin** required.
+
+**Body**: `{ "allocated_minor": 250000 | null, "edit_min_level": 1 | 4 | 8, "editor_uids": ["alice", "bob"] }`. Level values map to TeamHub team roles: 1 = every member, 4 = moderator+, 8 = admin only. `editor_uids` (added 3.93.0) is a full-replace list of team members who get edit access to this lane regardless of role. Absent or `null` == empty set. Unknown UIDs are refused; string entries only. `view_min_level` was removed in 3.94.0 — tab visibility is now project-level (see PUT /budget); any `view_min_level` in the body is silently ignored for back-compat.
+
+**Response 200**: full budget envelope.
+
+**Errors**: 400 for unknown lane, deleted-stack, invalid level (not in `{1,4,8}`), negative allocation, sum-of-allocations-exceeds-total, unknown editor UID, or non-array `editor_uids`; 403 for non-admin.
+
+### `POST /api/v1/teams/{teamId}/budget/lanes/{laneId}/expenses`
+
+Add an expense to a lane.
+
+**Auth**: caller must have team level ≥ the lane's `edit_min_level`.
+
+**Body**: `{ "description": "…", "projected_minor": 20000, "real_minor": 20500 | null, "incurred_at": 1751328000 | null }`. `real_minor` null = not yet realised. `incurred_at` is a Unix timestamp (UTC-midnight convention).
+
+**Response 200**: full budget envelope.
+
+**Errors**: 400 for empty description or negative amounts; 403 for insufficient lane edit level.
+
+### `PUT /api/v1/teams/{teamId}/budget/lanes/{laneId}/expenses/{expenseId}`
+
+Update an expense. Same auth + body + response as POST above. The expense must currently belong to `{laneId}` (moving between lanes is not supported).
+
+### `DELETE /api/v1/teams/{teamId}/budget/lanes/{laneId}/expenses/{expenseId}`
+
+Delete an expense.
+
+**Auth**: caller must have team level ≥ the lane's `edit_min_level`.
+
+**Response 200**: full budget envelope.
+
+---
+
+## Time investment endpoints (added 3.96.0)
+
+Execution-phase per-member time investment — each project participant gets an `available_minutes` figure (0 = uncapped); logs attach to a Deck card, roll up by member and by lane (Deck stack) inside the report. Only meaningful on `mode === 'advanced'` projects.
+
+### `GET /api/v1/teams/{teamId}/time/config`
+
+Per-team on/off toggle. Body: `{ "time_enabled": bool }`. Member-gated read.
+
+### `PUT /api/v1/teams/{teamId}/time/config`
+
+Set the toggle. Body: `{ "time_enabled": 0|1 }`. Admin-gated.
+
+### `GET /api/v1/teams/{teamId}/time`
+
+Full Time page payload. Member-gated, tab-visibility gated:
+- caller's team role ≥ `project.time_view_min_level` OR
+- caller has a `teamhub_project_member` row on this team (a named project participant).
+
+If gated out, returns an empty envelope with `isProject: false`. Response envelope: `{ isProject, timeViewMinLevel, totalAvailableMinutes, totalLoggedMinutes, members: [{ userId, displayName, availableMinutes, loggedMinutes, remainingMinutes }], lanes: [{ stackId, stackTitle, stackOrder, boardId, boardTitle, loggedMinutes }] }`. `remainingMinutes` is `null` when the member is uncapped.
+
+### `PUT /api/v1/teams/{teamId}/time`
+
+Set the project-level Time-tab view floor.
+
+**Body**: `{ "time_view_min_level": 1|4|8 }`. Admin-gated.
+
+**Response 200**: full time envelope.
+
+### `GET /api/v1/teams/{teamId}/time/loggable-cards?user_id=…`
+
+Cards the given user is currently assigned to inside this team's Deck boards. Powers the "Log time" picker. `user_id` defaults to the caller; non-admins can only query themselves.
+
+**Response 200**: `[{ cardId, cardTitle, stackId, stackTitle, boardTitle }]` sorted by card title.
+
+### `PUT /api/v1/teams/{teamId}/time/members/{userId}`
+
+Add or update a project participant's available-minutes budget. Admin-gated.
+
+**Body**: `{ "available_minutes": int }`. `0` = uncapped (report accumulates without a Remaining column for this user).
+
+**Response 200**: full time envelope.
+
+### `DELETE /api/v1/teams/{teamId}/time/members/{userId}`
+
+Remove someone from the project. Their existing time logs are retained (audit trail); they drop off the report grid. Admin-gated.
+
+**Response 200**: full time envelope.
+
+### `GET /api/v1/teams/{teamId}/time/members/{userId}/logs`
+
+Drill-down: every raw log row for `userId`. Non-admins can only see their own logs. Member-gated.
+
+**Response 200**: `[{ id, cardId, stackId, userId, minutes, description, workedAt, createdBy, createdAt, updatedAt }]`.
+
+### `POST /api/v1/teams/{teamId}/time/logs`
+
+Record a block of time on a Deck card.
+
+**Body**: `{ card_id, user_id (optional — defaults to caller), minutes, description, worked_at }`.
+
+**Auth**: caller must be a team member, the `user_id` (the person the time is *for*) must currently be a Deck-card assignee of `card_id`, and if `user_id` differs from the caller then the caller must be a team admin (on-behalf logging).
+
+**Errors**: 400 for missing card, wrong project, or invalid minutes (0 < minutes ≤ 43200); 403 for non-assignee or unauthorised on-behalf.
+
+**Response 200**: full time envelope.
+
+### `PUT /api/v1/teams/{teamId}/time/logs/{logId}`
+
+Update a log row. **Auth**: the row's `created_by` OR a team admin.
+
+### `DELETE /api/v1/teams/{teamId}/time/logs/{logId}`
+
+Delete a log row. **Auth**: same as PUT.
 
 ---
 

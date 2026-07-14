@@ -230,7 +230,7 @@ class MaintenanceController extends Controller {
             $ghosts = $this->maintenanceService->findGhostMembers($search);
             return new JSONResponse(['ghosts' => $ghosts, 'total' => count($ghosts)]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] findGhostMembers failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] findGhostMembers failed', [
                 'error' => $e->getMessage(),
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -297,7 +297,7 @@ class MaintenanceController extends Controller {
             $this->maintenanceService->clearCfgSingle($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] clearCfgSingle failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] clearCfgSingle failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(),
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -324,7 +324,7 @@ class MaintenanceController extends Controller {
             $this->maintenanceService->removeNestedTeam($parentTeamId, $childTeamId);
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] removeNestedTeam failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] removeNestedTeam failed', [
                 'parentTeamId' => $parentTeamId, 'childTeamId' => $childTeamId,
                 'error' => $e->getMessage(),
             ]);
@@ -355,7 +355,7 @@ class MaintenanceController extends Controller {
             $removed = $this->maintenanceService->removeGhostMember($userId, $teamId);
             return new JSONResponse(['removed' => $removed]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] removeGhostMember failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] removeGhostMember failed', [
                 'userId' => $userId, 'error' => $e->getMessage(),
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -372,7 +372,7 @@ class MaintenanceController extends Controller {
             $result = $this->maintenanceService->resetTeamConfig($teamId);
             return new JSONResponse($result);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] resetTeamConfig failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] resetTeamConfig failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(),
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -389,7 +389,7 @@ class MaintenanceController extends Controller {
             $issues = $this->maintenanceService->checkConfigIntegrity();
             return new JSONResponse(['issues' => $issues]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] checkConfigIntegrity failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] checkConfigIntegrity failed', [
                 'error' => $e->getMessage(),
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -420,7 +420,7 @@ class MaintenanceController extends Controller {
             $rows = $this->maintenanceService->listTeamsForUser($userId);
             return new JSONResponse(['teams' => $rows]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceController] listTeamsForUser failed', [
+            $this->logger->error('[TeamHub][MaintenanceController] listTeamsForUser failed', [
                 'userId' => $userId, 'error' => $e->getMessage(),
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -457,7 +457,7 @@ class MaintenanceController extends Controller {
                 $this->maintenanceService->adminRemoveUserFromTeam($teamId, $userId);
                 $results[] = ['teamId' => $teamId, 'ok' => true];
             } catch (\Throwable $e) {
-                $this->logger->warning('[MaintenanceController] removeUserFromTeams: per-team failure', [
+                $this->logger->warning('[TeamHub][MaintenanceController] removeUserFromTeams: per-team failure', [
                     'teamId' => $teamId, 'userId' => $userId, 'error' => $e->getMessage(),
                 ]);
                 $results[] = ['teamId' => $teamId, 'ok' => false, 'error' => $e->getMessage()];

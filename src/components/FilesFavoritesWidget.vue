@@ -196,7 +196,7 @@ export default {
     width: 38px;
     height: 38px;
     border-radius: var(--border-radius-large);
-    background: var(--color-background-dark, #f4f4f4);
+    background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
 }
@@ -232,9 +232,10 @@ export default {
     text-decoration: underline;
 }
 
+/* v3.100.16: NC theme token (was --th-color-warning hex). */
 .th-files-fav__star-badge {
     flex-shrink: 0;
-    color: var(--th-color-warning);
+    color: var(--color-warning-text);
 }
 
 .th-files-fav__meta {

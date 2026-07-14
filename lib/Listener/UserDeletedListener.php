@@ -33,6 +33,15 @@ use Psr\Log\LoggerInterface;
  * TeamHub for cross-app data operations. Flag this in code review if NC adds
  * proper transfer APIs in a future version.
  *
+ * LISTENER-ORDERING HAZARD (apps.md W-8):
+ * NC does not guarantee the order in which UserDeletedListener implementations
+ * run. If Files / Deck / Talk register their own listeners with a higher priority,
+ * they may DELETE the departing user's data before this listener gets a chance to
+ * REASSIGN it. Symptom: shares disappear on user deletion despite there being an
+ * eligible team admin to inherit them. If that regression appears in the wild,
+ * pin execution order with a listener priority via #[ListensTo] on the AppInfo
+ * registration (e.g. priority: 100 to run earlier).
+ *
  * @template-implements IEventListener<BeforeUserDeletedEvent>
  */
 class UserDeletedListener implements IEventListener {

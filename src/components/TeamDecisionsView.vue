@@ -344,6 +344,19 @@
                             <dt>{{ t('teamhub', 'Category') }}</dt>
                             <dd>{{ selected.category }}</dd>
                         </div>
+                        <!-- v3.97.5 — milestone linkage. Only rendered when
+                             the decision was linked to a milestone at
+                             propose time AND that milestone still exists. -->
+                        <div v-if="selected.milestoneLabel" class="th-dv__detail-meta-row">
+                            <dt>{{ t('teamhub', 'Milestone') }}</dt>
+                            <dd>
+                                <span class="th-dv__milestone-chip">
+                                    <FlagOutlineIcon :size="12" aria-hidden="true" />
+                                    <span>{{ selected.milestoneLabel }}</span>
+                                    <span v-if="selected.milestoneDate" class="th-dv__milestone-date">— {{ selected.milestoneDate }}</span>
+                                </span>
+                            </dd>
+                        </div>
                         <div class="th-dv__detail-meta-row">
                             <dt>{{ t('teamhub', 'Proposed by') }}</dt>
                             <dd>
@@ -1105,6 +1118,7 @@ import LinkVariantIcon          from 'vue-material-design-icons/LinkVariant.vue'
 import FormatListBulletedIcon  from 'vue-material-design-icons/FormatListBulleted.vue'
 import CalendarPlusIcon        from 'vue-material-design-icons/CalendarPlus.vue'
 import CalendarClockIcon       from 'vue-material-design-icons/CalendarClock.vue'
+import FlagOutlineIcon         from 'vue-material-design-icons/FlagOutline.vue'
 import AddTaskModal             from './AddTaskModal.vue'
 import SuggestMeetingWizard     from './SuggestMeetingWizard.vue'
 
@@ -1122,6 +1136,7 @@ export default {
         AlertCircleOutlineIcon, OpenInNewIcon, FileDocumentOutlineIcon, DownloadIcon,
         FolderOutlineIcon, MagnifyIcon, FormatListBulletedIcon,
         LinkVariantIcon, CalendarPlusIcon, CalendarClockIcon,
+        FlagOutlineIcon,
         AddTaskModal, SuggestMeetingWizard,
     },
 
@@ -1246,7 +1261,7 @@ export default {
     },
 
     computed: {
-        ...mapState(['currentTeamId', 'members', 'decisionsTargetMessageId', 'decisionsConfig', 'resources']),
+        ...mapState(['currentTeamId', 'members', 'decisionsTargetMessageId', 'decisionsPreselectStatus', 'decisionsConfig', 'resources']),
 
         decisionsLevelEnabled() {
             return !!(this.decisionsConfig && this.decisionsConfig.decisions_level_enabled)
@@ -1607,6 +1622,21 @@ export default {
             this.fetchLandingCategories()
             return
         }
+        // v3.99.8 — preselect-status hand-off from ProjectHealthWidget's
+        // "Open Decisions" links: skip landing, open All + pre-apply the
+        // requested status chip so the click lands on the pressing list.
+        // Clear the store field after honoring so a Back nav still shows
+        // landing.
+        if (this.decisionsPreselectStatus) {
+            const requestedStatus = this.decisionsPreselectStatus
+            this.openAllDecisions()
+            this.filterStatus = requestedStatus
+            this.SET_DECISIONS_PRESELECT_STATUS(null)
+            this.reload()
+            this.ensureCategoriesLoaded()
+            this.fetchLandingCategories()
+            return
+        }
         // Default flow: start on landing.
         this.fetchLandingCategories()
         this.ensureCategoriesLoaded()
@@ -1614,7 +1644,7 @@ export default {
 
     methods: {
         t, n, generateUrl,
-        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET']),
+        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_PRESELECT_STATUS']),
 
         // ── Landing view ────────────────────────────────────────────
 
@@ -2910,21 +2940,21 @@ export default {
 
 /* Breadcrumb elements */
 .th-dv__breadcrumb-title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
 }
 
 .th-dv__breadcrumb-sep {
     color: var(--color-text-maxcontrast);
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 .th-dv__breadcrumb-cat {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
     overflow: hidden;
@@ -2942,7 +2972,7 @@ export default {
     border: 1px solid var(--color-border);
     border-radius: 20px;
     background: transparent;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
     cursor: pointer;
@@ -2961,7 +2991,7 @@ export default {
 .th-dv__chip {
     padding: 5px 12px;
     border-radius: 20px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     border: 1px solid var(--color-border-dark);
     background: transparent;
@@ -2981,7 +3011,7 @@ export default {
     gap: 5px;
     padding: 5px 12px;
     border-radius: 20px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     border: 1px solid var(--color-border-dark);
     background: transparent;
@@ -3012,7 +3042,7 @@ export default {
     color: var(--color-main-text);
     border-radius: 999px;
     padding: 4px 10px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     cursor: pointer;
 }
@@ -3107,6 +3137,9 @@ export default {
     outline: none;
     transition: border-color 0.15s;
 }
+/* v3.100.14: color-mix here is a focus-glow ring, not a state
+   background — kept per SKILLS.md § "State-coloured backgrounds"
+   (the rule targets state signalling, not focus indicators). */
 .th-dv__landing-search:focus {
     border-color: var(--color-primary-element);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary-element) 20%, transparent);
@@ -3134,12 +3167,14 @@ export default {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
 }
+/* v3.100.14: decorative icon circle — neutral surface, primary
+   icon inside carries the accent (was a 12% color-mix soft tint). */
 .th-dv__landing-showall-icon {
     flex-shrink: 0;
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
+    background: var(--color-background-dark);
     color: var(--color-primary-element);
     display: flex;
     align-items: center;
@@ -3152,7 +3187,7 @@ export default {
     flex: 1;
 }
 .th-dv__landing-showall-sub {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 .th-dv__landing-showall-chevron {
@@ -3203,13 +3238,14 @@ export default {
     outline-offset: 2px;
 }
 
-/* Icon bubble */
+/* Icon bubble — decorative surface, primary icon inside carries the
+   accent. v3.100.14: neutral surface per SKILLS.md (was 10% color-mix). */
 .th-dv__cat-card-icon {
     flex-shrink: 0;
     width: 42px;
     height: 42px;
     border-radius: 10px;
-    background: color-mix(in srgb, var(--color-primary-element) 10%, transparent);
+    background: var(--color-background-dark);
     color: var(--color-primary-element);
     display: flex;
     align-items: center;
@@ -3249,48 +3285,52 @@ export default {
 }
 .th-dv__cat-card:hover .th-dv__cat-card-chevron { opacity: 1; }
 
-/* Decision search-result category tag (inline on card meta) */
+/* Decision search-result category tag (inline on card meta)
+   v3.100.14: full-saturation category tag per SKILLS.md (was 10% mix). */
 .th-dv__card-cat-tag {
     display: inline-block;
     padding: 1px 8px;
     border-radius: 10px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
-    background: color-mix(in srgb, var(--color-primary-element) 10%, transparent);
-    color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
-/* ── Level badges (in cards) and chips (in detail meta) ── */
+/* ── Level badges (in cards) and chips (in detail meta) ──
+   v3.100.14: full-saturation badge per SKILLS.md (was 12% mix + border
+   at 30%; now solid fill with the -text token, no border needed). */
 .th-dv__level-badge {
     display: inline-block;
     padding: 1px 6px;
     border-radius: 10px;
     font-size: 10px;
     font-weight: 600;
-    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
-    color: var(--color-primary-element);
-    border: 1px solid color-mix(in srgb, var(--color-primary-element) 30%, transparent);
-
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    border: 1px solid var(--color-primary-element);
 }
 
 .th-dv__level-chip {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 10px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
 }
 .th-dv__level-chip--operational {
     background: var(--color-background-dark);
     color: var(--color-text-maxcontrast);
 }
+/* v3.100.14: full-saturation tactical chip per SKILLS.md (was 14% mix). */
 .th-dv__level-chip--tactical {
-    background: color-mix(in srgb, var(--color-primary-element) 14%, transparent);
-    color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
+/* v3.100.14: full-saturation strategic chip per SKILLS.md (was 14% mix). */
 .th-dv__level-chip--strategic {
-    background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-    color: var(--color-warning-text, #a05a00);
+    background: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 /* ── Body: holds either the 2-column category grid OR the full-overlay detail.
@@ -3358,7 +3398,7 @@ export default {
 }
 
 .th-dv__section-title {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
@@ -3367,7 +3407,7 @@ export default {
 }
 
 .th-dv__section-count {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     background: var(--color-background-dark);
     border-radius: 10px;
@@ -3425,7 +3465,7 @@ export default {
 }
 
 .th-dv__card--open       .th-dv__card-accent { background: var(--color-primary-element); }
-.th-dv__card--finalized  .th-dv__card-accent { background: var(--color-warning, #c9a227); }
+.th-dv__card--finalized  .th-dv__card-accent { background: var(--color-warning); }
 .th-dv__card--approved   .th-dv__card-accent { background: var(--color-success-text); }
 .th-dv__card--denied     .th-dv__card-accent { background: var(--color-error-text); }
 .th-dv__card--withdrawn  .th-dv__card-accent { background: var(--color-text-maxcontrast); opacity: 0.4; }
@@ -3464,16 +3504,16 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
 }
 
 .th-dv__card-date { margin-left: auto; white-space: nowrap; }
 
 /* Impact label — inline coloured text */
-.th-dv__impact           { font-size: 11px; font-weight: 700; }
+.th-dv__impact           { font-size: var(--th-font-micro); font-weight: 700; }
 .th-dv__impact--low      { color: var(--color-text-maxcontrast); }
-.th-dv__impact--medium   { color: var(--color-warning-text, #a05a00); }
+.th-dv__impact--medium   { color: var(--color-warning-text); }
 .th-dv__impact--high     { color: var(--color-error-text); }
 
 /* Status pill */
@@ -3490,7 +3530,7 @@ export default {
 }
 
 .th-dv__status-pill--open       { color: var(--color-primary-element);          border-color: var(--color-primary-element); }
-.th-dv__status-pill--finalized  { color: var(--color-warning-text, #a05a00);    border-color: var(--color-warning-text, #a05a00); }
+.th-dv__status-pill--finalized  { color: var(--color-warning-text);    border-color: var(--color-warning-text); }
 .th-dv__status-pill--approved   { color: var(--color-success-text);             border-color: var(--color-success-text); }
 .th-dv__status-pill--denied     { color: var(--color-error-text);               border-color: var(--color-error-text); }
 .th-dv__status-pill--withdrawn  { color: var(--color-text-maxcontrast);         border-color: var(--color-border-dark); }
@@ -3679,11 +3719,29 @@ export default {
     display: contents;
 }
 
+/* v3.97.5 — milestone chip inside the decision detail panel. Same visual
+ * language as the list-view chip in DecisionsList.vue. */
+.th-dv__milestone-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    font-weight: 600;
+    font-size: var(--th-font-micro);
+}
+.th-dv__milestone-date {
+    opacity: 0.85;
+    font-weight: 500;
+}
+
 .th-dv__detail-meta-row dt,
 .th-dv__detail-meta-row dd {
     padding: 8px 12px;
     margin: 0;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     background: var(--color-main-background);
     line-height: 1.4;
 }
@@ -3698,7 +3756,7 @@ export default {
     color: var(--color-main-text);
 }
 
-.th-dv__detail-meta-sub { color: var(--color-text-maxcontrast); font-size: 11px; }
+.th-dv__detail-meta-sub { color: var(--color-text-maxcontrast); font-size: var(--th-font-micro); }
 
 /* Avatar + name inline layout used in Proposed by / Decided by rows */
 .th-dv__user-cell {
@@ -3708,7 +3766,7 @@ export default {
 }
 
 .th-dv__user-name {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-main-text);
     line-height: 1.4;
 }
@@ -3718,14 +3776,19 @@ export default {
     background: var(--color-background-dark);
     border-radius: 4px;
     padding: 1px 7px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
 }
 
 /* Answer block */
+/* Answer block — the recorded answer of a decision. State: "this
+   decision has an outcome". v3.100.14: full-saturation success per
+   SKILLS.md § "State-coloured backgrounds" (was a 7% color-mix soft
+   tint of the -text token, which was also an unusual pattern). */
 .th-dv__detail-answer {
     margin: 0 0 14px;
     padding: 12px 14px;
-    background: color-mix(in srgb, var(--color-success-text) 7%, transparent);
+    background: var(--color-success);
+    color: var(--color-success-text);
     border-left: 3px solid var(--color-success-text);
     border-radius: 0 var(--border-radius-large) var(--border-radius-large) 0;
     display: flex;
@@ -3737,7 +3800,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -3769,9 +3832,9 @@ export default {
     font-weight: 700;
     line-height: 1.3;
 }
-.th-dv__detail-answer-text--md h1 { font-size: 16px; }
+.th-dv__detail-answer-text--md h1 { font-size: var(--th-font-heading); }
 .th-dv__detail-answer-text--md h2 { font-size: 15px; }
-.th-dv__detail-answer-text--md h3 { font-size: 14px; }
+.th-dv__detail-answer-text--md h3 { font-size: var(--th-font-body); }
 .th-dv__detail-answer-text--md h4,
 .th-dv__detail-answer-text--md h5,
 .th-dv__detail-answer-text--md h6 { font-size: 13px; }
@@ -3792,7 +3855,7 @@ export default {
     background: var(--color-background-dark);
     padding: 1px 4px;
     border-radius: 3px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
 }
 .th-dv__detail-answer-text--md pre {
     background: var(--color-background-dark);
@@ -3829,7 +3892,7 @@ export default {
 }
 
 .th-dv__detail-section-label {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -3848,7 +3911,7 @@ export default {
 }
 
 .th-dv__approval-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-main-text);
     display: flex;
@@ -3888,7 +3951,7 @@ export default {
 }
 
 .th-dv__approval-counter {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     text-align: right;
     margin: 0;
@@ -3925,7 +3988,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-primary-element);
     text-decoration: none;
     word-break: break-all;
@@ -3934,7 +3997,7 @@ export default {
 .th-dv__detail-source-link:hover { text-decoration: underline; }
 
 .th-dv__detail-source-text {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -3943,7 +4006,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -3990,7 +4053,7 @@ export default {
     align-items: center;
     padding: 1px 7px;
     border-radius: 10px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     line-height: 1.6;
     white-space: nowrap;
@@ -4003,11 +4066,12 @@ export default {
     border: 1px solid var(--color-border);
 }
 
+/* v3.100.16: full-saturation success pill per SKILLS.md (was raw hex
+   #e6f4ec/#1a6633/#b3dcc4 — a soft green tint that ignored the theme). */
 .th-dv__task-status-pill--done {
-    /* Matches the established success-pill pattern used elsewhere in the widget */
-    background: #e6f4ec;
-    color: #1a6633;
-    border: 1px solid #b3dcc4;
+    background: var(--color-success);
+    color: var(--color-success-text);
+    border: 1px solid var(--color-success);
 }
 
 .th-dv__link-row {
@@ -4059,7 +4123,7 @@ export default {
 /* Trailing metadata (file size, etc.) — neutral, no pill */
 .th-dv__link-meta {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
 }
 
@@ -4075,7 +4139,10 @@ export default {
     letter-spacing: 0.02em;
     text-transform: uppercase;
     white-space: nowrap;
-    color: #fff;
+    /* v3.100.16: theme-safe inversion — text uses --color-main-background
+       so it inverts alongside the --color-text-maxcontrast fill in dark
+       mode (was hard-pinned `color: #fff`). */
+    color: var(--color-main-background);
     background: var(--color-text-maxcontrast); /* neutral default */
 }
 
@@ -4084,36 +4151,36 @@ export default {
 .th-dv__link-pill--status-proposed {
     background: var(--color-primary-element);
 }
-/* Status pills — hard-contrast colours from widget-tokens.css */
+/* Status pills — v3.100.16: NC theme tokens (were --th-color-* hex). */
 .th-dv__link-pill--status-open,
 .th-dv__link-pill--status-proposed {
     background: var(--color-primary-element);
 }
 .th-dv__link-pill--status-approved,
 .th-dv__link-pill--status-decided {
-    background: var(--th-color-success);
+    background: var(--color-success);
 }
 .th-dv__link-pill--status-denied {
-    background: var(--th-color-error);
+    background: var(--color-error);
 }
 .th-dv__link-pill--status-withdrawn {
-    background: var(--th-color-neutral);
+    background: var(--color-text-maxcontrast);
 }
 
 /* Level pills — operational neutral, tactical primary, strategic warning */
 .th-dv__link-pill--level-operational {
-    background: var(--th-color-neutral);
+    background: var(--color-text-maxcontrast);
 }
 .th-dv__link-pill--level-tactical {
     background: var(--color-primary-element);
 }
 .th-dv__link-pill--level-strategic {
-    background: var(--th-color-warning);
+    background: var(--color-warning);
 }
 
 /* "Final proposal" badge — matches status-approved */
 .th-dv__link-pill--proposal {
-    background: var(--th-color-success);
+    background: var(--color-success);
 }
 
 /* v3.75.3 — Kind pills distinguish internal-decision rows from
@@ -4165,12 +4232,12 @@ export default {
 
 .th-dv__link-remove:hover {
     background: var(--color-error);
-    color: #fff;
+    color: var(--color-error-text);
 }
 
 .th-dv__link-remove:focus-visible {
     background: var(--color-error);
-    color: #fff;
+    color: var(--color-error-text);
     outline: 2px solid var(--color-primary-element);
     outline-offset: 1px;
 }
@@ -4180,7 +4247,7 @@ export default {
     margin: 0;
     padding: 2px 0;
     color: var(--color-text-maxcontrast);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-style: italic;
 }
 
@@ -4199,13 +4266,13 @@ export default {
     align-items: center;
     gap: 8px;
     color: var(--color-text-maxcontrast);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
 }
 
 /* v3.74.10 — Scheduled meetings: time suffix on each meeting row */
 .th-dv__meeting-when {
     color: var(--color-text-maxcontrast);
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     margin-left: 4px;
 }
 
@@ -4224,7 +4291,7 @@ export default {
     font-size: 13px;
 }
 .th-dv__tasks-link-input:focus { border-color: var(--color-primary-element); }
-.th-dv__tasks-link-input--label { font-size: 12px; }
+.th-dv__tasks-link-input--label { font-size: var(--th-font-meta); }
 .th-dv__tasks-link-btns { display: flex; gap: 6px; }
 
 /* ── Session C: decision picker modal ── */
@@ -4331,13 +4398,13 @@ export default {
 .th-dv__dec-picker-item-status--approved,
 .th-dv__dec-picker-item-status--decided {
     background: var(--color-success);
-    color: #fff;
+    color: var(--color-success-text);
 }
 
 .th-dv__dec-picker-item-status--denied,
 .th-dv__dec-picker-item-status--withdrawn {
     background: var(--color-error);
-    color: #fff;
+    color: var(--color-error-text);
 }
 
 .th-dv__dec-picker-empty {
@@ -4364,19 +4431,19 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 6px 0;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .th-dv__audit-error {
     padding: 6px 0;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-error-text);
 }
 
 .th-dv__audit-empty {
     padding: 6px 0;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     font-style: italic;
 }
@@ -4425,7 +4492,7 @@ export default {
 
 .th-dv__audit-item--proposed  .th-dv__audit-dot { background: var(--color-primary-element); }
 .th-dv__audit-item--commented .th-dv__audit-dot { background: var(--color-text-maxcontrast); }
-.th-dv__audit-item--finalized .th-dv__audit-dot { background: var(--color-warning, #c9a227); }
+.th-dv__audit-item--finalized .th-dv__audit-dot { background: var(--color-warning); }
 .th-dv__audit-item--approved  .th-dv__audit-dot { background: var(--color-success-text); }
 .th-dv__audit-item--denied    .th-dv__audit-dot { background: var(--color-error-text); }
 .th-dv__audit-item--withdrawn .th-dv__audit-dot { background: var(--color-text-maxcontrast); opacity: 0.6; }
@@ -4440,7 +4507,7 @@ export default {
     align-items: baseline;
     gap: 6px;
     flex-wrap: wrap;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     line-height: 1.3;
 }
 
@@ -4457,11 +4524,11 @@ export default {
     margin-left: auto;
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
 }
 
 .th-dv__audit-payload {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin-top: 2px;
     overflow-wrap: anywhere;
@@ -4490,7 +4557,7 @@ export default {
     align-items: center;
     gap: 6px;
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -4511,7 +4578,7 @@ export default {
 
 .th-dv-viewer__readonly {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     text-transform: uppercase;
     letter-spacing: 0.4px;
     color: var(--color-text-maxcontrast);
@@ -4526,7 +4593,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     text-decoration: none;
     color: var(--color-primary-element);
     border: 1px solid var(--color-border);
@@ -4534,10 +4601,14 @@ export default {
     border-radius: var(--border-radius);
 }
 
-.th-dv-viewer__newtab:hover,
+/* v3.100.14: split hover+focus so keyboard focus keeps a visible ring. */
+.th-dv-viewer__newtab:hover {
+    background: var(--color-background-hover);
+}
 .th-dv-viewer__newtab:focus-visible {
     background: var(--color-background-hover);
-    outline: none;
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 /* v3.71.3 — button-styled source link (same look as <a> it replaced) */
@@ -4686,7 +4757,7 @@ export default {
 }
 .th-dv-viewer__nopreview-title {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--th-font-heading);
     font-weight: 600;
     color: var(--color-main-text);
 }
@@ -4724,10 +4795,14 @@ export default {
     border-color: var(--color-primary-element);
 }
 
-.th-dv-viewer__nopreview-btn:hover,
+/* v3.100.14: split hover+focus so keyboard focus keeps a visible ring. */
+.th-dv-viewer__nopreview-btn:hover {
+    background: var(--color-background-dark);
+}
 .th-dv-viewer__nopreview-btn:focus-visible {
     background: var(--color-background-dark);
-    outline: none;
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 .th-dv-viewer__nopreview-btn--primary:hover,

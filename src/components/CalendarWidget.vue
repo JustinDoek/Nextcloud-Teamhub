@@ -202,7 +202,7 @@ export default {
     width: 38px;
     height: 38px;
     border-radius: var(--border-radius-large);
-    background: var(--color-background-dark, #f4f4f4);
+    background: var(--color-background-dark);
     border: 1px solid var(--color-border);
 }
 .th-cal__date-badge-month {
@@ -214,7 +214,7 @@ export default {
     text-transform: uppercase;
 }
 .th-cal__date-badge-day {
-    font-size: 16px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     color: var(--color-main-text);
     line-height: 1.1;

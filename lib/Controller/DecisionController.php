@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\DecisionCategoryService;
 use OCA\TeamHub\Service\DecisionExternalLinkService;
 use OCA\TeamHub\Service\DecisionLinkService;
@@ -51,6 +52,8 @@ use Psr\Log\LoggerInterface;
  * frontend treats them the same way (route the user back to the team home).
  */
 class DecisionController extends Controller {
+    use ExceptionResponseTrait;
+
 
     public function __construct(
         string $appName,
@@ -88,7 +91,6 @@ class DecisionController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function saveConfig(string $teamId): JSONResponse {
         try {
             $this->decisionService->assertModuleEnabledGlobally();
@@ -442,11 +444,10 @@ class DecisionController extends Controller {
             return new JSONResponse($out);
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\RuntimeException $e) {
-            $code = str_contains($e->getMessage(), 'Not authorized')
-                ? Http::STATUS_FORBIDDEN
-                : Http::STATUS_NOT_FOUND;
-            return new JSONResponse(['error' => $e->getMessage()], $code);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
         } catch (\Throwable $e) {
             return $this->mapError($e, 'approve');
         }
@@ -468,11 +469,10 @@ class DecisionController extends Controller {
             return new JSONResponse($out);
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\RuntimeException $e) {
-            $code = str_contains($e->getMessage(), 'Not authorized')
-                ? Http::STATUS_FORBIDDEN
-                : Http::STATUS_NOT_FOUND;
-            return new JSONResponse(['error' => $e->getMessage()], $code);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
         } catch (\Throwable $e) {
             return $this->mapError($e, 'deny');
         }
@@ -901,17 +901,6 @@ class DecisionController extends Controller {
     }
 
     private function mapError(\Throwable $e, string $context): JSONResponse {
-        $this->logger->error(
-            '[TeamHub][DecisionController] ' . $context . ' failed',
-            ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]
-        );
-        $msg = $e->getMessage();
-        if (str_contains($msg, 'not a member') || str_contains($msg, 'not authorized') || str_contains($msg, 'Insufficient')) {
-            return new JSONResponse(['error' => $msg], Http::STATUS_FORBIDDEN);
-        }
-        if (str_contains($msg, 'Not authenticated')) {
-            return new JSONResponse(['error' => $msg], Http::STATUS_UNAUTHORIZED);
-        }
-        return new JSONResponse(['error' => $msg], Http::STATUS_INTERNAL_SERVER_ERROR);
+        return $this->exceptionResponse($e, ucfirst($context) . ' failed');
     }
 }

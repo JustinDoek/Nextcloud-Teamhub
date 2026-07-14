@@ -118,7 +118,7 @@ class DbIntrospectionService {
                 return $cols;
             }
         } catch (\Throwable $e) {
-            $this->logger->warning('[DbIntrospectionService] getTableColumns: all strategies failed', [
+            $this->logger->warning('[TeamHub][DbIntrospectionService] getTableColumns: all strategies failed', [
                 'table' => $table,
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,

@@ -124,7 +124,7 @@ class CalendarService {
                 ->andWhere($dqb->expr()->eq('principaluri', $dqb->createNamedParameter($principalUri)))
                 ->executeStatement();
 
-            $this->logger->debug('[CalendarService] suspendCalendarAccess: dav_shares row removed', [
+            $this->logger->debug('[TeamHub][CalendarService] suspendCalendarAccess: dav_shares row removed', [
                 'teamId' => $teamId, 'calendarId' => $calendarId, 'app' => Application::APP_ID,
             ]);
 
@@ -133,7 +133,7 @@ class CalendarService {
                 'principal_uri' => $ownerUri,
             ];
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] suspendCalendarAccess failed', [
+            $this->logger->error('[TeamHub][CalendarService] suspendCalendarAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return null;
@@ -173,13 +173,13 @@ class CalendarService {
                 ->setValue('resourceid',  $iqb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                 ->executeStatement();
 
-            $this->logger->debug('[CalendarService] resumeCalendarAccess: dav_shares row re-inserted', [
+            $this->logger->debug('[TeamHub][CalendarService] resumeCalendarAccess: dav_shares row re-inserted', [
                 'teamId' => $teamId, 'calendarId' => $calendarId, 'app' => Application::APP_ID,
             ]);
 
             return true;
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] resumeCalendarAccess failed', [
+            $this->logger->error('[TeamHub][CalendarService] resumeCalendarAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return false;
@@ -188,6 +188,11 @@ class CalendarService {
 
     /**
      * Resolve the calendar owner's principaluri from oc_calendars.
+     *
+     * apps.md R-2 note: kept as direct SELECT. ICalendarManager exposes
+     * calendars only by principal; there is no getCalendarById(). A
+     * reverse lookup here would have to walk every principal in the
+     * system, which is materially more expensive than an indexed SELECT.
      */
     private function resolveCalendarOwnerUri(int $calendarId, \OCP\IDBConnection $db): string {
         try {
@@ -217,6 +222,36 @@ class CalendarService {
     public function listOwnedCalendars(string $uid): array {
         if (!$this->appManager->isInstalled('calendar')) {
             return [];
+        }
+
+        // v3.100.8 (apps.md R-2) — resolve via ICalendarManager (fully
+        // public OCP API); fall back to direct SELECT if the manager can't
+        // resolve (older NC, unusual deployment). Exclude birthday
+        // calendar; sort by display name.
+        try {
+            $calendarManager = $this->container->get(\OCP\Calendar\ICalendarManager::class);
+            $principalUri = 'principals/users/' . $uid;
+            $calendars = $calendarManager->getCalendarsForPrincipal($principalUri);
+            $out = [];
+            foreach ($calendars as $cal) {
+                $uri = (string)$cal->getUri();
+                if ($uri === 'contact_birthdays') {
+                    continue;
+                }
+                $out[] = [
+                    'id'    => (int)$cal->getKey(),
+                    'uri'   => $uri,
+                    'name'  => (string)($cal->getDisplayName() ?? $uri),
+                    'color' => (string)($cal->getDisplayColor() ?? '#0082c9'),
+                ];
+            }
+            usort($out, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][CalendarService] listOwnedCalendars: ICalendarManager path unavailable — using DB fallback', [
+                'uid' => $uid, 'reason' => $e->getMessage(),
+                'app' => Application::APP_ID,
+            ]);
         }
 
         try {
@@ -256,7 +291,7 @@ class CalendarService {
             }
             return $out;
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] listOwnedCalendars failed', [
+            $this->logger->error('[TeamHub][CalendarService] listOwnedCalendars failed', [
                 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return [];
@@ -285,22 +320,44 @@ class CalendarService {
             $db = $this->container->get(\OCP\IDBConnection::class);
             $principalUri = 'principals/users/' . $uid;
 
-            // SECURITY: verify the calendar exists and is owned by this user.
-            $qb = $db->getQueryBuilder();
-            $res = $qb->select('id', 'displayname', 'uri')
-                ->from('calendars')
-                ->where($qb->expr()->eq('id', $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
-                return ['success' => false, 'error' => 'Calendar not found or not owned by user'];
+            // v3.100.8 (apps.md R-2) — SECURITY: verify the calendar
+            // exists and is owned by this user via ICalendarManager (public
+            // OCP API). Fall back to direct SELECT if the manager can't
+            // resolve for older NC versions.
+            $calendarName = null;
+            try {
+                $calendarManager = $this->container->get(\OCP\Calendar\ICalendarManager::class);
+                $calendars = $calendarManager->getCalendarsForPrincipal($principalUri);
+                foreach ($calendars as $cal) {
+                    if ((int)$cal->getKey() === $calendarId) {
+                        $calendarName = (string)($cal->getDisplayName() ?? $cal->getUri());
+                        break;
+                    }
+                }
+            } catch (\Throwable $e) {
+                $this->logger->debug('[TeamHub][CalendarService] connectExistingCalendar: ICalendarManager check unavailable — using DB fallback', [
+                    'uid' => $uid, 'calendarId' => $calendarId,
+                    'reason' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
             }
 
-            $calendarName = (string)($row['displayname'] ?? $row['uri']);
+            if ($calendarName === null) {
+                $qb = $db->getQueryBuilder();
+                $res = $qb->select('id', 'displayname', 'uri')
+                    ->from('calendars')
+                    ->where($qb->expr()->eq('id', $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                    ->setMaxResults(1)
+                    ->executeQuery();
+                $row = $res->fetch();
+                $res->closeCursor();
+
+                if (!$row) {
+                    return ['success' => false, 'error' => 'Calendar not found or not owned by user'];
+                }
+
+                $calendarName = (string)($row['displayname'] ?? $row['uri']);
+            }
 
             // Refuse only if this specific calendar is already connected to this team.
             // Multiple different calendars are allowed (multi-resource model).
@@ -349,7 +406,7 @@ class CalendarService {
             ];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] connectExistingCalendar failed', [
+            $this->logger->error('[TeamHub][CalendarService] connectExistingCalendar failed', [
                 'teamId' => $teamId, 'calendarId' => $calendarId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -372,13 +429,13 @@ class CalendarService {
                 ->andWhere($qb->expr()->eq('resourceid',   $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->debug('[CalendarService] removeCalendarAccess: dav_shares row removed', [
+            $this->logger->debug('[TeamHub][CalendarService] removeCalendarAccess: dav_shares row removed', [
                 'teamId' => $teamId, 'calendarId' => $calendarId,
                 'affected' => $affected, 'app' => Application::APP_ID,
             ]);
             return $affected > 0;
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] removeCalendarAccess failed', [
+            $this->logger->error('[TeamHub][CalendarService] removeCalendarAccess failed', [
                 'teamId' => $teamId, 'calendarId' => $calendarId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -397,7 +454,7 @@ class CalendarService {
                 $caldav->deleteCalendar($calendarId, true);
             } catch (\Throwable $e) {
                 // Fallback: manual QB delete
-                $this->logger->warning('[CalendarService] deleteCalendarById: CalDavBackend failed, using QB', [
+                $this->logger->warning('[TeamHub][CalendarService] deleteCalendarById: CalDavBackend failed, using QB', [
                     'calendarId' => $calendarId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
                 foreach (['dav_shares', 'calendarobjects', 'calendars'] as $tbl) {
@@ -410,12 +467,12 @@ class CalendarService {
                     } catch (\Throwable) {}
                 }
             }
-            $this->logger->info('[CalendarService] deleteCalendarById: calendar deleted', [
+            $this->logger->info('[TeamHub][CalendarService] deleteCalendarById: calendar deleted', [
                 'calendarId' => $calendarId, 'app' => Application::APP_ID,
             ]);
             return ['deleted' => true, 'calendar_id' => $calendarId];
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] deleteCalendarById failed', [
+            $this->logger->error('[TeamHub][CalendarService] deleteCalendarById failed', [
                 'calendarId' => $calendarId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
@@ -448,7 +505,7 @@ class CalendarService {
                 $caldav->deleteCalendar($calendarId, true);
             } catch (\Throwable $e) {
                 // Fallback: delete dav_shares row and calendarobjects manually
-                $this->logger->warning('[CalendarService] deleteCalendar: CalDavBackend failed, using QB', [
+                $this->logger->warning('[TeamHub][CalendarService] deleteCalendar: CalDavBackend failed, using QB', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
                 foreach (['dav_shares', 'calendarobjects', 'calendars'] as $tbl) {
@@ -462,7 +519,7 @@ class CalendarService {
                             ->where($dqb->expr()->eq($col, $dqb->createNamedParameter($calendarId)))
                             ->executeStatement();
                     } catch (\Throwable $inner) {
-                        $this->logger->warning('[CalendarService] deleteCalendar QB fallback failed', [
+                        $this->logger->warning('[TeamHub][CalendarService] deleteCalendar QB fallback failed', [
                             'table' => $tbl, 'error' => $inner->getMessage(), 'app' => Application::APP_ID,
                         ]);
                     }
@@ -472,7 +529,7 @@ class CalendarService {
             return ['deleted' => true, 'detail' => "Calendar {$calendarId} deleted"];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[CalendarService] deleteCalendar failed', [
+            $this->logger->error('[TeamHub][CalendarService] deleteCalendar failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];

@@ -5,9 +5,12 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\LayoutMapper;
+use OCA\TeamHub\Service\BudgetService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
+use OCA\TeamHub\Service\ProjectService;
+use OCA\TeamHub\Service\TimeService;
 use OCA\TeamHub\Service\TimelineService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -61,7 +64,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-members',
-            'x'           => 9, 'y' => 2,
+            'x'           => 9, 'y' => 6,
             'w'           => 3, 'h' => 2,
             'minW'        => 2, 'minH' => 1,
             'isResizable' => true,
@@ -70,7 +73,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-calendar',
-            'x'           => 9, 'y' => 4,
+            'x'           => 9, 'y' => 8,
             'w'           => 3, 'h' => 3,
             'minW'        => 2, 'minH' => 1,
             'isResizable' => true,
@@ -79,7 +82,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-deck',
-            'x'           => 9, 'y' => 7,
+            'x'           => 9, 'y' => 11,
             'w'           => 3, 'h' => 3,
             'minW'        => 2, 'minH' => 1,
             'isResizable' => true,
@@ -88,7 +91,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-activity',
-            'x'           => 9, 'y' => 10,
+            'x'           => 9, 'y' => 14,
             'w'           => 3, 'h' => 3,
             'minW'        => 2, 'minH' => 1,
             'isResizable' => true,
@@ -97,7 +100,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-pages',
-            'x'           => 9, 'y' => 13,
+            'x'           => 9, 'y' => 17,
             'w'           => 3, 'h' => 3,
             'minW'        => 2, 'minH' => 1,
             'isResizable' => true,
@@ -106,7 +109,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-files-center',
-            'x'           => 9, 'y' => 16,
+            'x'           => 9, 'y' => 20,
             'w'           => 3, 'h' => 4,
             'minW'        => 2, 'minH' => 2,
             'isResizable' => true,
@@ -115,7 +118,25 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-decisions',
-            'x'           => 9, 'y' => 20,
+            'x'           => 9, 'y' => 24,
+            'w'           => 3, 'h' => 4,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 4,
+        ],
+        // v3.97.0 — Project Health widget. Only rendered for Advanced-project
+        // members in Planning or Execution phase who can see both Budget and
+        // Time (gated in TeamWidgetGrid). Positioned near the top of the
+        // right column — this is a high-signal cockpit view an admin wants
+        // above the fold. For existing users whose saved layout predates
+        // this widget, mergeNewWidgets inserts it at y=2 and shifts every
+        // other x=9 widget down by 4 (see the widget-project-health branch
+        // there); for new users, this DEFAULT_LAYOUT ordering places it
+        // naturally.
+        [
+            'i'           => 'widget-project-health',
+            'x'           => 9, 'y' => 2,
             'w'           => 3, 'h' => 4,
             'minW'        => 2, 'minH' => 2,
             'isResizable' => true,
@@ -148,6 +169,7 @@ class LayoutController extends Controller {
         'widget-pages',
         'widget-files-center',
         'widget-decisions',
+        'widget-project-health',
         // Legacy — kept so saves from old clients are not rejected mid-migration.
         'widget-files-favorites',
         'widget-files-recent',
@@ -169,6 +191,9 @@ class LayoutController extends Controller {
         private PresenceTeamService $presenceTeamService,
         private DecisionTeamService $decisionTeamService,
         private TimelineService $timelineService,
+        private ProjectService $projectService,
+        private BudgetService $budgetService,
+        private TimeService $timeService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -234,6 +259,22 @@ class LayoutController extends Controller {
                 // DbIntrospectionService; absent on older Deck installs.
                 'card_dependencies_supported' => $this->timelineService->isCardDependencySupported(),
             ],
+            'budgetConfig'           => [
+                'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
+                // v3.94.0 — tab visibility uses a project-level role floor
+                // (project.budget_view_min_level) with an editor-override
+                // exception. Precomputed here so the frontend can gate the
+                // tab without a second fetch.
+                'can_view_budget'  => $this->budgetService->canUserViewBudgetTab($teamId, $userId),
+            ],
+            'timeConfig'             => [
+                'time_enabled'   => $this->config->getAppValue(Application::APP_ID, 'time_enabled_' . $teamId, '1') === '1',
+                // v3.96.0 — same precomputed-can-view pattern as budgetConfig.
+                // Tab visibility: level ≥ project.time_view_min_level OR user
+                // is a named project participant (teamhub_project_member row).
+                'can_view_time'  => $this->timeService->canUserViewTimeTab($teamId, $userId),
+            ],
+            'project'                => $this->projectFacts($teamId),
         ]);
         }
 
@@ -266,7 +307,38 @@ class LayoutController extends Controller {
                 // DbIntrospectionService; absent on older Deck installs.
                 'card_dependencies_supported' => $this->timelineService->isCardDependencySupported(),
             ],
+            'budgetConfig'           => [
+                'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
+                // v3.94.0 — tab visibility uses a project-level role floor
+                // (project.budget_view_min_level) with an editor-override
+                // exception. Precomputed here so the frontend can gate the
+                // tab without a second fetch.
+                'can_view_budget'  => $this->budgetService->canUserViewBudgetTab($teamId, $userId),
+            ],
+            'timeConfig'             => [
+                'time_enabled'   => $this->config->getAppValue(Application::APP_ID, 'time_enabled_' . $teamId, '1') === '1',
+                // v3.96.0 — same precomputed-can-view pattern as budgetConfig.
+                // Tab visibility: level ≥ project.time_view_min_level OR user
+                // is a named project participant (teamhub_project_member row).
+                'can_view_time'  => $this->timeService->canUserViewTimeTab($teamId, $userId),
+            ],
+            'project'                => $this->projectFacts($teamId),
         ]);
+    }
+
+    /**
+     * Project facts for the layout bundle. Membership is already verified above,
+     * so this is best-effort: any failure degrades to "not a project" rather than
+     * breaking the whole layout response (mirrors the other config here).
+     *
+     * @return array{isProject:bool, mode:?string, phase:?string, startDate:?int, targetEnd:?int}
+     */
+    private function projectFacts(string $teamId): array {
+        try {
+            return $this->projectService->getForTeam($teamId);
+        } catch (\Throwable $e) {
+            return ['isProject' => false, 'mode' => null, 'phase' => null, 'startDate' => null, 'targetEnd' => null];
+        }
     }
 
     // ----------------------------------------------------------------
@@ -524,6 +596,33 @@ class LayoutController extends Controller {
                 continue; // Already in the layout — skip.
             }
 
+            // v3.97.0 — widget-project-health is a top-of-column cockpit widget,
+            // not a bottom-of-stack append. Insert it at its DEFAULT_LAYOUT y
+            // (2, right below widget-teaminfo) and shift every other x=9
+            // widget with y >= 2 down by this widget's height. One-time
+            // reflow the first time an existing user's layout receives the
+            // widget; matches the visual position new users get from
+            // DEFAULT_LAYOUT verbatim.
+            if ($defaultItem['i'] === 'widget-project-health') {
+                $targetY = (int)$defaultItem['y'];
+                $shift   = (int)$defaultItem['h'];
+                foreach ($layout as &$item) {
+                    if ((int)$item['x'] === (int)$defaultItem['x']
+                        && (int)$item['y'] >= $targetY) {
+                        $item['y'] = (int)$item['y'] + $shift;
+                    }
+                }
+                unset($item);
+
+                $layout[] = $defaultItem;
+                $added    = true;
+
+                $this->logger->debug('[TeamHub][LayoutController] mergeNewWidgets — inserted widget-project-health at top of right column', [
+                    'atY' => $targetY, 'shiftedBy' => $shift,
+                ]);
+                continue;
+            }
+
             // Find the lowest y + h in the same x-column so we don't overlap.
             $targetX = $defaultItem['x'];
             $maxBottom = 0;
@@ -552,6 +651,88 @@ class LayoutController extends Controller {
                 'totalItems' => count($layout),
             ]);
         }
+
+        // v3.97.1 healing pass — the 3.97.0 mergeNewWidgets appended
+        // widget-project-health at the max-bottom of column x=9, which
+        // could easily be y=24 (below files/decisions). If we still find it
+        // there (i.e. its y equals the highest y+h of any OTHER x=9 widget),
+        // snap it up to y=2 and shift the rest down. Idempotent: after the
+        // first fetch snaps it up, the widget's y is no longer the max in
+        // its column and subsequent fetches skip the reflow. Users who
+        // intentionally moved the widget somewhere non-bottom keep their
+        // placement.
+        $layout = $this->healProjectHealthPosition($layout);
+
+        return $layout;
+    }
+
+    /**
+     * One-shot heal: if widget-project-health is saved at the very bottom of
+     * column x=9 (auto-appended by the pre-3.97.1 mergeNewWidgets), lift it
+     * to y=2 and shift every other x=9 widget down by its height.
+     *
+     * Skips silently when:
+     *   - widget-project-health is not in the layout at all (no-op)
+     *   - widget-project-health is not at the bottom of column x=9 (user has
+     *     moved it, respect their placement)
+     */
+    private function healProjectHealthPosition(array $layout): array {
+        $targetIdx = null;
+        foreach ($layout as $idx => $item) {
+            if (($item['i'] ?? '') === 'widget-project-health') {
+                $targetIdx = $idx;
+                break;
+            }
+        }
+        if ($targetIdx === null) {
+            return $layout;
+        }
+
+        $target  = $layout[$targetIdx];
+        $targetX = (int)($target['x'] ?? 0);
+        $targetY = (int)($target['y'] ?? 0);
+        $targetH = (int)($target['h'] ?? 0);
+
+        if ($targetX !== 9) {
+            // User moved it out of the right column entirely — respect that.
+            return $layout;
+        }
+
+        // Compute the max bottom edge of every OTHER widget in column x=9.
+        $maxOtherBottom = 0;
+        foreach ($layout as $idx => $item) {
+            if ($idx === $targetIdx) continue;
+            if ((int)($item['x'] ?? -1) !== 9) continue;
+            $bottom = (int)($item['y'] ?? 0) + (int)($item['h'] ?? 0);
+            if ($bottom > $maxOtherBottom) {
+                $maxOtherBottom = $bottom;
+            }
+        }
+
+        // Only heal when the widget is sitting at (or below) that max
+        // bottom — i.e. was auto-appended by mergeNewWidgets. If its top
+        // edge is above that line, it's already been repositioned or the
+        // user moved it — leave it alone.
+        if ($targetY < $maxOtherBottom) {
+            return $layout;
+        }
+
+        // Snap to y=2 and shift every other x=9 widget with y >= 2 down.
+        foreach ($layout as $idx => &$item) {
+            if ($idx === $targetIdx) continue;
+            if ((int)($item['x'] ?? -1) !== 9) continue;
+            if ((int)($item['y'] ?? 0) >= 2) {
+                $item['y'] = (int)$item['y'] + $targetH;
+            }
+        }
+        unset($item);
+
+        $layout[$targetIdx]['y'] = 2;
+
+        $this->logger->debug('[TeamHub][LayoutController] healProjectHealthPosition — snapped widget-project-health to y=2', [
+            'wasAtY'      => $targetY,
+            'shiftedBy'   => $targetH,
+        ]);
 
         return $layout;
     }

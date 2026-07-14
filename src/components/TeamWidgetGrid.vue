@@ -6,26 +6,34 @@
             'teamhub-home-view--mobile': isMobile || isTablet,
         }">
 
-        <!-- Edit mode hint banner -->
+        <!-- Edit mode hint banner
+             v3.100.15: the two Default-layout icon buttons now render as
+             NcButton (variant="tertiary") so they inherit NC's hover /
+             focus / circular sizing behaviour. The custom
+             .teamhub-layout-default-btn CSS block was retired. -->
         <div v-if="editMode && !isMobile && !isTablet" class="teamhub-edit-banner">
             <ViewDashboardEdit :size="16" />
             <span class="teamhub-edit-banner-text">{{ t('teamhub', 'Drag widgets to rearrange. Use the resize icon in the bottom-right corner of each widget to resize.') }}</span>
             <!-- Default layout actions — always shown in edit mode so they are always discoverable -->
             <div class="teamhub-edit-banner-actions">
-                <button
-                    class="teamhub-layout-default-btn"
+                <NcButton
+                    variant="tertiary"
                     :title="t('teamhub', 'Save as my default layout for all teams')"
                     :aria-label="t('teamhub', 'Save as my default layout for all teams')"
                     @click="$emit('set-as-default')">
-                    <ContentSaveAll :size="16" />
-                </button>
-                <button
-                    class="teamhub-layout-default-btn"
+                    <template #icon>
+                        <ContentSaveAll :size="16" />
+                    </template>
+                </NcButton>
+                <NcButton
+                    variant="tertiary"
                     :title="t('teamhub', 'Reset to my default layout')"
                     :aria-label="t('teamhub', 'Reset to my default layout')"
                     @click="$emit('reset-to-default')">
-                    <Restore :size="16" />
-                </button>
+                    <template #icon>
+                        <Restore :size="16" />
+                    </template>
+                </NcButton>
             </div>
         </div>
 
@@ -64,13 +72,10 @@
                     <div class="teamhub-widget-header">
                         <MessageOutline :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</h2>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('msgstream') ? t('teamhub', 'Expand Team Messages') : t('teamhub', 'Collapse Team Messages')"
-                            @click.stop="toggleCollapse('msgstream')">
-                            <ChevronUp v-if="!isCollapsed('msgstream')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('msgstream')"
+                            :widget-name="t('teamhub', 'Team Messages')"
+                            @toggle="toggleCollapse('msgstream')" />
                     </div>
                     <MessageStream v-show="!isCollapsed('msgstream')" class="teamhub-widget-content" />
                 </div>
@@ -121,13 +126,10 @@
                                 {{ t('teamhub', 'Leave team') }}
                             </NcActionButton>
                         </NcActions>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-teaminfo') ? t('teamhub', 'Expand Team Info') : t('teamhub', 'Collapse Team Info')"
-                            @click.stop="toggleCollapse('widget-teaminfo')">
-                            <ChevronUp v-if="!isCollapsed('widget-teaminfo')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-teaminfo')"
+                            :widget-name="t('teamhub', 'Team Info')"
+                            @toggle="toggleCollapse('widget-teaminfo')" />
                     </div>
 
                     <!-- Resource warning strip — directly under header, matches DeckWidget unassigned pattern -->
@@ -215,13 +217,10 @@
                             @click.stop="$emit('invite')">
                             <AccountPlus :size="18" />
                         </button>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-members') ? t('teamhub', 'Expand Members') : t('teamhub', 'Collapse Members')"
-                            @click.stop="toggleCollapse('widget-members')">
-                            <ChevronUp v-if="!isCollapsed('widget-members')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-members')"
+                            :widget-name="t('teamhub', 'Members')"
+                            @toggle="toggleCollapse('widget-members')" />
                     </div>
                     <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content teamhub-widget-content--notoppad">
                         <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
@@ -261,13 +260,10 @@
                                 {{ t('teamhub', 'Add Meeting') }}
                             </NcActionButton>
                         </NcActions>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-calendar') ? t('teamhub', 'Expand Upcoming Events') : t('teamhub', 'Collapse Upcoming Events')"
-                            @click.stop="toggleCollapse('widget-calendar')">
-                            <ChevronUp v-if="!isCollapsed('widget-calendar')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-calendar')"
+                            :widget-name="t('teamhub', 'Upcoming Events')"
+                            @toggle="toggleCollapse('widget-calendar')" />
                     </div>
                     <div v-show="!isCollapsed('widget-calendar')" class="teamhub-widget-content">
                         <CalendarWidget ref="calendarWidget" />
@@ -307,13 +303,10 @@
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
                         </NcActions>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-deck') ? t('teamhub', 'Expand Upcoming Tasks') : t('teamhub', 'Collapse Upcoming Tasks')"
-                            @click.stop="toggleCollapse('widget-deck')">
-                            <ChevronUp v-if="!isCollapsed('widget-deck')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-deck')"
+                            :widget-name="t('teamhub', 'Upcoming Tasks')"
+                            @toggle="toggleCollapse('widget-deck')" />
                     </div>
                     <div v-show="!isCollapsed('widget-deck')" class="teamhub-widget-content">
                         <DeckWidget />
@@ -343,13 +336,10 @@
                     <div class="teamhub-widget-header">
                         <ClockOutline :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Activity') }}</h2>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-activity') ? t('teamhub', 'Expand Team Activity') : t('teamhub', 'Collapse Team Activity')"
-                            @click.stop="toggleCollapse('widget-activity')">
-                            <ChevronUp v-if="!isCollapsed('widget-activity')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-activity')"
+                            :widget-name="t('teamhub', 'Team Activity')"
+                            @toggle="toggleCollapse('widget-activity')" />
                     </div>
                     <div v-show="!isCollapsed('widget-activity')" class="teamhub-widget-content">
                         <ActivityWidget @show-more="$emit('set-view', 'activity')" />
@@ -391,13 +381,10 @@
                                 {{ t('teamhub', 'Delete page') }}
                             </NcActionButton>
                         </NcActions>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-pages') ? t('teamhub', 'Expand Pages') : t('teamhub', 'Collapse Pages')"
-                            @click.stop="toggleCollapse('widget-pages')">
-                            <ChevronUp v-if="!isCollapsed('widget-pages')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-pages')"
+                            :widget-name="t('teamhub', 'Pages')"
+                            @toggle="toggleCollapse('widget-pages')" />
                     </div>
                     <div v-show="!isCollapsed('widget-pages')" class="teamhub-widget-content">
                         <IntravoxWidget
@@ -439,13 +426,10 @@
                             :aria-label="t('teamhub', 'Open team folder in Files')">
                             <PlusIcon :size="18" aria-hidden="true" />
                         </a>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-files-center') ? t('teamhub', 'Expand File Center') : t('teamhub', 'Collapse File Center')"
-                            @click.stop="toggleCollapse('widget-files-center')">
-                            <ChevronUp v-if="!isCollapsed('widget-files-center')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-files-center')"
+                            :widget-name="t('teamhub', 'File Center')"
+                            @toggle="toggleCollapse('widget-files-center')" />
                     </div>
                     <div v-show="!isCollapsed('widget-files-center')" class="teamhub-widget-content teamhub-widget-content--notoppad">
                         <FilesWidget />
@@ -481,16 +465,48 @@
                             @click="$emit('propose-decision')">
                             <PlusIcon :size="18" aria-hidden="true" />
                         </button>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-decisions') ? t('teamhub', 'Expand Decisions') : t('teamhub', 'Collapse Decisions')"
-                            @click.stop="toggleCollapse('widget-decisions')">
-                            <ChevronUp v-if="!isCollapsed('widget-decisions')" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-decisions')"
+                            :widget-name="t('teamhub', 'Decisions')"
+                            @toggle="toggleCollapse('widget-decisions')" />
                     </div>
                     <div v-show="!isCollapsed('widget-decisions')" class="teamhub-widget-content teamhub-widget-content--notoppad">
                         <DecisionsWidget />
+                    </div>
+                </div>
+            </grid-item>
+
+            <!-- Project Health widget (v3.97.0, Track E Session 6) — gated on
+                 Advanced-project + Execution phase + both Budget and Time
+                 tab visibility. Payload gated server-side too. -->
+            <grid-item
+                v-if="showProjectHealthWidget && getGridItem('widget-project-health')"
+                v-bind="getGridItem('widget-project-health')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Project health') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-project-health', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-project-health', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-project-health', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-project-health', 'right')">
+                        <DragVariant :size="16" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Project health') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <ViewDashboard :size="25" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Project health') }}</h2>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-project-health')"
+                            :widget-name="t('teamhub', 'Project health')"
+                            @toggle="toggleCollapse('widget-project-health')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-project-health')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <ProjectHealthWidget @open-tab="$emit('set-view', $event)" />
                     </div>
                 </div>
             </grid-item>
@@ -539,13 +555,10 @@
                                 {{ action.label }}
                             </NcActionButton>
                         </NcActions>
-                        <button
-                            class="teamhub-widget-collapse-btn"
-                            :aria-label="isCollapsed('widget-int-' + widget.registry_id) ? t('teamhub', 'Expand {widget}', { widget: widget.title }) : t('teamhub', 'Collapse {widget}', { widget: widget.title })"
-                            @click.stop="toggleCollapse('widget-int-' + widget.registry_id)">
-                            <ChevronUp v-if="!isCollapsed('widget-int-' + widget.registry_id)" :size="16" />
-                            <ChevronDown v-else :size="16" />
-                        </button>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-int-' + widget.registry_id)"
+                            :widget-name="widget.title"
+                            @toggle="toggleCollapse('widget-int-' + widget.registry_id)" />
                     </div>
                     <div v-show="!isCollapsed('widget-int-' + widget.registry_id)" class="teamhub-widget-content">
                         <IntegrationWidget
@@ -754,6 +767,20 @@
                     </div>
                 </div>
 
+                <!-- Project Health widget — tablet layout (v3.97.0) -->
+                <div v-if="showProjectHealthWidget && getGridItem('widget-project-health')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-project-health')">
+                            <ViewDashboard :size="18" />
+                            <span>{{ t('teamhub', 'Project health') }}</span>
+                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-project-health') }" />
+                        </button>
+                    </div>
+                    <div v-if="!isCollapsed('widget-project-health')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <ProjectHealthWidget @open-tab="$emit('set-view', $event)" />
+                    </div>
+                </div>
+
                 <!-- External integration widgets — no standard actions -->
                 <div
                     v-for="ext in teamWidgets"
@@ -850,7 +877,9 @@ import Bell from 'vue-material-design-icons/Bell.vue'
 import ViewDashboard from 'vue-material-design-icons/ViewDashboard.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import FileDocument from 'vue-material-design-icons/FileDocument.vue'
-import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
+// v3.100.14: ChevronUp import removed — the 12 desktop collapse buttons
+// that used it were extracted into WidgetCollapseButton. ChevronDown stays
+// because it is still used inline in the tablet layout below.
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
@@ -874,7 +903,11 @@ import IntegrationWidget from './IntegrationWidget.vue'
 import FilesWidget          from './FilesWidget.vue'
 import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
+import ProjectHealthWidget  from './ProjectHealthWidget.vue'
 import MobileWidgetView from './MobileWidgetView.vue'
+// v3.100.14: shared chevron toggle for every desktop widget header.
+// See gui.md § 6 — this replaces 12 copies of the same 5-line button.
+import WidgetCollapseButton from './WidgetCollapseButton.vue'
 
 export default {
     name: 'TeamWidgetGrid',
@@ -887,14 +920,16 @@ export default {
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus, PlusIcon,
         Cog, Puzzle, GavelIcon, ViewDashboardEdit, DragVariant,
         ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
-        ChevronUp, ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
+        ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         ContentSaveAll, Restore,
         ClipboardPlusOutline,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
+        ProjectHealthWidget,
         MobileWidgetView,
+        WidgetCollapseButton,
     },
 
     props: {
@@ -938,6 +973,11 @@ export default {
             'resourceWarnings',
             'presenceModuleEnabled', 'presenceConfig',
             'decisionsModuleEnabled', 'decisionsConfig',
+            // v3.97.0 — gate for the project-health widget. Both flags are
+            // precomputed on the layout bundle; project.mode + phase come
+            // with the same bundle. The widget also self-checks the payload,
+            // but gating here avoids a needless fetch on non-eligible views.
+            'budgetConfig', 'timeConfig', 'project',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -958,6 +998,29 @@ export default {
          */
         showDecisionsWidget() {
             return !!(this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled)
+        },
+
+        /**
+         * Show the Project Health widget for Advanced projects currently in
+         * Planning or Execution phase, where the viewer sees BOTH the Budget
+         * and Time tabs. Both flags are precomputed on the layout bundle
+         * (LayoutController.getLayout), so this is a synchronous store read.
+         * Widget content is also gated server-side; the frontend gate just
+         * prevents an unnecessary fetch on non-eligible views.
+         *
+         * Planning included (v3.97.0 tweak): admins want the same
+         * budget/time/milestone overview while they're still setting up the
+         * work, not only once execution starts.
+         */
+        showProjectHealthWidget() {
+            const phase = this.project?.phase
+            return !!(
+                this.project?.isProject
+                && this.project?.mode === 'advanced'
+                && (phase === 'planning' || phase === 'execution')
+                && this.budgetConfig?.can_view_budget
+                && this.timeConfig?.can_view_time
+            )
         },
 
         /**
@@ -983,6 +1046,9 @@ export default {
             if (this.resources?.files) active.add('widget-files-center')
             if (this.decisionsModuleEnabled && this.decisionsConfig?.decisions_enabled) {
                 active.add('widget-decisions')
+            }
+            if (this.showProjectHealthWidget) {
+                active.add('widget-project-health')
             }
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
             return active
@@ -1318,13 +1384,16 @@ export default {
 </script>
 
 <style scoped>
+/* v3.100.16: theme-safe canvas backdrop (was #f4f4f4 — a light-grey
+   pinned in raw hex that made the home view read as a bright rectangle
+   in dark mode). */
 .teamhub-home-view {
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
     padding: 12px;
     box-sizing: border-box;
-    background: #f4f4f4;
+    background: var(--color-background-dark);
 }
 
 /*
@@ -1373,29 +1442,10 @@ export default {
     flex-shrink: 0;
 }
 
-.teamhub-layout-default-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid var(--color-border);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    cursor: pointer;
-    border-radius: var(--border-radius);
-    opacity: 0.85;
-    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
-    flex-shrink: 0;
-}
-
-.teamhub-layout-default-btn:hover {
-    opacity: 1;
-    background: var(--color-background-hover);
-    border-color: var(--color-primary-element);
-    color: var(--color-primary-element);
-}
+/* v3.100.15: .teamhub-layout-default-btn was the CSS for the two raw
+   <button>s in the edit-mode banner that are now NcButtons; NcButton
+   owns the sizing, hover, focus, and cursor behaviour, so the block is
+   retired. */
 
 .teamhub-grid-item { touch-action: none; }
 .teamhub-grid-item--editing { cursor: move; }
@@ -1419,7 +1469,7 @@ export default {
     background: var(--color-background-hover);
     border-bottom: 1px solid var(--color-border);
     cursor: grab;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
     user-select: none;
@@ -1551,7 +1601,7 @@ export default {
     height: 22px;
     padding: 0 10px;
     border-radius: 11px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 500;
     line-height: 1;
     white-space: nowrap;
@@ -1560,12 +1610,12 @@ export default {
     user-select: none;
 }
 
+/* v3.100.16: dropped the #1a1a1a hex fallbacks on the -text tokens —
+   NC always defines --color-success-text / --color-warning-text, so
+   the fallback was dead code that pinned a colour regardless of theme. */
 .teamhub-team-label--success {
     background-color: var(--color-success);
-    /* Use NC's success-text variable where available; fall back to a dark
-       neutral that reads on the mid-tone green in both light and dark mode.
-       The explicit fallback keeps forced-colors / high-contrast modes safe. */
-    color: var(--color-success-text, #1a1a1a);
+    color: var(--color-success-text);
     border-color: var(--color-success);
 }
 
@@ -1577,9 +1627,7 @@ export default {
 
 .teamhub-team-label--warning {
     background-color: var(--color-warning);
-    /* Use NC's warning-text variable where available; fall back to dark
-       neutral that reads on the amber background in light and dark mode. */
-    color: var(--color-warning-text, #1a1a1a);
+    color: var(--color-warning-text);
     border-color: var(--color-warning);
 }
 
@@ -1591,7 +1639,7 @@ export default {
 
 .teamhub-info-label {
     display: block;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     text-transform: uppercase;
     margin-bottom: 4px;
@@ -1608,21 +1656,29 @@ export default {
 
 .teamhub-owner-name { font-size: 13px; color: var(--color-main-text); }
 
-/* Resource warning strip — directly under widget header, matches DeckWidget unassigned pattern */
+/* Resource warning strip — directly under widget header, matches DeckWidget
+   unassigned pattern.
+   v3.100.16: full-saturation warning per SKILLS.md § "State-coloured
+   backgrounds" (was --color-warning-soft with rgba fallback — neither is
+   an NC canonical token; the fallback fired because --color-warning-soft
+   doesn't exist). --color-warning-element-light was similar; both are
+   retired in favour of the fill + border pair using --color-warning /
+   --color-warning-text. Also dropped the raw hex fallbacks on the -text
+   / fill tokens (NC always defines the canonical variants). */
 .teamhub-resource-warning {
     display: flex;
     align-items: center;
     gap: 7px;
     padding: 7px 14px;
-    background: var(--color-warning-soft, rgba(245, 158, 11, 0.08));
-    border-bottom: 1px solid var(--color-warning-element-light, rgba(245, 158, 11, 0.18));
+    background: var(--color-warning);
+    border-bottom: 1px solid var(--color-warning-text);
     font-size: 13px;
-    color: var(--color-warning-text, #92400e);
+    color: var(--color-warning-text);
     line-height: 1.3;
 }
 .teamhub-resource-warning__icon {
     flex-shrink: 0;
-    color: var(--color-warning, #d97706);
+    color: var(--color-warning-text);
 }
 .teamhub-resource-warning__text {
     flex: 1;
@@ -1635,7 +1691,7 @@ export default {
     margin: 0;
     display: flex;
     align-items: center;
-    color: var(--color-warning-text, #92400e);
+    color: var(--color-warning-text);
     cursor: pointer;
     opacity: 0.75;
     flex-shrink: 0;

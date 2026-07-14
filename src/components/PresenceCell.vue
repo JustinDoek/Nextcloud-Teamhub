@@ -127,7 +127,7 @@ export default {
     justify-content: center;
     transition: filter 0.1s, transform 0.1s;
     padding: 4px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     line-height: 1.2;
     text-align: center;
     word-break: break-word;
@@ -154,9 +154,10 @@ export default {
     cursor: wait;
 }
 
-/* Unsaved draft change — amber outline */
+/* Unsaved draft change — amber outline. v3.100.16: dropped the hex
+   fallback (NC always defines --color-warning). */
 .presence-cell--dirty {
-    outline: 2px solid var(--color-warning, #e9a020);
+    outline: 2px solid var(--color-warning);
     outline-offset: 1px;
 }
 

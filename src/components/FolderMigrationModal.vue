@@ -339,8 +339,10 @@ export default {
 .fmm-ok  { color: var(--color-success-text); font-weight: 600; }
 .fmm-warn { color: var(--color-warning-text); font-weight: 600; }
 
+/* v3.100.14: full-saturation warning banner per SKILLS.md
+   (was a 10% color-mix() soft tint). */
 .fmm-warning-text {
-    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+    background: var(--color-warning);
     border: 1px solid var(--color-warning);
     border-radius: var(--border-radius);
     padding: 10px 14px;

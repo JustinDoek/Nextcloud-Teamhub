@@ -26,6 +26,8 @@ use Psr\Log\LoggerInterface;
  *   else                     → 500
  */
 class PresenceTeamController extends Controller {
+    use ExceptionResponseTrait;
+
 
     public function __construct(
         string $appName,
@@ -302,23 +304,6 @@ class PresenceTeamController extends Controller {
     // =========================================================================
 
     private function mapError(\Throwable $e, string $action): JSONResponse {
-        $msg = $e->getMessage();
-
-        if ($e instanceof \InvalidArgumentException) {
-            return new JSONResponse(['error' => $msg], Http::STATUS_BAD_REQUEST);
-        }
-
-        // MemberService throws plain \Exception for auth/membership failures.
-        if (str_contains($msg, 'not a member') || str_contains($msg, 'not authenticated')
-            || str_contains($msg, 'not have admin') || str_contains($msg, 'Insufficient')
-        ) {
-            return new JSONResponse(['error' => $msg], Http::STATUS_FORBIDDEN);
-        }
-
-        $this->logger->error(sprintf(
-            '[TeamHub][PresenceTeamController] %s: %s', $action, $msg
-        ), ['exception' => $e]);
-
-        return new JSONResponse(['error' => $msg], Http::STATUS_INTERNAL_SERVER_ERROR);
+        return $this->exceptionResponse($e, ucfirst($action) . ' failed');
     }
 }

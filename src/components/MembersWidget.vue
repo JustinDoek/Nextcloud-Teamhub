@@ -408,7 +408,7 @@ export default {
     align-items: center;
     gap: 5px;
     padding: 8px 10px 7px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
     background: transparent;
@@ -456,7 +456,7 @@ export default {
     gap: 10px;
     padding: 24px 16px;
     color: var(--color-text-maxcontrast);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     text-align: center;
 }
 .th-members-widget__state--hint {

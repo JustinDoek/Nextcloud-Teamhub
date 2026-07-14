@@ -98,14 +98,14 @@ class ResourceService {
         $isEffectiveMember = $isDirectMember || $this->isEffectiveTeamMember($db, $teamId, $uid);
 
         if (!$isEffectiveMember) {
-            $this->logger->warning('[ResourceService] getTeamResources — non-member access attempt', [
+            $this->logger->warning('[TeamHub][ResourceService] getTeamResources — non-member access attempt', [
                 'teamId' => $teamId,
                 'userId' => $uid,
                 'app'    => Application::APP_ID,
             ]);
             throw new \Exception('Access denied');
         }
-        $this->logger->debug('[ResourceService] getTeamResources — membership confirmed', [
+        $this->logger->debug('[TeamHub][ResourceService] getTeamResources — membership confirmed', [
             'teamId' => $teamId, 'uid' => $uid,
             'direct' => $isDirectMember, 'indirect' => !$isDirectMember,
             'app' => Application::APP_ID,
@@ -392,7 +392,7 @@ class ResourceService {
      * Create app resources and share them with the circle. Returns per-app results.
      * Delegates to TalkService, FilesService, CalendarService, DeckService.
      */
-    public function createTeamResources(string $teamId, array $apps, string $teamName, array $names = []): array {
+    public function createTeamResources(string $teamId, array $apps, string $teamName, array $names = [], ?string $projectMode = null): array {
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
@@ -508,7 +508,7 @@ class ResourceService {
                         break;
                     case 'deck':
                         $result = $this->deckService->createDeckBoard(
-                            $teamId, $resourceName, $uid, $teamColour
+                            $teamId, $resourceName, $uid, $teamColour, $projectMode
                         );
                         $results['deck'] = $result;
                         if (!empty($result['board_id'])) {
@@ -560,7 +560,11 @@ class ResourceService {
 
         switch ($app) {
             case 'talk':
-                $result = $this->talkService->connectExistingRoom($teamId, $resourceId, $uid);
+                // v3.100.12 — TalkService::connectExistingRoom typed
+                // roomId as int, but the picker sends it as a JSON int
+                // which arrives at the controller as a string. Cast
+                // here rather than widening the TalkService signature.
+                $result = $this->talkService->connectExistingRoom($teamId, (int)$resourceId, $uid);
                 // resource_id for Talk is the room token returned by the sub-service.
                 if (!empty($result['success']) && !empty($result['token'])) {
                     $this->upsertResourceRow($teamId, 'talk', (string) $result['token'], 'teamhub_connect', $uid);
@@ -680,8 +684,19 @@ class ResourceService {
             ]);
         }
 
-        // Delete this team's registry row.
-        $this->resourceMapper->deleteById($row->getId());
+        // v3.100.10 — soft-delete instead of hard-delete. Marking the row
+        // 'disconnected' (rather than dropping it) lets the Files picker
+        // scope its "reattach" section to folders THIS team was previously
+        // connected to. Hard-delete leaked all folder names via the admin
+        // picker; soft-delete keeps the pre-attach history team-local.
+        $user = $this->userSession->getUser();
+        $actorUid = $user ? $user->getUID() : null;
+        $this->resourceMapper->updateStatus(
+            $row->getId(),
+            'disconnected',
+            $actorUid,
+            time(),
+        );
 
         $this->logger->info('[TeamHub][ResourceService] removeTeamAccess completed', [
             'teamId'          => $teamId,
@@ -945,10 +960,13 @@ class ResourceService {
         try {
             $existing = $this->resourceMapper->findByTeamAppResource($teamId, $appId, $resourceId);
             if ($existing !== null) {
-                // If the row already exists but is pending or ignored, promote it to active.
-                // This happens when discovery already found the resource before the admin
-                // clicked "Connect existing" — the explicit connect is the acceptance decision.
-                if (in_array($existing->getStatus(), ['pending', 'ignored'], true)) {
+                // If the row already exists but is pending, ignored, or
+                // disconnected, promote it to active. This happens when
+                // discovery already found the resource before the admin
+                // clicked "Connect existing" — the explicit connect is the
+                // acceptance decision. As of v3.100.10 disconnected rows
+                // are also revived here (soft-delete → reconnect flow).
+                if (in_array($existing->getStatus(), ['pending', 'ignored', 'disconnected'], true)) {
                     $this->resourceMapper->updateStatus(
                         $existing->getId(),
                         'active',
@@ -1004,7 +1022,7 @@ class ResourceService {
             $res->closeCursor();
             return $row ? (string)($row['name'] ?? '') : '';
         } catch (\Throwable $e) {
-            $this->logger->warning('[ResourceService] getTeamName failed', [
+            $this->logger->warning('[TeamHub][ResourceService] getTeamName failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return '';
@@ -1067,7 +1085,7 @@ class ResourceService {
             $ucRes->closeCursor();
 
             if (empty($circleIds)) {
-                $this->logger->debug('[ResourceService] isEffectiveTeamMember: user has no circle memberships', [
+                $this->logger->debug('[TeamHub][ResourceService] isEffectiveTeamMember: user has no circle memberships', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
                 return false;
@@ -1083,12 +1101,12 @@ class ResourceService {
             $cnt = (int)$res->fetchOne();
             $res->closeCursor();
 
-            $this->logger->debug('[ResourceService] isEffectiveTeamMember via circles_membership', [
+            $this->logger->debug('[TeamHub][ResourceService] isEffectiveTeamMember via circles_membership', [
                 'uid' => $uid, 'teamId' => $teamId, 'found' => $cnt > 0, 'app' => Application::APP_ID,
             ]);
             return $cnt > 0;
         } catch (\Throwable $e) {
-            $this->logger->warning('[ResourceService] isEffectiveTeamMember check failed', [
+            $this->logger->warning('[TeamHub][ResourceService] isEffectiveTeamMember check failed', [
                 'teamId' => $teamId, 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return false;

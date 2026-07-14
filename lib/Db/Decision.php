@@ -64,6 +64,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void    setDecidedAt(?int $decidedAt)
  * @method ?int    getWithdrawnAt()
  * @method void    setWithdrawnAt(?int $withdrawnAt)
+ * @method ?int    getMilestoneId()
+ * @method void    setMilestoneId(?int $milestoneId)
  */
 class Decision extends Entity {
 
@@ -87,6 +89,12 @@ class Decision extends Entity {
     protected int     $createdAt         = 0;
     protected ?int    $decidedAt         = null;
     protected ?int    $withdrawnAt       = null;
+    // v3.97.5 — optional linkage to a teamhub_milestones row. Null on
+    // every existing decision + every decision proposed on a non-project
+    // team. Soft link — no FK constraint; if the milestone is deleted,
+    // the serialiser resolves the label to null and the frontend hides
+    // the chip.
+    protected ?int    $milestoneId       = null;
 
     public function __construct() {
         $this->addType('messageId',         'integer');
@@ -95,5 +103,6 @@ class Decision extends Entity {
         $this->addType('createdAt',         'integer');
         $this->addType('decidedAt',         'integer');
         $this->addType('withdrawnAt',       'integer');
+        $this->addType('milestoneId',       'integer');
     }
 }

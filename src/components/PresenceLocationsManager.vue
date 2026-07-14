@@ -517,7 +517,7 @@ export default {
 }
 .presence-empty-inline {
     padding: 4px 8px 4px 36px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -560,7 +560,7 @@ export default {
     min-width: 0;
 }
 .presence-node__sub {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 .presence-node__actions {

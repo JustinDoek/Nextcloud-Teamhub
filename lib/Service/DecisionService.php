@@ -9,6 +9,7 @@ use OCA\TeamHub\Db\Decision;
 use OCA\TeamHub\Db\DecisionMapper;
 use OCA\TeamHub\Db\DecisionTeamConfigMapper;
 use OCA\TeamHub\Db\MessageMapper;
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCP\Files\IRootFolder;
 use OCP\IConfig;
 use OCP\IUserManager;
@@ -89,6 +90,9 @@ class DecisionService {
         private IRootFolder              $rootFolder,
         private LoggerInterface          $logger,
         private \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper,
+        // v3.97.5 — optional milestone linkage on proposals (Advanced projects).
+        private \OCA\TeamHub\Db\MilestoneMapper $milestoneMapper,
+        private \OCA\TeamHub\Db\ProjectMapper   $projectMapper,
     ) {}
 
     // =========================================================================
@@ -186,6 +190,7 @@ class DecisionService {
         ?string $sourceRef,
         string  $actingUserId,
         bool    $autoFinalize = false,
+        ?int    $milestoneId = null,
     ): array {
         $this->assertModuleEnabledForTeam($teamId);
         $this->memberService->requireMemberLevel($teamId);
@@ -257,6 +262,22 @@ class DecisionService {
             }
         }
 
+        // v3.97.5 — validate optional milestone linkage. Milestones only
+        // apply to Advanced project teams; passing a milestoneId on a
+        // non-project or Basic-project team is a client bug we refuse
+        // rather than silently dropping. The milestone must belong to the
+        // same team — cross-team writes would be a security issue.
+        if ($milestoneId !== null) {
+            $project = $this->projectMapper->findByTeam($teamId);
+            if ($project === null || $project->getMode() !== 'advanced') {
+                throw new \InvalidArgumentException('milestoneId only applies to Advanced project teams');
+            }
+            $milestone = $this->milestoneMapper->findById($milestoneId);
+            if ($milestone === null || $milestone->getTeamId() !== $teamId) {
+                throw new \InvalidArgumentException('milestoneId does not point to a milestone in this team');
+            }
+        }
+
         // Capture question from the message subject. The spec lets the message
         // body carry context; subject is the canonical decision question.
         $question = (string)$message['subject'];
@@ -291,6 +312,7 @@ class DecisionService {
         $row->setSourceType($sourceType ?? 'message');
         $row->setSourceRef($sourceRef);
         $row->setCreatedAt($now);
+        $row->setMilestoneId($milestoneId);
 
         /** @var Decision $saved */
         $saved = $this->decisionMapper->insert($row);
@@ -779,7 +801,7 @@ class DecisionService {
                     if (in_array($actingUserId, $cat['approvers'], true)) {
                         return; // Approved approver.
                     }
-                    throw new \RuntimeException('Not authorized: you are not an approver for category ' . $categoryName);
+                    throw new AccessDeniedException('Not authorized: you are not an approver for category ' . $categoryName);
                 }
             }
             // Category string doesn't match any predefined row — fall
@@ -1437,6 +1459,29 @@ class DecisionService {
                 $participants = null;
             }
         }
+
+        // v3.97.5 — resolve the linked milestone once so the frontend can
+        // render the chip without a second fetch. Soft link: if the
+        // milestone has been deleted, the row's milestone_id remains but
+        // label/date resolve to null and the frontend hides the chip.
+        $milestoneLabel = null;
+        $milestoneDate  = null;
+        $milestoneId    = $d->getMilestoneId();
+        if ($milestoneId !== null) {
+            try {
+                $milestone = $this->milestoneMapper->findById($milestoneId);
+                if ($milestone !== null && $milestone->getTeamId() === $d->getTeamId()) {
+                    $milestoneLabel = $milestone->getLabel();
+                    $ts = $milestone->getMilestoneDate();
+                    $milestoneDate = $ts !== null
+                        ? (new \DateTimeImmutable('@' . $ts))->format('Y-m-d')
+                        : null;
+                }
+            } catch (\Throwable) {
+                // Silent — soft link. Chip stays hidden.
+            }
+        }
+
         return [
             'id'                  => $d->getId(),
             'teamId'              => $d->getTeamId(),
@@ -1459,6 +1504,9 @@ class DecisionService {
             'createdAt'           => $d->getCreatedAt(),
             'decidedAt'           => $d->getDecidedAt(),
             'withdrawnAt'         => $d->getWithdrawnAt(),
+            'milestoneId'         => $milestoneId,
+            'milestoneLabel'      => $milestoneLabel,
+            'milestoneDate'       => $milestoneDate,
         ];
     }
 

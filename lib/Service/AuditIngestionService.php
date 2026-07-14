@@ -79,7 +79,10 @@ class AuditIngestionService {
      */
     public function checkActivityAvailable(): bool {
         try {
-            // Cheapest possible probe: SELECT 1 FROM oc_activity LIMIT 1.
+            // apps.md R-6: direct read of `activity` retained — no OCP
+            // reader API exists (\OCP\Activity\IManager is write-only;
+            // \OCA\Activity\Data is user-scoped and internal). This is
+            // the cheapest liveness probe: SELECT 1 FROM oc_activity LIMIT 1.
             $qb = $this->db->getQueryBuilder();
             $r = $qb->select($qb->createFunction('1'))
                 ->from('activity')
@@ -451,6 +454,11 @@ class AuditIngestionService {
      * @return array<int,array<string,mixed>>
      */
     private function collectCurrentShares(array $teamIds): array {
+        // apps.md R-5: direct SELECT retained — \OCP\Share\IManager offers
+        // getSharesBy (creator-scoped) and getSharedWith (user-scoped),
+        // but has no reverse lookup "shares given to circle recipient X".
+        // Circle-recipient enumeration is genuinely absent from the OCP
+        // surface; a raw SELECT on share_with is the only path.
         $qb = $this->db->getQueryBuilder();
         $qb->select('id', 'share_with', 'permissions', 'expiration', 'uid_initiator', 'item_type', 'file_target')
             ->from('share')
@@ -490,6 +498,9 @@ class AuditIngestionService {
             return [];
         }
 
+        // apps.md R-5: direct SELECT retained — no reverse-lookup API for
+        // "shares given to circle X" on \OCP\Share\IManager. Same rationale
+        // as collectCurrentShares above.
         $qb = $this->db->getQueryBuilder();
         $qb->select('share_with', 'file_target')
             ->from('share')
@@ -531,6 +542,10 @@ class AuditIngestionService {
      * @return string[]
      */
     public function listTeamIds(): array {
+        // apps.md R-1: direct SELECT retained — nightly audit job needs
+        // every team on the instance regardless of the caller. CirclesManager
+        // is caller-scoped (probeCircles returns only teams the acting user
+        // can see), which for a system cron with no session would return [].
         $qb = $this->db->getQueryBuilder();
         $qb->select('unique_id', 'name')
             ->from('circles_circle');
@@ -554,6 +569,12 @@ class AuditIngestionService {
 
     /**
      * Fetch oc_activity rows for a given app since the cursor.
+     *
+     * apps.md R-6: direct SELECT retained — no OCP reader for the
+     * activity stream. \OCA\Activity\Data::read exists but is user-scoped
+     * (needs a session UID and applies per-user filters), which is wrong
+     * for a system ingestion job. The internal class also changed
+     * signature 3× between NC 25–29; the raw SELECT is more stable.
      *
      * @return array<int,array<string,mixed>>
      */

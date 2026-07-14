@@ -702,7 +702,7 @@ export default {
     flex-shrink: 0;
 }
 .app-embed__bar-btn-label {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 400;
     white-space: nowrap;
     color: var(--color-text-maxcontrast);
@@ -725,7 +725,7 @@ export default {
 
 .app-embed__label {
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 .app-embed__viewport {

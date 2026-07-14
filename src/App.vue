@@ -3,7 +3,7 @@
         <NcAppNavigation :aria-label="t('teamhub', 'Teams navigation')">
             <template #list>
                 <!-- Spacer to clear the show/hide sidebar toggle button -->
-                <div style="height: 44px; flex-shrink: 0;" />
+                <div class="teamhub-nav-spacer" />
 
                 <NcAppNavigationItem
                     v-if="canCreateTeam"
@@ -51,16 +51,22 @@
                     </template>
                 </NcEmptyContent>
 
-                <!-- Docs / help link — at bottom of list, visually separated -->
+                <!-- Docs / help link — at bottom of list, visually separated.
+                     v3.100.15: uses NcButton so it inherits NC's hover/focus
+                     ring, keyboard behaviour and the six-lock circular sizing
+                     from SKILLS.md (raw <button> previously required its own
+                     44×44 pill CSS to hold shape). -->
                 <div class="teamhub-feedback-separator" />
                 <li class="teamhub-feedback-item">
-                    <button
-                        class="teamhub-feedback-btn"
+                    <NcButton
+                        variant="tertiary"
                         :title="t('teamhub', 'Help & Documentation')"
                         :aria-label="t('teamhub', 'Help & Documentation')"
                         @click="openDocs">
-                        <HelpCircleOutlineIcon :size="20" />
-                    </button>
+                        <template #icon>
+                            <HelpCircleOutlineIcon :size="20" />
+                        </template>
+                    </NcButton>
                 </li>
             </template>
         </NcAppNavigation>
@@ -107,7 +113,7 @@ import { translate as t } from '@nextcloud/l10n'
 import { emit } from '@nextcloud/event-bus'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble } from '@nextcloud/vue'
+import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Magnify from 'vue-material-design-icons/Magnify.vue'
@@ -120,7 +126,7 @@ import CreateTeamView from './components/CreateTeamView.vue'
 export default {
     name: 'App',
     components: {
-        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble,
+        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton,
         AccountGroup, Plus, Magnify, HelpCircleOutlineIcon,
         TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView,
     },
@@ -288,7 +294,19 @@ export default {
 
         selectTeamFromSidebar(teamId) {
             this.activeView = 'team'
-            this.selectTeam(teamId)
+            // Guard against re-clicking the currently open team. selectTeam's
+            // store action unconditionally resets SET_PROJECT to isProject:false,
+            // then relies on TeamView's `currentTeamId` watcher to re-run
+            // loadLayout so the project fact + budgetConfig + timeConfig come
+            // back. When teamId is unchanged the watcher doesn't fire, so we
+            // would leave advanced-project state empty (phase stepper, Budget
+            // + Time tabs, Manage Team → Project tab all vanish) until the
+            // user reloads. If they were already on 'admin' or 'create' view
+            // and clicked their team, activeView above is enough — no need to
+            // touch team state.
+            if (this.currentTeamId !== teamId) {
+                this.selectTeam(teamId)
+            }
             this.closeSidebarIfOverlay()
         },
 
@@ -340,6 +358,14 @@ export default {
 </script>
 
 <style scoped lang="scss">
+// v3.100.17: moved from inline style="height: 44px" (gui.md § 13).
+// Spacer at the top of the sidebar list that clears the NC show/hide
+// sidebar toggle button so its icon doesn't overlap the first nav item.
+.teamhub-nav-spacer {
+    height: 44px;
+    flex-shrink: 0;
+}
+
 // Visual separator above the feedback item at the bottom of the list.
 .teamhub-feedback-separator {
     height: 1px;
@@ -348,36 +374,16 @@ export default {
 }
 
 // Icon-only feedback button — sits in the nav list but shows only the icon.
+// The button itself is now NcButton; only the <li> wrapper's centring stays here.
+// v3.100.15: the custom .teamhub-feedback-btn CSS block (44×44 pill with
+// bespoke hover / focus-visible rules) was retired because NcButton owns
+// all of that behaviour natively.
 .teamhub-feedback-item {
     list-style: none;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 4px 0;
-}
-
-.teamhub-feedback-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    border: none;
-    background: transparent;
-    border-radius: var(--border-radius-pill);
-    color: var(--color-main-text);
-    cursor: pointer;
-    transition: background-color 0.15s;
-
-    &:hover {
-        background-color: var(--color-background-hover);
-    }
-
-    &:focus-visible {
-        background-color: var(--color-background-hover);
-        outline: 2px solid var(--color-primary-element);
-        outline-offset: 2px;
-    }
 }
 </style>
 

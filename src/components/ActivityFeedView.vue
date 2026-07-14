@@ -3,13 +3,18 @@
         <div class="activity-feed__header">
             <h2 class="activity-feed__title">{{ t('teamhub', 'Team Activity') }}</h2>
             <span class="activity-feed__subtitle">{{ t('teamhub', 'Past 30 days') }}</span>
-            <button class="activity-feed__refresh"
+            <!-- v3.100.15: NcButton (was a raw <button> with bespoke
+                 hover / focus CSS). -->
+            <NcButton
+                variant="tertiary"
                 :aria-label="t('teamhub', 'Refresh activity')"
                 :title="t('teamhub', 'Refresh activity')"
-                @click="load"
-                :disabled="loading">
-                <Refresh :size="16" aria-hidden="true" />
-            </button>
+                :disabled="loading"
+                @click="load">
+                <template #icon>
+                    <Refresh :size="16" aria-hidden="true" />
+                </template>
+            </NcButton>
         </div>
 
         <!-- Loading -->
@@ -80,7 +85,7 @@ import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcLoadingIcon, NcEmptyContent, NcAvatar } from '@nextcloud/vue'
+import { NcLoadingIcon, NcEmptyContent, NcAvatar, NcButton } from '@nextcloud/vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import File            from 'vue-material-design-icons/File.vue'
 import FilePlus        from 'vue-material-design-icons/FilePlus.vue'
@@ -93,11 +98,41 @@ import Bell            from 'vue-material-design-icons/Bell.vue'
 import OpenInNew       from 'vue-material-design-icons/OpenInNew.vue'
 import Refresh         from 'vue-material-design-icons/Refresh.vue'
 import ClockOutline    from 'vue-material-design-icons/ClockOutline.vue'
+import WalletOutline   from 'vue-material-design-icons/WalletOutline.vue'
 
-const ICON_MAP = { AccountMultiple, File, FilePlus, FileEdit, FileRemove, CardText, Calendar, Chat, Bell }
+const ICON_MAP = {
+    AccountMultiple, File, FilePlus, FileEdit, FileRemove,
+    CardText, Calendar, Chat, Bell,
+    ClockOutline, WalletOutline,
+}
 const APP_LABELS = {
     circles: 'Team', files: 'Files', files_sharing: 'Sharing',
     deck: 'Deck', calendar: 'Calendar', spreed: 'Talk', dav: 'Calendar',
+    teamhub: 'Project',
+}
+
+// Minutes → "1h 30m" / "45m" — matches ProjectTimeView.vue's formatHours so
+// activity strings read the same as the Time tab.
+function formatMinutes(mins) {
+    const m = Math.max(0, Math.round(mins || 0))
+    if (m < 60) return t('teamhub', '{m}m', { m })
+    const h = Math.floor(m / 60)
+    const rem = m % 60
+    if (rem === 0) return t('teamhub', '{h}h', { h })
+    return t('teamhub', '{h}h {m}m', { h, m: rem })
+}
+
+// Minor units → "€12.34" / "12.34". Best-effort — we don't have the currency
+// on the audit row so we fall back to a raw 2-decimal number.
+function formatMinorMoney(minor) {
+    const value = (Number(minor) || 0) / 100
+    try {
+        return new Intl.NumberFormat(undefined, {
+            minimumFractionDigits: 2, maximumFractionDigits: 2,
+        }).format(value)
+    } catch (_) {
+        return value.toFixed(2)
+    }
 }
 
 function dayLabel(dateStr) {
@@ -129,8 +164,8 @@ function raw(value) {
 export default {
     name: 'ActivityFeedView',
     components: {
-        NcLoadingIcon, NcEmptyContent, NcAvatar,
-        OpenInNew, Refresh, ClockOutline,
+        NcLoadingIcon, NcEmptyContent, NcAvatar, NcButton,
+        OpenInNew, Refresh, ClockOutline, WalletOutline,
         AccountMultiple, File, FilePlus, FileEdit, FileRemove,
         CardText, Calendar, Chat, Bell,
     },
@@ -189,6 +224,34 @@ export default {
             const detail = s.replace(/_/g, ' ')
             // TRANSLATORS: fallback activity line, e.g. "alice · card moved". {user} is a name, {detail} is a machine-generated description.
             const fallback = user ? t('teamhub', '{user} · {detail}', { user: raw(user), detail: raw(detail) }) : detail
+
+            // TeamHub project events — time logs + budget expenses (v3.96.0)
+            if (item.app === 'teamhub') {
+                const p     = item.subjectparams || {}
+                const mins  = p.minutes || 0
+                const hours = formatMinutes(mins)
+                const proj  = formatMinorMoney(p.projected_minor || 0)
+                const real  = p.real_minor !== null && p.real_minor !== undefined
+                    ? formatMinorMoney(p.real_minor) : null
+
+                // TRANSLATORS: activity line — {user} is a display name, {hours} is e.g. "1h 30m"
+                if (s === 'project.time_log_added')     return t('teamhub', '{user} logged {hours}', { user: raw(user), hours: raw(hours) })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'project.time_log_updated')   return t('teamhub', '{user} updated a time entry', { user: raw(user) })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'project.time_log_deleted')   return t('teamhub', '{user} removed a time entry', { user: raw(user) })
+                // TRANSLATORS: activity line — {user} is a display name, {amount} is a formatted money value
+                if (s === 'project.expense_added') {
+                    return real !== null
+                        ? t('teamhub', '{user} added an expense ({amount})', { user: raw(user), amount: raw(real) })
+                        : t('teamhub', '{user} added an expense ({amount})', { user: raw(user), amount: raw(proj) })
+                }
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'project.expense_updated')    return t('teamhub', '{user} updated an expense', { user: raw(user) })
+                // TRANSLATORS: activity line — {user} is a display name
+                if (s === 'project.expense_deleted')    return t('teamhub', '{user} removed an expense', { user: raw(user) })
+                return fallback
+            }
 
             // Circles — member events
             if (item.app === 'circles') {
@@ -311,7 +374,7 @@ export default {
 }
 
 .activity-feed__title {
-    font-size: 20px;
+    font-size: var(--th-font-heading-lg);
     font-weight: 600;
     margin: 0;
 }
@@ -322,22 +385,8 @@ export default {
     margin-right: auto;
 }
 
-.activity-feed__refresh {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: var(--color-text-maxcontrast);
-    padding: 4px;
-    border-radius: var(--border-radius);
-    display: flex;
-    align-items: center;
-    transition: color 0.15s, background 0.15s;
-}
-
-.activity-feed__refresh:hover {
-    color: var(--color-main-text);
-    background: var(--color-background-hover);
-}
+/* v3.100.15: the .activity-feed__refresh block was retired when the
+   raw <button> became NcButton; NcButton owns hover / focus / sizing. */
 
 .activity-feed__loading {
     display: flex;
@@ -352,7 +401,7 @@ export default {
 }
 
 .activity-feed__day-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -393,13 +442,24 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-.activity-feed__badge--circles        { background: #e8f0fe; color: #3b5998; }
+/* v3.100.16: previously a Google-Material palette (soft tinted
+   backgrounds with dark-tone text) pinned in raw hex — see gui.md § 2.
+   The badges are categorical source markers (Files / Deck / Calendar /
+   Talk / Circles), not state signals; the badge's icon carries the
+   visual distinction between apps, and the row typography carries the
+   information. Every variant now shares one neutral surface using NC
+   theme tokens so it renders correctly in light AND dark themes and
+   follows any branded theme. */
+.activity-feed__badge--circles,
 .activity-feed__badge--files,
-.activity-feed__badge--files_sharing  { background: #e6f4ea; color: #188038; }
-.activity-feed__badge--deck           { background: #fce8e6; color: #c5221f; }
+.activity-feed__badge--files_sharing,
+.activity-feed__badge--deck,
 .activity-feed__badge--calendar,
-.activity-feed__badge--dav            { background: #fef7e0; color: #b45309; }
-.activity-feed__badge--spreed         { background: #e8f5e9; color: #1b5e20; }
+.activity-feed__badge--dav,
+.activity-feed__badge--spreed {
+    background: var(--color-background-dark);
+    color: var(--color-main-text);
+}
 
 .activity-feed__body {
     flex: 1;

@@ -29,6 +29,7 @@ use Psr\Log\LoggerInterface;
  *   PUT  /api/v1/admin/archive/settings           — save settings
  */
 class ArchiveController extends Controller {
+    use ExceptionResponseTrait;
 
     public function __construct(
         string $appName,
@@ -60,7 +61,6 @@ class ArchiveController extends Controller {
      *   500 — archive production failed (team NOT deleted; can retry)
      */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function archiveTeam(string $teamId): JSONResponse {
         $this->logger->debug('[TeamHub][ArchiveController] archiveTeam called', [
             'teamId' => $teamId, 'app' => Application::APP_ID,
@@ -80,9 +80,10 @@ class ArchiveController extends Controller {
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], $status);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'owner') ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to archive team', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -105,7 +106,6 @@ class ArchiveController extends Controller {
      *   500 — operation failed
      */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function softDeleteTeam(string $teamId): JSONResponse {
         try {
             $result = $this->archiveService->softDeleteTeamWithoutArchive($teamId);
@@ -119,9 +119,10 @@ class ArchiveController extends Controller {
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], $status);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'owner') ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to soft-delete team', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -175,7 +176,6 @@ class ArchiveController extends Controller {
      * team becomes visible again. The archive ZIP is retained.
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    #[NoCSRFRequired]
     public function restorePendingDeletion(int $id): JSONResponse {
         $this->logger->debug('[TeamHub][ArchiveController] restorePendingDeletion', [
             'id' => $id, 'app' => Application::APP_ID,
@@ -200,7 +200,6 @@ class ArchiveController extends Controller {
      * Immediately hard-deletes a team regardless of grace period remaining.
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    #[NoCSRFRequired]
     public function purgePendingDeletion(int $id): JSONResponse {
         try {
             $result = $this->archiveService->purgePendingDeletion($id);
@@ -219,7 +218,6 @@ class ArchiveController extends Controller {
      * is not removed — admin cleans up manually if needed.
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    #[NoCSRFRequired]
     public function discardFailedArchive(int $id): JSONResponse {
         try {
             $result = $this->archiveService->discardFailedArchive($id);
@@ -241,7 +239,6 @@ class ArchiveController extends Controller {
      * Records the admin UID as archived_by, includes original owner in metadata.
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    #[NoCSRFRequired]
     public function retryArchive(int $id): JSONResponse {
         try {
             $result = $this->archiveService->retryArchive($id);
@@ -281,7 +278,6 @@ class ArchiveController extends Controller {
      *   anonymizeData   — boolean
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    #[NoCSRFRequired]
     public function saveAdminArchiveSettings(): JSONResponse {
         $body = $this->request->getParams();
 

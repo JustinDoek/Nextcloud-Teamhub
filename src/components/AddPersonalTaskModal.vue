@@ -214,7 +214,7 @@ export default {
     border-radius: var(--border-radius-large);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-family: inherit;
     box-sizing: border-box;
 }

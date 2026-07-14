@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Settings;
 
 use OCP\AppFramework\Http\TemplateResponse;
+use OCP\IConfig;
 use OCP\Settings\ISettings;
 
 /**
@@ -19,9 +20,12 @@ use OCP\Settings\ISettings;
  */
 class PersonalSettings implements ISettings {
 
+    public function __construct(
+        private IConfig $config,
+    ) {}
+
     public function getForm(): TemplateResponse {
-        $config  = \OC::$server->get(\OCP\IConfig::class);
-        $enabled = $config->getAppValue('teamhub', 'presence_module_enabled', '1') === '1';
+        $enabled = $this->config->getAppValue('teamhub', 'presence_module_enabled', '1') === '1';
         return new TemplateResponse('teamhub', 'personal', [
             'presenceModuleEnabled' => $enabled,
         ]);

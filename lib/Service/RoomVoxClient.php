@@ -78,8 +78,8 @@ class RoomVoxClient {
     /**
      * Book the room from the documented API. Throws RoomVoxClientException
      * with a translatable, user-facing message on every failure mode. The
-     * caller (ActivityService) catches and aborts event creation per
-     * Justin's session decision (option A = surface, don't degrade).
+     * caller (ActivityService) catches and aborts event creation
+     * (option A = surface, don't degrade).
      *
      * @param string $roomId      RoomVox room id (e.g. "meeting-room-1")
      * @param string $title       Event summary

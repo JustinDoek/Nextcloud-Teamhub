@@ -303,7 +303,7 @@ class FilesService {
             $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
             $federatedUserService->setLocalCurrentUser($user);
         } catch (\Throwable $e) {
-            $this->logger->warning('[FilesService] createSharedFolder — Circles session bootstrap failed', [
+            $this->logger->warning('[TeamHub][FilesService] createSharedFolder — Circles session bootstrap failed', [
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -323,21 +323,21 @@ class FilesService {
                     $node = $userFolder->get($shareFolder);
                     if ($node instanceof \OCP\Files\Folder) {
                         $targetFolder = $node;
-                        $this->logger->debug('[FilesService] createSharedFolder — using share_folder path', [
+                        $this->logger->debug('[TeamHub][FilesService] createSharedFolder — using share_folder path', [
                             'path' => $shareFolder, 'uid' => $uid, 'app' => Application::APP_ID,
                         ]);
                     } else {
-                        $this->logger->warning('[FilesService] createSharedFolder — share_folder path is not a folder, falling back to root', [
+                        $this->logger->warning('[TeamHub][FilesService] createSharedFolder — share_folder path is not a folder, falling back to root', [
                             'path' => $shareFolder, 'uid' => $uid, 'app' => Application::APP_ID,
                         ]);
                     }
                 } else {
-                    $this->logger->warning('[FilesService] createSharedFolder — share_folder path does not exist, falling back to root', [
+                    $this->logger->warning('[TeamHub][FilesService] createSharedFolder — share_folder path does not exist, falling back to root', [
                         'path' => $shareFolder, 'uid' => $uid, 'app' => Application::APP_ID,
                     ]);
                 }
             } catch (\Throwable $e) {
-                $this->logger->warning('[FilesService] createSharedFolder — share_folder resolution failed, falling back to root', [
+                $this->logger->warning('[TeamHub][FilesService] createSharedFolder — share_folder resolution failed, falling back to root', [
                     'path' => $shareFolder, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -360,7 +360,7 @@ class FilesService {
                   ->setPermissions(\OCP\Constants::PERMISSION_ALL);
             $share = $shareManager->createShare($share);
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] createSharedFolder — share failed, deleting folder', [
+            $this->logger->error('[TeamHub][FilesService] createSharedFolder — share failed, deleting folder', [
                 'teamId'     => $teamId,
                 'folderName' => $folderName,
                 'error'      => $e->getMessage(),
@@ -369,7 +369,7 @@ class FilesService {
             try {
                 $folder->delete();
             } catch (\Throwable $deleteEx) {
-                $this->logger->warning('[FilesService] createSharedFolder — orphan folder delete also failed', [
+                $this->logger->warning('[TeamHub][FilesService] createSharedFolder — orphan folder delete also failed', [
                     'error' => $deleteEx->getMessage(),
                     'app'   => Application::APP_ID,
                 ]);
@@ -438,7 +438,7 @@ class FilesService {
                 $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
                 $federatedUserService->setLocalCurrentUser($user);
             } catch (\Throwable $e) {
-                $this->logger->warning('[FilesService] connectExistingFolder — Circles session bootstrap failed', [
+                $this->logger->warning('[TeamHub][FilesService] connectExistingFolder — Circles session bootstrap failed', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -461,7 +461,7 @@ class FilesService {
             ];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] connectExistingFolder failed', [
+            $this->logger->error('[TeamHub][FilesService] connectExistingFolder failed', [
                 'teamId' => $teamId, 'fileId' => $fileId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -497,14 +497,19 @@ class FilesService {
             $shareId     = (int)$row['id'];
             $permissions = (int)$row['permissions'];
 
-            // Circle shares (type=7) are not retrievable via IManager::getShareById
-            // with the 'ocinternal:' prefix — use QB delete directly.
+            // v3.100.8 — revert of the W-4 migration for this site. The
+            // IManager::deleteShare path leaves a row in `share` that the
+            // reconnect duplicate-check ("already has a Files folder")
+            // then hits, so users can't reattach the same share after
+            // disconnecting. The audit log entry is already written by
+            // ResourceService, so no observability is lost by staying
+            // with the raw DELETE. See apps.md W-4 verdict.
             $dqb = $db->getQueryBuilder();
             $dqb->delete('share')
                 ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->debug('[FilesService] suspendFilesAccess: share removed', [
+            $this->logger->debug('[TeamHub][FilesService] suspendFilesAccess: share removed', [
                 'teamId' => $teamId, 'shareId' => $shareId, 'app' => Application::APP_ID,
             ]);
 
@@ -515,7 +520,7 @@ class FilesService {
                 'permissions'   => $permissions,
             ];
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] suspendFilesAccess failed', [
+            $this->logger->error('[TeamHub][FilesService] suspendFilesAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return null;
@@ -539,7 +544,7 @@ class FilesService {
             $nodes       = $userFolder->getById($fileId);
 
             if (empty($nodes)) {
-                $this->logger->warning('[FilesService] resumeFilesAccess: folder node not found', [
+                $this->logger->warning('[TeamHub][FilesService] resumeFilesAccess: folder node not found', [
                     'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
                 ]);
                 return false;
@@ -555,13 +560,13 @@ class FilesService {
             $share->setPermissions($permissions);
             $shareManager->createShare($share);
 
-            $this->logger->debug('[FilesService] resumeFilesAccess: share re-created', [
+            $this->logger->debug('[TeamHub][FilesService] resumeFilesAccess: share re-created', [
                 'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
             ]);
 
             return true;
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] resumeFilesAccess failed', [
+            $this->logger->error('[TeamHub][FilesService] resumeFilesAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return false;
@@ -590,7 +595,8 @@ class FilesService {
         string $uid,
         string $teamId,
         \OCA\TeamHub\Service\GroupFolderService $groupFolderService,
-        string $activeFilesType = 'none'
+        string $activeFilesType = 'none',
+        bool $isTeamAdmin = false
     ): array {
         $out = [];
 
@@ -626,6 +632,42 @@ class FilesService {
                 ]);
             } catch (\Throwable $e) {
                 $this->logger->warning('[TeamHub][FilesService] listConnectableFileFolders — GF query failed', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // ── 1b. v3.100.9 — Available Group Folders (team NOT yet a member)
+        // Only visible to team admins because attaching a team to a
+        // group folder is an admin-level action. This is the reconnect
+        // path: after removeCircleFromFolder() strips the team from a
+        // folder's ACL, the folder no longer appears in section 1 above;
+        // this section brings it back so admins can re-attach it. Also
+        // covers "add the team to a fresh group folder we've never used
+        // before." Suppressed when activeFilesType === 'gf' (already
+        // connected to a GF — one GF per team is the convention).
+        if ($isTeamAdmin && $teamId !== '' && $activeFilesType !== 'gf'
+            && $groupFolderService->isGroupFoldersAvailable()
+        ) {
+            try {
+                foreach ($groupFolderService->listGroupFoldersAvailableToAttach($teamId) as $gf) {
+                    // Note: use type='group_folder' (not a new sub-type) so
+                    // the existing frontend picker renders the entry with
+                    // no build required. Connect flow is idempotent so
+                    // reconnect works the same code path as fresh attach.
+                    $out[] = [
+                        'id'         => 'gf:' . $gf['folder_id'],
+                        'name'       => $gf['mount_point'],
+                        'type'       => 'group_folder',
+                        'available'  => true,
+                    ];
+                }
+                $this->logger->debug('[TeamHub][FilesService] listConnectableFileFolders — available GFs', [
+                    'teamId' => $teamId, 'total_after' => count($out),
+                    'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][FilesService] listConnectableFileFolders — available GF query failed', [
                     'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -764,26 +806,27 @@ class FilesService {
             $res->closeCursor();
 
             if (!$row) {
-                $this->logger->warning('[FilesService] removeFilesAccess: share not found', [
+                $this->logger->warning('[TeamHub][FilesService] removeFilesAccess: share not found', [
                     'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
                 ]);
                 return false;
             }
             $shareId = (int)$row['id'];
 
-            // Circle shares (type=7) are not retrievable via IManager — use QB directly.
+            // v3.100.8 — revert of the W-4 migration for this site. See
+            // suspendFilesAccess above for rationale.
             $dqb = $db->getQueryBuilder();
             $dqb->delete('share')
                 ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->debug('[FilesService] removeFilesAccess: share removed', [
+            $this->logger->debug('[TeamHub][FilesService] removeFilesAccess: share removed', [
                 'teamId' => $teamId, 'fileId' => $fileId, 'shareId' => $shareId,
                 'app' => Application::APP_ID,
             ]);
             return true;
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] removeFilesAccess failed', [
+            $this->logger->error('[TeamHub][FilesService] removeFilesAccess failed', [
                 'teamId' => $teamId, 'fileId' => $fileId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
@@ -802,22 +845,22 @@ class FilesService {
 
             // Delete the actual node via NC filesystem.
             try {
-                $folder = \OC::$server->get(\OCP\Files\IRootFolder::class)->getById($fileId);
+                $folder = $this->container->get(IRootFolder::class)->getById($fileId);
                 if (!empty($folder)) {
                     $folder[0]->delete();
                 }
             } catch (\Throwable $e) {
-                $this->logger->warning('[FilesService] deleteFolderById: node delete failed', [
+                $this->logger->warning('[TeamHub][FilesService] deleteFolderById: node delete failed', [
                     'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
 
-            $this->logger->info('[FilesService] deleteFolderById: folder deleted', [
+            $this->logger->info('[TeamHub][FilesService] deleteFolderById: folder deleted', [
                 'fileId' => $fileId, 'app' => Application::APP_ID,
             ]);
             return ['deleted' => true, 'file_id' => $fileId];
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] deleteFolderById failed', [
+            $this->logger->error('[TeamHub][FilesService] deleteFolderById failed', [
                 'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
@@ -850,7 +893,7 @@ class FilesService {
                 $share = $shareManager->getShareById('ocinternal:' . $shareId);
                 $shareManager->deleteShare($share);
             } catch (\Throwable $e) {
-                $this->logger->warning('[FilesService] deleteSharedFolder: IManager delete failed, using QB', [
+                $this->logger->warning('[TeamHub][FilesService] deleteSharedFolder: IManager delete failed, using QB', [
                     'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
                 $dqb = $db->getQueryBuilder();
@@ -866,7 +909,7 @@ class FilesService {
                     $nodes[0]->delete();
                 }
             } catch (\Throwable $e) {
-                $this->logger->warning('[FilesService] deleteSharedFolder: folder node delete failed', [
+                $this->logger->warning('[TeamHub][FilesService] deleteSharedFolder: folder node delete failed', [
                     'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }
@@ -874,7 +917,7 @@ class FilesService {
             return ['deleted' => true, 'detail' => "Files folder {$fileId} and share deleted"];
 
         } catch (\Throwable $e) {
-            $this->logger->error('[FilesService] deleteSharedFolder failed', [
+            $this->logger->error('[TeamHub][FilesService] deleteSharedFolder failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];

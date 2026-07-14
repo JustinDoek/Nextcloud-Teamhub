@@ -49,7 +49,7 @@
                             class="admin-group-chip__remove"
                             :aria-label="t('teamhub', 'Remove {name}', { name: g.displayName })"
                             @click="removeGroup(g)">
-                            ×
+                            <CloseIcon :size="14" />
                         </button>
                     </span>
                 </div>
@@ -1625,8 +1625,188 @@
 
         </NcSettingsSection>
 
-        <!-- ── Save row — only for settings tabs, not statistics/maintenance/audit/archive ─ -->
-        <div v-show="!(['statistics','maintenance','audit','archive'].includes(activeTab))" class="admin-save-row">
+        <!-- ──────────────────────────────────────────────────────────────────
+             License tab (v3.100.0, Track F)
+             Presents license status + a paste field for the JWT + instance
+             UUID with copy button + telemetry status (Connected only). Its
+             own save flow (PUT /license) so the global "Save settings"
+             row is hidden while this tab is active.
+             ───────────────────────────────────────────────────────────── -->
+        <NcSettingsSection
+            v-show="activeTab === 'license'"
+            id="tab-panel-license"
+            role="tabpanel"
+            :name="t('teamhub', 'License')"
+            :description="t('teamhub', 'Advanced Projects (Compass, Project health, closing artifact, timeline) require a business license. Enter the license key you received by email.')">
+
+            <div v-if="license.loading" class="license-loading">
+                <NcLoadingIcon :size="18" /> {{ t('teamhub', 'Loading license status…') }}
+            </div>
+
+            <template v-else-if="license.status">
+                <!-- Status pill -->
+                <div class="license-status-row">
+                    <span class="license-pill" :class="'license-pill--' + licensePillLevel">
+                        <span class="license-pill__dot" />
+                        {{ licenseStatusLabel }}
+                    </span>
+                    <span v-if="license.status.isTrial && license.status.valid" class="license-trial-flag">
+                        {{ t('teamhub', 'Trial') }}
+                    </span>
+                </div>
+
+                <!-- Detail table (only when there IS a key installed) -->
+                <dl v-if="license.status.hasKey" class="license-detail">
+                    <template v-if="license.status.customer">
+                        <dt>{{ t('teamhub', 'Customer') }}</dt>
+                        <dd>{{ license.status.customer }}</dd>
+                    </template>
+                    <template v-if="license.status.kind">
+                        <dt>{{ t('teamhub', 'Type') }}</dt>
+                        <dd>{{ licenseKindLabel }}</dd>
+                    </template>
+                    <template v-if="license.status.seats">
+                        <dt>{{ t('teamhub', 'Seats') }}</dt>
+                        <dd>
+                            {{ license.status.seatsUsed }}
+                            /
+                            <template v-if="license.status.seats >= 999999">
+                                {{ t('teamhub', 'Unlimited') }}
+                            </template>
+                            <template v-else>
+                                {{ license.status.seats }}
+                            </template>
+                            <span v-if="license.status.seatsOverBy > 0" class="license-over">
+                                ({{ n('teamhub', '{n} over', '{n} over', license.status.seatsOverBy, { n: license.status.seatsOverBy }) }})
+                            </span>
+                        </dd>
+                    </template>
+                    <template v-if="license.status.expiresAt">
+                        <dt>{{ t('teamhub', 'Expires') }}</dt>
+                        <dd>
+                            {{ formatLicenseDate(license.status.expiresAt) }}
+                            <span v-if="license.status.daysRemaining !== null && license.status.valid">
+                                ({{ n('teamhub', '{n} day left', '{n} days left', license.status.daysRemaining, { n: license.status.daysRemaining }) }})
+                            </span>
+                            <span v-else-if="license.status.enforcementLevel === 'grace'" class="license-over">
+                                ({{ n('teamhub', 'grace: {n} day left', 'grace: {n} days left', license.status.graceRemaining, { n: license.status.graceRemaining }) }})
+                            </span>
+                        </dd>
+                    </template>
+                    <template v-if="license.status.invalidReason">
+                        <dt>{{ t('teamhub', 'Problem') }}</dt>
+                        <dd class="license-over">{{ license.status.invalidReason }}</dd>
+                    </template>
+                </dl>
+
+                <!-- Instance UUID (always shown so admins can copy it into
+                     a purchase form or email). -->
+                <div class="license-uuid">
+                    <div class="license-uuid__label">
+                        {{ t('teamhub', 'Instance UUID') }}
+                    </div>
+                    <div class="license-uuid__value">
+                        <code>{{ license.status.instanceUuid }}</code>
+                        <NcButton
+                            variant="tertiary"
+                            :aria-label="t('teamhub', 'Copy UUID')"
+                            @click="copyUuid">
+                            <template #icon>
+                                <ContentCopyIcon :size="16" />
+                            </template>
+                        </NcButton>
+                        <span v-if="license.uuidCopied" class="license-copied">
+                            {{ t('teamhub', 'Copied!') }}
+                        </span>
+                    </div>
+                    <p class="license-uuid__hint">
+                        {{ t('teamhub', 'Send this UUID with your license request. Licenses are bound to a single instance UUID.') }}
+                    </p>
+                </div>
+
+                <!-- Telemetry status (Connected only) -->
+                <div v-if="license.status.kind === 'connected'" class="license-telemetry">
+                    <div class="license-telemetry__label">
+                        {{ t('teamhub', 'Telemetry') }}
+                    </div>
+                    <div class="license-telemetry__value">
+                        <span v-if="license.status.lastTelemetryAt">
+                            {{ t('teamhub', 'Last sent {when}', { when: formatLicenseAgo(license.status.lastTelemetryAt) }) }}
+                        </span>
+                        <span v-else class="license-over">
+                            {{ t('teamhub', 'Never sent yet') }}
+                        </span>
+                        <NcButton
+                            v-if="license.status.lastTelemetryPayload"
+                            variant="tertiary"
+                            @click="license.showPayload = !license.showPayload">
+                            {{ license.showPayload ? t('teamhub', 'Hide payload') : t('teamhub', 'View payload') }}
+                        </NcButton>
+                        <NcButton
+                            variant="tertiary"
+                            :disabled="license.refreshing"
+                            @click="refreshTelemetry">
+                            <template #icon>
+                                <RefreshIcon :size="16" />
+                            </template>
+                            {{ license.refreshing ? t('teamhub', 'Refreshing…') : t('teamhub', 'Refresh now') }}
+                        </NcButton>
+                    </div>
+                    <pre v-if="license.showPayload" class="license-payload">{{ formatLicensePayload(license.status.lastTelemetryPayload) }}</pre>
+                </div>
+
+                <!-- Paste-or-replace key -->
+                <div class="license-key-row">
+                    <label class="license-key-row__label" for="teamhub-license-key">
+                        {{ license.status.hasKey ? t('teamhub', 'Replace license key') : t('teamhub', 'Paste license key') }}
+                    </label>
+                    <textarea
+                        id="teamhub-license-key"
+                        v-model="license.pendingKey"
+                        class="license-key-row__input"
+                        rows="4"
+                        spellcheck="false"
+                        autocomplete="off"
+                        :placeholder="t('teamhub', 'Paste the JWT from your license email here')" />
+                    <div class="license-key-row__actions">
+                        <NcButton
+                            variant="primary"
+                            :disabled="!license.pendingKey.trim() || license.saving"
+                            @click="saveLicenseKey">
+                            <template #icon>
+                                <NcLoadingIcon v-if="license.saving" :size="18" />
+                                <ContentSave v-else :size="18" />
+                            </template>
+                            {{ license.saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save license key') }}
+                        </NcButton>
+                        <span v-if="license.saveError" class="admin-save-err">{{ license.saveError }}</span>
+                    </div>
+                </div>
+
+                <!-- Purchase link → public marketing site.
+                     Trial button → server-to-server request; back-end URL
+                     never surfaces in the browser. Rate-limited + one-shot
+                     per instance UUID on the licensing back-end. -->
+                <div class="license-links">
+                    <a href="https://tldr.host/teamhub" target="_blank" rel="noopener">
+                        {{ t('teamhub', 'Buy a license') }} →
+                    </a>
+                    <button
+                        type="button"
+                        class="license-trial-button"
+                        :disabled="license.trialRequesting || license.status.hasKey"
+                        @click="startTrial">
+                        <NcLoadingIcon v-if="license.trialRequesting" :size="14" />
+                        {{ license.trialRequesting
+                            ? t('teamhub', 'Requesting trial…')
+                            : t('teamhub', 'Start a 30-day trial') }}
+                    </button>
+                </div>
+            </template>
+        </NcSettingsSection>
+
+        <!-- ── Save row — only for settings tabs, not statistics/maintenance/audit/archive/license ─ -->
+        <div v-show="!(['statistics','maintenance','audit','archive','license'].includes(activeTab))" class="admin-save-row">
             <NcButton
                 variant="primary"
                 :disabled="saving"
@@ -1730,6 +1910,11 @@ import AccountOffIcon from 'vue-material-design-icons/AccountOff.vue'
 import AccountRemoveIcon from 'vue-material-design-icons/AccountRemove.vue'
 import MagnifyIcon from 'vue-material-design-icons/Magnify.vue'
 import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
+import KeyIcon from 'vue-material-design-icons/Key.vue'
+import ContentCopyIcon from 'vue-material-design-icons/ContentCopy.vue'
+// v3.100.14: MDI icon for the group-chip remove button — replaces the
+// × multiplication-sign character (gui.md § 13). Cross-font consistency.
+import CloseIcon from 'vue-material-design-icons/Close.vue'
 
 // Presence module — Session B1 / v3.42.0 admin sub-panels.
 import PresenceTypesManager     from './PresenceTypesManager.vue'
@@ -1745,11 +1930,26 @@ export default {
         ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon, RestoreIcon,
         InformationOutline, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon,
         OfficeBuildingIcon,
+        KeyIcon, ContentCopyIcon, CloseIcon,
         PresenceTypesManager, PresenceLocationsManager, PresenceHolidaysManager,
     },
     data() {
         return {
             activeTab: 'creation',
+
+            // v3.100.0 — Track F licensing tab state. All under one
+            // object so unrelated tabs don't collide with 'saving'/'saved'.
+            license: {
+                loading:         false,
+                status:          null,
+                pendingKey:      '',
+                saving:          false,
+                saveError:       null,
+                refreshing:      false,
+                showPayload:     false,
+                uuidCopied:      false,
+                trialRequesting: false,   // v3.100.2 — "Start trial" button spinner
+            },
             loading: true,
             saving: false,
             saved: false,
@@ -1905,6 +2105,9 @@ export default {
                 { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },
                 { id: 'audit',         label: this.t('teamhub', 'Audit'),          icon: 'ShieldCheckIcon' },
                 { id: 'archive',       label: this.t('teamhub', 'Archive'),        icon: 'ArchiveIcon'     },
+                // v3.100.0 — Track F. License tab always visible; state
+                // pill inside shows whether a valid key is installed.
+                { id: 'license',       label: this.t('teamhub', 'License'),        icon: 'KeyIcon'         },
             ]
             // Presence module tab only visible when the module is enabled.
             if (this.form.presenceModuleEnabled) {
@@ -1921,6 +2124,33 @@ export default {
          */
         visiblePendingDels() {
             return this.pendingDels.filter(r => r.status === 'pending' || r.status === 'failed')
+        },
+
+        // ── v3.100.0 Licensing computeds ────────────────────────────
+        licensePillLevel() {
+            const s = this.license.status
+            if (!s) return 'ok'
+            if (s.enforcementLevel === 'none')       return 'ok'
+            if (s.enforcementLevel === 'grace')      return 'warn'
+            return 'err'   // 'unlicensed' | 'soft-lock'
+        },
+        licenseStatusLabel() {
+            const s = this.license.status
+            if (!s) return ''
+            switch (s.enforcementLevel) {
+            case 'none':       return s.isTrial ? this.t('teamhub', 'Trial active') : this.t('teamhub', 'Active')
+            case 'grace':      return this.t('teamhub', 'Grace — renew soon')
+            case 'soft-lock':  return this.t('teamhub', 'Expired — Advanced features locked')
+            case 'unlicensed': return this.t('teamhub', 'No license installed')
+            default:           return this.t('teamhub', 'Unknown')
+            }
+        },
+        licenseKindLabel() {
+            switch (this.license.status?.kind) {
+            case 'connected': return this.t('teamhub', 'Connected (metered)')
+            case 'airgapped': return this.t('teamhub', 'Air-gapped (no telemetry)')
+            default:          return this.t('teamhub', 'Unknown')
+            }
         },
 
         /**
@@ -2004,10 +2234,15 @@ export default {
                     this.loadPendingDeletions()
                 }
             }
+            // v3.100.0 — refetch license status when the user opens the tab.
+            if (tab === 'license') {
+                this.loadLicense()
+            }
         },
     },
     mounted() {
         this.load()
+        this.loadLicense()
     },
     methods: {
         t(app, str, vars) {
@@ -3127,6 +3362,115 @@ export default {
                 year: 'numeric', month: 'short', day: 'numeric',
             })
         },
+
+        // ── v3.100.0 Licensing methods ──────────────────────────────
+        async loadLicense() {
+            this.license.loading = true
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/license'))
+                this.license.status = data
+            } catch (err) {
+                this.license.status = null
+                showError(this.t('teamhub', 'Could not load license status'))
+            } finally {
+                this.license.loading = false
+            }
+        },
+        async saveLicenseKey() {
+            const jwt = this.license.pendingKey.trim()
+            if (!jwt) return
+            this.license.saving    = true
+            this.license.saveError = null
+            try {
+                const { data } = await axios.put(
+                    generateUrl('/apps/teamhub/api/v1/admin/license'),
+                    { jwt },
+                )
+                this.license.status     = data
+                this.license.pendingKey = ''
+                showSuccess(this.t('teamhub', 'License key saved'))
+            } catch (err) {
+                this.license.saveError = err?.response?.data?.error
+                    || this.t('teamhub', 'Could not save license key')
+            } finally {
+                this.license.saving = false
+            }
+        },
+        /**
+         * v3.100.6 — Requests a 30-day Connected trial from the
+         * licensing back-end. Server-to-server; the URL is set on the
+         * NC-side LicenseService constant, never sent to the browser.
+         * On success the fresh license status envelope comes back and
+         * we swap it in — no page reload needed.
+         */
+        async startTrial() {
+            if (this.license.status?.hasKey) return
+            this.license.trialRequesting = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl('/apps/teamhub/api/v1/admin/license/trial'),
+                )
+                this.license.status = data
+                showSuccess(this.t('teamhub', 'Trial activated — 30 days.'))
+            } catch (err) {
+                const status = err?.response?.status
+                const msg = err?.response?.data?.error
+                if (status === 409) {
+                    showError(msg || this.t('teamhub', 'This instance has already used its trial.'))
+                } else if (status === 429) {
+                    // v3.100.5 — server hit rate-limit; usually only ever
+                    // seen during heavy dev testing.
+                    showError(msg || this.t('teamhub', 'Too many trial requests. Try again in an hour.'))
+                } else {
+                    showError(msg || this.t('teamhub', 'Could not start trial.'))
+                }
+            } finally {
+                this.license.trialRequesting = false
+            }
+        },
+
+        async refreshTelemetry() {
+            this.license.refreshing = true
+            try {
+                await axios.post(generateUrl('/apps/teamhub/api/v1/admin/license/refresh'))
+                showSuccess(this.t('teamhub', 'Telemetry refresh scheduled — check back in a minute'))
+            } catch (err) {
+                showError(err?.response?.data?.error
+                    || this.t('teamhub', 'Could not schedule refresh'))
+            } finally {
+                this.license.refreshing = false
+            }
+        },
+        async copyUuid() {
+            const uuid = this.license.status?.instanceUuid
+            if (!uuid) return
+            try {
+                await navigator.clipboard.writeText(uuid)
+                this.license.uuidCopied = true
+                setTimeout(() => { this.license.uuidCopied = false }, 1500)
+            } catch (err) {
+                showError(this.t('teamhub', 'Could not copy UUID'))
+            }
+        },
+        formatLicenseDate(unixTs) {
+            return this.formatUnixDate(unixTs)
+        },
+        formatLicenseAgo(unixTs) {
+            if (!unixTs) return this.t('teamhub', 'never')
+            const secs = Math.floor(Date.now() / 1000) - unixTs
+            if (secs < 60)    return this.t('teamhub', 'just now')
+            if (secs < 3600)  return this.n('teamhub', '{n} min ago', '{n} min ago', Math.floor(secs / 60),   { n: Math.floor(secs / 60) })
+            if (secs < 86400) return this.n('teamhub', '{n} hour ago', '{n} hours ago', Math.floor(secs / 3600),  { n: Math.floor(secs / 3600) })
+            return this.n('teamhub', '{n} day ago', '{n} days ago', Math.floor(secs / 86400), { n: Math.floor(secs / 86400) })
+        },
+        formatLicensePayload(p) {
+            if (!p) return ''
+            try {
+                return JSON.stringify(p, null, 2)
+            } catch {
+                return String(p)
+            }
+        },
     },
 }
 </script>
@@ -3157,7 +3501,7 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 10px 16px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
     background: var(--color-main-background); /* all tabs white by default */
@@ -3247,12 +3591,15 @@ export default {
     margin-bottom: 10px;
 }
 
+/* v3.100.14: selected-group chip — full-saturation state per SKILLS.md
+   § "State-coloured backgrounds" (was --color-primary-element-light). */
 .admin-group-chip {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     padding: 4px 8px;
-    background: var(--color-primary-element-light);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     border: 1px solid var(--color-primary-element);
     border-radius: var(--border-radius-pill);
     font-size: 13px;
@@ -3269,15 +3616,20 @@ export default {
     flex-shrink: 0;
 }
 
+/* v3.100.14: was a text-only × button; now hosts an MDI CloseIcon.
+   font-size no longer sizes the glyph (icon uses the :size prop).
+   inline-flex centres the SVG in the button box. */
 .admin-group-chip__remove {
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 16px;
     line-height: 1;
     color: var(--color-text-maxcontrast);
     padding: 0 2px;
     margin-left: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .admin-group-chip__remove:hover {
@@ -3321,13 +3673,13 @@ export default {
 }
 
 .admin-group-result__name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     flex: 1;
 }
 
 .admin-group-result__id {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     font-family: monospace;
 }
@@ -3360,7 +3712,7 @@ export default {
 }
 
 .admin-select-label {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     min-width: 180px;
 }
@@ -3371,7 +3723,7 @@ export default {
     border: 2px solid var(--color-border-maxcontrast);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     min-width: 180px;
     cursor: pointer;
 }
@@ -3392,7 +3744,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     color: var(--color-text-maxcontrast);
     padding: 8px 0;
 }
@@ -3434,12 +3786,12 @@ export default {
 }
 
 .admin-integration-row__title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
 }
 
 .admin-integration-row__appid {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     font-family: monospace;
 }
@@ -3453,7 +3805,7 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     word-break: break-all;
 }
@@ -3468,14 +3820,16 @@ export default {
     letter-spacing: 0.04em;
 }
 
+/* v3.100.14: full-saturation category badges per SKILLS.md
+   (were 15% color-mix() soft tints). */
 .admin-integration-row__badge--widget {
-    background: color-mix(in srgb, var(--color-primary-element) 15%, transparent);
-    color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 
 .admin-integration-row__badge--menu_item,
 .admin-integration-row__badge--tab {
-    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    background: var(--color-success);
     color: var(--color-success-text);
 }
 .admin-save-row {
@@ -3487,8 +3841,8 @@ export default {
     margin-top: 8px;
 }
 
-.admin-save-ok  { font-size: 14px; color: var(--color-success-text); font-weight: 500; }
-.admin-save-err { font-size: 14px; color: var(--color-error-text); }
+.admin-save-ok  { font-size: var(--th-font-body); color: var(--color-success-text); font-weight: 500; }
+.admin-save-err { font-size: var(--th-font-body); color: var(--color-error-text); }
 /* ── Statistics tab ────────────────────────────────────────────── */
 .admin-stat-grid {
     display: grid;
@@ -3532,7 +3886,7 @@ export default {
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius);
     padding: 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-family: monospace;
     overflow-x: auto;
     white-space: pre-wrap;
@@ -3575,7 +3929,7 @@ export default {
 }
 
 .maint-header__title {
-    font-size: 20px;
+    font-size: var(--th-font-heading-lg);
     font-weight: 700;
     margin: 0 0 4px;
     color: var(--color-main-text);
@@ -3646,7 +4000,7 @@ export default {
 .maint-grid__head {
     background: var(--color-background-dark);
     border-bottom: 2px solid var(--color-border);
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -3715,7 +4069,7 @@ export default {
 }
 
 .maint-owner-uid {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     font-family: monospace;
     white-space: nowrap;
@@ -3726,7 +4080,7 @@ export default {
 .maint-no-owner {
     color: var(--color-warning-text);
     font-weight: 500;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
 }
 
 /* ── Row actions — icon-only buttons ─────────────────────────────── */
@@ -3775,7 +4129,7 @@ export default {
 
 .admin-owner-result__uid {
     color: var(--color-text-maxcontrast);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     margin-left: 4px;
 }
 
@@ -3831,7 +4185,7 @@ export default {
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius);
     margin-bottom: 16px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 .maint-integrity-summary__item--ok strong {
@@ -3869,13 +4223,13 @@ export default {
 }
 
 .maint-integrity-row__name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     color: var(--color-main-text);
 }
 
 .maint-integrity-row__detail {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     font-family: monospace;
 }
@@ -4011,7 +4365,7 @@ export default {
 .audit-table thead th {
     text-align: left;
     padding: 10px 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
     text-transform: uppercase;
@@ -4037,7 +4391,7 @@ export default {
 
 .audit-table__event {
     font-family: monospace;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-main-text);
 }
 
@@ -4047,7 +4401,7 @@ export default {
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: monospace;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
 }
 
 .audit-table__details {
@@ -4055,7 +4409,7 @@ export default {
 }
 
 .audit-table__details code {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     word-break: break-word;
 }
@@ -4069,7 +4423,7 @@ export default {
 }
 
 .archive-admin__heading {
-    font-size: 16px;
+    font-size: var(--th-font-heading);
     font-weight: 500;
     margin: 0;
     color: var(--color-main-text);
@@ -4121,7 +4475,7 @@ export default {
     border-radius: var(--border-radius);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
 }
 
 .archive-admin__input--short {
@@ -4129,7 +4483,7 @@ export default {
 }
 
 .archive-admin__help {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin-top: 2px;
     line-height: 1.4;
@@ -4143,7 +4497,7 @@ export default {
 
 .archive-admin__ok {
     font-size: 13px;
-    color: var(--color-success-text, #2d7d46);
+    color: var(--color-success-text);
 }
 
 .archive-admin__err {
@@ -4171,7 +4525,7 @@ export default {
 
 .archive-admin__table-caption {
     text-align: left;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin-bottom: 6px;
     caption-side: top;
@@ -4200,63 +4554,68 @@ export default {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
 
+/* v3.100.16: status pills use NC theme fill + matching -text token
+   per SKILLS.md § "State-coloured backgrounds" (were --color-*-bg
+   with hardcoded hex fallbacks; --color-*-bg is not a canonical NC
+   token, only ever fell back to the pinned hex, and the pinned hex
+   didn't follow the dark theme). */
 .archive-admin__status--pending {
-    background: var(--color-warning-bg, #fff3cd);
-    color: var(--color-warning-text, #7d5a00);
+    background: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .archive-admin__status--completed {
-    background: var(--color-success-bg, #d4edda);
-    color: var(--color-success-text, #1a5e2e);
+    background: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .archive-admin__status--restored {
-    background: var(--color-info-bg, #d1ecf1);
-    color: var(--color-info-text, #0c5460);
+    background: var(--color-info);
+    color: var(--color-info-text);
 }
 
 .archive-admin__status--failed {
-    background: var(--color-error-bg, #fff3f3);
-    color: var(--color-error-text, #c62828);
+    background: var(--color-error);
+    color: var(--color-error-text);
 }
 
-/* Inline error detail row */
+/* Inline error detail row — v3.100.16: NC theme tokens (was raw hex). */
 .archive-admin__error-row td {
     padding: 0;
-    border-bottom: 2px solid #c62828;
+    border-bottom: 2px solid var(--color-error);
 }
 
 .archive-admin__error-panel {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    background: #ffebee;
-    border-left: 4px solid #c62828;
+    background: var(--color-error);
+    border-left: 4px solid var(--color-error);
     padding: 14px 16px;
     font-size: 13px;
-    color: #7f0000;
+    color: var(--color-error-text);
 }
 
 .archive-admin__error-panel strong {
-    font-size: 14px;
-    color: #7f0000;
+    font-size: var(--th-font-body);
+    color: var(--color-error-text);
 }
 
 .archive-admin__error-reason {
     display: block;
     font-family: monospace;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     background: rgba(0, 0, 0, 0.06);
     border-radius: 3px;
     padding: 6px 8px;
     word-break: break-word;
-    color: #4a0000;
+    color: var(--color-error-text);
 }
 
 .archive-admin__error-actions {
@@ -4283,7 +4642,7 @@ export default {
 .admin-gf-status__indicator {
     flex-shrink: 0;
     font-weight: 700;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     width: 20px;
     text-align: center;
     margin-top: 1px;
@@ -4385,7 +4744,7 @@ export default {
     display: inline-block;
     background-color: var(--color-error-background);
     color: var(--color-error-text);
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     padding: 1px 6px;
     border-radius: 10px;
     border: 1px solid var(--color-error);
@@ -4469,7 +4828,7 @@ export default {
 
 .audit-user-grid__desc {
     color: var(--color-text-maxcontrast);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     margin-top: 2px;
 }
 
@@ -4477,7 +4836,7 @@ export default {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     background: var(--color-background-dark);
     color: var(--color-main-text);
@@ -4495,7 +4854,7 @@ export default {
 
 .audit-user-grid__source {
     display: inline-block;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     padding: 2px 8px;
     border-radius: 12px;
     background: var(--color-background-dark);
@@ -4517,7 +4876,7 @@ export default {
     background: var(--color-warning);
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
 }
 
 .audit-user-actions {
@@ -4533,6 +4892,183 @@ export default {
 .audit-user-actions__summary {
     color: var(--color-text-maxcontrast);
     font-size: 13px;
+}
+
+/* ── v3.100.0 Licensing tab ─────────────────────────────────────────── */
+.license-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0;
+    color: var(--color-text-maxcontrast);
+}
+.license-status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.license-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.license-pill__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.license-pill--ok {
+    background: var(--color-success);
+    color: var(--color-success-text);
+}
+/* v3.100.16: NC theme tokens (were --color-warning-text with a #fff
+   fallback and --color-error-text with color: #fff). Full-saturation
+   error fill + matching -text pair per SKILLS.md. */
+.license-pill--warn {
+    background: var(--color-warning);
+    color: var(--color-warning-text);
+}
+.license-pill--err {
+    background: var(--color-error);
+    color: var(--color-error-text);
+}
+.license-trial-flag {
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--color-background-hover);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.license-detail {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 16px;
+    margin: 8px 0 20px;
+    font-size: var(--th-font-body);
+}
+.license-detail dt {
+    color: var(--color-text-maxcontrast);
+    font-weight: 500;
+}
+.license-detail dd {
+    margin: 0;
+}
+.license-over {
+    color: var(--color-error-text);
+    font-weight: 600;
+}
+.license-uuid,
+.license-telemetry,
+.license-key-row {
+    margin: 16px 0;
+    padding: 12px 14px;
+    background: var(--color-background-hover);
+    border-radius: var(--border-radius);
+}
+.license-uuid__label,
+.license-telemetry__label,
+.license-key-row__label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.license-uuid__value,
+.license-telemetry__value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.license-uuid__value code {
+    background: var(--color-main-background);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    word-break: break-all;
+}
+.license-uuid__hint {
+    margin: 6px 0 0;
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+.license-copied {
+    color: var(--color-success-text);
+    font-size: var(--th-font-meta);
+    font-weight: 600;
+}
+.license-payload {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    background: var(--color-main-background);
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: var(--th-font-meta);
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre;
+}
+.license-key-row__input {
+    width: 100%;
+    min-height: 90px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-family: monospace;
+    font-size: var(--th-font-meta);
+    resize: vertical;
+    box-sizing: border-box;
+}
+.license-key-row__actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+}
+.license-links {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    font-size: var(--th-font-body);
+}
+.license-links a {
+    color: var(--color-primary-element);
+    text-decoration: none;
+}
+.license-links a:hover {
+    text-decoration: underline;
+}
+/* v3.100.2 — button styled to sit visually next to the "Buy" link but
+   read as an action. Disabled when a license is already installed. */
+.license-trial-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-primary-element);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    cursor: pointer;
+}
+.license-trial-button:hover:not(:disabled) {
+    text-decoration: underline;
+}
+.license-trial-button:disabled {
+    color: var(--color-text-maxcontrast);
+    cursor: not-allowed;
 }
 
 </style>

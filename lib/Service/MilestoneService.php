@@ -29,14 +29,40 @@ class MilestoneService {
     public function __construct(
         private MilestoneMapper $mapper,
         private MemberService   $memberService,
+        private LicenseService  $licenseService,
         private LoggerInterface $logger,
     ) {}
+
+    /**
+     * v3.97.5 — member-gated read used by the decision-compose milestone
+     * picker. Same shape as listForTeam but only requires membership. Data
+     * is already effectively visible to every member via the Timeline tab
+     * (red marker lines) and the project-health widget's Milestones pillar,
+     * so exposing id/label/date at member scope adds no new leak — it just
+     * lets the compose form render the picker without escalating the
+     * caller's role.
+     *
+     * @return array<int, array{id:int, label:string, date:?string, createdBy:string, createdAt:int}>
+     */
+    public function listForTeamAsMember(string $teamId): array {
+        $this->memberService->requireMemberLevel($teamId);
+        return $this->buildOrderedList($teamId);
+    }
 
     /**
      * @return array<int, array{id:int, label:string, date:?string, createdBy:string, createdAt:int}>
      */
     public function listForTeam(string $teamId): array {
         $this->memberService->requireAdminLevel($teamId);
+        return $this->buildOrderedList($teamId);
+    }
+
+    /**
+     * Shared list body — ordered dated-ascending, undated last.
+     *
+     * @return array<int, array{id:int, label:string, date:?string, createdBy:string, createdAt:int}>
+     */
+    private function buildOrderedList(string $teamId): array {
 
         $rows = $this->mapper->findByTeam($teamId);
 
@@ -59,6 +85,8 @@ class MilestoneService {
      * Create a milestone. Admin-gated.
      */
     public function create(string $teamId, string $label, ?string $date, string $actingUserId): array {
+        // v3.100.0 — Track F soft-lock gate.
+        $this->licenseService->gateAdvancedWrite($teamId);
         $this->memberService->requireAdminLevel($teamId);
 
         $label = $this->validateLabel($label);

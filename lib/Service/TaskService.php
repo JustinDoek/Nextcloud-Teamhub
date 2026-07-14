@@ -4,9 +4,12 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Exception\AppNotAvailableException;
+use OCA\TeamHub\Exception\NotFoundException;
 use OCP\App\IAppManager;
 use OCP\IDBConnection;
 use OCP\IUserSession;
+use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -28,6 +31,10 @@ class TaskService {
         private IDBConnection $db,
         private IUserSession $userSession,
         private ResourceService $resourceService,
+        // ContainerInterface is used to lazily resolve the CalDavBackend
+        // — importing OCA\DAV\CalDAV\CalDavBackend directly would create
+        // a hard dependency on the DAV app being installed at compile time.
+        private ContainerInterface $container,
         private LoggerInterface $logger,
     ) {}
 
@@ -103,33 +110,51 @@ class TaskService {
             $calendarId = $this->resolveCalendarId($teamId);
         }
         if ($calendarId === null) {
-            throw new \Exception('No calendar found for this team.');
+            throw new NotFoundException('No calendar found for this team.');
         }
 
         $uid     = $this->generateUid();
         $icsData = $this->buildVtodoIcs($uid, $title, $duedate, $description);
         $uri     = $uid . '.ics';
 
-        // Persist via CalDavBackend (preferred — updates indices and caches).
-        $stored = false;
+        // v3.100.8 (apps.md W-6) — persist via the fully public
+        // ICalendarManager API. The team calendar is bound to the circle
+        // principal `principals/circles/{teamId}`; we walk that principal's
+        // calendars for the matching ID and call createFromString on it.
+        // Failure surfaces as an exception the caller can handle — no raw
+        // QB fallback is needed (the previous CalDavBackend + QB dual path
+        // was hedging against version drift that ICalendar sits above).
         try {
-            /** @var \OCA\DAV\CalDAV\CalDavBackend $backend */
-            $backend = \OC::$server->get(\OCA\DAV\CalDAV\CalDavBackend::class);
-            $backend->createCalendarObject(
-                (int)$calendarId,
-                $uri,
-                $icsData,
-            );
-            $stored = true;
+            $calendarManager = $this->container->get(\OCP\Calendar\ICalendarManager::class);
+            $principalUri = 'principals/circles/' . $teamId;
+            $calendars = $calendarManager->getCalendarsForPrincipal($principalUri);
+            $target = null;
+            foreach ($calendars as $cal) {
+                if ((int)$cal->getKey() === (int)$calendarId
+                    && $cal instanceof \OCP\Calendar\ICreateFromString
+                ) {
+                    $target = $cal;
+                    break;
+                }
+            }
+            if ($target === null) {
+                throw new NotFoundException(
+                    'Calendar ' . $calendarId . ' not writable from principal ' . $principalUri,
+                );
+            }
+            $target->createFromString($uri, $icsData);
+        } catch (NotFoundException $e) {
+            throw $e;
         } catch (\Throwable $e) {
-            $this->logger->warning('[TaskService] createTeamTask — CalDavBackend failed, falling back to QB insert', [
-                'error' => $e->getMessage(),
-                'app'   => Application::APP_ID,
+            $this->logger->error('[TeamHub][TaskService] createTeamTask — ICalendar::createFromString failed', [
+                'teamId' => $teamId, 'calendarId' => $calendarId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-        }
-
-        if (!$stored) {
-            $this->insertCalendarObject($calendarId, $uri, $icsData);
+            throw new \RuntimeException(
+                'Failed to create team task: ' . $e->getMessage(),
+                0,
+                $e,
+            );
         }
 
         return ['uri' => $uri, 'title' => $title];
@@ -141,7 +166,7 @@ class TaskService {
 
     private function assertTasksApp(): void {
         if (!$this->isTasksAppAvailable()) {
-            throw new \Exception('Tasks app is not installed.');
+            throw new AppNotAvailableException('Tasks app is not installed.');
         }
     }
 
@@ -172,7 +197,7 @@ class TaskService {
             }
             return $ids;
         } catch (\Throwable $e) {
-            $this->logger->warning('[TaskService] resolveAllCalendarIds failed', [
+            $this->logger->warning('[TeamHub][TaskService] resolveAllCalendarIds failed', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -183,6 +208,13 @@ class TaskService {
 
     /**
      * Fetch raw VTODO rows from calendarobjects for the given calendar.
+     *
+     * apps.md R-2 note: kept as direct SELECT. ICalendar::search() would
+     * be the API path, but it operates on an ICalendar instance which
+     * ICalendarManager only hands out per-principal. Reverse-looking-up
+     * the principal from a calendar ID would either require another raw
+     * SELECT anyway or walking every principal on the instance. Read-only
+     * with no side-effects — the API path adds cost without gain here.
      *
      * @return array<int,array{uri:string,calendardata:string}>
      */
@@ -303,33 +335,6 @@ class TaskService {
 
         $vcalendar->add($vtodo);
         return $vcalendar->serialize();
-    }
-
-    /**
-     * Direct QB fallback insert into calendarobjects.
-     * Only used when CalDavBackend::createCalendarObject() throws.
-     */
-    private function insertCalendarObject(int $calendarId, string $uri, string $icsData): void {
-        $now  = time();
-        $etag = md5($icsData);
-        $size = strlen($icsData);
-
-        $qb = $this->db->getQueryBuilder();
-        $qb->insert('calendarobjects')
-            ->setValue('calendarid',    $qb->createNamedParameter($calendarId))
-            ->setValue('uri',           $qb->createNamedParameter($uri))
-            ->setValue('calendardata',  $qb->createNamedParameter($icsData))
-            ->setValue('lastmodified',  $qb->createNamedParameter($now))
-            ->setValue('etag',          $qb->createNamedParameter($etag))
-            ->setValue('size',          $qb->createNamedParameter($size))
-            ->setValue('componenttype', $qb->createNamedParameter('VTODO'))
-            ->setValue('firstoccurence',$qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-            ->setValue('lastoccurence', $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-            ->setValue('uid',           $qb->createNamedParameter($uri))
-            ->setValue('classification',$qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-            ->setValue('calendartype',  $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-            ->executeStatement();
-
     }
 
     /** Generate a unique RFC 5545-compliant UID. */

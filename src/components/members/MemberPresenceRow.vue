@@ -149,7 +149,7 @@ export default {
     height: 24px;
     padding: 0 10px;
     border-radius: var(--border-radius);
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     line-height: 1;
     border: 1px solid transparent;

@@ -31,6 +31,8 @@ use Psr\Log\LoggerInterface;
  *   Auth: team admin.
  */
 class MeetingController extends Controller {
+    use ExceptionResponseTrait;
+
 
     public function __construct(
         IRequest                $request,
@@ -169,21 +171,10 @@ class MeetingController extends Controller {
 
             return new JSONResponse($result, Http::STATUS_CREATED);
 
-        } catch (\Exception $e) {
-            $msg = $e->getMessage();
-            $this->logger->warning('[TeamHub][MeetingController] createTeamMeeting failed', [
-                'teamId' => $teamId, 'error' => $msg, 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to create meeting', [
+                'teamId' => $teamId,
             ]);
-
-            $status = match (true) {
-                str_contains($msg, 'not a member'),
-                str_contains($msg, 'Insufficient permissions') => Http::STATUS_FORBIDDEN,
-                str_contains($msg, 'not found'),
-                str_contains($msg, 'not installed')            => Http::STATUS_UNPROCESSABLE_ENTITY,
-                default                                        => Http::STATUS_INTERNAL_SERVER_ERROR,
-            };
-
-            return new JSONResponse(['error' => $msg], $status);
         }
     }
 
@@ -202,14 +193,10 @@ class MeetingController extends Controller {
             $this->memberService->requireAdminLevel($teamId);
             $level = $this->meetingService->getMeetingMinLevel($teamId);
             return new JSONResponse(['minLevel' => $level]);
-        } catch (\Exception $e) {
-            $msg = $e->getMessage();
-            $this->logger->warning('[TeamHub][MeetingController] getMeetingSettings failed', [
-                'teamId' => $teamId, 'error' => $msg, 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load meeting settings', [
+                'teamId' => $teamId,
             ]);
-            $status = str_contains($msg, 'member') || str_contains($msg, 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $msg], $status);
         }
     }
 
@@ -235,14 +222,10 @@ class MeetingController extends Controller {
             $this->meetingService->saveMeetingMinLevel($teamId, $level);
 
             return new JSONResponse(['minLevel' => $level]);
-        } catch (\Exception $e) {
-            $msg = $e->getMessage();
-            $this->logger->warning('[TeamHub][MeetingController] saveMeetingSettings failed', [
-                'teamId' => $teamId, 'error' => $msg, 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save meeting settings', [
+                'teamId' => $teamId,
             ]);
-            $status = str_contains($msg, 'member') || str_contains($msg, 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $msg], $status);
         }
     }
 }

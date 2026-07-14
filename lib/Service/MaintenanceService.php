@@ -657,7 +657,7 @@ class MaintenanceService {
         } catch (\Throwable $e) {
             // Non-fatal — log and continue. Admin can run `occ circles:memberships`
             // manually if the cache rebuild fails here.
-            $this->logger->warning('[MaintenanceService] assignOwner: membership cache rebuild failed', [
+            $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: membership cache rebuild failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1149,7 +1149,7 @@ class MaintenanceService {
             ->where($delQb->expr()->in('id', $delQb->createNamedParameter($delIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)));
         $removed = $delQb->executeStatement();
 
-        $this->logger->info('[MaintenanceService] repairDuplicateMember: removed duplicate rows', [
+        $this->logger->info('[TeamHub][MaintenanceService] repairDuplicateMember: removed duplicate rows', [
             'teamId' => $teamId, 'userId' => $userId,
             'kept' => $keepId, 'removed' => $removed, 'app' => Application::APP_ID,
         ]);
@@ -1192,7 +1192,7 @@ class MaintenanceService {
             ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
             ->executeStatement();
 
-        $this->logger->info('[MaintenanceService] fixDisplayName: corrected display_name', [
+        $this->logger->info('[TeamHub][MaintenanceService] fixDisplayName: corrected display_name', [
             'teamId' => $teamId, 'newDisplayName' => $correctName, 'app' => Application::APP_ID,
         ]);
 
@@ -1237,7 +1237,7 @@ class MaintenanceService {
                 ->where($updQb->expr()->eq('id', $updQb->createNamedParameter($rowId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $this->logger->info('[MaintenanceService] assignOwner: promoted existing member to owner', [
+            $this->logger->info('[TeamHub][MaintenanceService] assignOwner: promoted existing member to owner', [
                 'teamId' => $teamId, 'uid' => $newUid, 'app' => Application::APP_ID,
             ]);
             return $newUid;
@@ -1263,7 +1263,7 @@ class MaintenanceService {
             ->setValue('joined',     $insQb->createNamedParameter($now, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
             ->executeStatement();
 
-        $this->logger->info('[MaintenanceService] assignOwner: inserted admin as owner', [
+        $this->logger->info('[TeamHub][MaintenanceService] assignOwner: inserted admin as owner', [
             'teamId' => $teamId, 'uid' => $adminUid, 'app' => Application::APP_ID,
         ]);
         return $adminUid;
@@ -1303,7 +1303,7 @@ class MaintenanceService {
             ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
             ->executeStatement();
 
-        $this->logger->info('[MaintenanceService] clearCfgSingle: cleared bit 1024', [
+        $this->logger->info('[TeamHub][MaintenanceService] clearCfgSingle: cleared bit 1024', [
             'teamId' => $teamId, 'oldConfig' => $currentConfig, 'newConfig' => $newConfig,
             'app' => Application::APP_ID,
         ]);
@@ -1325,7 +1325,7 @@ class MaintenanceService {
 
         $removed = $qb->executeStatement();
 
-        $this->logger->info('[MaintenanceService] removeNestedTeam: removed circles_member rows', [
+        $this->logger->info('[TeamHub][MaintenanceService] removeNestedTeam: removed circles_member rows', [
             'parentTeamId' => $parentTeamId, 'childTeamId' => $childTeamId,
             'rows' => $removed, 'app' => Application::APP_ID,
         ]);
@@ -1451,7 +1451,7 @@ class MaintenanceService {
         usort($ghosts, fn($a, $b) => strcmp($a['userId'], $b['userId']));
         $ghosts = array_values(array_slice($ghosts, 0, 200));
 
-        $this->logger->info('[MaintenanceService] findGhostMembers: scan complete', [
+        $this->logger->info('[TeamHub][MaintenanceService] findGhostMembers: scan complete', [
             'ghost_count' => count($ghosts), 'search' => $search, 'app' => Application::APP_ID,
         ]);
 
@@ -1483,7 +1483,7 @@ class MaintenanceService {
 
         $removed = $qb->executeStatement();
 
-        $this->logger->info('[MaintenanceService] removeGhostMember: removed rows', [
+        $this->logger->info('[TeamHub][MaintenanceService] removeGhostMember: removed rows', [
             'userId' => $userId, 'teamId' => $teamId ?? 'all', 'rows' => $removed, 'app' => Application::APP_ID,
         ]);
 
@@ -1525,14 +1525,14 @@ class MaintenanceService {
                     ->set('config', $updQb->createNamedParameter($newCfg, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                     ->where($updQb->expr()->eq('unique_id', $updQb->createNamedParameter($teamId)))
                     ->executeStatement();
-                $this->logger->info('[MaintenanceService] repairMembershipCache: cleared forbidden system bits', [
+                $this->logger->info('[TeamHub][MaintenanceService] repairMembershipCache: cleared forbidden system bits', [
                     'teamId' => $teamId, 'oldConfig' => $oldCfg, 'newConfig' => $newCfg,
                     'clearedMask' => $oldCfg & $forbidden,
                     'app' => Application::APP_ID,
                 ]);
             }
         } catch (\Throwable $e) {
-            $this->logger->warning('[MaintenanceService] repairMembershipCache: forbidden-bit clear failed', [
+            $this->logger->warning('[TeamHub][MaintenanceService] repairMembershipCache: forbidden-bit clear failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1540,11 +1540,11 @@ class MaintenanceService {
         try {
             $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
             $membershipService->onUpdate($teamId);
-            $this->logger->info('[MaintenanceService] repairMembershipCache: rebuilt cache for team', [
+            $this->logger->info('[TeamHub][MaintenanceService] repairMembershipCache: rebuilt cache for team', [
                 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
         } catch (\Throwable $e) {
-            $this->logger->error('[MaintenanceService] repairMembershipCache failed', [
+            $this->logger->error('[TeamHub][MaintenanceService] repairMembershipCache failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             throw new \Exception('Failed to rebuild membership cache: ' . $e->getMessage());
@@ -1608,7 +1608,7 @@ class MaintenanceService {
             } catch (\Throwable $e) { /* non-fatal */ }
         }
 
-        $this->logger->info('[MaintenanceService] resetTeamConfig: cleaned config bits', [
+        $this->logger->info('[TeamHub][MaintenanceService] resetTeamConfig: cleaned config bits', [
             'teamId'    => $teamId,
             'oldConfig' => $oldConfig,
             'newConfig' => $newConfig,
@@ -1630,7 +1630,7 @@ class MaintenanceService {
             );
         } catch (\Throwable $e) {
             // Audit failure is non-fatal — the repair already succeeded.
-            $this->logger->warning('[MaintenanceService] resetTeamConfig: audit log failed', [
+            $this->logger->warning('[TeamHub][MaintenanceService] resetTeamConfig: audit log failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -1677,7 +1677,7 @@ class MaintenanceService {
         }
         $res->closeCursor();
 
-        $this->logger->info('[MaintenanceService] checkConfigIntegrity: scan complete', [
+        $this->logger->info('[TeamHub][MaintenanceService] checkConfigIntegrity: scan complete', [
             'issuesFound' => count($issues), 'app' => Application::APP_ID,
         ]);
 
@@ -2009,7 +2009,7 @@ class MaintenanceService {
             $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
             $membershipService->onUpdate($teamId);
         } catch (\Throwable $e) {
-            $this->logger->warning('[MaintenanceService] adminRemoveUserFromTeam: cache rebuild failed', [
+            $this->logger->warning('[TeamHub][MaintenanceService] adminRemoveUserFromTeam: cache rebuild failed', [
                 'teamId' => $teamId, 'userId' => $userId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -2025,7 +2025,7 @@ class MaintenanceService {
             ['source' => 'admin_audit_panel'],
         );
 
-        $this->logger->info('[MaintenanceService] adminRemoveUserFromTeam: removed', [
+        $this->logger->info('[TeamHub][MaintenanceService] adminRemoveUserFromTeam: removed', [
             'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
         ]);
     }

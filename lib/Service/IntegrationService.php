@@ -453,22 +453,10 @@ class IntegrationService {
     /**
      * Return all enabled integrations for a team split by type.
      * Shape: { 'widgets': [...], 'menu_items': [...] }
-     *
-     * If the integration tables are missing (fresh NC 34 installs where the
-     * v2.9.0 create-table migration didn't materialise — see the safety-net
-     * migration Version000387100 shipped with v3.87.1), degrade to an empty
-     * result rather than 500-ing the whole timeline / tab-bar render.
      */
     public function getEnabledIntegrations(string $teamId): array {
 
-        try {
-            $all = $this->teamMapper->findEnabledForTeam($teamId);
-        } catch (\OCP\DB\Exception $e) {
-            $this->logger->warning('IntegrationService::getEnabledIntegrations — DB error, returning empty', [
-                'team_id' => $teamId, 'exception' => $e, 'app' => 'teamhub',
-            ]);
-            return ['widgets' => [], 'menu_items' => []];
-        }
+        $all = $this->teamMapper->findEnabledForTeam($teamId);
 
         $result = ['widgets' => [], 'menu_items' => []];
         foreach ($all as $item) {

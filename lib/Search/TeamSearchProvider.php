@@ -59,6 +59,11 @@ class TeamSearchProvider implements IProvider {
         $uid          = $user->getUID();
         $userSingleId = $this->resolveUserSingleId($uid);
 
+        // apps.md R-1 note: kept as direct SELECT. Semantically equivalent
+        // to CirclesManager::probeCircles() + PHP-side name/description
+        // filter, but the DB path pushes the case-insensitive LIKE into
+        // SQL. Search endpoints fire on every keystroke; PHP-side filtering
+        // over probeCircles() results is measurably slower.
         $qb = $this->db->getQueryBuilder();
         $qb->select('c.unique_id', 'c.name', 'c.description', 'c.display_name', 'c.sanitized_name')
             ->from('circles_circle', 'c')

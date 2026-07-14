@@ -87,7 +87,7 @@ export default {
 
 .th-compose-modal__hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     line-height: 1.4;
 }

@@ -96,12 +96,16 @@ export default {
          * widgets.
          */
         presenceDotColor() {
+            // v3.100.16: return CSS variable references (were raw hex
+            // #00c853/#ffab00/#d50000) — the consumer binds them via
+            // :style so the browser resolves the tokens at render time,
+            // and the dot follows the NC theme in light and dark modes.
             const s = this.member?.ncStatus?.status
             switch (s) {
-                case 'online': return '#00c853'
-                case 'away':   return '#ffab00'
+                case 'online': return 'var(--color-success)'
+                case 'away':   return 'var(--color-warning)'
                 case 'dnd':
-                case 'busy':   return '#d50000'
+                case 'busy':   return 'var(--color-error)'
                 default:       return null
             }
         },
@@ -205,7 +209,7 @@ export default {
     flex-wrap: wrap;
     align-items: baseline;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     line-height: 1.3;
     min-width: 0;
 }

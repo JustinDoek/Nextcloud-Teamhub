@@ -133,11 +133,19 @@ class PickerController extends Controller {
                 return new JSONResponse(['error' => 'Not a team member'], Http::STATUS_FORBIDDEN);
             }
 
+            // v3.100.9 — pass "team admin?" flag so the picker can offer
+            // the "available group folders" section (reconnect / attach
+            // to a new GF) only to admins. Members still see the
+            // currently-attached GFs and their own shared folders.
+            $isTeamAdmin = $teamId !== ''
+                && $this->memberService->isCurrentUserTeamAdmin($teamId);
+
             $resources = $this->filesService->listConnectableFileFolders(
                 $user->getUID(),
                 $teamId,
                 $this->groupFolderService,
-                (string)($this->request->getParam('activeFilesType', 'none'))
+                (string)($this->request->getParam('activeFilesType', 'none')),
+                $isTeamAdmin
             );
             return new JSONResponse(['resources' => $resources]);
         } catch (\Throwable $e) {

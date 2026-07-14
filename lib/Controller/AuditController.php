@@ -72,6 +72,11 @@ class AuditController extends Controller {
             // Look up display names in one query.
             // Only teams that still have a circles_circle row are included —
             // this naturally excludes hard-deleted teams.
+            //
+            // apps.md R-1: direct SELECT retained — the audit admin must
+            // see display names for teams they may not be a member of.
+            // CirclesManager::getCircle() throws CircleNotFoundException
+            // on any circle not visible to the caller.
             $names = [];
             if (!empty($teamIds)) {
                 $qb = $this->db->getQueryBuilder();
@@ -226,7 +231,7 @@ class AuditController extends Controller {
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     #[NoCSRFRequired]
-    public function exportTeam(string $teamId): mixed {
+    public function exportTeam(string $teamId): DataDownloadResponse|JSONResponse {
         try {
             $teamId = trim($teamId);
             if ($teamId === '' || strlen($teamId) > 64) {
@@ -234,6 +239,9 @@ class AuditController extends Controller {
             }
 
             // Resolve display name for the export filename + team-info.json.
+            // apps.md R-1: direct SELECT retained — same rationale as
+            // listTeams() above; admin export must see the display name of
+            // teams they may not be a member of.
             $displayName = $teamId;
             try {
                 $qb = $this->db->getQueryBuilder();
@@ -299,9 +307,9 @@ class AuditController extends Controller {
             return new DataDownloadResponse($bytes, $filename, 'application/zip');
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][AuditController] export failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                'teamId' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+            return new JSONResponse(['error' => 'Export failed'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 

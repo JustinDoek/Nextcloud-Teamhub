@@ -1,74 +1,145 @@
 /* ──────────────────────────────────────────────────────────────────────────
- * TeamHub — shared widget design tokens
+ * TeamHub — shared design tokens
  *
- * Loaded once from main.js so every widget — Decisions, Deck, Members,
- * Files*, Calendar, Activity, Intravox, Integration, ExternalWidgetItem —
- * inherits the same typography scale, colour assignments, and structural
- * helpers. Widgets stop defining font-size/weight/colour in their own
- * scoped blocks and reach for these tokens instead.
+ * Loaded once from main.js AND admin.js AND personal.js so every view
+ * inherits the same typography scale, radius scale, colour assignments,
+ * spacing, and structural helpers. Components stop defining
+ * font-size/border-radius in their own scoped blocks and reach for
+ * these tokens instead.
+ *
+ * The file started as widget-only (Decisions, Deck, Members, Files*,
+ * Calendar, Activity, Intravox, Integration, ExternalWidgetItem). It
+ * has been extended to cover app-wide typography, border-radius and
+ * icon-size scales — see gui.md § 1, § 7, § 10 for the audit that
+ * prompted this. Widget-specific tokens further down remain as aliases
+ * onto the new app-wide names so existing widget CSS keeps working
+ * unchanged.
  *
  * Why CSS custom properties on :root rather than @import in each widget:
- *  - Vue 2 scoped styles wrap rules in [data-v-XXX] selectors. A scoped
+ *  - Vue scoped styles wrap rules in [data-v-XXX] selectors. A scoped
  *    .th-widget__row in widget A is invisible to widget B. CSS variables
  *    cascade across that boundary; classes here are deliberately
  *    unscoped (this file is loaded outside any component) and so they
  *    apply globally to whichever widget consumes the class name.
- *  - One file = one source of truth. A widget-pass that wants to
- *    re-tune spacing or font sizes edits one number here, not twelve
- *    places spread across twelve files.
+ *  - One file = one source of truth. A design pass that wants to
+ *    re-tune spacing or font sizes edits one number here, not hundreds
+ *    of places spread across dozens of files.
  *
- * Convention: anything widget-internal stays in the widget's own
- * scoped block (the Decisions tab bar, the Members search box,
- * the Calendar date column). Anything shared lives here.
+ * Icon sizes are also mirrored as JS constants in
+ * src/constants/uiTokens.js because vue-material-design-icons takes a
+ * numeric `:size` prop at compile time and cannot read a CSS variable.
+ * Keep the two files in sync.
  * ────────────────────────────────────────────────────────────────────── */
 
 :root {
-    /* ── Brand colour palette — hard-contrast, defined by TeamHub ──────
-       The NC theme variables (--color-success, --color-warning, etc.) on
-       many themes render as very soft tints — e.g. a pale mint green for
-       success, a soft amber for warning. Against white pill text those
-       reads as washed out. We define our own hard-contrast tokens so a
-       "success" pill in TeamHub reads as success at a glance regardless
-       of theme. NC vars are still consulted for chrome (borders,
-       backgrounds, primary-element) — we only override the *semantic*
-       colours that show up as fills behind white text. */
-    --th-color-success:        #2d7d46;   /* solid green */
-    --th-color-success-soft:   #e6f0e9;   /* hover/tint background */
-    --th-color-warning:        #a05a00;   /* solid dark amber, 5.4:1 contrast vs white */
-    --th-color-warning-soft:   #fbe9d1;
-    --th-color-error:          #c8253f;   /* solid red — matches tab badge */
-    --th-color-error-soft:     #f6d8de;
-    --th-color-neutral:        #6c757d;   /* solid slate-grey */
-    --th-color-neutral-soft:   var(--color-background-dark);
+    /* ── Typography scale — five sizes, four weights ──────────────────
+       Size is the primary hierarchy signal, weight secondary. NC's
+       default body size is 15px (--default-font-size); our scale sits
+       one step tighter because widget/list rows read better at 14px in
+       a dense app shell. Any new .vue scoped style should reach for
+       one of these tokens instead of a raw px value.
 
-    /* ── Typography scale — size is the primary signal, weight is secondary.
-       Previous scale leaned on bold (500/600/700) to distinguish lines;
-       we now use size for hierarchy and reserve heavy weight for pills
-       and the widget header only. */
-    --th-widget-title-size:        14px;
-    --th-widget-title-weight:      600;   /* widget HEADER only */
+       Role → token mapping:
+       - view-level heading (H1)   → --th-font-heading-lg
+       - section heading   (H2/H3) → --th-font-heading
+       - body / labels / buttons   → --th-font-body
+       - hint / meta / help text   → --th-font-meta
+       - timestamp / pill / caption→ --th-font-micro
+    */
+    --th-font-heading-lg:  20px;
+    --th-font-heading:     16px;
+    --th-font-body:        14px;
+    --th-font-meta:        12px;
+    --th-font-micro:       11px;
 
-    --th-widget-row-primary-size:  14px;
-    --th-widget-row-primary-weight: 500;  /* medium, not bold */
+    --th-font-weight-bold:      700;
+    --th-font-weight-semibold:  600;
+    --th-font-weight-medium:    500;
+    --th-font-weight-regular:   400;
 
-    --th-widget-row-meta-size:     12px;
-    --th-widget-row-meta-weight:   400;   /* regular */
+    --th-line-height-tight:  1.2;
+    --th-line-height-body:   1.4;
+    --th-line-height-relaxed: 1.5;
+
+    /* ── Border-radius scale ──────────────────────────────────────────
+       Prefer the NC-provided tokens (--border-radius,
+       --border-radius-large, --border-radius-pill) — they follow the
+       user's theme. We define one aliased set so consumers can reach
+       for role-named tokens without having to remember which of the
+       three NC tokens fits which role, plus one custom size for the
+       chip radius used by widget pills.
+
+       Role → token mapping:
+       - chip / pill      → --th-radius-chip     (10px, matches widget pill)
+       - button / control → --th-radius-control  (NC --border-radius)
+       - card / section   → --th-radius-card     (NC --border-radius-large)
+       - pill / round btn → --th-radius-pill     (NC --border-radius-pill)
+    */
+    --th-radius-chip:     10px;
+    --th-radius-control:  var(--border-radius);
+    --th-radius-card:     var(--border-radius-large);
+    --th-radius-pill:     var(--border-radius-pill);
+
+    /* ── Icon-size scale ──────────────────────────────────────────────
+       Not directly usable in vue-material-design-icons `:size="N"` props
+       (props take numbers at compile time), so these values are mirrored
+       as numeric JS constants in src/constants/uiTokens.js. Keep the two
+       in sync. The CSS names below exist so an SVG that is styled via
+       width/height in scoped CSS (e.g. an inline SVG icon in a template)
+       can reach for the same scale.
+
+       Role → token mapping:
+       - inline with meta text (12px) → --th-icon-inline    (14px)
+       - inline with body text (14px) → --th-icon-body      (16px, most buttons)
+       - toolbar / tab bar            → --th-icon-toolbar   (18px)
+       - NcAppNavigationItem canonical→ --th-icon-nav       (20px)
+       - NcEmptyContent hero          → --th-icon-hero      (64px)
+    */
+    --th-icon-inline:   14px;
+    --th-icon-body:     16px;
+    --th-icon-toolbar:  18px;
+    --th-icon-nav:      20px;
+    --th-icon-hero:     64px;
+
+    /* v3.100.16: the four --th-color-* hard-contrast hex tokens
+       (success, warning, error, neutral) were removed. The original
+       reasoning — that NC theme variables render as too-soft tints —
+       is not consistent with SKILLS.md's canonical `--color-X` +
+       `--color-X-text` pattern (which pairs full-saturation fill with
+       a matching text token designed for contrast). Every consumer
+       migrated to NC's own tokens so the app follows the theme
+       (light/dark/branded) instead of pinning specific hex values.
+       See gui.md § 2. */
+
+    /* ── Widget typography aliases — point at the app-wide typography
+       scale above so widget CSS keeps working. Size is the primary
+       signal, weight is secondary. Pills keep a raw 10px because they
+       intentionally sit one step below --th-font-micro (11px) — that
+       drop is what makes a pill visually distinct. */
+    --th-widget-title-size:        var(--th-font-body);
+    --th-widget-title-weight:      var(--th-font-weight-semibold);   /* widget HEADER only */
+
+    --th-widget-row-primary-size:  var(--th-font-body);
+    --th-widget-row-primary-weight: var(--th-font-weight-medium);   /* medium, not bold */
+
+    --th-widget-row-meta-size:     var(--th-font-meta);
+    --th-widget-row-meta-weight:   var(--th-font-weight-regular);
 
     --th-widget-pill-size:         10px;
-    --th-widget-pill-weight:       700;   /* pills stay heavy — that's what makes a pill a pill */
+    --th-widget-pill-weight:       var(--th-font-weight-bold);   /* pills stay heavy — that's what makes a pill a pill */
 
-    --th-widget-empty-size:        12px;
-    --th-widget-empty-weight:      400;
+    --th-widget-empty-size:        var(--th-font-meta);
+    --th-widget-empty-weight:      var(--th-font-weight-regular);
 
     /* Spacing — row geometry. Three widgets already share these values
        (10px 14px padding, 12px gap); we promote them to canonical. */
     --th-widget-row-padding:       10px 14px;
     --th-widget-row-gap:           12px;
 
-    /* Aliases used elsewhere in the codebase — point them at the new
-       hard-contrast tokens. Kept named "success-strong" for back-compat
-       with the detail-panel pills already shipped in v3.73.3. */
-    --th-widget-success-strong:    var(--th-color-success);
+    /* Aliases used elsewhere in the codebase.
+       v3.100.16: --th-widget-success-strong was defined but had no
+       consumers, so it was removed alongside the underlying --th-color-*
+       hex tokens it wrapped. */
     --th-widget-meta-color:        var(--color-text-maxcontrast);
     --th-widget-empty-color:       var(--color-text-maxcontrast);
 }
@@ -201,9 +272,12 @@
 
 @keyframes th-widget-spin { to { transform: rotate(360deg); } }
 
-/* Pill base — solid filled, white text. Matches the detail-panel
-   link-pill family so widget pills and detail-panel pills read as
-   the same element across the app. Use modifier classes for colour. */
+/* Pill base — solid filled, matching text token. v3.100.16: switched
+   from a hard-coded `color: #fff` to `--color-primary-element-text`
+   (the default modifier is primary; other modifiers override the text
+   colour to match their fill). Matches the detail-panel link-pill
+   family so widget pills and detail-panel pills read as the same
+   element across the app. Use modifier classes for colour. */
 .th-widget__pill {
     display: inline-block;
     padding: 2px 8px;
@@ -214,25 +288,31 @@
     letter-spacing: 0.02em;
     text-transform: uppercase;
     white-space: nowrap;
-    color: #fff;
+    color: var(--color-primary-element-text);
     background: var(--th-widget-meta-color);
 }
 
-.th-widget__pill--primary    { background: var(--color-primary-element); }
-.th-widget__pill--success    { background: var(--th-color-success); }
-.th-widget__pill--warning    { background: var(--th-color-warning); }
-.th-widget__pill--error      { background: var(--th-color-error); }
-.th-widget__pill--neutral    { background: var(--th-color-neutral); }
+/* v3.100.16: each pill modifier now sets both background and the
+   matching -text token so the label stays legible on every theme.
+   Previously the fill came from the retired --th-color-* hex tokens
+   and text was pinned to white. */
+.th-widget__pill--primary { background: var(--color-primary-element); color: var(--color-primary-element-text); }
+.th-widget__pill--success { background: var(--color-success);         color: var(--color-success-text); }
+.th-widget__pill--warning { background: var(--color-warning);         color: var(--color-warning-text); }
+.th-widget__pill--error   { background: var(--color-error);           color: var(--color-error-text); }
+.th-widget__pill--neutral { background: var(--color-background-dark); color: var(--color-text-maxcontrast); }
 
 /* Outline pill variant — same dimensions, transparent fill, coloured
    border + text. Used where a row already has a strong background
-   and a solid pill would be too loud. */
+   and a solid pill would be too loud. v3.100.16: the -success / -warning
+   / -error variants use the matching -text tokens so they follow the
+   NC theme; -neutral uses the maxcontrast text token. */
 .th-widget__pill--outline {
     background: transparent;
     border: 1px solid currentColor;
 }
 .th-widget__pill--outline.th-widget__pill--primary { color: var(--color-primary-element); }
-.th-widget__pill--outline.th-widget__pill--success { color: var(--th-color-success); }
-.th-widget__pill--outline.th-widget__pill--warning { color: var(--th-color-warning); }
-.th-widget__pill--outline.th-widget__pill--error   { color: var(--th-color-error); }
-.th-widget__pill--outline.th-widget__pill--neutral { color: var(--th-color-neutral); }
+.th-widget__pill--outline.th-widget__pill--success { color: var(--color-success-text); }
+.th-widget__pill--outline.th-widget__pill--warning { color: var(--color-warning-text); }
+.th-widget__pill--outline.th-widget__pill--error   { color: var(--color-error-text); }
+.th-widget__pill--outline.th-widget__pill--neutral { color: var(--color-text-maxcontrast); }

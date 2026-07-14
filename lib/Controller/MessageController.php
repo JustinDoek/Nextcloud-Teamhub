@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Exception\AccessDeniedException;
+use OCA\TeamHub\Exception\NotFoundException;
+use OCA\TeamHub\Exception\ValidationException;
 use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
@@ -17,6 +20,8 @@ use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 class MessageController extends Controller {
+    use ExceptionResponseTrait;
+
     public function __construct(
         string $appName,
         IRequest $request,
@@ -56,10 +61,15 @@ class MessageController extends Controller {
                 'page'     => $page,
                 'limit'    => $limit,
             ]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (NotFoundException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MessageController] listMessages failed', [
+                'teamId' => $teamId, 'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to load messages'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -78,22 +88,37 @@ class MessageController extends Controller {
                 $teamId, $subject, $message, $priority, $messageType, $pollOptions, $decision
             );
             return new JSONResponse($newMessage, Http::STATUS_CREATED);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (NotFoundException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (ValidationException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to create message', [
-                'exception' => $e,
-                'app'       => Application::APP_ID,
+                'exception' => $e, 'app' => Application::APP_ID,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return new JSONResponse(['error' => 'Failed to create message'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
     #[NoAdminRequired]
     public function updateMessage(string $teamId, int $messageId, string $subject, string $message): JSONResponse {
         try {
-            $updatedMessage = $this->messageService->updateMessage($messageId, $subject, $message);
+            $updatedMessage = $this->messageService->updateMessage($teamId, $messageId, $subject, $message);
             return new JSONResponse($updatedMessage);
-        } catch (\Exception $e) {
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (NotFoundException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (ValidationException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to update message', [
+                'teamId' => $teamId, 'messageId' => $messageId,
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to update message'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -102,10 +127,16 @@ class MessageController extends Controller {
         try {
             $this->messageService->deleteMessage($teamId, $messageId);
             return new JSONResponse(['success' => true]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'permissions') || str_contains($e->getMessage(), 'member')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (NotFoundException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to delete message', [
+                'teamId' => $teamId, 'messageId' => $messageId,
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to delete message'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -235,14 +266,10 @@ class MessageController extends Controller {
             return new JSONResponse($row, Http::STATUS_CREATED);
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
-        } catch (\Exception $e) {
-            $this->logger->warning('[TeamHub][MessageController] registerAttachment failed', [
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to register attachment', [
                 'messageId' => $messageId, 'file_id' => $file_id,
-                'exception' => $e->getMessage(),
-                'app'       => Application::APP_ID,
             ]);
-            $status = str_contains($e->getMessage(), 'author') ? Http::STATUS_FORBIDDEN : Http::STATUS_BAD_REQUEST;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -302,15 +329,10 @@ class MessageController extends Controller {
                 'fileId'    => $result['fileId'],
                 'cachePath' => $result['cachePath'],
             ]);
-        } catch (\RuntimeException $e) {
-            $this->logger->warning('[TeamHub][MessageController] cacheImage failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to cache image', [
+                'teamId' => $teamId,
             ]);
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
         }
     }
 
@@ -343,10 +365,10 @@ class MessageController extends Controller {
             $deleted = $this->filesService->clearImageCache($teamFolderId);
 
             return new JSONResponse(['deleted' => $deleted]);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to clear image cache', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -365,10 +387,10 @@ class MessageController extends Controller {
         try {
             $this->memberService->requireMemberLevel($teamId);
             return new JSONResponse($this->messageService->getMessageSettings($teamId));
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load message settings', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -393,10 +415,10 @@ class MessageController extends Controller {
             return new JSONResponse(['success' => true]);
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
-        } catch (\Exception $e) {
-            $status = str_contains($e->getMessage(), 'member') || str_contains($e->getMessage(), 'permissions')
-                ? Http::STATUS_FORBIDDEN : Http::STATUS_INTERNAL_SERVER_ERROR;
-            return new JSONResponse(['error' => $e->getMessage()], $status);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save message settings', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 }

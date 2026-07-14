@@ -50,25 +50,31 @@
                 </li>
             </ul>
 
-            <!-- Pagination footer -->
+            <!-- Pagination footer
+                 v3.100.15: prev/next NcButtons — icon-only tertiary variant;
+                 retires the custom .th-files-shared__page-btn CSS. -->
             <div v-if="totalPages > 1" class="th-files-shared__pagination">
-                <button
-                    class="th-files-shared__page-btn"
+                <NcButton
+                    variant="tertiary"
                     :disabled="page === 1"
                     :aria-label="t('teamhub', 'Previous page')"
                     @click="goToPage(page - 1)">
-                    <ChevronLeftIcon :size="16" />
-                </button>
+                    <template #icon>
+                        <ChevronLeftIcon :size="16" />
+                    </template>
+                </NcButton>
                 <span class="th-files-shared__page-info">
                     {{ page }} / {{ totalPages }}
                 </span>
-                <button
-                    class="th-files-shared__page-btn"
+                <NcButton
+                    variant="tertiary"
                     :disabled="page === totalPages"
                     :aria-label="t('teamhub', 'Next page')"
                     @click="goToPage(page + 1)">
-                    <ChevronRightIcon :size="16" />
-                </button>
+                    <template #icon>
+                        <ChevronRightIcon :size="16" />
+                    </template>
+                </NcButton>
             </div>
         </template>
     </div>
@@ -79,7 +85,7 @@ import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcLoadingIcon, NcAvatar } from '@nextcloud/vue'
+import { NcLoadingIcon, NcAvatar, NcButton } from '@nextcloud/vue'
 
 // Icons
 
@@ -105,7 +111,7 @@ export default {
     name: 'FilesSharedWidget',
 
     components: {
-        NcLoadingIcon, NcAvatar,
+        NcLoadingIcon, NcAvatar, NcButton,
         ShareVariantIcon, FolderIcon, FileIcon,
         FileImageIcon, FilePdfBoxIcon, FileWordIcon, FileExcelIcon,
         FilePowerpointIcon, FileVideoIcon, FileMusicIcon, FileCodeIcon,
@@ -232,7 +238,7 @@ export default {
     width: 38px;
     height: 38px;
     border-radius: var(--border-radius-large);
-    background: var(--color-background-dark, #f4f4f4);
+    background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
 }
@@ -285,28 +291,8 @@ export default {
     padding: 8px 14px;
     border-top: 1px solid var(--color-border);
 }
-.th-files-shared__page-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid var(--color-border);
-    background: var(--color-main-background);
-    color: var(--color-primary-element);
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-}
-.th-files-shared__page-btn:hover:not(:disabled) {
-    background: var(--color-background-hover);
-    border-color: var(--color-primary-element);
-}
-.th-files-shared__page-btn:disabled {
-    opacity: 0.35;
-    cursor: default;
-}
+/* v3.100.15: .th-files-shared__page-btn block retired — the two prev/next
+   raw <button>s are now NcButtons. */
 .th-files-shared__page-info {
     font-size: var(--th-widget-row-meta-size);
     color: var(--th-widget-meta-color);

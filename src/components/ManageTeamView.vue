@@ -185,6 +185,542 @@
                 </div>
             </div>
 
+        </div>
+
+        <!-- TAB: Messages -->
+        <div v-else-if="activeTab === 'messages'" class="manage-tab-content">
+            <div v-if="loadingMessageSettings" class="section-loading">
+                <NcLoadingIcon :size="32" />
+            </div>
+            <template v-else>
+                <!-- Pin level -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Pin messages') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Minimum role required to pin or unpin a message in this team. One message can be pinned at a time.') }}
+                    </p>
+                    <div class="manage-setting-row">
+                        <label class="manage-setting-label" for="pin-min-level">
+                            {{ t('teamhub', 'Minimum role to pin') }}
+                        </label>
+                        <select
+                            id="pin-min-level"
+                            v-model="messageSettingsForm.pinMinLevel"
+                            class="manage-setting-select">
+                            <option value="member">{{ t('teamhub', 'Member') }}</option>
+                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Post level -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Post messages') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Minimum role required to post new messages, questions, and polls in this team.') }}
+                    </p>
+                    <div class="manage-setting-row">
+                        <label class="manage-setting-label" for="post-min-level">
+                            {{ t('teamhub', 'Minimum role to post') }}
+                        </label>
+                        <select
+                            id="post-min-level"
+                            v-model="messageSettingsForm.postMinLevel"
+                            class="manage-setting-select">
+                            <option value="member">{{ t('teamhub', 'Member') }}</option>
+                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Link level -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Custom links') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Minimum role required to add, edit, or delete custom links in the tab bar of this team.') }}
+                    </p>
+                    <div class="manage-setting-row">
+                        <label class="manage-setting-label" for="link-min-level">
+                            {{ t('teamhub', 'Minimum role to manage links') }}
+                        </label>
+                        <select
+                            id="link-min-level"
+                            v-model="messageSettingsForm.linkMinLevel"
+                            class="manage-setting-select">
+                            <option value="member">{{ t('teamhub', 'Member') }}</option>
+                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Save -->
+                <div class="manage-section">
+                    <NcButton
+                        variant="primary"
+                        :disabled="savingMessageSettings"
+                        @click="saveMessageSettings">
+                        <template #icon>
+                            <NcLoadingIcon v-if="savingMessageSettings" :size="18" />
+                            <Check v-else :size="18" />
+                        </template>
+                        {{ savingMessageSettings ? t('teamhub', 'Saving…') : t('teamhub', 'Save permission settings') }}
+                    </NcButton>
+                    <span v-if="messageSettingsSaved" class="manage-saved-indicator">
+                        {{ t('teamhub', 'Saved') }}
+                    </span>
+                </div>
+
+                <!-- Image cache -->
+                <div class="manage-section">
+                    <h3>{{ t('teamhub', 'Message image cache') }}</h3>
+                    <p class="manage-section__desc">
+                        {{ t('teamhub', 'Images inserted from your personal files are copied into a hidden cache folder (.teamhub-cache) inside the team folder so all members can view them. Clear this cache to free up storage — existing messages will show broken images.') }}
+                    </p>
+                    <NcButton
+                        variant="error"
+                        :disabled="clearingImageCache || !teamFilesFolderId"
+                        @click="clearImageCache">
+                        <template #icon>
+                            <NcLoadingIcon v-if="clearingImageCache" :size="18" />
+                            <TrashCan v-else :size="18" aria-hidden="true" />
+                        </template>
+                        {{ clearingImageCache ? t('teamhub', 'Clearing…') : t('teamhub', 'Clear image cache') }}
+                    </NcButton>
+                    <span v-if="!teamFilesFolderId" class="manage-section__hint">
+                        {{ t('teamhub', 'No Files folder connected — image cache is not available.') }}
+                    </span>
+                </div>
+            </template>
+        </div>
+
+        <!-- TAB: Members -->
+        <div v-else-if="activeTab === 'members'" class="manage-tab-content">
+
+            <!-- Direct members -->
+            <div class="manage-section">
+                <div class="manage-section__header">
+                    <h3>{{ t('teamhub', 'Direct Members') }} ({{ manageMembers.direct.length }})</h3>
+                    <NcButton
+                        v-if="isAdminOrOwner"
+                        variant="secondary"
+                        :aria-label="t('teamhub', 'Invite members to this team')"
+                        @click="showInviteModal = true">
+                        <template #icon><AccountPlusIcon :size="18" /></template>
+                        {{ t('teamhub', 'Invite members') }}
+                    </NcButton>
+                </div>
+                <div v-if="loadingMembers" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+                <div v-else-if="manageMembers.direct.length === 0" class="no-pending">
+                    {{ t('teamhub', 'No direct members') }}
+                </div>
+                <div v-else class="members-list">
+                    <div
+                        v-for="member in manageMembers.direct"
+                        :key="member.userId"
+                        class="member-item">
+                        <NcAvatar
+                            v-if="member.userId"
+                            :user="member.userId"
+                            :display-name="member.displayName"
+                            :size="32"
+                            :show-user-status="false" />
+                        <div v-else class="member-avatar-fallback">
+                            {{ (member.displayName || '?').charAt(0).toUpperCase() }}
+                        </div>
+                        <div class="member-info">
+                            <span class="member-name">{{ member.displayName }}</span>
+                        </div>
+                        <select
+                            v-if="canChangeLevel(member)"
+                            :value="member.level"
+                            :disabled="changingLevel === member.userId"
+                            class="member-level-select"
+                            :aria-label="t('teamhub', 'Change role for {name}', { name: member.displayName })"
+                            @change="changeLevel(member, Number($event.target.value))">
+                            <option :value="1">{{ t('teamhub', 'Member') }}</option>
+                            <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
+                            <option v-if="currentUserIsOwner" :value="8">{{ t('teamhub', 'Admin') }}</option>
+                        </select>
+                        <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
+                        <NcButton
+                            v-if="canRemoveMember(member)"
+                            variant="error"
+                            :aria-label="t('teamhub', 'Remove member')"
+                            @click="removeMember(member.userId, 'user')">
+                            <template #icon><AccountRemove :size="20" /></template>
+                            {{ t('teamhub', 'Remove') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Groups -->
+            <div v-if="!loadingMembers && (manageMembers.groups.length > 0 || manageMembers.circles.length > 0)" class="manage-section">
+                <h3>{{ t('teamhub', 'Groups & Teams') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'These groups and teams have been added as members. All their users count towards the total effective membership of {count}.', { count: manageMembers.effective_count }) }}
+                </p>
+
+                <!-- Groups -->
+                <div v-if="manageMembers.groups.length > 0" class="group-circle-list">
+                    <div class="group-circle-section-label">{{ t('teamhub', 'Groups') }}</div>
+                    <div
+                        v-for="group in manageMembers.groups"
+                        :key="'group-' + group.groupId"
+                        class="group-circle-item">
+                        <div class="group-circle-icon group-circle-icon--group">
+                            <AccountGroup :size="20" />
+                        </div>
+                        <div class="group-circle-info">
+                            <span class="group-circle-name">{{ group.displayName }}</span>
+                            <span class="group-circle-count">
+                                {{
+                                    // TRANSLATORS: member count of a group, e.g. "1 user" or "12 users"
+                                    n('teamhub', '{n} user', '{n} users', group.memberCount, { n: group.memberCount })
+                                }}
+                            </span>
+                        </div>
+                        <NcButton
+                            variant="error"
+                            :aria-label="t('teamhub', 'Remove group {name}', { name: group.displayName })"
+                            @click="removeMember(group.singleId, group.userType === 16 ? 'circle' : 'group')">
+                            <template #icon><AccountRemove :size="20" /></template>
+                            {{ t('teamhub', 'Remove') }}
+                        </NcButton>
+                    </div>
+                </div>
+
+                <!-- Teams / Circles -->
+                <div v-if="manageMembers.circles.length > 0" class="group-circle-list" :class="{ 'group-circle-list--spaced': manageMembers.groups.length > 0 }">
+                    <div class="group-circle-section-label">{{ t('teamhub', 'Teams') }}</div>
+                    <div
+                        v-for="circle in manageMembers.circles"
+                        :key="'circle-' + circle.circleId"
+                        class="group-circle-item">
+                        <div class="group-circle-icon group-circle-icon--circle">
+                            <AccountMultipleIcon :size="20" />
+                        </div>
+                        <div class="group-circle-info">
+                            <span class="group-circle-name">{{ circle.displayName }}</span>
+                            <span class="group-circle-count">
+                                {{
+                                    // TRANSLATORS: member count of a sub-team, e.g. "1 user" or "8 users"
+                                    n('teamhub', '{n} user', '{n} users', circle.memberCount, { n: circle.memberCount })
+                                }}
+                            </span>
+                        </div>
+                        <NcButton
+                            variant="error"
+                            :aria-label="t('teamhub', 'Remove team {name}', { name: circle.displayName })"
+                            @click="removeMember(circle.singleId, 'circle')">
+                            <template #icon><AccountRemove :size="20" /></template>
+                            {{ t('teamhub', 'Remove') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Effective count summary -->
+            <div v-if="!loadingMembers" class="manage-section manage-section--summary">
+                <span class="effective-count-label">
+                    {{ t('teamhub', 'Total users with access to this team:') }}
+                    <strong>{{ manageMembers.effective_count }}</strong>
+                </span>
+            </div>
+
+            <!-- Pending join requests -->
+            <div class="manage-section manage-section--pending">
+                <h3>{{ t('teamhub', 'Pending Join Requests') }}</h3>
+                <div v-if="loadingPending" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+                <div v-else-if="pendingRequests.length === 0" class="no-pending">
+                    {{ t('teamhub', 'No pending requests') }}
+                </div>
+                <div v-else class="pending-list">
+                    <div v-for="req in pendingRequests" :key="req.userId" class="pending-item">
+                        <NcAvatar
+                            v-if="req.userId"
+                            :user="req.userId"
+                            :display-name="req.displayName"
+                            :size="32"
+                            :show-user-status="false" />
+                        <div v-else class="member-avatar-fallback">
+                            {{ (req.displayName || '?').charAt(0).toUpperCase() }}
+                        </div>
+                        <div class="pending-info">
+                            <span class="pending-name">{{ req.displayName }}</span>
+                            <span class="pending-date">{{ req.userId }}</span>
+                        </div>
+                        <div class="pending-actions">
+                            <NcButton variant="primary" @click="approve(req)">
+                                <template #icon><Check :size="20" /></template>
+                                {{ t('teamhub', 'Approve') }}
+                            </NcButton>
+                            <NcButton variant="error" @click="reject(req)">
+                                <template #icon><Close :size="20" /></template>
+                                {{ t('teamhub', 'Reject') }}
+                            </NcButton>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- InviteMemberModal — triggered from Members tab -->
+        <InviteMemberModal
+            v-if="showInviteModal"
+            :team-id="team.id"
+            @close="showInviteModal = false"
+            @invited="onMembersInvited" />
+
+        <!-- TAB: Integrations -->
+        <div v-else-if="activeTab === 'integrations'" class="manage-tab-content">
+            <div class="manage-section">
+                <h3>{{ t('teamhub', 'Integrations') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Enable or disable integrations for this team. Internal integrations are built into TeamHub; third-party integrations are registered by other Nextcloud apps. Widgets appear on the Home view; tab integrations add a tab to the tab bar.') }}
+                </p>
+
+                <!-- ── Internal integrations (built into TeamHub) ──────────── -->
+                <div v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection">
+                    <h4 class="integrations-subsection__title">{{ t('teamhub', 'Internal integrations') }}</h4>
+                    <div class="widgets-list">
+                        <!-- Presence row — only shown when presence module is on -->
+                        <div
+                            v-if="presenceModuleEnabled"
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': presenceEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    {{ t('teamhub', 'Presence') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Show a Presence tab on the team home so members can see each other\'s schedules.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="presenceEnabled"
+                                :disabled="savingPresenceConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Presence tab for this team')"
+                                @update:model-value="setPresenceEnabled($event)">
+                                {{ presenceEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Sub-option: only shown when presence is enabled -->
+                        <div
+                            v-if="presenceModuleEnabled && presenceEnabled"
+                            class="widget-item widget-item--internal widget-item--sub">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">{{ t('teamhub', 'Hide status details') }}</span>
+                                <span class="widget-description">{{ t('teamhub', 'Members see busy / free / off only — not the specific status or location.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="presenceHideReasons"
+                                :disabled="savingPresenceConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Hide status details from team members')"
+                                @update:model-value="setPresenceHideReasons($event)">
+                                {{ presenceHideReasons ? t('teamhub', 'Hidden') : t('teamhub', 'Visible') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Decisions row — only shown when decisions module is on -->
+                        <div
+                            v-if="decisionsModuleEnabled"
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': decisionsEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Decisions feature/module (a TeamHub built-in integration that lets teams record decisions) -->
+                                    {{ t('teamhub', 'Decisions') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Allow team members to propose, discuss, and record decisions in the message stream and Decisions tab.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="decisionsEnabled"
+                                :disabled="savingDecisionsConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Decisions for this team')"
+                                @update:model-value="setDecisionsEnabled($event)">
+                                {{ decisionsEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Budget row — Advanced projects only. Per-team toggle.
+                             Default on so newly-created Advanced projects show the
+                             tab out of the box; admins can hide the tab from
+                             here for projects that don't need budget tracking. -->
+                        <div
+                            v-if="project.mode === 'advanced'"
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': budgetEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Budget feature (a TeamHub built-in integration that adds an Execution-phase budget page to Advanced projects) -->
+                                    {{ t('teamhub', 'Budget') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Show a Budget tab with per-workstream allocations and expenses. Available for Advanced projects only.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="budgetEnabled"
+                                :disabled="savingBudgetConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Budget for this team')"
+                                @update:model-value="setBudgetEnabled($event)">
+                                {{ budgetEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Time investment row — Advanced projects only (v3.96.0).
+                             Same shape as the Budget row: per-team toggle, default
+                             on so newly-created Advanced projects show the tab
+                             out of the box. -->
+                        <div
+                            v-if="project.mode === 'advanced'"
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': timeEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Time investment feature (a TeamHub built-in integration that adds an Execution-phase per-member time-logging page to Advanced projects) -->
+                                    {{ t('teamhub', 'Time investment') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Show a Time tab with per-member available hours and per-card time logs. Available for Advanced projects only.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="timeEnabled"
+                                :disabled="savingTimeConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Time investment for this team')"
+                                @update:model-value="setTimeEnabled($event)">
+                                {{ timeEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Timeline row — per-team toggle. No global module gate
+                             because the timeline is purely a read-only visual
+                             aggregation; nothing to disable at the system level. -->
+                        <div
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': timelineEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Timeline feature (a TeamHub built-in integration that shows calendar/deck/decisions/messages on a visual timeline) -->
+                                    {{ t('teamhub', 'Timeline') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                    <span class="widget-badge widget-badge--tab">
+                                        {{ t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Show a visual timeline tab combining calendar events, Deck cards, decisions, and message posts.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="timelineEnabled"
+                                :disabled="savingTimelineConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Timeline for this team')"
+                                @update:model-value="setTimelineEnabled($event)">
+                                {{ timelineEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ── Third-party integrations (registered by other apps) ── -->
+                <h4 v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
+                <div v-if="loadingWidgets" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+                <template v-else>
+                    <!--
+                        Only EXTERNAL (non-builtin) integrations appear here.
+                        Built-in NC apps (Talk, Files, Calendar, Deck) are managed
+                        in the Settings tab under Team Apps. They are seeded into
+                        the registry as is_builtin=true and did NOT register via
+                        the integration API — so they must not appear here.
+                    -->
+                    <div v-if="externalIntegrations.length === 0" class="no-pending">
+                        {{ t('teamhub', 'No third-party integrations available. Install a compatible app to add integrations to this team.') }}
+                    </div>
+                    <div v-else class="widgets-list">
+                        <div
+                            v-for="integration in externalIntegrations"
+                            :key="integration.registry_id"
+                            class="widget-item"
+                            :class="{ 'widget-item--enabled': integration.enabled }">
+                            <span
+                                v-if="integration.enabled"
+                                class="widget-drag-handle"
+                                :draggable="true"
+                                :aria-label="t('teamhub', 'Drag to reorder')"
+                                @dragstart="onDragStart($event, integration)"
+                                @dragover.prevent
+                                @drop="onDrop($event, integration)">
+                                <DragVertical :size="18" />
+                            </span>
+                            <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    {{ integration.title }}
+                                    <span
+                                        class="widget-badge"
+                                        :class="integration.integration_type === 'widget' ? 'widget-badge--widget' : 'widget-badge--tab'">
+                                        {{ integration.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Menu item') }}
+                                    </span>
+                                </span>
+                                <span v-if="integration.description" class="widget-description">{{ integration.description }}</span>
+                                <span v-if="integration.app_id" class="widget-app-id">{{ integration.app_id }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="integration.enabled"
+                                :disabled="togglingWidget === integration.registry_id"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable {title}', { title: integration.title })"
+                                @update:model-value="toggleIntegration(integration, $event)">
+                                {{ integration.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+                    </div>
+                </template>
+            </div>
             <!-- Team Apps — per-app resource lists for resource-backed apps -->
             <div class="manage-section">
                 <h3>{{ t('teamhub', 'Team Apps') }}</h3>
@@ -581,478 +1117,6 @@
             </div>
         </div>
 
-        <!-- TAB: Messages -->
-        <div v-else-if="activeTab === 'messages'" class="manage-tab-content">
-            <div v-if="loadingMessageSettings" class="section-loading">
-                <NcLoadingIcon :size="32" />
-            </div>
-            <template v-else>
-                <!-- Pin level -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Pin messages') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Minimum role required to pin or unpin a message in this team. One message can be pinned at a time.') }}
-                    </p>
-                    <div class="manage-setting-row">
-                        <label class="manage-setting-label" for="pin-min-level">
-                            {{ t('teamhub', 'Minimum role to pin') }}
-                        </label>
-                        <select
-                            id="pin-min-level"
-                            v-model="messageSettingsForm.pinMinLevel"
-                            class="manage-setting-select">
-                            <option value="member">{{ t('teamhub', 'Member') }}</option>
-                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Post level -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Post messages') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Minimum role required to post new messages, questions, and polls in this team.') }}
-                    </p>
-                    <div class="manage-setting-row">
-                        <label class="manage-setting-label" for="post-min-level">
-                            {{ t('teamhub', 'Minimum role to post') }}
-                        </label>
-                        <select
-                            id="post-min-level"
-                            v-model="messageSettingsForm.postMinLevel"
-                            class="manage-setting-select">
-                            <option value="member">{{ t('teamhub', 'Member') }}</option>
-                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Link level -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Custom links') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Minimum role required to add, edit, or delete custom links in the tab bar of this team.') }}
-                    </p>
-                    <div class="manage-setting-row">
-                        <label class="manage-setting-label" for="link-min-level">
-                            {{ t('teamhub', 'Minimum role to manage links') }}
-                        </label>
-                        <select
-                            id="link-min-level"
-                            v-model="messageSettingsForm.linkMinLevel"
-                            class="manage-setting-select">
-                            <option value="member">{{ t('teamhub', 'Member') }}</option>
-                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Save -->
-                <div class="manage-section">
-                    <NcButton
-                        variant="primary"
-                        :disabled="savingMessageSettings"
-                        @click="saveMessageSettings">
-                        <template #icon>
-                            <NcLoadingIcon v-if="savingMessageSettings" :size="18" />
-                            <Check v-else :size="18" />
-                        </template>
-                        {{ savingMessageSettings ? t('teamhub', 'Saving…') : t('teamhub', 'Save permission settings') }}
-                    </NcButton>
-                    <span v-if="messageSettingsSaved" class="manage-saved-indicator">
-                        {{ t('teamhub', 'Saved') }}
-                    </span>
-                </div>
-
-                <!-- Image cache -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Message image cache') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Images inserted from your personal files are copied into a hidden cache folder (.teamhub-cache) inside the team folder so all members can view them. Clear this cache to free up storage — existing messages will show broken images.') }}
-                    </p>
-                    <NcButton
-                        variant="error"
-                        :disabled="clearingImageCache || !teamFilesFolderId"
-                        @click="clearImageCache">
-                        <template #icon>
-                            <NcLoadingIcon v-if="clearingImageCache" :size="18" />
-                            <TrashCan v-else :size="18" aria-hidden="true" />
-                        </template>
-                        {{ clearingImageCache ? t('teamhub', 'Clearing…') : t('teamhub', 'Clear image cache') }}
-                    </NcButton>
-                    <span v-if="!teamFilesFolderId" class="manage-section__hint">
-                        {{ t('teamhub', 'No Files folder connected — image cache is not available.') }}
-                    </span>
-                </div>
-            </template>
-        </div>
-
-        <!-- TAB: Members -->
-        <div v-else-if="activeTab === 'members'" class="manage-tab-content">
-
-            <!-- Direct members -->
-            <div class="manage-section">
-                <div class="manage-section__header">
-                    <h3>{{ t('teamhub', 'Direct Members') }} ({{ manageMembers.direct.length }})</h3>
-                    <NcButton
-                        v-if="isAdminOrOwner"
-                        variant="secondary"
-                        :aria-label="t('teamhub', 'Invite members to this team')"
-                        @click="showInviteModal = true">
-                        <template #icon><AccountPlusIcon :size="18" /></template>
-                        {{ t('teamhub', 'Invite members') }}
-                    </NcButton>
-                </div>
-                <div v-if="loadingMembers" class="section-loading">
-                    <NcLoadingIcon :size="32" />
-                </div>
-                <div v-else-if="manageMembers.direct.length === 0" class="no-pending">
-                    {{ t('teamhub', 'No direct members') }}
-                </div>
-                <div v-else class="members-list">
-                    <div
-                        v-for="member in manageMembers.direct"
-                        :key="member.userId"
-                        class="member-item">
-                        <NcAvatar
-                            v-if="member.userId"
-                            :user="member.userId"
-                            :display-name="member.displayName"
-                            :size="32"
-                            :show-user-status="false" />
-                        <div v-else class="member-avatar-fallback">
-                            {{ (member.displayName || '?').charAt(0).toUpperCase() }}
-                        </div>
-                        <div class="member-info">
-                            <span class="member-name">{{ member.displayName }}</span>
-                        </div>
-                        <select
-                            v-if="canChangeLevel(member)"
-                            :value="member.level"
-                            :disabled="changingLevel === member.userId"
-                            class="member-level-select"
-                            :aria-label="t('teamhub', 'Change role for {name}', { name: member.displayName })"
-                            @change="changeLevel(member, Number($event.target.value))">
-                            <option :value="1">{{ t('teamhub', 'Member') }}</option>
-                            <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
-                            <option v-if="currentUserIsOwner" :value="8">{{ t('teamhub', 'Admin') }}</option>
-                        </select>
-                        <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
-                        <NcButton
-                            v-if="canRemoveMember(member)"
-                            variant="error"
-                            :aria-label="t('teamhub', 'Remove member')"
-                            @click="removeMember(member.userId, 'user')">
-                            <template #icon><AccountRemove :size="20" /></template>
-                            {{ t('teamhub', 'Remove') }}
-                        </NcButton>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Groups -->
-            <div v-if="!loadingMembers && (manageMembers.groups.length > 0 || manageMembers.circles.length > 0)" class="manage-section">
-                <h3>{{ t('teamhub', 'Groups & Teams') }}</h3>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'These groups and teams have been added as members. All their users count towards the total effective membership of {count}.', { count: manageMembers.effective_count }) }}
-                </p>
-
-                <!-- Groups -->
-                <div v-if="manageMembers.groups.length > 0" class="group-circle-list">
-                    <div class="group-circle-section-label">{{ t('teamhub', 'Groups') }}</div>
-                    <div
-                        v-for="group in manageMembers.groups"
-                        :key="'group-' + group.groupId"
-                        class="group-circle-item">
-                        <div class="group-circle-icon group-circle-icon--group">
-                            <AccountGroup :size="20" />
-                        </div>
-                        <div class="group-circle-info">
-                            <span class="group-circle-name">{{ group.displayName }}</span>
-                            <span class="group-circle-count">
-                                {{
-                                    // TRANSLATORS: member count of a group, e.g. "1 user" or "12 users"
-                                    n('teamhub', '{n} user', '{n} users', group.memberCount, { n: group.memberCount })
-                                }}
-                            </span>
-                        </div>
-                        <NcButton
-                            variant="error"
-                            :aria-label="t('teamhub', 'Remove group {name}', { name: group.displayName })"
-                            @click="removeMember(group.singleId, group.userType === 16 ? 'circle' : 'group')">
-                            <template #icon><AccountRemove :size="20" /></template>
-                            {{ t('teamhub', 'Remove') }}
-                        </NcButton>
-                    </div>
-                </div>
-
-                <!-- Teams / Circles -->
-                <div v-if="manageMembers.circles.length > 0" class="group-circle-list" :class="{ 'group-circle-list--spaced': manageMembers.groups.length > 0 }">
-                    <div class="group-circle-section-label">{{ t('teamhub', 'Teams') }}</div>
-                    <div
-                        v-for="circle in manageMembers.circles"
-                        :key="'circle-' + circle.circleId"
-                        class="group-circle-item">
-                        <div class="group-circle-icon group-circle-icon--circle">
-                            <AccountMultipleIcon :size="20" />
-                        </div>
-                        <div class="group-circle-info">
-                            <span class="group-circle-name">{{ circle.displayName }}</span>
-                            <span class="group-circle-count">
-                                {{
-                                    // TRANSLATORS: member count of a sub-team, e.g. "1 user" or "8 users"
-                                    n('teamhub', '{n} user', '{n} users', circle.memberCount, { n: circle.memberCount })
-                                }}
-                            </span>
-                        </div>
-                        <NcButton
-                            variant="error"
-                            :aria-label="t('teamhub', 'Remove team {name}', { name: circle.displayName })"
-                            @click="removeMember(circle.singleId, 'circle')">
-                            <template #icon><AccountRemove :size="20" /></template>
-                            {{ t('teamhub', 'Remove') }}
-                        </NcButton>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Effective count summary -->
-            <div v-if="!loadingMembers" class="manage-section manage-section--summary">
-                <span class="effective-count-label">
-                    {{ t('teamhub', 'Total users with access to this team:') }}
-                    <strong>{{ manageMembers.effective_count }}</strong>
-                </span>
-            </div>
-
-            <!-- Pending join requests -->
-            <div class="manage-section manage-section--pending">
-                <h3>{{ t('teamhub', 'Pending Join Requests') }}</h3>
-                <div v-if="loadingPending" class="section-loading">
-                    <NcLoadingIcon :size="32" />
-                </div>
-                <div v-else-if="pendingRequests.length === 0" class="no-pending">
-                    {{ t('teamhub', 'No pending requests') }}
-                </div>
-                <div v-else class="pending-list">
-                    <div v-for="req in pendingRequests" :key="req.userId" class="pending-item">
-                        <NcAvatar
-                            v-if="req.userId"
-                            :user="req.userId"
-                            :display-name="req.displayName"
-                            :size="32"
-                            :show-user-status="false" />
-                        <div v-else class="member-avatar-fallback">
-                            {{ (req.displayName || '?').charAt(0).toUpperCase() }}
-                        </div>
-                        <div class="pending-info">
-                            <span class="pending-name">{{ req.displayName }}</span>
-                            <span class="pending-date">{{ req.userId }}</span>
-                        </div>
-                        <div class="pending-actions">
-                            <NcButton variant="primary" @click="approve(req)">
-                                <template #icon><Check :size="20" /></template>
-                                {{ t('teamhub', 'Approve') }}
-                            </NcButton>
-                            <NcButton variant="error" @click="reject(req)">
-                                <template #icon><Close :size="20" /></template>
-                                {{ t('teamhub', 'Reject') }}
-                            </NcButton>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- InviteMemberModal — triggered from Members tab -->
-        <InviteMemberModal
-            v-if="showInviteModal"
-            :team-id="team.id"
-            @close="showInviteModal = false"
-            @invited="onMembersInvited" />
-
-        <!-- TAB: Integrations -->
-        <div v-else-if="activeTab === 'integrations'" class="manage-tab-content">
-            <div class="manage-section">
-                <h3>{{ t('teamhub', 'Integrations') }}</h3>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'Enable or disable integrations for this team. Internal integrations are built into TeamHub; third-party integrations are registered by other Nextcloud apps. Widgets appear on the Home view; tab integrations add a tab to the tab bar.') }}
-                </p>
-
-                <!-- ── Internal integrations (built into TeamHub) ──────────── -->
-                <div v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection">
-                    <h4 class="integrations-subsection__title">{{ t('teamhub', 'Internal integrations') }}</h4>
-                    <div class="widgets-list">
-                        <!-- Presence row — only shown when presence module is on -->
-                        <div
-                            v-if="presenceModuleEnabled"
-                            class="widget-item widget-item--internal"
-                            :class="{ 'widget-item--enabled': presenceEnabled }">
-                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
-                            <div class="widget-info">
-                                <span class="widget-title">
-                                    {{ t('teamhub', 'Presence') }}
-                                    <span class="widget-badge widget-badge--internal">
-                                        {{ t('teamhub', 'Built-in') }}
-                                    </span>
-                                    <span class="widget-badge widget-badge--tab">
-                                        {{ t('teamhub', 'Menu item') }}
-                                    </span>
-                                </span>
-                                <span class="widget-description">{{ t('teamhub', 'Show a Presence tab on the team home so members can see each other\'s schedules.') }}</span>
-                            </div>
-                            <NcCheckboxRadioSwitch
-                                :model-value="presenceEnabled"
-                                :disabled="savingPresenceConfig"
-                                type="switch"
-                                :aria-label="t('teamhub', 'Enable Presence tab for this team')"
-                                @update:model-value="setPresenceEnabled($event)">
-                                {{ presenceEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                            </NcCheckboxRadioSwitch>
-                        </div>
-
-                        <!-- Sub-option: only shown when presence is enabled -->
-                        <div
-                            v-if="presenceModuleEnabled && presenceEnabled"
-                            class="widget-item widget-item--internal widget-item--sub">
-                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
-                            <div class="widget-info">
-                                <span class="widget-title">{{ t('teamhub', 'Hide status details') }}</span>
-                                <span class="widget-description">{{ t('teamhub', 'Members see busy / free / off only — not the specific status or location.') }}</span>
-                            </div>
-                            <NcCheckboxRadioSwitch
-                                :model-value="presenceHideReasons"
-                                :disabled="savingPresenceConfig"
-                                type="switch"
-                                :aria-label="t('teamhub', 'Hide status details from team members')"
-                                @update:model-value="setPresenceHideReasons($event)">
-                                {{ presenceHideReasons ? t('teamhub', 'Hidden') : t('teamhub', 'Visible') }}
-                            </NcCheckboxRadioSwitch>
-                        </div>
-
-                        <!-- Decisions row — only shown when decisions module is on -->
-                        <div
-                            v-if="decisionsModuleEnabled"
-                            class="widget-item widget-item--internal"
-                            :class="{ 'widget-item--enabled': decisionsEnabled }">
-                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
-                            <div class="widget-info">
-                                <span class="widget-title">
-                                    <!-- TRANSLATORS: Name of the Decisions feature/module (a TeamHub built-in integration that lets teams record decisions) -->
-                                    {{ t('teamhub', 'Decisions') }}
-                                    <span class="widget-badge widget-badge--internal">
-                                        {{ t('teamhub', 'Built-in') }}
-                                    </span>
-                                    <span class="widget-badge widget-badge--tab">
-                                        {{ t('teamhub', 'Menu item') }}
-                                    </span>
-                                </span>
-                                <span class="widget-description">{{ t('teamhub', 'Allow team members to propose, discuss, and record decisions in the message stream and Decisions tab.') }}</span>
-                            </div>
-                            <NcCheckboxRadioSwitch
-                                :model-value="decisionsEnabled"
-                                :disabled="savingDecisionsConfig"
-                                type="switch"
-                                :aria-label="t('teamhub', 'Enable Decisions for this team')"
-                                @update:model-value="setDecisionsEnabled($event)">
-                                {{ decisionsEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                            </NcCheckboxRadioSwitch>
-                        </div>
-
-                        <!-- Timeline row — per-team toggle. No global module gate
-                             because the timeline is purely a read-only visual
-                             aggregation; nothing to disable at the system level. -->
-                        <div
-                            class="widget-item widget-item--internal"
-                            :class="{ 'widget-item--enabled': timelineEnabled }">
-                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
-                            <div class="widget-info">
-                                <span class="widget-title">
-                                    <!-- TRANSLATORS: Name of the Timeline feature (a TeamHub built-in integration that shows calendar/deck/decisions/messages on a visual timeline) -->
-                                    {{ t('teamhub', 'Timeline') }}
-                                    <span class="widget-badge widget-badge--internal">
-                                        {{ t('teamhub', 'Built-in') }}
-                                    </span>
-                                    <span class="widget-badge widget-badge--tab">
-                                        {{ t('teamhub', 'Menu item') }}
-                                    </span>
-                                </span>
-                                <span class="widget-description">{{ t('teamhub', 'Show a visual timeline tab combining calendar events, Deck cards, decisions, and message posts.') }}</span>
-                            </div>
-                            <NcCheckboxRadioSwitch
-                                :model-value="timelineEnabled"
-                                :disabled="savingTimelineConfig"
-                                type="switch"
-                                :aria-label="t('teamhub', 'Enable Timeline for this team')"
-                                @update:model-value="setTimelineEnabled($event)">
-                                {{ timelineEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                            </NcCheckboxRadioSwitch>
-                        </div>
-
-                    </div>
-                </div>
-
-                <!-- ── Third-party integrations (registered by other apps) ── -->
-                <h4 v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
-                <div v-if="loadingWidgets" class="section-loading">
-                    <NcLoadingIcon :size="32" />
-                </div>
-                <template v-else>
-                    <!--
-                        Only EXTERNAL (non-builtin) integrations appear here.
-                        Built-in NC apps (Talk, Files, Calendar, Deck) are managed
-                        in the Settings tab under Team Apps. They are seeded into
-                        the registry as is_builtin=true and did NOT register via
-                        the integration API — so they must not appear here.
-                    -->
-                    <div v-if="externalIntegrations.length === 0" class="no-pending">
-                        {{ t('teamhub', 'No third-party integrations available. Install a compatible app to add integrations to this team.') }}
-                    </div>
-                    <div v-else class="widgets-list">
-                        <div
-                            v-for="integration in externalIntegrations"
-                            :key="integration.registry_id"
-                            class="widget-item"
-                            :class="{ 'widget-item--enabled': integration.enabled }">
-                            <span
-                                v-if="integration.enabled"
-                                class="widget-drag-handle"
-                                :draggable="true"
-                                :aria-label="t('teamhub', 'Drag to reorder')"
-                                @dragstart="onDragStart($event, integration)"
-                                @dragover.prevent
-                                @drop="onDrop($event, integration)">
-                                <DragVertical :size="18" />
-                            </span>
-                            <span v-else class="widget-drag-handle widget-drag-handle--placeholder" />
-                            <div class="widget-info">
-                                <span class="widget-title">
-                                    {{ integration.title }}
-                                    <span
-                                        class="widget-badge"
-                                        :class="integration.integration_type === 'widget' ? 'widget-badge--widget' : 'widget-badge--tab'">
-                                        {{ integration.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Menu item') }}
-                                    </span>
-                                </span>
-                                <span v-if="integration.description" class="widget-description">{{ integration.description }}</span>
-                                <span v-if="integration.app_id" class="widget-app-id">{{ integration.app_id }}</span>
-                            </div>
-                            <NcCheckboxRadioSwitch
-                                :model-value="integration.enabled"
-                                :disabled="togglingWidget === integration.registry_id"
-                                type="switch"
-                                :aria-label="t('teamhub', 'Enable {title}', { title: integration.title })"
-                                @update:model-value="toggleIntegration(integration, $event)">
-                                {{ integration.enabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                            </NcCheckboxRadioSwitch>
-                        </div>
-                    </div>
-                </template>
-            </div>
-        </div>
-
         <!-- TAB: Integration settings (Decisions block + Timeline/Milestones block) -->
         <div v-else-if="activeTab === 'integration-settings'" class="manage-tab-content">
 
@@ -1402,142 +1466,495 @@
             </div>
             </template>
 
-            <!-- ── Timeline block — heading always shown; Milestones
-                 management is gated on the per-team Timeline toggle. No
-                 instance-wide module flag exists for Timeline (it's a
-                 read-only visual aggregation), so unlike Decisions above
-                 the heading itself is unconditional. ─────────────────── -->
+            <!-- Milestones management moved to Manage Team → Project (v3.97.4).
+                 Milestones own Deck-card ownership intervals for the
+                 project-health widget, so they belong with the project's
+                 other lifecycle tools. -->
+        </div>
+
+        <!-- TAB: Project — only for teams created from the Project template
+             (project.isProject). Basic projects can be upgraded to Advanced;
+             Advanced projects expose the phase control. Its own tab because a
+             project isn't an integration that can be enabled/disabled. -->
+        <div v-else-if="activeTab === 'project'" class="manage-tab-content">
             <div class="manage-section">
-                <h3>{{ t('teamhub', 'Timeline') }}</h3>
+                <h3>{{ t('teamhub', 'Project') }}</h3>
+
+                <template v-if="project.mode === 'advanced'">
+                    <p class="manage-section-desc">
+                        {{ t('teamhub', 'Move the project through its lifecycle. The current phase is shown on the team home.') }}
+                    </p>
+                    <label class="teamhub-project__label" for="project-phase-select">{{ t('teamhub', 'Current phase') }}</label>
+                    <select
+                        id="project-phase-select"
+                        class="teamhub-project__select"
+                        :value="project.phase"
+                        :disabled="savingProject"
+                        @change="changeProjectPhase($event.target.value)">
+                        <option
+                            v-for="opt in projectPhaseOptions"
+                            :key="opt.id"
+                            :value="opt.id">
+                            {{ opt.label }}
+                        </option>
+                    </select>
+                </template>
+
+                <template v-else>
+                    <!-- TRANSLATORS: the four parenthesised phase names should match
+                         the translations used for the Initiation/Planning/Execution/
+                         Closing labels shown on the project phase stepper. -->
+                    <p class="manage-section-desc">
+                        {{ t('teamhub', 'This is a Basic project. Upgrade to Advanced to guide it through the project lifecycle (Initiation, Planning, Execution, Closing) and unlock project tools.') }}
+                    </p>
+                    <NcButton
+                        variant="primary"
+                        :disabled="savingProject"
+                        @click="upgradeProjectToAdvanced">
+                        {{ savingProject ? t('teamhub', 'Upgrading…') : t('teamhub', 'Upgrade to Advanced') }}
+                    </NcButton>
+                </template>
+            </div>
+
+            <!-- Project dates — Advanced projects only (v3.98.1). Start
+                 and target-end dates anchor the timeline so milestones
+                 and the health widget have a range to report against. The
+                 backend has always accepted these fields (ProjectController::save
+                 with start_date / target_end); this section is the first
+                 time they're exposed in the UI, added because the Project
+                 Compass's "Set project start and target end dates" item
+                 pointed at a screen with no dates form. -->
+            <div v-if="project.mode === 'advanced'" class="manage-section" data-section="dates">
+                <h3>{{ t('teamhub', 'Project dates') }}</h3>
                 <p class="manage-section-desc">
-                    {{ t('teamhub', 'Milestones appear as a red marker line on the Timeline tab, with the label you give them. Useful for tracking key dates such as launches or deadlines at a glance.') }}
+                    {{ t('teamhub', 'Anchors the timeline so milestones and the project-health widget have a range to report against. Both fields are optional but recommended.') }}
+                </p>
+                <div class="teamhub-project__dates">
+                    <label class="teamhub-project__label" for="project-start-date">{{ t('teamhub', 'Start date') }}</label>
+                    <input
+                        id="project-start-date"
+                        v-model="projectDatesForm.startDate"
+                        type="date"
+                        class="teamhub-project__date-input"
+                        :disabled="savingProjectDates">
+
+                    <label class="teamhub-project__label" for="project-target-end">{{ t('teamhub', 'Target end date') }}</label>
+                    <input
+                        id="project-target-end"
+                        v-model="projectDatesForm.targetEnd"
+                        type="date"
+                        class="teamhub-project__date-input"
+                        :disabled="savingProjectDates">
+                </div>
+                <div class="teamhub-project__dates-actions">
+                    <NcButton
+                        variant="primary"
+                        :disabled="savingProjectDates || !projectDatesDirty"
+                        @click="saveProjectDates">
+                        {{ savingProjectDates ? t('teamhub', 'Saving') : t('teamhub', 'Save dates') }}
+                    </NcButton>
+                </div>
+                <p v-if="projectDatesError" class="teamhub-project__dates-error" role="alert">
+                    {{ projectDatesError }}
+                </p>
+            </div>
+
+            <!-- Milestones — moved here from Integration Settings (v3.97.4).
+                 Milestones own the Deck-card ownership intervals the
+                 project-health widget's Milestones pillar reads. Timeline
+                 also renders them as red marker lines when enabled. -->
+            <div class="manage-section" data-section="milestones">
+                <h3>{{ t('teamhub', 'Milestones') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Milestones mark key project dates such as launches or deadlines. Every Deck card whose due date falls between a milestone and the previous one belongs to that milestone — the project-health widget uses this to flag work at risk of slipping. When Timeline is enabled, they also appear as red marker lines there.') }}
                 </p>
 
                 <p v-if="!timelineEnabled" class="manage-section-desc manage-section-desc--inline">
-                    {{ t('teamhub', 'Timeline is disabled for this team. Enable it under the Integrations tab to manage milestones.') }}
+                    {{ t('teamhub', 'Timeline is disabled for this team — milestones you add here still drive the project-health widget, but will not appear on the Timeline tab until Timeline is enabled under Integration Settings.') }}
                 </p>
 
+                <div v-if="loadingMilestones" class="section-loading">
+                    <NcLoadingIcon :size="32" />
+                </div>
+
                 <template v-else>
-                    <div v-if="loadingMilestones" class="section-loading">
-                        <NcLoadingIcon :size="32" />
-                    </div>
+                    <ul v-if="milestones.length" class="teamhub-milestones__list" aria-live="polite">
+                        <li
+                            v-for="m in milestones"
+                            :key="m.id"
+                            class="teamhub-milestones__row">
 
-                    <template v-else>
-                        <ul v-if="milestones.length" class="teamhub-milestones__list" aria-live="polite">
-                            <li
-                                v-for="m in milestones"
-                                :key="m.id"
-                                class="teamhub-milestones__row">
-
-                                <!-- Read mode -->
-                                <template v-if="milestoneEditing !== m.id">
-                                    <div class="teamhub-milestones__row-main">
-                                        <span class="teamhub-milestones__row-name">{{ m.label }}</span>
-                                        <span
-                                            class="teamhub-milestones__row-date"
-                                            :class="{ 'teamhub-milestones__row-date--unset': !m.date }">
-                                            {{ m.date ? formatMilestoneDate(m.date) : t('teamhub', 'No date set — not shown on Timeline') }}
-                                        </span>
-                                    </div>
-                                    <div class="teamhub-milestones__row-actions">
-                                        <NcButton
-                                            variant="tertiary"
-                                            :aria-label="t('teamhub', 'Edit milestone {name}', { name: m.label })"
-                                            @click="startEditMilestone(m)">
-                                            <template #icon><PencilIcon :size="16" /></template>
-                                        </NcButton>
-                                        <NcButton
-                                            variant="tertiary"
-                                            :aria-label="t('teamhub', 'Delete milestone {name}', { name: m.label })"
-                                            @click="confirmDeleteMilestone(m)">
-                                            <template #icon><Delete :size="16" /></template>
-                                        </NcButton>
-                                    </div>
-                                </template>
-
-                                <!-- Edit mode -->
-                                <template v-else>
-                                    <div class="teamhub-milestones__edit">
-                                        <label class="teamhub-milestones__edit-label" :for="`milestone-edit-name-${m.id}`">{{ t('teamhub', 'Name') }}</label>
-                                        <input
-                                            :id="`milestone-edit-name-${m.id}`"
-                                            v-model="milestoneForm.label"
-                                            type="text"
-                                            maxlength="255"
-                                            class="teamhub-milestones__edit-input">
-
-                                        <label class="teamhub-milestones__edit-label" :for="`milestone-edit-date-${m.id}`">{{ t('teamhub', 'Date (optional)') }}</label>
-                                        <input
-                                            :id="`milestone-edit-date-${m.id}`"
-                                            v-model="milestoneForm.date"
-                                            type="date"
-                                            class="teamhub-milestones__edit-input">
-
-                                        <div class="teamhub-milestones__edit-actions">
-                                            <NcButton variant="secondary" @click="cancelEditMilestone">{{ t('teamhub', 'Cancel') }}</NcButton>
-                                            <NcButton
-                                                variant="primary"
-                                                :disabled="savingMilestone || !milestoneForm.label.trim()"
-                                                @click="saveMilestone">
-                                                {{ savingMilestone ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
-                                            </NcButton>
-                                        </div>
-
-                                        <p v-if="milestoneFormError" class="teamhub-milestones__edit-error" role="alert">
-                                            {{ milestoneFormError }}
-                                        </p>
-                                    </div>
-                                </template>
-                            </li>
-                        </ul>
-
-                        <p v-else-if="milestoneEditing !== 'new'" class="teamhub-milestones__empty-text">
-                            {{ t('teamhub', 'No milestones yet. Add the first one below.') }}
-                        </p>
-
-                        <!-- Add-new form -->
-                        <div class="teamhub-milestones__add-area">
-                            <NcButton
-                                v-if="milestoneEditing !== 'new'"
-                                variant="secondary"
-                                @click="startCreateMilestone">
-                                <template #icon><PlusIcon :size="16" /></template>
-                                {{ t('teamhub', 'Add milestone') }}
-                            </NcButton>
-
-                            <div v-else class="teamhub-milestones__edit">
-                                <label class="teamhub-milestones__edit-label" for="milestone-new-name">{{ t('teamhub', 'Name') }}</label>
-                                <input
-                                    id="milestone-new-name"
-                                    v-model="milestoneForm.label"
-                                    type="text"
-                                    maxlength="255"
-                                    class="teamhub-milestones__edit-input"
-                                    :placeholder="t('teamhub', 'e.g. Beta launch')">
-
-                                <label class="teamhub-milestones__edit-label" for="milestone-new-date">{{ t('teamhub', 'Date (optional)') }}</label>
-                                <input
-                                    id="milestone-new-date"
-                                    v-model="milestoneForm.date"
-                                    type="date"
-                                    class="teamhub-milestones__edit-input">
-
-                                <div class="teamhub-milestones__edit-actions">
-                                    <NcButton variant="secondary" @click="cancelEditMilestone">{{ t('teamhub', 'Cancel') }}</NcButton>
+                            <!-- Read mode -->
+                            <template v-if="milestoneEditing !== m.id">
+                                <div class="teamhub-milestones__row-main">
+                                    <span class="teamhub-milestones__row-name">{{ m.label }}</span>
+                                    <span
+                                        class="teamhub-milestones__row-date"
+                                        :class="{ 'teamhub-milestones__row-date--unset': !m.date }">
+                                        {{ m.date ? formatMilestoneDate(m.date) : t('teamhub', 'No date set — not shown on Timeline') }}
+                                    </span>
+                                </div>
+                                <div class="teamhub-milestones__row-actions">
                                     <NcButton
-                                        variant="primary"
-                                        :disabled="savingMilestone || !milestoneForm.label.trim()"
-                                        @click="saveMilestone">
-                                        {{ savingMilestone ? t('teamhub', 'Saving…') : t('teamhub', 'Create') }}
+                                        variant="tertiary"
+                                        :aria-label="t('teamhub', 'Edit milestone {name}', { name: m.label })"
+                                        @click="startEditMilestone(m)">
+                                        <template #icon><PencilIcon :size="16" /></template>
+                                    </NcButton>
+                                    <NcButton
+                                        variant="tertiary"
+                                        :aria-label="t('teamhub', 'Delete milestone {name}', { name: m.label })"
+                                        @click="confirmDeleteMilestone(m)">
+                                        <template #icon><Delete :size="16" /></template>
                                     </NcButton>
                                 </div>
+                            </template>
 
-                                <p v-if="milestoneFormError" class="teamhub-milestones__edit-error" role="alert">
-                                    {{ milestoneFormError }}
-                                </p>
+                            <!-- Edit mode -->
+                            <template v-else>
+                                <div class="teamhub-milestones__edit">
+                                    <label class="teamhub-milestones__edit-label" :for="`milestone-edit-name-${m.id}`">{{ t('teamhub', 'Name') }}</label>
+                                    <input
+                                        :id="`milestone-edit-name-${m.id}`"
+                                        v-model="milestoneForm.label"
+                                        type="text"
+                                        maxlength="255"
+                                        class="teamhub-milestones__edit-input">
+
+                                    <label class="teamhub-milestones__edit-label" :for="`milestone-edit-date-${m.id}`">{{ t('teamhub', 'Date (optional)') }}</label>
+                                    <input
+                                        :id="`milestone-edit-date-${m.id}`"
+                                        v-model="milestoneForm.date"
+                                        type="date"
+                                        class="teamhub-milestones__edit-input">
+
+                                    <div class="teamhub-milestones__edit-actions">
+                                        <NcButton variant="secondary" @click="cancelEditMilestone">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                        <NcButton
+                                            variant="primary"
+                                            :disabled="savingMilestone || !milestoneForm.label.trim()"
+                                            @click="saveMilestone">
+                                            {{ savingMilestone ? t('teamhub', 'Saving') : t('teamhub', 'Save') }}
+                                        </NcButton>
+                                    </div>
+
+                                    <p v-if="milestoneFormError" class="teamhub-milestones__edit-error" role="alert">
+                                        {{ milestoneFormError }}
+                                    </p>
+                                </div>
+                            </template>
+                        </li>
+                    </ul>
+
+                    <p v-else-if="milestoneEditing !== 'new'" class="teamhub-milestones__empty-text">
+                        {{ t('teamhub', 'No milestones yet. Add the first one below.') }}
+                    </p>
+
+                    <!-- Add-new form -->
+                    <div class="teamhub-milestones__add-area">
+                        <NcButton
+                            v-if="milestoneEditing !== 'new'"
+                            variant="secondary"
+                            @click="startCreateMilestone">
+                            <template #icon><PlusIcon :size="16" /></template>
+                            {{ t('teamhub', 'Add milestone') }}
+                        </NcButton>
+
+                        <div v-else class="teamhub-milestones__edit">
+                            <label class="teamhub-milestones__edit-label" for="milestone-new-name">{{ t('teamhub', 'Name') }}</label>
+                            <input
+                                id="milestone-new-name"
+                                v-model="milestoneForm.label"
+                                type="text"
+                                maxlength="255"
+                                class="teamhub-milestones__edit-input"
+                                :placeholder="t('teamhub', 'e.g. Beta launch')">
+
+                            <label class="teamhub-milestones__edit-label" for="milestone-new-date">{{ t('teamhub', 'Date (optional)') }}</label>
+                            <input
+                                id="milestone-new-date"
+                                v-model="milestoneForm.date"
+                                type="date"
+                                class="teamhub-milestones__edit-input">
+
+                            <div class="teamhub-milestones__edit-actions">
+                                <NcButton variant="secondary" @click="cancelEditMilestone">{{ t('teamhub', 'Cancel') }}</NcButton>
+                                <NcButton
+                                    variant="primary"
+                                    :disabled="savingMilestone || !milestoneForm.label.trim()"
+                                    @click="saveMilestone">
+                                    {{ savingMilestone ? t('teamhub', 'Saving') : t('teamhub', 'Create') }}
+                                </NcButton>
                             </div>
+
+                            <p v-if="milestoneFormError" class="teamhub-milestones__edit-error" role="alert">
+                                {{ milestoneFormError }}
+                            </p>
                         </div>
-                    </template>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Budget config — Advanced projects only (v3.92.0, Track E Session 4).
+                 Total + currency at project scope; per-lane allocation +
+                 view/edit min-level settings underneath. -->
+            <div v-if="project.mode === 'advanced'" class="manage-section" data-section="budget">
+                <h3>{{ t('teamhub', 'Budget') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Set the project total, then allocate a share to each workstream (Deck stack). Per-workstream view and edit permissions decide who sees the lane and who can add or change expenses.') }}
+                </p>
+
+                <div v-if="loadingBudget" class="teamhub-budget-cfg__status">
+                    <NcLoadingIcon :size="24" />
+                </div>
+
+                <template v-else-if="budgetCfg">
+                    <div class="teamhub-budget-cfg__totals">
+                        <label class="teamhub-budget-cfg__label">
+                            {{ t('teamhub', 'Total budget') }}
+                            <input
+                                v-model.number="budgetCfg.totalMajor"
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                class="teamhub-budget-cfg__input"
+                                :placeholder="t('teamhub', 'e.g. 10000')" />
+                        </label>
+                        <label class="teamhub-budget-cfg__label">
+                            {{ t('teamhub', 'Currency') }}
+                            <select v-model="budgetCfg.currency" class="teamhub-budget-cfg__select">
+                                <option value="">{{ t('teamhub', 'Not set') }}</option>
+                                <option v-for="c in currencyOptions" :key="c" :value="c">{{ c }}</option>
+                            </select>
+                        </label>
+                        <label class="teamhub-budget-cfg__label">
+                            <span class="teamhub-budget-cfg__label-head">
+                                {{ t('teamhub', 'Who sees the Budget tab') }}
+                                <button
+                                    type="button"
+                                    class="teamhub-budget-cfg__help"
+                                    :aria-label="t('teamhub', 'Explain who sees the Budget tab')"
+                                    @click="showPermInfo()">?</button>
+                            </span>
+                            <select v-model.number="budgetCfg.budgetViewMinLevel" class="teamhub-budget-cfg__select">
+                                <option v-for="opt in laneLevelOptions" :key="'bv-' + opt.value" :value="opt.value">{{ opt.label }}</option>
+                            </select>
+                        </label>
+                        <NcButton
+                            variant="primary"
+                            :disabled="savingBudgetTotal"
+                            @click="saveBudgetTotal">
+                            {{ savingBudgetTotal ? t('teamhub', 'Saving') : t('teamhub', 'Save project settings') }}
+                        </NcButton>
+                    </div>
+
+                    <p v-if="!budgetCfg.lanes.length" class="manage-section-desc" style="margin-top: 12px;">
+                        {{ t('teamhub', 'No Deck stacks found yet. Once a workstream (stack) exists on the project\'s Deck board, it appears here.') }}
+                    </p>
+
+                    <table v-else class="teamhub-budget-cfg__lanes">
+                        <thead>
+                            <tr>
+                                <th scope="col">{{ t('teamhub', 'Workstream') }}</th>
+                                <th scope="col">{{ t('teamhub', 'Allocated') }}</th>
+                                <th scope="col">
+                                    {{ t('teamhub', 'Edit from') }}
+                                    <button
+                                        type="button"
+                                        class="teamhub-budget-cfg__help"
+                                        :aria-label="t('teamhub', 'Explain edit permission')"
+                                        @click="showPermInfo()">?</button>
+                                </th>
+                                <th scope="col">
+                                    {{ t('teamhub', 'Additional editors') }}
+                                    <button
+                                        type="button"
+                                        class="teamhub-budget-cfg__help"
+                                        :aria-label="t('teamhub', 'Explain additional editors')"
+                                        @click="showPermInfo()">?</button>
+                                </th>
+                                <th scope="col"><span class="hidden-visually">{{ t('teamhub', 'Actions') }}</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="lane in budgetCfg.lanes" :key="lane.laneId">
+                                <td>{{ lane.stackTitle }}</td>
+                                <td>
+                                    <input
+                                        v-model.number="lane.allocatedMajor"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        class="teamhub-budget-cfg__input teamhub-budget-cfg__input--narrow"
+                                        :placeholder="t('teamhub', 'Not set')" />
+                                </td>
+                                <td>
+                                    <select v-model.number="lane.editMinLevel" class="teamhub-budget-cfg__select">
+                                        <option v-for="opt in laneLevelOptions" :key="'e-' + opt.value" :value="opt.value">{{ opt.label }}</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <div class="teamhub-budget-cfg__editors">
+                                        <span v-for="e in lane.editors" :key="e.uid" class="teamhub-budget-cfg__editor-chip">
+                                            {{ e.displayName }}
+                                            <button
+                                                type="button"
+                                                class="teamhub-budget-cfg__editor-remove"
+                                                :aria-label="t('teamhub', 'Remove {name}', { name: e.displayName })"
+                                                @click="removeEditor(lane, e.uid)">
+                                                <Close :size="14" />
+                                            </button>
+                                        </span>
+                                        <div class="teamhub-budget-cfg__editor-picker">
+                                            <input
+                                                v-model="lane.editorSearch"
+                                                type="text"
+                                                class="teamhub-budget-cfg__input teamhub-budget-cfg__input--narrow"
+                                                :placeholder="t('teamhub', 'Add editor')"
+                                                @input="onEditorSearchInput(lane)" />
+                                            <ul v-if="lane.editorSuggestions && lane.editorSuggestions.length" class="teamhub-budget-cfg__editor-suggestions">
+                                                <li
+                                                    v-for="s in lane.editorSuggestions"
+                                                    :key="'s-' + lane.laneId + '-' + s.uid"
+                                                    class="teamhub-budget-cfg__editor-suggestion"
+                                                    @mousedown.prevent="addEditor(lane, s)">
+                                                    {{ s.displayName }}
+                                                    <span class="teamhub-budget-cfg__editor-suggestion-uid">{{ s.uid }}</span>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <NcButton
+                                        variant="secondary"
+                                        :disabled="lane.saving"
+                                        @click="saveBudgetLane(lane)">
+                                        {{ lane.saving ? t('teamhub', 'Saving') : t('teamhub', 'Save') }}
+                                    </NcButton>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <NcDialog v-if="permInfoOpen"
+                        :name="t('teamhub', 'Who can view and edit the Budget')"
+                        :open="permInfoOpen"
+                        @update:open="permInfoOpen = false">
+                        <template #default>
+                            <p style="margin: 0 0 8px;">
+                                <strong>{{ t('teamhub', 'Who sees the Budget tab') }}</strong> —
+                                {{ t('teamhub', 'a single project-level role. A member sees the Budget tab when their team role is at or above this level. Any member who is a named additional editor on ANY workstream also automatically sees the tab, regardless of their role.') }}
+                            </p>
+                            <p style="margin: 0 0 8px;">
+                                <strong>{{ t('teamhub', 'Edit from') }}</strong> —
+                                {{ t('teamhub', 'per workstream: the minimum team role that can add, change or remove expenses in that workstream.') }}
+                            </p>
+                            <p style="margin: 0;">
+                                <strong>{{ t('teamhub', 'Additional editors') }}</strong> —
+                                {{ t('teamhub', 'per workstream: named members who can edit that workstream regardless of their team role. Being an additional editor on any workstream also unlocks the Budget tab for that member.') }}
+                            </p>
+                        </template>
+                        <template #actions>
+                            <NcButton variant="primary" @click="permInfoOpen = false">{{ t('teamhub', 'Got it') }}</NcButton>
+                        </template>
+                    </NcDialog>
+                </template>
+            </div>
+
+            <!-- Time investment config — Advanced projects only (v3.96.0, Track E Session 5).
+                 Project-level view floor + per-member available-minutes grid.
+                 Same rhythm as the Budget section above. -->
+            <div v-if="project.mode === 'advanced'" class="manage-section" data-section="time">
+                <h3>{{ t('teamhub', 'Time investment') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Add project members with an available-hours budget. Members log time against Deck cards they are assigned to; the Time tab shows logged vs available per person.') }}
+                </p>
+
+                <div v-if="loadingTime" class="teamhub-budget-cfg__status">
+                    <NcLoadingIcon :size="24" />
+                </div>
+
+                <template v-else-if="timeCfg">
+                    <div class="teamhub-budget-cfg__totals">
+                        <label class="teamhub-budget-cfg__label">
+                            <span class="teamhub-budget-cfg__label-head">
+                                {{ t('teamhub', 'Who sees the Time tab') }}
+                                <button
+                                    type="button"
+                                    class="teamhub-budget-cfg__help"
+                                    :aria-label="t('teamhub', 'Explain who sees the Time tab')"
+                                    @click="timePermInfoOpen = true">?</button>
+                            </span>
+                            <select v-model.number="timeCfg.timeViewMinLevel" class="teamhub-budget-cfg__select">
+                                <option v-for="opt in laneLevelOptions" :key="'tv-' + opt.value" :value="opt.value">{{ opt.label }}</option>
+                            </select>
+                        </label>
+                        <NcButton
+                            variant="primary"
+                            :disabled="savingTimeCfg"
+                            @click="saveTimeConfig">
+                            {{ savingTimeCfg ? t('teamhub', 'Saving') : t('teamhub', 'Save project settings') }}
+                        </NcButton>
+                    </div>
+
+                    <!-- Per-member grid: name / available hours / save.
+                         Every team member is automatically a project member —
+                         they show up here as soon as they belong to the team,
+                         so there is nothing to add or remove from this list.
+                         Restrict logging by raising the view floor above or
+                         by disabling the Time investment integration entirely. -->
+                    <p v-if="!timeCfg.members.length" class="manage-section-desc" style="margin-top: 12px;">
+                        {{ t('teamhub', 'No team members found yet. Once a team member exists, they appear here automatically and can log time immediately.') }}
+                    </p>
+                    <table v-else class="teamhub-budget-cfg__lanes">
+                        <thead>
+                            <tr>
+                                <th scope="col">{{ t('teamhub', 'Member') }}</th>
+                                <th scope="col">{{ t('teamhub', 'Available hours') }}</th>
+                                <th scope="col"><span class="hidden-visually">{{ t('teamhub', 'Actions') }}</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="m in timeCfg.members" :key="m.userId">
+                                <td>{{ m.displayName }}</td>
+                                <td>
+                                    <input
+                                        v-model.number="m.availableHours"
+                                        type="number"
+                                        step="0.5"
+                                        min="0"
+                                        class="teamhub-budget-cfg__input teamhub-budget-cfg__input--narrow"
+                                        :placeholder="t('teamhub', 'Uncapped')" />
+                                </td>
+                                <td>
+                                    <NcButton
+                                        variant="secondary"
+                                        :disabled="m.saving"
+                                        @click="saveTimeMember(m)">
+                                        {{ m.saving ? t('teamhub', 'Saving') : t('teamhub', 'Save') }}
+                                    </NcButton>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <NcDialog v-if="timePermInfoOpen"
+                        :name="t('teamhub', 'Who can view the Time tab')"
+                        :open="timePermInfoOpen"
+                        @update:open="timePermInfoOpen = false">
+                        <template #default>
+                            <p style="margin: 0 0 8px;">
+                                {{ t('teamhub', 'A single project-level role. A member sees the Time tab when their team role is at or above this level.') }}
+                            </p>
+                            <p style="margin: 0;">
+                                {{ t('teamhub', 'Any team member added to the project (with a row in the grid above) also automatically sees the tab, regardless of their role — being a project participant implies view access.') }}
+                            </p>
+                        </template>
+                        <template #actions>
+                            <NcButton variant="primary" @click="timePermInfoOpen = false">{{ t('teamhub', 'Got it') }}</NcButton>
+                        </template>
+                    </NcDialog>
                 </template>
             </div>
         </div>
@@ -1781,7 +2198,7 @@
                             v-model="enableAppResourceId" />
                     </div>
                 </div>
-                <p style="margin: 12px 0 0; font-size: 12px; color: var(--color-text-maxcontrast);">
+                <p style="margin: 12px 0 0; font-size: var(--th-font-meta); color: var(--color-text-maxcontrast);">
                     {{ t('teamhub', 'Note: connected resources stay shared with the team. If the team is deleted, the resource is deleted too. To preserve the resource, remove the team from its sharing permissions before deleting the team.') }}
                 </p>
             </template>
@@ -1839,6 +2256,7 @@ import ResourcePicker from './ResourcePicker.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
 import GavelIcon from 'vue-material-design-icons/Gavel.vue'
+import BriefcaseIcon from 'vue-material-design-icons/Briefcase.vue'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
 
 // Circles config bitmask constants — canonical values from circlesConfig.js.
@@ -1866,7 +2284,7 @@ export default {
         ArchiveTeamModal,
         ResourcePicker,
         InviteMemberModal,
-        AccountPlusIcon, PencilIcon, PlusIcon, GavelIcon,
+        AccountPlusIcon, PencilIcon, PlusIcon, GavelIcon, BriefcaseIcon,
     },
     props: {
         team: { type: Object, required: true },
@@ -1966,6 +2384,12 @@ export default {
             // matches the backend default so first paint doesn't flicker the
             // toggle off before loadTimelineConfig() resolves.
             timelineEnabled:       true,
+            // Budget integration toggle (v3.92.0) — Advanced projects only.
+            // Row is v-if'd on project.mode === 'advanced'; the flag defaults
+            // true so the toggle off before loadBudgetConfig resolves doesn't
+            // briefly show a Disabled switch.
+            budgetEnabled:         true,
+            savingBudgetConfig:    false,
             savingTimelineConfig:  false,
 
             // Decision categories — Session G
@@ -1986,10 +2410,75 @@ export default {
             milestoneForm:          { label: '', date: '' },
             savingMilestone:        false,
             milestoneFormError:     '',
+            savingProject:          false,
+            // v3.98.1 — Project dates form. Populated from `project` state
+            // on tab enter; two ISO 'YYYY-MM-DD' strings or empty.
+            projectDatesForm:       { startDate: '', targetEnd: '' },
+            savingProjectDates:     false,
+            projectDatesError:      '',
+            // Budget config (v3.92.0, Track E Session 4). budgetCfg is null
+            // until the Project tab loads. lanes' saving flags live on the
+            // lane objects themselves so multiple rows can save independently.
+            loadingBudget:          false,
+            budgetCfg:              null, // { totalMajor, currency, lanes: [{ laneId, stackTitle, allocatedMajor, viewMinLevel, editMinLevel, editors, editorSearch, editorSuggestions, saving }] }
+            savingBudgetTotal:      false,
+            // "?" popup explaining the permission model. Section is a string
+            // marker, kept simple since the dialog body renders all three
+            // sections at once — no per-section state needed.
+            permInfoOpen:           false,
+
+            // Time investment integration toggle (v3.96.0) — same pattern
+            // as budget. Advanced projects only.
+            timeEnabled:            true,
+            savingTimeConfig:       false,
+            // Time config (v3.96.0). Same shape/rhythm as budgetCfg. Members
+            // are auto-populated from the team roster on the backend
+            // (reconcile-on-read), so this UI only sets available-hours per
+            // person; there is no add or remove.
+            loadingTime:            false,
+            timeCfg:                null, // { timeViewMinLevel, members: [{ userId, displayName, availableHours, availableMinutes, loggedMinutes, saving }] }
+            savingTimeCfg:          false,
+            timePermInfoOpen:       false,
         }
     },
     computed: {
-        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled']),
+        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'project', 'projectTabFocus', 'manageTeamDeepLink']),
+
+        /** Ordered PMC phases — must match ProjectService::PHASES on the backend. */
+        projectPhaseOptions() {
+            return [
+                { id: 'initiation', label: t('teamhub', 'Initiation') },
+                { id: 'planning',   label: t('teamhub', 'Planning') },
+                { id: 'execution',  label: t('teamhub', 'Execution') },
+                { id: 'closing',    label: t('teamhub', 'Closing') },
+            ]
+        },
+
+        /**
+         * v3.98.1 — the dates form values differ from what's persisted in
+         * the store's project fact. Drives the Save button disabled state.
+         */
+        projectDatesDirty() {
+            const toIso = ts => (ts && Number.isFinite(ts))
+                ? new Date(ts * 1000).toISOString().slice(0, 10)
+                : ''
+            return this.projectDatesForm.startDate !== toIso(this.project?.startDate)
+                || this.projectDatesForm.targetEnd !== toIso(this.project?.targetEnd)
+        },
+
+        /** Budget config — currency picker options. Must match BudgetService::KNOWN_CURRENCIES. */
+        currencyOptions() {
+            return ['EUR', 'USD', 'GBP', 'CHF', 'JPY', 'DKK', 'SEK', 'NOK', 'CAD', 'AUD']
+        },
+
+        /** Budget config — per-lane view/edit min-level dropdown options. */
+        laneLevelOptions() {
+            return [
+                { value: 1, label: t('teamhub', 'Every member') },
+                { value: 4, label: t('teamhub', 'Moderators + admins') },
+                { value: 8, label: t('teamhub', 'Admins only') },
+            ]
+        },
 
         // Category icon helpers — used by the MDI icon picker and list rendering
         categoryIconList() { return CATEGORY_ICONS },
@@ -2157,8 +2646,14 @@ export default {
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
                 { key: 'messages',     label: t('teamhub', 'Permissions'),  icon: 'MessageIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
-                { key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' },
             ]
+            // Project tab — only for teams created from the Project template.
+            // A project isn't an integration that can be enabled/disabled, so
+            // it gets its own tab rather than living under Integration settings.
+            if (this.project && this.project.isProject) {
+                list.push({ key: 'project', label: t('teamhub', 'Project'), icon: 'BriefcaseIcon' })
+            }
+            list.push({ key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' })
             // Integration settings tab — Decisions config (when the module is
             // enabled) plus Timeline Milestones (always available, gated only
             // by the per-team Timeline toggle inside the tab itself). Unlike
@@ -2297,6 +2792,36 @@ export default {
                 // The activeTab watcher handles the scroll + flag clear.
             }
         },
+        // "Open Project settings" in ProjectPhaseGuide (v3.90.x) — same
+        // deep-link pattern as resourceWarningFocus, but no sub-section to
+        // scroll to, so the flag is cleared right here.
+        projectTabFocus(focused) {
+            if (focused) {
+                this.activeTab = 'project'
+                this.SET_PROJECT_TAB_FOCUS(false)
+            }
+        },
+        // v3.98.0 — Project Compass deep-link. Switch to the requested tab,
+        // then on the next tick scroll to the named section (data-section
+        // anchor). Clears the store payload so subsequent identical clicks
+        // still fire the watcher (nonce on the payload guarantees identity
+        // change even when tab+section are unchanged).
+        manageTeamDeepLink(payload) {
+            if (!payload) return
+            this.activeTab = payload.tab
+            const section = payload.section
+            this.$nextTick(() => {
+                if (section && section !== 'top') {
+                    const el = this.$el.querySelector(`[data-section="${section}"]`)
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        el.classList.add('manage-section--highlight')
+                        setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
+                    }
+                }
+                this.$store.commit('SET_MANAGE_TEAM_DEEP_LINK', null)
+            })
+        },
         activeTab(tab) {
             if (tab === 'danger') {
                 this.loadArchiveStatus()
@@ -2309,6 +2834,8 @@ export default {
                 this.loadPresenceConfig()
                 this.loadDecisionsConfig()
                 this.loadTimelineConfig()
+                this.loadBudgetConfig()
+                this.loadTimeConfig()
             }
             if (tab === 'integration-settings') {
                 // Refresh decisions config and categories when switching to
@@ -2317,7 +2844,16 @@ export default {
                 // v3.71.9 — ensure the approver picker has the full effective
                 // member list (incl. indirect via groups/sub-teams).
                 this.$store.dispatch('fetchAllEffectiveMembers', this.team.id)
+            }
+            if (tab === 'project') {
+                this.loadBudget()
+                this.loadTime()
+                // v3.97.4 — milestone management moved here from Integration Settings.
                 this.loadMilestones()
+                // v3.98.1 — dates form appears here now; hydrate it from
+                // the store's project fact on every enter (project may
+                // have been updated on another tab).
+                this.hydrateProjectDatesForm()
             }
             // If the warning block sent us here with focus flag set, scroll to at-risk section.
             if (tab === 'settings' && this.resourceWarningFocus) {
@@ -2342,6 +2878,29 @@ export default {
             }
         }
         document.addEventListener('click', this._iconPickerOutside)
+
+        // v3.98.1 — pick up a deep-link that was committed to the store
+        // BEFORE this component mounted. That's the common Compass flow:
+        // Compass writes SET_MANAGE_TEAM_DEEP_LINK then emits show-manage-team,
+        // App.vue mounts ManageTeamView, so the watcher on the deep-link
+        // never fires (the value was already there at mount time). Applying
+        // it here in mounted() closes that race.
+        if (this.manageTeamDeepLink) {
+            const payload = this.manageTeamDeepLink
+            this.activeTab = payload.tab
+            const section = payload.section
+            this.$nextTick(() => {
+                if (section && section !== 'top') {
+                    const el = this.$el.querySelector(`[data-section="${section}"]`)
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        el.classList.add('manage-section--highlight')
+                        setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
+                    }
+                }
+                this.$store.commit('SET_MANAGE_TEAM_DEEP_LINK', null)
+            })
+        }
     },
 
     beforeDestroy() {
@@ -2350,7 +2909,7 @@ export default {
     methods: {
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG']),
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT_TAB_FOCUS']),
 
         loadAll() {
             this.loadMembers()
@@ -3126,6 +3685,386 @@ export default {
         },
 
         /**
+         * Budget integration toggle (v3.92.0) — Advanced projects only. Same
+         * NC-app-config-backed pattern as timeline/decisions. Commits into the
+         * store on save so the Budget tab appears/disappears on the team home
+         * without a page reload.
+         */
+        async loadBudgetConfig() {
+            if (!this.team?.id) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/budget/config`)
+                )
+                this.budgetEnabled = !!data.budget_enabled
+                this.SET_BUDGET_CONFIG(data)
+            } catch (err) {
+                // Non-fatal — default of true stays in place.
+            }
+        },
+
+        async setBudgetEnabled(val) {
+            this.savingBudgetConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/budget/config`),
+                    { budget_enabled: val ? 1 : 0 }
+                )
+                this.budgetEnabled = !!data.budget_enabled
+                this.SET_BUDGET_CONFIG(data)
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingBudgetConfig = false
+            }
+        },
+
+        // ── Time investment (v3.96.0, Track E Session 5) ────────────────────
+        // Same NC-app-config-backed toggle pattern as budget/timeline/decisions.
+
+        async loadTimeConfig() {
+            if (!this.team?.id) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/time/config`)
+                )
+                this.timeEnabled = !!data.time_enabled
+                this.SET_TIME_CONFIG(data)
+            } catch (err) {
+                // Non-fatal — default of true stays in place.
+            }
+        },
+
+        async setTimeEnabled(val) {
+            this.savingTimeConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/time/config`),
+                    { time_enabled: val ? 1 : 0 }
+                )
+                this.timeEnabled = !!data.time_enabled
+                this.SET_TIME_CONFIG(data)
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingTimeConfig = false
+            }
+        },
+
+        async loadTime() {
+            if (!this.team?.id || this.project?.mode !== 'advanced') {
+                this.timeCfg = null
+                return
+            }
+            this.loadingTime = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/time`)
+                )
+                this.timeCfg = {
+                    timeViewMinLevel: data.timeViewMinLevel ?? 1,
+                    members: (data.members || []).map(m => ({
+                        userId:           m.userId,
+                        displayName:      m.displayName,
+                        availableMinutes: m.availableMinutes,
+                        availableHours:   m.availableMinutes > 0 ? (m.availableMinutes / 60) : '',
+                        loggedMinutes:    m.loggedMinutes,
+                        saving:           false,
+                    })),
+                }
+            } catch (err) {
+                this.timeCfg = null
+                showError(t('teamhub', 'Failed to load time settings: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.loadingTime = false
+            }
+        },
+
+        async saveTimeConfig() {
+            if (!this.timeCfg) return
+            this.savingTimeCfg = true
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/time`),
+                    { time_view_min_level: this.timeCfg.timeViewMinLevel }
+                )
+                showSuccess(t('teamhub', 'Time settings saved'))
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingTimeCfg = false
+            }
+        },
+
+        async saveTimeMember(m) {
+            m.saving = true
+            const minutes = m.availableHours === '' || m.availableHours === null || !Number.isFinite(Number(m.availableHours))
+                ? 0
+                : Math.max(0, Math.round(Number(m.availableHours) * 60))
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/time/members/${encodeURIComponent(m.userId)}`),
+                    { available_minutes: minutes }
+                )
+                m.availableMinutes = minutes
+                showSuccess(t('teamhub', '{name} saved', { name: m.displayName }))
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                m.saving = false
+            }
+        },
+
+
+        /**
+         * Project Teams (v3.88.0) — upgrade a Basic project to Advanced. The
+         * store action re-commits SET_PROJECT, so the phase stepper on the team
+         * home appears immediately without a reload.
+         */
+        async upgradeProjectToAdvanced() {
+            if (this.savingProject) return
+            this.savingProject = true
+            try {
+                await this.$store.dispatch('saveProjectMode', { mode: 'advanced' })
+                showSuccess(t('teamhub', 'Project upgraded to Advanced'))
+            } catch (err) {
+                const msg = err?.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Failed to upgrade project: {error}', { error: msg })
+                    : t('teamhub', 'Failed to upgrade project'))
+            } finally {
+                this.savingProject = false
+            }
+        },
+
+        /**
+         * v3.98.1 — hydrate the dates form from the store's project fact.
+         * Called on tab enter and when the project state changes underneath.
+         * Converts Unix timestamps (backend) to ISO 'YYYY-MM-DD' (date input).
+         */
+        hydrateProjectDatesForm() {
+            const toIso = ts => (ts && Number.isFinite(ts))
+                ? new Date(ts * 1000).toISOString().slice(0, 10)
+                : ''
+            this.projectDatesForm.startDate = toIso(this.project?.startDate)
+            this.projectDatesForm.targetEnd = toIso(this.project?.targetEnd)
+            this.projectDatesError = ''
+        },
+
+        /**
+         * v3.98.1 — persist the project dates via the existing
+         * ProjectController::save endpoint (mode required, start/target
+         * optional). Reuses the store's saveProjectMode action so
+         * SET_PROJECT re-commits and the Compass refetches.
+         */
+        async saveProjectDates() {
+            if (this.savingProjectDates) return
+            const toTs = iso => {
+                if (!iso) return null
+                // Interpret picker date as UTC midnight to match the
+                // teamhub_project.startDate / targetEnd convention.
+                const t = Date.parse(iso + 'T00:00:00Z')
+                return Number.isFinite(t) ? Math.floor(t / 1000) : null
+            }
+            const startDate = toTs(this.projectDatesForm.startDate)
+            const targetEnd = toTs(this.projectDatesForm.targetEnd)
+
+            // Sanity check: if both set, start must not be after end.
+            if (startDate !== null && targetEnd !== null && startDate > targetEnd) {
+                this.projectDatesError = t('teamhub', 'Target end date must be on or after the start date.')
+                return
+            }
+
+            this.savingProjectDates = true
+            this.projectDatesError = ''
+            try {
+                await this.$store.dispatch('saveProjectMode', {
+                    mode: this.project.mode,
+                    startDate,
+                    targetEnd,
+                })
+                showSuccess(t('teamhub', 'Project dates saved'))
+            } catch (err) {
+                const msg = err?.response?.data?.error
+                this.projectDatesError = msg
+                    ? t('teamhub', 'Failed to save dates: {error}', { error: msg })
+                    : t('teamhub', 'Failed to save project dates')
+                showError(this.projectDatesError)
+            } finally {
+                this.savingProjectDates = false
+            }
+        },
+
+        /**
+         * Project Teams (v3.88.0) — set the lifecycle phase of an advanced
+         * project. No-ops if the phase is unchanged.
+         */
+        async changeProjectPhase(phase) {
+            if (this.savingProject || phase === this.project.phase) return
+            this.savingProject = true
+            try {
+                await this.$store.dispatch('setProjectPhase', phase)
+                showSuccess(t('teamhub', 'Project phase updated'))
+            } catch (err) {
+                const msg = err?.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Failed to update phase: {error}', { error: msg })
+                    : t('teamhub', 'Failed to update phase'))
+            } finally {
+                this.savingProject = false
+            }
+        },
+
+        /**
+         * Budget config (v3.92.0, Track E Session 4) — fetch the project's
+         * budget envelope and hydrate `budgetCfg` for the Project tab. Server
+         * returns minor units; convert to major (2-decimal) for the UI. Admin
+         * sees every lane (viewMinLevel gate doesn't apply to them).
+         */
+        async loadBudget() {
+            if (!this.team?.id || this.project?.mode !== 'advanced') {
+                this.budgetCfg = null
+                return
+            }
+            this.loadingBudget = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/budget`)
+                )
+                this.budgetCfg = {
+                    totalMajor:          data.totalMinor !== null ? data.totalMinor / 100 : '',
+                    currency:            data.currency || '',
+                    budgetViewMinLevel:  data.budgetViewMinLevel ?? 1,
+                    lanes:               (data.lanes || []).map(lane => ({
+                        laneId:            lane.laneId,
+                        stackTitle:        lane.stackTitle,
+                        allocatedMajor:    lane.allocatedMinor !== null ? lane.allocatedMinor / 100 : '',
+                        editMinLevel:      lane.editMinLevel,
+                        editors:           Array.isArray(lane.editors) ? [...lane.editors] : [],
+                        editorSearch:      '',
+                        editorSuggestions: [],
+                        editorSearchTimer: null,
+                        saving:            false,
+                    })),
+                }
+            } catch (err) {
+                showError(t('teamhub', 'Could not load budget settings'))
+                this.budgetCfg = null
+            } finally {
+                this.loadingBudget = false
+            }
+        },
+
+        parseMinor(value) {
+            if (value === '' || value === null || value === undefined) return null
+            const n = Number(value)
+            if (!Number.isFinite(n) || n < 0) return null
+            return Math.round(n * 100)
+        },
+
+        async saveBudgetTotal() {
+            if (!this.budgetCfg || this.savingBudgetTotal) return
+            this.savingBudgetTotal = true
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/budget`),
+                    {
+                        total_minor:            this.parseMinor(this.budgetCfg.totalMajor),
+                        currency:               this.budgetCfg.currency || null,
+                        budget_view_min_level:  this.budgetCfg.budgetViewMinLevel,
+                    }
+                )
+                showSuccess(t('teamhub', 'Budget settings saved'))
+            } catch (err) {
+                const msg = err?.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Could not save: {error}', { error: msg })
+                    : t('teamhub', 'Could not save'))
+            } finally {
+                this.savingBudgetTotal = false
+            }
+        },
+
+        async saveBudgetLane(lane) {
+            if (lane.saving) return
+            lane.saving = true
+            try {
+                await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/budget/lanes/${lane.laneId}`),
+                    {
+                        allocated_minor: this.parseMinor(lane.allocatedMajor),
+                        edit_min_level:  lane.editMinLevel,
+                        editor_uids:     lane.editors.map(e => e.uid),
+                    }
+                )
+                showSuccess(t('teamhub', 'Workstream saved'))
+            } catch (err) {
+                const msg = err?.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Could not save workstream: {error}', { error: msg })
+                    : t('teamhub', 'Could not save workstream'))
+            } finally {
+                lane.saving = false
+            }
+        },
+
+        /**
+         * Additional-editors picker per lane. Uses the same direct-member list
+         * as the owner search — non-members can't be additional editors
+         * because the lane's underlying team-membership check would then fail
+         * server-side anyway. Local state (editorSearch / editorSuggestions /
+         * editorSearchTimer) lives on the lane object.
+         */
+        onEditorSearchInput(lane) {
+            clearTimeout(lane.editorSearchTimer)
+            lane.editorSearchTimer = setTimeout(() => {
+                const q = (lane.editorSearch || '').trim().toLowerCase()
+                if (q.length < 1) {
+                    lane.editorSuggestions = []
+                    return
+                }
+                const already = new Set(lane.editors.map(e => e.uid))
+                lane.editorSuggestions = this.manageMembers.direct
+                    .filter(m => m.userId && !already.has(m.userId))
+                    .filter(m => {
+                        const name = (m.displayName || '').toLowerCase()
+                        const uid  = (m.userId || '').toLowerCase()
+                        return name.includes(q) || uid.includes(q)
+                    })
+                    .slice(0, 8)
+                    .map(m => ({
+                        uid:         m.userId,
+                        displayName: m.displayName || m.userId,
+                    }))
+            }, 200)
+        },
+
+        addEditor(lane, suggestion) {
+            if (lane.editors.some(e => e.uid === suggestion.uid)) return
+            lane.editors.push({ uid: suggestion.uid, displayName: suggestion.displayName })
+            lane.editorSearch = ''
+            lane.editorSuggestions = []
+        },
+
+        removeEditor(lane, uid) {
+            lane.editors = lane.editors.filter(e => e.uid !== uid)
+        },
+
+        showPermInfo() {
+            this.permInfoOpen = true
+        },
+
+        /**
          * Timeline Milestones (v3.78.2) — admin-managed marker lines shown
          * on the Timeline tab. CRUD mirrors the decision-categories pattern
          * (loadX / startCreateX / startEditX / cancelEditX / saveX /
@@ -3764,7 +4703,7 @@ export default {
     border-bottom: 2px solid transparent;
     background: transparent;
     color: var(--color-text-maxcontrast);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     cursor: pointer;
     border-radius: var(--border-radius-large) var(--border-radius-large) 0 0;
@@ -3784,8 +4723,11 @@ export default {
     background: transparent;
 }
 
+/* v3.100.14: hover feedback on the already-active tab — the active
+   state is carried by the primary-coloured text + underline. Neutral
+   hover feedback per SKILLS.md (was a 6% color-mix soft tint). */
 .manage-tab--active:hover {
-    background: color-mix(in srgb, var(--color-primary-element) 6%, transparent);
+    background: var(--color-background-hover);
 }
 
 /* Danger tab styling */
@@ -3839,6 +4781,246 @@ export default {
     padding: 12px 0;
 }
 
+/* Project block — phase selector */
+.teamhub-project__label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.teamhub-project__select {
+    min-width: 220px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+}
+/* v3.98.1 — Project dates form. Two date inputs stacked, then Save. */
+.teamhub-project__dates {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 8px 12px;
+    align-items: center;
+    max-width: 480px;
+    margin: 8px 0 12px;
+}
+.teamhub-project__dates .teamhub-project__label {
+    margin-bottom: 0;
+}
+.teamhub-project__date-input {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+    min-width: 200px;
+}
+.teamhub-project__date-input:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+.teamhub-project__dates-actions {
+    margin-top: 4px;
+}
+.teamhub-project__dates-error {
+    margin-top: 8px;
+    color: var(--color-error-text);
+    background: var(--color-error);
+    padding: 6px 10px;
+    border-radius: var(--border-radius);
+    font-size: var(--th-font-meta);
+}
+
+.teamhub-project__select:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+
+/* Budget config — v3.92.0 */
+.teamhub-budget-cfg__status {
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+}
+.teamhub-budget-cfg__totals {
+    display: flex;
+    gap: 16px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.teamhub-budget-cfg__label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.teamhub-budget-cfg__input,
+.teamhub-budget-cfg__select {
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius);
+    background: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: 13px;
+    min-width: 160px;
+}
+.teamhub-budget-cfg__input--narrow {
+    min-width: 100px;
+    width: 120px;
+}
+.teamhub-budget-cfg__input:focus-visible,
+.teamhub-budget-cfg__select:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+.teamhub-budget-cfg__lanes {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+.teamhub-budget-cfg__lanes th,
+.teamhub-budget-cfg__lanes td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 13px;
+    vertical-align: middle;
+}
+.teamhub-budget-cfg__lanes th {
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+    text-transform: uppercase;
+    font-size: var(--th-font-micro);
+    letter-spacing: 0.4px;
+}
+.teamhub-budget-cfg__lanes .hidden-visually {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Editors picker */
+/* Header row inside a flex-column label — text + `?` inline, so the `?`
+   sits next to the label, not on its own line under it. */
+.teamhub-budget-cfg__label-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.teamhub-budget-cfg__help {
+    /* SKILLS.md "UI shapes: circles, not ellipses" — mirrors the phase-stepper
+       info button pattern from v3.90.0. `min-width` alone is NOT enough;
+       NC's global button reset also applies min-height (44px touch target),
+       and the button can flex-grow inside a header cell. The three-lock is:
+         box-sizing: border-box  — border doesn't bleed the target size
+         width + min-width + max-width  — horizontal size pinned
+         height + min-height + max-height  — vertical size pinned
+         flex: 0 0 auto  — no flex-grow inside a flex container
+         padding: 0     — no content-driven inflation
+       Without max-height, the button was still rendering as an oval on the
+       manage tab, hence 3.94.2. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    max-width: 18px;
+    max-height: 18px;
+    padding: 0;
+    margin: 0 0 0 4px;
+    border: 1px solid var(--color-border-dark);
+    border-radius: 50%;
+    background: var(--color-main-background);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-micro);
+    line-height: 1;
+    cursor: pointer;
+}
+.teamhub-budget-cfg__help:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 1px;
+}
+.teamhub-budget-cfg__editors {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 200px;
+}
+.teamhub-budget-cfg__editor-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: var(--color-background-hover);
+    border-radius: 12px;
+    font-size: var(--th-font-meta);
+    color: var(--color-main-text);
+}
+/* v3.100.14: was a text × button; the button now hosts an MDI Close
+   icon sized via the :size prop, so the font-size rule is dropped. */
+.teamhub-budget-cfg__editor-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px; height: 16px;
+    background: transparent;
+    border: none;
+    color: var(--color-text-maxcontrast);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.teamhub-budget-cfg__editor-remove:hover {
+    color: var(--color-error-text);
+}
+.teamhub-budget-cfg__editor-picker {
+    position: relative;
+    flex: 1 0 100%;
+    margin-top: 4px;
+}
+.teamhub-budget-cfg__editor-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    background: var(--color-main-background);
+    border: 1px solid var(--color-border-dark);
+    border-radius: var(--border-radius, 4px);
+    margin: 2px 0 0;
+    padding: 0;
+    list-style: none;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.teamhub-budget-cfg__editor-suggestion {
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+.teamhub-budget-cfg__editor-suggestion:hover,
+.teamhub-budget-cfg__editor-suggestion:focus {
+    background: var(--color-background-hover);
+}
+.teamhub-budget-cfg__editor-suggestion-uid {
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-micro);
+}
+
 /* Description */
 .manage-description-form {
     display: flex;
@@ -3862,7 +5044,7 @@ export default {
     gap: 4px;
 }
 .manage-settings-group h4 {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -3902,7 +5084,7 @@ export default {
     border-radius: var(--border-radius-large);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-family: inherit;
     cursor: pointer;
 }
@@ -3931,7 +5113,7 @@ export default {
     background: var(--color-background-dark);
 }
 .team-app-section-title {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -3946,7 +5128,10 @@ export default {
     width: 36px;
     height: 36px;
     border-radius: var(--border-radius);
-    background: var(--color-primary-element-light);
+    /* v3.100.14: neutral surface for the decorative app-icon tile
+       (the primary-coloured MDI glyph inside is the accent). Was
+       --color-primary-element-light — a state token per SKILLS.md. */
+    background: var(--color-background-dark);
     color: var(--color-primary-element);
     flex-shrink: 0;
 }
@@ -3958,20 +5143,25 @@ export default {
     min-width: 0;
 }
 .team-app-name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
 }
 .team-app-desc {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
-/* At-risk resource panel */
+/* At-risk resource panel
+   v3.100.14: full-saturation error panel per SKILLS.md § "State-coloured
+   backgrounds" (was 8% color-mix soft tints on both panel variants and
+   a 12% color-mix on the header). Inner rows now use --color-error-text
+   for the border separator and text so they read cleanly on the fill. */
 .manage-section--atrisk {
     border: 1px solid var(--color-error);
     border-radius: var(--border-radius-large);
     padding: 12px 16px;
-    background: color-mix(in srgb, var(--color-error) 8%, transparent);
+    background: var(--color-error);
+    color: var(--color-error-text);
     transition: box-shadow 0.3s ease;
 }
 /* Inline variant — inside team-apps-list, styled as a section item */
@@ -3980,26 +5170,29 @@ export default {
     border-radius: var(--border-radius-large);
     margin-bottom: 10px;
     overflow: hidden;
-    background: color-mix(in srgb, var(--color-error) 8%, transparent);
+    background: var(--color-error);
+    color: var(--color-error-text);
 }
 .team-app-section__header--warning {
-    background: color-mix(in srgb, var(--color-error) 12%, var(--color-background-dark));
-    color: var(--color-main-text);
+    background: var(--color-error);
+    color: var(--color-error-text);
 }
 .team-app-section__header--warning span[aria-hidden] {
     color: var(--color-error-text);
 }
 .atrisk-resource-item--inline {
-    border-top: 1px solid color-mix(in srgb, var(--color-error) 25%, transparent);
+    border-top: 1px solid var(--color-error-text);
     padding: 8px 14px;
     background: transparent;
 }
 .atrisk-resource-item--inline .atrisk-resource-name {
-    color: var(--color-main-text);
+    color: var(--color-error-text);
 }
 .atrisk-resource-item--inline .atrisk-resource-reason {
     color: var(--color-error-text);
 }
+/* Highlight ring — deliberate soft focus glow via color-mix; kept per
+   SKILLS.md (focus indicators are not state backgrounds). */
 .manage-section--atrisk.manage-section--highlight,
 .manage-section--atrisk-inline.manage-section--highlight {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-error) 40%, transparent);
@@ -4035,37 +5228,41 @@ export default {
     color: var(--color-main-text);
 }
 .atrisk-resource-reason {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-error-text);
 }
 
-/* Pending / ignored resource panels */
+/* Pending / ignored resource panels
+   v3.100.14: full-saturation state per SKILLS.md (were 6-8% color-mix). */
 .manage-section--pending {
     border: 1px solid var(--color-warning);
     border-radius: var(--border-radius-large);
     padding: 12px 16px;
-    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+    background: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 /* Inline variant — inside team-apps-list, above app rows */
 .manage-section--pending-inline {
     margin-bottom: 4px;
     border-color: var(--color-info);
-    background: color-mix(in srgb, var(--color-info) 6%, transparent);
+    background: var(--color-info);
+    color: var(--color-info-text);
 }
 
 .manage-section--pending-inline .team-app-section__header--info {
     color: var(--color-info-text);
 }
 
-/* Dual-folder migration notice */
+/* Dual-folder migration notice — informational, full-saturation primary. */
 .dual-folder-notice {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 10px 12px;
     margin-bottom: 8px;
-    background: color-mix(in srgb, var(--color-primary-element) 8%, transparent);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     border: 1px solid var(--color-primary-element);
     border-radius: var(--border-radius);
 }
@@ -4131,7 +5328,7 @@ export default {
     font-weight: 500;
 }
 .pending-resource-name {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4207,22 +5404,26 @@ export default {
 }
 .resource-type-badge {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     padding: 2px 7px;
     border-radius: 10px;
     margin: 0 8px;
     white-space: nowrap;
 }
+/* v3.100.14: full-saturation resource-type badges per SKILLS.md
+   (were 10-30% color-mix soft tints on fill + border). --shared uses
+   the neutral --color-background-dark surface because it's a neutral
+   "shared" type indicator, not a state colour. */
 .resource-type-badge--gf {
-    background: color-mix(in srgb, var(--color-primary-element) 12%, transparent);
-    color: var(--color-primary-element-text, var(--color-primary-element));
-    border: 1px solid color-mix(in srgb, var(--color-primary-element) 30%, transparent);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    border: 1px solid var(--color-primary-element);
 }
 .resource-type-badge--shared {
-    background: color-mix(in srgb, var(--color-text-maxcontrast) 10%, transparent);
+    background: var(--color-background-dark);
     color: var(--color-text-maxcontrast);
-    border: 1px solid color-mix(in srgb, var(--color-text-maxcontrast) 25%, transparent);
+    border: 1px solid var(--color-border-dark);
 }
 .resource-row__empty-label {
     flex: 1;
@@ -4258,7 +5459,7 @@ export default {
 }
 .delete-resource-confirm p {
     margin-bottom: 16px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     line-height: 1.5;
     color: var(--color-main-text);
 }
@@ -4284,7 +5485,7 @@ export default {
     background: var(--color-background-hover);
     cursor: pointer;
     text-align: left;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     color: var(--color-main-text);
 }
 .teamhub-resource-picker__item:hover {
@@ -4303,7 +5504,7 @@ export default {
 
 .teamhub-resource-picker__badge {
     flex-shrink: 0;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 10px;
@@ -4311,8 +5512,10 @@ export default {
     white-space: nowrap;
 }
 
+/* v3.100.14: group-folder badge is a state indicator — full saturation
+   per SKILLS.md (was --color-primary-element-light). */
 .teamhub-resource-picker__badge--gf {
-    background-color: var(--color-primary-element-light);
+    background-color: var(--color-primary-element);
     color: var(--color-primary-element-text);
 }
 
@@ -4344,7 +5547,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -4354,7 +5557,7 @@ export default {
     flex-direction: column;
 }
 .member-name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
 }
 .member-level-select {
@@ -4380,7 +5583,7 @@ export default {
 
 /* Pending requests */
 .no-pending {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     color: var(--color-text-maxcontrast);
 }
 .pending-list {
@@ -4402,11 +5605,11 @@ export default {
     flex-direction: column;
 }
 .pending-name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
 }
 .pending-date {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 .pending-actions {
@@ -4429,8 +5632,12 @@ export default {
     background: var(--color-background-dark);
     transition: background 0.15s ease;
 }
+/* v3.100.14: dropped the 6% primary tint. The enabled/disabled state
+   is already communicated by the toggle switch in the row, so the row
+   background is just visual separation (neutral --color-background-dark
+   per SKILLS.md § "State-coloured backgrounds"). */
 .widget-item--enabled {
-    background: color-mix(in srgb, var(--color-primary-element) 6%, var(--color-background-dark));
+    background: var(--color-background-dark);
 }
 .widget-drag-handle {
     display: flex;
@@ -4457,21 +5664,21 @@ export default {
     min-width: 0;
 }
 .widget-title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .widget-description {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .widget-app-id {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     font-family: monospace;
     opacity: 0.7;
@@ -4487,16 +5694,18 @@ export default {
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
+/* v3.100.14: full-saturation category badges per SKILLS.md
+   (were 15% color-mix soft tints). */
 .widget-badge--widget {
-    background: color-mix(in srgb, var(--color-primary-element) 15%, transparent);
-    color: var(--color-primary-element);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
 }
 .widget-badge--tab {
-    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    background: var(--color-success);
     color: var(--color-success-text);
 }
 .widget-badge--internal {
-    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    background: var(--color-warning);
     color: var(--color-warning-text);
 }
 
@@ -4528,13 +5737,17 @@ export default {
     font-size: 0.9em;
 }
 
-/* Danger zone */
+/* Danger zone — a large panel; the 3px error border-left and the
+   error-text heading carry the "danger" signal so the background stays
+   neutral (v3.100.14: was a 5% color-mix soft tint; SKILLS.md permits
+   neutral surfaces where the state is already communicated by another
+   channel — here the border and heading). */
 .manage-section--danger {
     border: 1px solid var(--color-border);
     border-left: 3px solid var(--color-error);
     border-radius: var(--border-radius-large);
     padding: 20px 24px;
-    background: color-mix(in srgb, var(--color-error) 5%, transparent);
+    background: var(--color-main-background);
 }
 .manage-section--danger h3 {
     color: var(--color-error-text);
@@ -4553,7 +5766,7 @@ export default {
     flex: 1;
 }
 .manage-danger-title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
 }
 .manage-danger-desc {
@@ -4572,31 +5785,34 @@ export default {
     margin-bottom: 16px;
 }
 
+/* v3.100.16: full-saturation state notices per SKILLS.md
+   (was raw hex — #fff8e1/#f9a825/#3e2a00 for pending, #ffebee/#c62828
+   /#7f0000 for failed — none of which followed the dark theme). */
 .manage-archive-notice--pending {
-    background: #fff8e1;
-    border: 2px solid #f9a825;
-    color: #3e2a00;
+    background: var(--color-warning);
+    border: 2px solid var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .manage-archive-notice--pending strong {
-    color: #3e2a00;
-    font-size: 14px;
+    color: var(--color-warning-text);
+    font-size: var(--th-font-body);
 }
 
 .manage-archive-notice--failed {
-    background: #ffebee;
-    border: 2px solid #c62828;
-    color: #7f0000;
+    background: var(--color-error);
+    border: 2px solid var(--color-error);
+    color: var(--color-error-text);
 }
 
 .manage-archive-notice--failed strong {
-    color: #7f0000;
-    font-size: 14px;
+    color: var(--color-error-text);
+    font-size: var(--th-font-body);
 }
 
 .manage-archive-notice__reason {
     font-family: monospace;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     background: rgba(0, 0, 0, 0.07);
     border-radius: 3px;
     padding: 4px 6px;
@@ -4665,7 +5881,7 @@ export default {
     border-radius: var(--border-radius);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     box-sizing: border-box;
 }
 
@@ -4710,13 +5926,13 @@ export default {
 }
 
 .manage-owner-suggestion__name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     flex: 1;
 }
 
 .manage-owner-suggestion__uid {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -4732,7 +5948,7 @@ export default {
 }
 
 .manage-owner-selected__name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     flex: 1;
 }
@@ -4771,7 +5987,7 @@ export default {
     margin-top: 16px;
 }
 .group-circle-section-label {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -4795,12 +6011,15 @@ export default {
     border-radius: var(--border-radius);
     flex-shrink: 0;
 }
+/* v3.100.14: decorative avatar tiles — the icon carries the group vs
+   circle accent. Neutral surface per SKILLS.md § "State-coloured
+   backgrounds" (were 18-22% color-mix soft tints). */
 .group-circle-icon--group {
-    background: color-mix(in srgb, var(--color-primary-element) 18%, transparent);
+    background: var(--color-background-dark);
     color: var(--color-primary-element);
 }
 .group-circle-icon--circle {
-    background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+    background: var(--color-background-dark);
     color: var(--color-warning-text);
 }
 .group-circle-info {
@@ -4811,14 +6030,14 @@ export default {
     min-width: 0;
 }
 .group-circle-name {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .group-circle-count {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -4832,7 +6051,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     cursor: pointer;
 }
 .enable-app-mode input[type="radio"] {
@@ -4844,24 +6063,27 @@ export default {
     margin-top: 4px;
     max-width: 360px;
 }
-/* Connected-resource deletion warning under "Delete team" */
+/* Connected-resource deletion warning under "Delete team"
+   v3.100.14: full-saturation warning per SKILLS.md § "State-coloured
+   backgrounds" (was --color-warning-hover — a hover token used as state
+   bg, which washed the banner out against the canvas). */
 .manage-danger-warning {
     display: flex;
     align-items: flex-start;
     gap: 8px;
     margin-top: 8px;
     padding: 8px 10px;
-    border-left: 3px solid var(--color-warning, #c89b00);
-    background: var(--color-warning-hover, rgba(200, 155, 0, 0.08));
-    border-radius: 0 var(--border-radius, 4px) var(--border-radius, 4px) 0;
-    font-size: 12px;
+    border-left: 3px solid var(--color-warning);
+    background: var(--color-warning);
+    border-radius: 0 var(--border-radius) var(--border-radius) 0;
+    font-size: var(--th-font-meta);
     line-height: 1.4;
-    color: var(--color-main-text);
+    color: var(--color-warning-text);
 }
 .manage-danger-warning :first-child {
     flex-shrink: 0;
     margin-top: 1px;
-    color: var(--color-warning-text, #7a5900);
+    color: var(--color-warning-text);
 }
 
 /* Message settings tab */
@@ -4964,7 +6186,7 @@ export default {
 }
 
 .teamhub-dec-cats__row-icon {
-    font-size: 20px;
+    font-size: var(--th-font-heading-lg);
     line-height: 1;
     flex-shrink: 0;
 }
@@ -4984,7 +6206,7 @@ export default {
 }
 
 .teamhub-dec-cats__row-desc {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4992,7 +6214,7 @@ export default {
 }
 
 .teamhub-dec-cats__row-approvers {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -5049,7 +6271,7 @@ export default {
 }
 .teamhub-dec-cats__icon-btn:hover { border-color: var(--color-primary-element); }
 .teamhub-dec-cats__icon-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 2px; }
-.teamhub-dec-cats__icon-btn-placeholder { color: var(--color-text-maxcontrast); font-size: 16px; }
+.teamhub-dec-cats__icon-btn-placeholder { color: var(--color-text-maxcontrast); font-size: var(--th-font-heading); }
 
 /* Icon picker wrap — anchor for the popover and target for click-outside detection */
 .teamhub-dec-cats__icon-picker-wrap { position: relative; }
@@ -5079,13 +6301,13 @@ export default {
 .manage-section__row-info { flex: 1; min-width: 0; }
 .manage-section__row-title {
     display: block;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
 }
 .manage-section__row-desc {
     display: block;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin-top: 2px;
 }
@@ -5122,7 +6344,7 @@ export default {
     border-radius: var(--border-radius);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     outline: none;
 }
 .teamhub-dec-cats__icon-search:focus {
@@ -5131,7 +6353,7 @@ export default {
 
 .teamhub-dec-cats__icon-clear-btn {
     padding: 0 10px;
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     background: transparent;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius);
@@ -5173,7 +6395,7 @@ export default {
 .teamhub-dec-cats__icon-no-results {
     text-align: center;
     color: var(--color-text-maxcontrast);
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     padding: 20px 0;
 }
 
@@ -5192,8 +6414,11 @@ export default {
 }
 .teamhub-dec-cats__icon-grid-btn:hover { background: var(--color-background-hover); }
 .teamhub-dec-cats__icon-grid-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
+/* v3.100.14: full-saturation selected state per SKILLS.md
+   (was a 14% color-mix soft tint). */
 .teamhub-dec-cats__icon-grid-btn--selected {
-    background: color-mix(in srgb, var(--color-primary-element) 14%, transparent);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     border-color: var(--color-primary-element);
 }
 
@@ -5205,14 +6430,14 @@ export default {
 }
 
 .teamhub-dec-cats__edit-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
     margin: 0;
 }
 
 .teamhub-dec-cats__edit-hint {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     font-style: italic;
     margin: -4px 0 0 0;
@@ -5241,7 +6466,7 @@ export default {
 }
 
 .teamhub-dec-cats__edit-error {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-error-text);
     margin: 0;
 }
@@ -5303,13 +6528,14 @@ export default {
 }
 
 .teamhub-milestones__row-date {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
     white-space: nowrap;
 }
+/* v3.100.16: NC theme token (was --th-color-warning hex). */
 .teamhub-milestones__row-date--unset {
-    color: var(--th-color-warning);
+    color: var(--color-warning-text);
 }
 
 .teamhub-milestones__row-actions {
@@ -5330,7 +6556,7 @@ export default {
 }
 
 .teamhub-milestones__edit-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
     margin: 0;
@@ -5358,7 +6584,7 @@ export default {
 }
 
 .teamhub-milestones__edit-error {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-error-text);
     margin: 0;
 }

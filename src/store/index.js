@@ -50,10 +50,49 @@ export default createStore({
         decisionsConfig: { decisions_enabled: false, decisions_level_enabled: false, decisions_action_min_level: 1 },
         decisionsModuleEnabled: false,
         decisionsTargetMessageId: null, // set by widget/stream to highlight a decision in the tab
+        // v3.99.8 — when set, TeamDecisionsView skips the landing view and
+        // opens the "All decisions" list with this status filter pre-
+        // applied. Dispatched by ProjectHealthWidget when a user clicks
+        // "Open Decisions" so the click lands on the pressing subset
+        // (Awaits approval) instead of the generic landing page.
+        // Consumers MUST clear it (SET_DECISIONS_PRESELECT_STATUS(null))
+        // after honoring it, so a later back-navigation shows landing.
+        decisionsPreselectStatus: null,
         // Timeline integration: per-team toggle, default enabled. Mirrors the
         // decisionsConfig shape so consumers can guard the Timeline tab the
         // same way they guard the Decisions tab.
         timelineConfig: { timeline_enabled: true },
+        // Budget integration (v3.92.0): per-team toggle, default enabled.
+        // Only surfaced in the UI for Advanced projects, but the store shape
+        // is universal so consumers can guard the Budget tab consistently.
+        budgetConfig: { budget_enabled: true, can_view_budget: false },
+        // Time investment integration (v3.96.0): mirrors budgetConfig. Same
+        // universal shape so TeamView's tab-gating watcher pattern applies
+        // uniformly. can_view_time is precomputed server-side (level ≥ floor
+        // OR user is a named project participant).
+        timeConfig: { time_enabled: true, can_view_time: false },
+        // Project Teams (v3.88.0): persisted project-ness for teams created from
+        // the Project template. Delivered in the layout bundle (SET_PROJECT).
+        // isProject=false for non-project teams. mode: 'basic'|'advanced';
+        // phase (advanced only): initiation|planning|execution|closing.
+        project: { isProject: false, mode: null, phase: null, startDate: null, targetEnd: null },
+        // Project-owner onboarding (v3.90.x): set by CreateTeamView right after an
+        // Advanced project team is persisted; read once by TeamView on first open
+        // of that exact team to auto-show ProjectPhaseGuide, then cleared — a
+        // one-shot in-memory signal, deliberately not persisted anywhere.
+        justCreatedAdvancedProjectTeamId: null,
+        // Same deep-link-to-a-tab pattern as resourceWarningFocus, for "Open
+        // Project settings" in ProjectPhaseGuide — ManageTeamView watches this to
+        // jump straight to the Project tab.
+        projectTabFocus: false,
+        // v3.98.0 — Project Compass deep-link target. Set by any component that
+        // wants to route the user into Manage Team at a specific tab + section
+        // (e.g. Compass items linking to project/milestones or project/budget).
+        // Shape: { tab: string, section: string, nonce: number } | null.
+        // The nonce forces the watcher to re-fire even when tab+section are
+        // unchanged (a user might click the same link twice). Consumers set
+        // back to null after acting to keep the mutation single-shot.
+        manageTeamDeepLink: null,
         loading: {
             teams: false,
             messages: false,
@@ -246,8 +285,20 @@ export default createStore({
         SET_PRESENCE_MODULE_ENABLED(state, val) { state.presenceModuleEnabled = val },
         SET_DECISIONS_CONFIG(state, config) { state.decisionsConfig = config },
         SET_TIMELINE_CONFIG(state, config) { state.timelineConfig = config },
+        SET_BUDGET_CONFIG(state, config) { state.budgetConfig = config },
+        SET_TIME_CONFIG(state, config) { state.timeConfig = config },
+        SET_PROJECT(state, project) { state.project = project },
+        SET_JUST_CREATED_ADVANCED_PROJECT(state, teamId) { state.justCreatedAdvancedProjectTeamId = teamId },
+        SET_PROJECT_TAB_FOCUS(state, value) { state.projectTabFocus = value },
+        // v3.98.0 — Project Compass deep-link. Payload: { tab, section } or null.
+        SET_MANAGE_TEAM_DEEP_LINK(state, payload) {
+            state.manageTeamDeepLink = payload
+                ? { tab: payload.tab, section: payload.section || null, nonce: Date.now() }
+                : null
+        },
         SET_DECISIONS_MODULE_ENABLED(state, val) { state.decisionsModuleEnabled = val },
         SET_DECISIONS_TARGET(state, messageId) { state.decisionsTargetMessageId = messageId },
+        SET_DECISIONS_PRESELECT_STATUS(state, val) { state.decisionsPreselectStatus = val },
         SET_LOADING(state, { key, value }) { state.loading[key] = value }, // Vue 3: direct assignment is reactive
         SET_ERROR(state, error) { state.error = error },
         SET_INTRAVOX_AVAILABLE(state, value) { state.intravoxAvailable = value },
@@ -308,6 +359,9 @@ export default createStore({
             commit('SET_WEB_LINKS', [])
             commit('SET_TEAM_WIDGETS', [])
             commit('SET_TEAM_MENU_ITEMS', [])
+            // Reset project fact so a previous team's stepper never flashes before
+            // the layout bundle for the newly selected team arrives.
+            commit('SET_PROJECT', { isProject: false, mode: null, phase: null, startDate: null, targetEnd: null })
 
             // Mark seen immediately (optimistic) + fire-and-forget to backend
             commit('MARK_TEAM_SEEN', teamId)
@@ -322,6 +376,28 @@ export default createStore({
                 dispatch('fetchTeamIntegrations', teamId),
                 dispatch('fetchMessageSettings', teamId),
             ])
+        },
+
+        // ── Project Teams (v3.88.0) ─────────────────────────────────────────
+        // The project fact arrives with the layout bundle (SET_PROJECT). These
+        // actions mutate it (admin-gated server-side) and re-commit the result.
+
+        async saveProjectMode({ commit, state }, { mode, startDate = null, targetEnd = null }) {
+            const { data } = await axios.put(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/project`),
+                { mode, start_date: startDate, target_end: targetEnd }
+            )
+            commit('SET_PROJECT', data)
+            return data
+        },
+
+        async setProjectPhase({ commit, state }, phase) {
+            const { data } = await axios.put(
+                generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/project/phase`),
+                { phase }
+            )
+            commit('SET_PROJECT', data)
+            return data
         },
 
         async fetchMessages({ commit, state }, { teamId, page } = {}) {

@@ -71,7 +71,12 @@
                         <EarthArrowRight v-else-if="u.type === 'federated'" :size="16" />
                         <NcAvatar v-else :user="u.id" :display-name="u.label" :size="20" :disable-menu="true" />
                         {{ u.label }}
-                        <button class="invite-modal__chip-remove" @click="removeStaged(u)">×</button>
+                        <button
+                            class="invite-modal__chip-remove"
+                            :aria-label="t('teamhub', 'Remove {name}', { name: u.label })"
+                            @click="removeStaged(u)">
+                            <Close :size="14" />
+                        </button>
                     </span>
                 </div>
             </div>
@@ -108,10 +113,13 @@ import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 import EarthArrowRight from 'vue-material-design-icons/EarthArrowRight.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
+// v3.100.14: MDI icon for the chip remove button — replaces the ×
+// multiplication-sign character (gui.md § 13).
+import Close from 'vue-material-design-icons/Close.vue'
 
 export default {
     name: 'InviteMemberModal',
-    components: { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, AccountPlus, AccountGroup, AccountMultiple, EmailOutline, EarthArrowRight, Plus },
+    components: { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, AccountPlus, AccountGroup, AccountMultiple, EmailOutline, EarthArrowRight, Plus, Close },
     props: {
         teamId: { type: String, required: true },
     },
@@ -270,11 +278,15 @@ export default {
     justify-content: center;
 }
 
+/* v3.100.14: neutral surface — these avatars are decorative
+   placeholders where a user photo would sit. The primary-coloured
+   icon inside carries the accent. Was --color-primary-element-light,
+   a state token that SKILLS.md reserves for actual state indication. */
 .invite-modal__result-avatar--group,
 .invite-modal__result-avatar--circle,
 .invite-modal__result-avatar--email,
 .invite-modal__result-avatar--federated {
-    background: var(--color-primary-element-light);
+    background: var(--color-background-dark);
     border-radius: 50%;
     color: var(--color-primary-element);
 }
@@ -288,14 +300,14 @@ export default {
 
 .invite-modal__result-name {
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--th-font-body);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .invite-modal__result-id {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -320,7 +332,7 @@ export default {
 
 .invite-modal__empty-hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     line-height: 1.4;
     color: var(--color-text-maxcontrast);
 }
@@ -338,7 +350,7 @@ export default {
 }
 
 .invite-modal__staged-label {
-    font-size: 12px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
     text-transform: uppercase;
@@ -351,26 +363,33 @@ export default {
     gap: 6px;
 }
 
+/* v3.100.14: chip is a selected-invitee state indicator — full
+   saturation per SKILLS.md (was --color-primary-element-light). */
 .invite-modal__chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 4px 8px 4px 6px;
-    background: var(--color-primary-element-light);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
     border: 1px solid var(--color-primary-element);
     border-radius: var(--border-radius-pill);
     font-size: 13px;
     font-weight: 500;
 }
 
+/* v3.100.14: was a text × button; now hosts an MDI Close icon.
+   font-size no longer needed (icon sized via :size prop). */
 .invite-modal__chip-remove {
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 16px;
     line-height: 1;
-    color: var(--color-text-maxcontrast);
+    color: var(--color-primary-element-text);
     padding: 0 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .invite-modal__chip-remove:hover {

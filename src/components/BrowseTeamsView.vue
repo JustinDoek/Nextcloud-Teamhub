@@ -299,7 +299,7 @@ export default {
 
 .browse-teams-subtitle {
     color: var(--color-text-maxcontrast);
-    font-size: 16px;
+    font-size: var(--th-font-heading);
     margin: 0;
 }
 
@@ -407,7 +407,7 @@ export default {
 .team-card__description {
     margin: 0;
     color: var(--color-text-maxcontrast);
-    font-size: 14px;
+    font-size: var(--th-font-body);
     line-height: 1.5;
 }
 
@@ -430,12 +430,14 @@ export default {
     gap: 6px;
     cursor: default;
 }
+/* v3.100.14: full-saturation warning badge per SKILLS.md
+   (was a 15% color-mix() soft tint). */
 .team-card__via-badge {
-    font-size: 11px;
+    font-size: var(--th-font-micro);
     font-weight: 600;
     padding: 2px 7px;
     border-radius: var(--border-radius-pill);
-    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    background: var(--color-warning);
     color: var(--color-warning-text);
     white-space: nowrap;
 }

@@ -244,8 +244,12 @@ export default {
     border-radius: var(--border-radius-large);
     border: 1px solid var(--color-border);
 }
+/* v3.100.14: neutral decorative tile per SKILLS.md — the primary-
+   coloured icon carries the "deck" accent. Was
+   --color-primary-element-light with a background-dark fallback that
+   already conceded this should be neutral. */
 .th-deck__badge--deck {
-    background: var(--color-primary-element-light, var(--color-background-dark));
+    background: var(--color-background-dark);
     color: var(--color-primary-element);
 }
 .th-deck__badge--tasks {
@@ -272,7 +276,8 @@ export default {
     display: block;
 }
 .th-deck__title:hover { color: var(--color-primary-element); }
-.th-deck__title--overdue { color: var(--th-color-error); }
+/* v3.100.16: NC theme token (was --th-color-error hex). */
+.th-deck__title--overdue { color: var(--color-error-text); }
 
 .th-deck__meta {
     display: flex;
@@ -283,7 +288,7 @@ export default {
     color: var(--th-widget-meta-color);
     flex-wrap: wrap;
 }
-.th-deck__meta--overdue { color: var(--th-color-error); }
+.th-deck__meta--overdue { color: var(--color-error-text); }
 
 .th-deck__boardname {
     max-width: 120px;
@@ -307,6 +312,11 @@ export default {
     border-bottom: 1px solid var(--color-border);
 }
 
+/* v3.100.14: switched from the deprecated --th-color-warning-soft
+   token to the SKILLS.md-standard --color-warning + --color-warning-text
+   pair, so the unassigned-card row reads as an actual warning state at
+   full saturation. The row separator becomes a translucent overlay of
+   the text colour instead of a second warning tone. */
 .th-unassigned__row {
     display: flex;
     align-items: center;
@@ -316,10 +326,10 @@ export default {
     text-align: left;
     text-decoration: none;
     cursor: pointer;
-    background: var(--th-color-warning-soft);
+    background: var(--color-warning);
     border: none;
-    border-bottom: 1px solid var(--th-color-warning);
-    color: var(--th-color-warning);
+    border-bottom: 1px solid var(--color-warning-text);
+    color: var(--color-warning-text);
     font-size: var(--th-widget-row-meta-size);
     font-family: inherit;
     line-height: 1.3;
@@ -331,11 +341,11 @@ export default {
 }
 
 .th-unassigned__row:hover {
-    background: color-mix(in srgb, var(--th-color-warning) 15%, transparent);
+    background: var(--color-warning-hover);
 }
 
 .th-unassigned__row:focus-visible {
-    outline: 2px solid var(--th-color-warning);
+    outline: 2px solid var(--color-warning-text);
     outline-offset: -2px;
 }
 

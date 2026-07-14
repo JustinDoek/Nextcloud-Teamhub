@@ -94,12 +94,12 @@ class TeamService {
 
         $user = $this->userSession->getUser();
         if (!$user) {
-            $this->logger->warning('[TeamService] getUserTeams called without authenticated user', ['app' => Application::APP_ID]);
+            $this->logger->warning('[TeamHub][TeamService] getUserTeams called without authenticated user', ['app' => Application::APP_ID]);
             return [];
         }
 
         if (!$this->appManager->isInstalled('circles')) {
-            $this->logger->warning('[TeamService] Circles app is not enabled', ['app' => Application::APP_ID]);
+            $this->logger->warning('[TeamHub][TeamService] Circles app is not enabled', ['app' => Application::APP_ID]);
             return [];
         }
 
@@ -110,7 +110,7 @@ class TeamService {
             // Resolve the user's personal-circle single_id so we can check
             // circles_membership for indirect (group/team) membership.
             $userSingleId = $this->memberService->resolveUserSingleId($uid, $db);
-            $this->logger->debug('[TeamService] getUserTeams: resolved single_id', [
+            $this->logger->debug('[TeamHub][TeamService] getUserTeams: resolved single_id', [
                 'uid' => $uid, 'singleId' => $userSingleId, 'app' => Application::APP_ID,
             ]);
 
@@ -210,7 +210,7 @@ class TeamService {
                 }
             }
 
-            $this->logger->debug('[TeamService] getUserTeams: found teams', [
+            $this->logger->debug('[TeamHub][TeamService] getUserTeams: found teams', [
                 'uid' => $uid, 'count' => count($ids), 'singleId' => $userSingleId, 'app' => Application::APP_ID,
             ]);
 
@@ -268,7 +268,7 @@ class TeamService {
                 $urRes->closeCursor();
             }
 
-            $this->logger->info('[TeamService] getTeams: unread counts computed', [
+            $this->logger->info('[TeamHub][TeamService] getTeams: unread counts computed', [
                 'uid'    => $uid,
                 'teams'  => count($ids),
                 'unread' => array_filter($unreadCounts),
@@ -298,7 +298,7 @@ class TeamService {
             return $teams;
 
         } catch (\Exception $e) {
-            $this->logger->error('[TeamService] Error in getUserTeams', ['exception' => $e, 'app' => Application::APP_ID]);
+            $this->logger->error('[TeamHub][TeamService] Error in getUserTeams', ['exception' => $e, 'app' => Application::APP_ID]);
             return [];
         }
     }
@@ -321,29 +321,59 @@ class TeamService {
         if ($accessLevel < 1) {
             // Not a direct member — check indirect membership via circles_membership
             if (!$this->memberService->isEffectiveMember($teamId, $uid, $db)) {
-                $this->logger->debug('[TeamService] getTeam: access denied (not direct or indirect member)', [
+                $this->logger->debug('[TeamHub][TeamService] getTeam: access denied (not direct or indirect member)', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
                 throw new \Exception('Team not found or access denied');
             }
-            $this->logger->debug('[TeamService] getTeam: access granted via indirect membership', [
+            $this->logger->debug('[TeamHub][TeamService] getTeam: access granted via indirect membership', [
                 'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
         }
 
-        $qb  = $db->getQueryBuilder();
-        $res = $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config')
-            ->from('circles_circle', 'c')
-            ->where($qb->expr()->eq('c.unique_id', $qb->createNamedParameter($teamId)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $row = $res->fetch();
-        $res->closeCursor();
-
-        if (!$row) {
-            throw new \Exception('Team not found');
+        // v3.100.8 (apps.md R-1) — resolve team via CirclesManager where
+        // available; the caller has already been proven a member above so
+        // the API's caller-scoped visibility fits. Fall back to raw SELECT
+        // if Circles is unavailable or the API throws.
+        $name = null;
+        $description = '';
+        $config = 0;
+        $viaApi = false;
+        try {
+            $circlesMgr = $this->getCirclesManager();
+            $circle = $circlesMgr->getCircle($teamId);
+            $name = $circle->getName();
+            $description = (string)$circle->getDescription();
+            $config = (int)$circle->getConfig();
+            $viaApi = true;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TeamService] getTeam: CirclesManager path unavailable — using DB fallback', [
+                'teamId' => $teamId, 'reason' => $e->getMessage(),
+                'app' => Application::APP_ID,
+            ]);
         }
 
+        if (!$viaApi) {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config')
+                ->from('circles_circle', 'c')
+                ->where($qb->expr()->eq('c.unique_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                throw new \Exception('Team not found');
+            }
+            $name = $row['name'];
+            $description = $row['description'] ?? '';
+            $config = (int)($row['config'] ?? 0);
+        }
+
+        // Member count — direct SELECT retained: no OCP scalar for this
+        // and computing it via CirclesManager::getCircle()->getMembers()
+        // hydrates every member entity (expensive on large teams).
         $countQb  = $db->getQueryBuilder();
         $countRes = $countQb->select($countQb->func()->count('*', 'cnt'))
             ->from('circles_member')
@@ -356,14 +386,14 @@ class TeamService {
 
 
         return [
-            'id'          => $row['unique_id'],
-            'name'        => $row['name'],
-            'description' => $row['description'] ?? '',
+            'id'          => $teamId,
+            'name'        => $name,
+            'description' => $description,
             'members'     => $memberCount,
-            'image_url'   => $this->teamImageService->getImageUrl($row['unique_id']),
+            'image_url'   => $this->teamImageService->getImageUrl($teamId),
             // Circles config bitmask — exposed so the frontend can render
             // human-readable "team type" labels (open/invite/public/etc).
-            'config'      => (int)($row['config'] ?? 0),
+            'config'      => $config,
         ];
     }
 
@@ -406,7 +436,7 @@ class TeamService {
 
             return $result;
         } catch (\Exception $e) {
-            $this->logger->error('[TeamService] Error creating team', ['exception' => $e, 'app' => Application::APP_ID]);
+            $this->logger->error('[TeamHub][TeamService] Error creating team', ['exception' => $e, 'app' => Application::APP_ID]);
             throw new \Exception('Failed to create team: ' . $e->getMessage());
         } finally {
             $circlesManager->stopSession();
@@ -471,7 +501,7 @@ class TeamService {
             }
             $res->closeCursor();
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamService] deleteTeam: could not read teamhub_team_apps', [
+            $this->logger->warning('[TeamHub][TeamService] deleteTeam: could not read teamhub_team_apps', [
                 'teamId' => $teamId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
@@ -486,14 +516,14 @@ class TeamService {
         foreach ($appsToClean as $app) {
             try {
                 $result = $this->resourceService->deleteTeamResource($teamId, $app);
-                $this->logger->debug('[TeamService] deleteTeam: resource deleted', [
+                $this->logger->debug('[TeamHub][TeamService] deleteTeam: resource deleted', [
                     'teamId' => $teamId,
                     'app'    => $app,
                     'result' => $result,
                     'class'  => Application::APP_ID,
                 ]);
             } catch (\Throwable $e) {
-                $this->logger->warning('[TeamService] deleteTeam: resource deletion failed', [
+                $this->logger->warning('[TeamHub][TeamService] deleteTeam: resource deletion failed', [
                     'teamId' => $teamId,
                     'app'    => $app,
                     'error'  => $e->getMessage(),
@@ -589,7 +619,7 @@ class TeamService {
                     ->executeStatement();
             }
         } catch (\Exception $e) {
-            $this->logger->error('[TeamService] Error updating team description', [
+            $this->logger->error('[TeamHub][TeamService] Error updating team description', [
                 'teamId'    => $teamId,
                 'exception' => $e,
                 'app'       => Application::APP_ID,
@@ -734,17 +764,25 @@ class TeamService {
             // check circles_membership for indirect (group/team) membership below.
             $userSingleId = $this->memberService->resolveUserSingleId($uid, $db);
 
-            // CFG_VISIBLE bitmask (bit 9 = 512): circles with this bit set are
-            // discoverable by non-members. We push the filter into SQL so we never
-            // load all circles into PHP — critical for scalability to 1,000+ groups.
+            // CFG_VISIBLE (bit 9 = 512): circles marked discoverable by
+            // non-members. CFG_OPEN (bit 4 = 16): circles that auto-accept
+            // any join request. We push the filter into SQL so we never
+            // load all circles into PHP — critical for scalability to
+            // 1,000+ groups.
             //
             // Strategy: LEFT JOIN on direct membership (user_type=1) AND on the
             // circles_membership cache (indirect via group/team).
             // Include the circle if:
             //   (a) the user has a direct member row (m.user_id IS NOT NULL), OR
             //   (b) the user appears in circles_membership (ms.single_id IS NOT NULL), OR
-            //   (c) the circle has CFG_VISIBLE set (config & 512 != 0)
+            //   (c) the circle has CFG_VISIBLE set (config & 512 != 0), OR
+            //   (d) v3.100.8 — the circle has CFG_OPEN set (config & 16 != 0).
+            //       Rationale: an open circle allows anyone to join, so
+            //       hiding it from browse serves no security purpose;
+            //       showing it lets users actually reach the auto-approve
+            //       flow this app supports (apps.md W-2 test path).
             $CFG_VISIBLE = 512;
+            $CFG_OPEN    = 16;
 
             $qb = $db->getQueryBuilder();
             $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config',
@@ -788,6 +826,11 @@ class TeamService {
                        $qb->expr()->neq(
                            $qb->createFunction('(c.config & ' . $CFG_VISIBLE . ')'),
                            $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+                       ),
+                       // Circle is open (CFG_OPEN bit set) — v3.100.8
+                       $qb->expr()->neq(
+                           $qb->createFunction('(c.config & ' . $CFG_OPEN . ')'),
+                           $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                        )
                    )
                )
@@ -804,7 +847,12 @@ class TeamService {
                 }
 
                 $config           = (int)($row['config'] ?? 0);
-                $isOpen           = ($config & 1) > 0;
+                // CFG_OPEN = bit 4 = 16, not bit 0. The previous check was
+                // reading CFG_SINGLE by accident, so every circle showed
+                // requiresApproval=false regardless of its actual config
+                // — masked because the migration path used to normalise the
+                // bitmask elsewhere. Fixed in v3.100.8.
+                $isOpen           = ($config & $CFG_OPEN) > 0;
                 $isDirectMember   = $row['member_uid'] !== null;
                 $isIndirectMember = !$isDirectMember && ($row['ms_single_id'] ?? null) !== null;
 
@@ -823,7 +871,7 @@ class TeamService {
             return $teams;
 
         } catch (\Exception $e) {
-            $this->logger->error('[TeamService] Error browsing teams', ['exception' => $e, 'app' => Application::APP_ID]);
+            $this->logger->error('[TeamHub][TeamService] Error browsing teams', ['exception' => $e, 'app' => Application::APP_ID]);
             return [];
         }
     }
@@ -937,7 +985,7 @@ class TeamService {
         try {
             return $this->groupFolderService->getDelegationStatus();
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamService] getDelegationStatus failed — returning safe defaults', [
+            $this->logger->warning('[TeamHub][TeamService] getDelegationStatus failed — returning safe defaults', [
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return [
@@ -961,7 +1009,7 @@ class TeamService {
         }
         $groupManager = $this->container->get(\OCP\IGroupManager::class);
         if (!$groupManager->isAdmin($user->getUID())) {
-            $this->logger->warning('[TeamService] saveAdminSettings — non-admin attempt', [
+            $this->logger->warning('[TeamHub][TeamService] saveAdminSettings — non-admin attempt', [
                 'userId' => $user->getUID(),
                 'app'    => Application::APP_ID,
             ]);
