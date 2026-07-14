@@ -10,19 +10,20 @@ Each team gets a shared home with:
 - **Messages** — post announcements, questions and polls to your team
 - **Activity feed** — a single view of recent file, calendar, task and member changes across all shared resources
 - **App tabs** — quick-links to the team's shared Talk chat, Files folder, Calendar and Deck board
-- **Sidebar widgets** — upcoming calendar events, open Deck tasks, Pages, and the activity snapshot
+- **Widgets** — upcoming calendar events, open Deck tasks, Pages, and the activity snapshot and others through integrations
 - **Team management** — invite members by user, group, email or federated account; manage roles and pending requests
-- **Customizable view** — users can create their own layout
+- **Customizable view** — users can create their own layout per team
 - **Integrations** — developers can integrate their app with teamhub
+- **Internal integrations** - Added TeamHub native integrations for Decisions, Precense, Timeline, Budget and Time  
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>3.104.4</version>
+    <version>4.00</version>
     <licence>agpl</licence>
     <author mail="teamhub@tldr.host" homepage="https://tldr.host/teamhub">Justin Doek</author>
     <namespace>TeamHub</namespace>
     <category>organization</category>
     <category>dashboard</category>
-	<author >Bernhard Posselt</author>
+	<author >Justin Doek</author>
     <website>https://tldr.host/teamhub</website>
 	<discussion>https://github.com/JustinDoek/Nextcloud-Teamhub/discussions</discussion>
     <bugs>https://github.com/JustinDoek/nextcloud-teamhub/issues</bugs>
