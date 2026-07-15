@@ -14,12 +14,12 @@
         <div class="message-card__header">
             <NcAvatar
                 :user="message.author_id"
-                :display-name="message.author_id"
+                :display-name="message.author_display_name || message.author_id"
                 :show-user-status="true"
                 :disable-menu="false"
                 :size="36" />
             <div class="message-card__meta">
-                <span class="message-card__author">{{ message.author_id }}</span>
+                <span class="message-card__author">{{ message.author_display_name || message.author_id }}</span>
                 <span class="message-card__date">{{ formattedDate }}</span>
             </div>
             <span v-if="isPriority" class="message-card__priority-badge">

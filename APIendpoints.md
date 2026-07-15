@@ -206,6 +206,48 @@ Accepts any truthy/falsy representation (bool, 0/1, "0"/"1"). Coerced to a stric
 
 ---
 
+### `GET /api/v1/teams/{teamId}/messages/config`  *(added 4.0.0)*
+
+Fetch the per-team Messages integration enabled flag.
+
+**Auth**: team member required.
+
+**Response 200**:
+```json
+{ "messages_enabled": true }
+```
+
+**Storage**: NC app-config keyed `messages_enabled_<teamId>` = `"1"` (enabled) or `"0"` (disabled). Default `"1"`.
+
+**Routing note**: this route is registered *before* the `PUT /messages/{messageId}` catchall so the literal `config` segment wins over `{messageId}=config`. Any future route with a fixed segment under `/messages/` must be positioned the same way in `appinfo/routes.php`.
+
+**Failures**: `403` if not a member.
+
+---
+
+### `PUT /api/v1/teams/{teamId}/messages/config`  *(added 4.0.0)*
+
+Toggle the per-team Messages integration. Disabling hides the message stream widget, the post form, and the Home entry in the mobile bottom bar.
+
+**Auth**: team **admin** required (`MemberService::requireAdminLevel`).
+
+**Body**:
+```json
+{ "messages_enabled": 1 }
+```
+Accepts any truthy/falsy representation (bool, 0/1, "0"/"1"). Coerced to a strict `"0"`/`"1"` string for storage.
+
+**Response 200**:
+```json
+{ "messages_enabled": true }
+```
+
+**Failures**:
+- `403` — not a team admin
+- `500` — internal error (logged)
+
+---
+
 ## Timeline iframe page (added 3.78.0, params extended through 3.78.9)
 
 ### `GET /apps/teamhub/timeline/{teamId}`
@@ -255,6 +297,14 @@ Also added `mergeNewTabs()` post-processing on `tabOrder` — saved `tab_order_j
 {
   "...": "...",
   "project": { "isProject": true, "mode": "advanced", "phase": "planning", "startDate": null, "targetEnd": null }
+}
+```
+
+**Response addition (4.0.0)** — `messagesConfig` (in both team-row and cascade-to-default branches). Lets the frontend gate the message-stream widget, the mobile Home entry, and the post form on the per-team toggle without a second fetch — same pattern as `timelineConfig`. Default `true` so a team that never touches the setting keeps its stream.
+```json
+{
+  "...": "...",
+  "messagesConfig": { "messages_enabled": true }
 }
 ```
 

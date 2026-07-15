@@ -109,6 +109,37 @@ class MessageService {
             $pinned['decision'] = $decisions[(int)$pinned['id']];
         }
 
+        // v4.0.0 — resolve author display names in one pass so the frontend
+        // shows real names in message cards instead of raw account UIDs.
+        // IUserManager's in-process cache dedupes repeat UIDs; missing or
+        // deleted users fall back to the raw UID. Same pattern as
+        // TimelineService::resolveDisplayNames.
+        $uids = [];
+        foreach ($messages as $m) {
+            if (!empty($m['author_id'])) {
+                $uids[$m['author_id']] = true;
+            }
+        }
+        if ($pinned && !empty($pinned['author_id'])) {
+            $uids[$pinned['author_id']] = true;
+        }
+        $nameMap = [];
+        foreach (array_keys($uids) as $uid) {
+            try {
+                $u = $this->userManager->get($uid);
+                $nameMap[$uid] = $u ? (string)$u->getDisplayName() : $uid;
+            } catch (\Throwable) {
+                $nameMap[$uid] = $uid;
+            }
+        }
+        foreach ($messages as &$m) {
+            $m['author_display_name'] = $nameMap[$m['author_id'] ?? ''] ?? ($m['author_id'] ?? '');
+        }
+        unset($m);
+        if ($pinned) {
+            $pinned['author_display_name'] = $nameMap[$pinned['author_id'] ?? ''] ?? ($pinned['author_id'] ?? '');
+        }
+
         return [
             'pinned'   => $pinned,
             'messages' => $messages,
@@ -255,6 +286,12 @@ class MessageService {
             if ($priority === 'priority') {
                 $this->sendPriorityEmailsWithName($subject, $message, $user->getDisplayName(), $teamName, $memberUids);
             }
+
+            // v4.0.0 — include the author's display name so MessageStream
+            // renders the fresh post with the same author label the listing
+            // endpoint returns (avoids a flash of the raw UID before the
+            // next page refresh).
+            $messageData['author_display_name'] = $user->getDisplayName();
 
             return $messageData;
         } catch (\Exception $e) {

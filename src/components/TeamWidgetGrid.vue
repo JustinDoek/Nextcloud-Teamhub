@@ -72,12 +72,29 @@
                     <div class="teamhub-widget-header">
                         <MessageOutline :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</h2>
+                        <!-- v4.0.0 — Post-message action moved out of the
+                             stream's first row and into the widget header so
+                             it matches File Center / Decisions header icons.
+                             Only rendered for users who meet the team's
+                             post-role minimum (canPost getter). -->
+                        <button
+                            v-if="canPost"
+                            class="teamhub-widget-header-btn"
+                            :aria-label="t('teamhub', 'Post message')"
+                            :title="t('teamhub', 'Post message')"
+                            @click="openMessagePostForm">
+                            <PlusIcon :size="18" aria-hidden="true" />
+                        </button>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('msgstream')"
                             :widget-name="t('teamhub', 'Team Messages')"
                             @toggle="toggleCollapse('msgstream')" />
                     </div>
-                    <MessageStream v-show="!isCollapsed('msgstream')" class="teamhub-widget-content" />
+                    <MessageStream
+                        ref="msgstream"
+                        v-show="!isCollapsed('msgstream')"
+                        :hide-header="true"
+                        class="teamhub-widget-content" />
                 </div>
             </grid-item>
 
@@ -986,7 +1003,7 @@ export default {
             // but gating here avoids a needless fetch on non-eligible views.
             'budgetConfig', 'timeConfig', 'project',
         ]),
-        ...mapGetters(['currentTeam']),
+        ...mapGetters(['currentTeam', 'canPost']),
 
         team() { return this.currentTeam || {} },
 
@@ -1227,6 +1244,20 @@ export default {
         openSettingsAtRisk() {
             this.SET_RESOURCE_WARNING_FOCUS(true)
             this.$emit('manage-team')
+        },
+
+        /**
+         * v4.0.0 — desktop Messages widget header + button. Delegates to
+         * MessageStream's public openPostForm() method so the composer opens
+         * inside the stream (same behaviour the removed row-1 button had).
+         * The ref is stable across collapse toggles because MessageStream
+         * uses v-show, not v-if.
+         */
+        openMessagePostForm() {
+            const stream = this.$refs.msgstream
+            if (stream && typeof stream.openPostForm === 'function') {
+                stream.openPostForm()
+            }
         },
 
         onLayoutUpdated(newLayout) {
