@@ -2274,7 +2274,19 @@
 		"This instance has already used its trial.": "Denne instans har allerede brugt sin prøveperiode.",
 		"Could not start trial.": "Kunne ikke starte prøveperiode.",
 		"Start a 30-day trial": "Start en 30-dages prøveperiode",
-		"Trial activated — 30 days.": "Prøveperiode aktiveret — 30 dage."
+		"Trial activated — 30 days.": "Prøveperiode aktiveret — 30 dage.",
+		"Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.": "Aktivér holdets beskedstrøm — indlæg, spørgsmål, afstemninger og fastgjorte beskeder. Rollegrænser findes under Integrationsindstillinger.",
+		"Enable Messages for this team": "Aktivér Beskeder for dette hold",
+		"Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.": "Beskeder er deaktiveret for dette hold. Aktivér modulet under fanen Integrationer for at konfigurere rollegrænser for fastgørelse og opslag.",
+		"Who can pin or unpin a message. One message can be pinned at a time.": "Hvem kan fastgøre eller frigive en besked. Der kan fastgøres én besked ad gangen.",
+		"Who can post new messages, questions, and polls.": "Hvem kan skrive nye indlæg, spørgsmål og afstemninger.",
+		"Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Billeder indsat fra personlige filer kopieres til en skjult cache-mappe i holdmappen, så alle medlemmer kan se dem. Rydning viser ødelagte billeder i eksisterende indlæg.",
+		"Set which membership level is required to add, edit, or delete custom links in the team tab bar.": "Vælg hvilket medlemskabsniveau der kræves for at tilføje, redigere eller slette brugerdefinerede links i holdets fanebjælke.",
+		"Who can manage custom links?": "Hvem kan administrere brugerdefinerede links?",
+		"Team message stream — posts, questions, polls, pinned messages": "Holdets beskedstrøm — indlæg, spørgsmål, afstemninger, fastgjorte beskeder",
+		"Team meetings": "Holdmøder",
+		"Who can create a team meeting.": "Hvem kan oprette et holdmøde.",
+		"Who can add, edit, or delete custom links in the team tab bar.": "Hvem kan tilføje, redigere eller slette brugerdefinerede links i holdets fanebjælke."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

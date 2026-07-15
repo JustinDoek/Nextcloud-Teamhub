@@ -2148,7 +2148,19 @@
 		"This instance has already used its trial.": "This instance has already used its trial.",
 		"Could not start trial.": "Could not start trial.",
 		"Start a 30-day trial": "Start a 30-day trial",
-		"Trial activated — 30 days.": "Trial activated — 30 days."
+		"Trial activated — 30 days.": "Trial activated — 30 days.",
+		"Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.": "Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.",
+		"Enable Messages for this team": "Enable Messages for this team",
+		"Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.": "Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.",
+		"Who can pin or unpin a message. One message can be pinned at a time.": "Who can pin or unpin a message. One message can be pinned at a time.",
+		"Who can post new messages, questions, and polls.": "Who can post new messages, questions, and polls.",
+		"Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.",
+		"Set which membership level is required to add, edit, or delete custom links in the team tab bar.": "Set which membership level is required to add, edit, or delete custom links in the team tab bar.",
+		"Who can manage custom links?": "Who can manage custom links?",
+		"Team message stream — posts, questions, polls, pinned messages": "Team message stream — posts, questions, polls, pinned messages",
+		"Team meetings": "Team meetings",
+		"Who can create a team meeting.": "Who can create a team meeting.",
+		"Who can add, edit, or delete custom links in the team tab bar.": "Who can add, edit, or delete custom links in the team tab bar."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

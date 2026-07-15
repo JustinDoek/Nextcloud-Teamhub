@@ -231,6 +231,7 @@ import Cog from 'vue-material-design-icons/Cog.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import FilePlus from 'vue-material-design-icons/FilePlus.vue'
+import Folder from 'vue-material-design-icons/Folder.vue'
 import LocationExit from 'vue-material-design-icons/LocationExit.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
@@ -259,7 +260,7 @@ export default {
         MessageOutline, InformationOutline, AccountGroup,
         AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
-        FileDocumentOutline, FilePlus, LocationExit, Plus, Puzzle,
+        FileDocumentOutline, FilePlus, Folder, LocationExit, Plus, Puzzle,
         TrashCan, VideoIcon, ViewDashboard,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
@@ -304,12 +305,23 @@ export default {
             'currentTeamId', 'resources',
             'teamWidgets', 'isCurrentUserDirectMember',
             'decisionsModuleEnabled', 'decisionsConfig',
+            // v3.104.1 — drops msgstream from the icon bar / canvas when
+            // Messages is off for the team.
+            'messagesConfig',
             // v3.97.0 — same gate as TeamWidgetGrid for the Project Health widget.
             'budgetConfig', 'timeConfig', 'project',
         ]),
         ...mapGetters(['currentTeam']),
 
         team() { return this.currentTeam || {} },
+
+        /**
+         * v3.104.1 — per-team Messages toggle. Default true so a team that
+         * never touches the setting keeps its stream + FAB.
+         */
+        messagesEnabled() {
+            return this.messagesConfig?.messages_enabled !== false
+        },
 
         /**
          * The full list of widgets the current user has access to.
@@ -323,13 +335,17 @@ export default {
         availableWidgets() {
             const list = []
 
-            // Home / message stream — always first
-            list.push({
-                key: 'msgstream',
-                title: t('teamhub', 'Messages'),
-                shortTitle: t('teamhub', 'Home'),
-                icon: 'MessageOutline',
-            })
+            // Home / message stream — first when the team has Messages on.
+            // v3.104.1: teams that disable Messages skip this entry entirely
+            // and land on Team info as the default canvas.
+            if (this.messagesEnabled) {
+                list.push({
+                    key: 'msgstream',
+                    title: t('teamhub', 'Messages'),
+                    shortTitle: t('teamhub', 'Home'),
+                    icon: 'MessageOutline',
+                })
+            }
 
             list.push({
                 key: 'widget-teaminfo',
@@ -622,7 +638,10 @@ export default {
          * land on a stale widget that may not exist in the new team.
          */
         currentTeamId() {
-            this.activeWidget = 'msgstream'
+            // v3.104.1 — Messages may be disabled for the new team; land on
+            // the first available widget (msgstream when present, otherwise
+            // typically Team info) instead of a blank canvas.
+            this.activeWidget = this.availableWidgets[0]?.key || 'msgstream'
             this.actionsMenuOpen = false
         },
 
@@ -636,13 +655,23 @@ export default {
 
         /**
          * If the active widget becomes unavailable (e.g. an integration was
-         * unregistered, or a resource was disabled), fall back to the
-         * message stream rather than rendering an empty canvas.
+         * unregistered, or a resource was disabled), fall back to the first
+         * widget in the list — historically that's always msgstream, but
+         * v3.104.1 teams with Messages disabled land on the next available
+         * widget (typically Team info) instead of an empty canvas.
+         *
+         * immediate:true covers the cold-mount case where messagesConfig is
+         * already in the store and msgstream is absent from the very first
+         * availableWidgets — without this, the default 'msgstream' would
+         * render an empty stream body until the next store change.
          */
-        availableWidgets(newList) {
-            if (!newList.find(w => w.key === this.activeWidget)) {
-                this.activeWidget = 'msgstream'
-            }
+        availableWidgets: {
+            immediate: true,
+            handler(newList) {
+                if (!newList.find(w => w.key === this.activeWidget)) {
+                    this.activeWidget = newList[0]?.key || 'msgstream'
+                }
+            },
         },
     },
 

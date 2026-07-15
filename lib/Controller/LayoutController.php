@@ -259,6 +259,9 @@ class LayoutController extends Controller {
                 // DbIntrospectionService; absent on older Deck installs.
                 'card_dependencies_supported' => $this->timelineService->isCardDependencySupported(),
             ],
+            'messagesConfig'         => [
+                'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
+            ],
             'budgetConfig'           => [
                 'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
                 // v3.94.0 — tab visibility uses a project-level role floor
@@ -306,6 +309,9 @@ class LayoutController extends Controller {
                 // connector toggle on the Timeline tab (v3.78.8). Detected via
                 // DbIntrospectionService; absent on older Deck installs.
                 'card_dependencies_supported' => $this->timelineService->isCardDependencySupported(),
+            ],
+            'messagesConfig'         => [
+                'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
             ],
             'budgetConfig'           => [
                 'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',

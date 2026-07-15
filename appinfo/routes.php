@@ -106,6 +106,13 @@ return [
         // ----------------------------------------------------------------
         ['name' => 'message#listMessages',        'url' => '/api/v1/teams/{teamId}/messages',                'verb' => 'GET'],
         ['name' => 'message#createMessage',       'url' => '/api/v1/teams/{teamId}/messages',                'verb' => 'POST'],
+        // Messages module — per-team enable flag (v3.104.6).
+        // MUST come BEFORE the `{messageId}` catchall PUT/DELETE below —
+        // otherwise `PUT /messages/config` matches `updateMessage` with
+        // messageId='config' and 400s. Stored as app-config:
+        // messages_enabled_<teamId> = "1" or "0". Default enabled.
+        ['name' => 'team#getMessagesConfig',      'url' => '/api/v1/teams/{teamId}/messages/config',        'verb' => 'GET'],
+        ['name' => 'team#saveMessagesConfig',     'url' => '/api/v1/teams/{teamId}/messages/config',        'verb' => 'PUT'],
         ['name' => 'message#updateMessage',       'url' => '/api/v1/teams/{teamId}/messages/{messageId}',   'verb' => 'PUT'],
         ['name' => 'message#deleteMessage',       'url' => '/api/v1/teams/{teamId}/messages/{messageId}',   'verb' => 'DELETE'],
         ['name' => 'message#pinMessage',          'url' => '/api/v1/teams/{teamId}/messages/{messageId}/pin',   'verb' => 'POST'],

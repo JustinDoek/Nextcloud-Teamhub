@@ -2274,7 +2274,19 @@
 		"This instance has already used its trial.": "Diese Instanz hat bereits eine Testphase genutzt.",
 		"Could not start trial.": "Testphase konnte nicht gestartet werden.",
 		"Start a 30-day trial": "30-tägigen Test starten",
-		"Trial activated — 30 days.": "Testphase aktiviert — 30 Tage."
+		"Trial activated — 30 days.": "Testphase aktiviert — 30 Tage.",
+		"Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.": "Team-Nachrichtenstream aktivieren — Beiträge, Fragen, Umfragen und angepinnte Nachrichten. Rollenbeschränkungen finden sich unter Integrationseinstellungen.",
+		"Enable Messages for this team": "Nachrichten für dieses Team aktivieren",
+		"Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.": "Nachrichten sind für dieses Team deaktiviert. Aktivieren Sie das Modul im Tab Integrationen, um Rollenbeschränkungen für Anpinnen und Posten zu konfigurieren.",
+		"Who can pin or unpin a message. One message can be pinned at a time.": "Wer eine Nachricht anpinnen oder lösen darf. Es kann jeweils nur eine Nachricht angepinnt sein.",
+		"Who can post new messages, questions, and polls.": "Wer neue Beiträge, Fragen und Umfragen erstellen darf.",
+		"Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Aus persönlichen Dateien eingefügte Bilder werden in einen versteckten Cache-Ordner im Team-Ordner kopiert, damit alle Mitglieder sie sehen können. Nach dem Leeren erscheinen defekte Bilder in bestehenden Beiträgen.",
+		"Set which membership level is required to add, edit, or delete custom links in the team tab bar.": "Legen Sie fest, welche Mitgliedschaftsstufe erforderlich ist, um benutzerdefinierte Links in der Team-Tab-Leiste hinzuzufügen, zu bearbeiten oder zu löschen.",
+		"Who can manage custom links?": "Wer darf benutzerdefinierte Links verwalten?",
+		"Team message stream — posts, questions, polls, pinned messages": "Team-Nachrichtenstream — Beiträge, Fragen, Umfragen, angepinnte Nachrichten",
+		"Team meetings": "Team-Meetings",
+		"Who can create a team meeting.": "Wer ein Team-Meeting erstellen darf.",
+		"Who can add, edit, or delete custom links in the team tab bar.": "Wer benutzerdefinierte Links in der Team-Tab-Leiste hinzufügen, bearbeiten oder löschen darf."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

@@ -593,7 +593,7 @@ export default {
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
-            'timelineConfig', 'budgetConfig', 'timeConfig', 'project',
+            'timelineConfig', 'messagesConfig', 'budgetConfig', 'timeConfig', 'project',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -1272,7 +1272,7 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
@@ -1338,6 +1338,11 @@ export default {
                 }
                 if (data.timelineConfig) {
                     this.SET_TIMELINE_CONFIG(data.timelineConfig)
+                }
+                // Messages integration (v3.104.1) — per-team toggle rides along
+                // with the layout, same pattern as timelineConfig.
+                if (data.messagesConfig) {
+                    this.SET_MESSAGES_CONFIG(data.messagesConfig)
                 }
                 // Budget integration (v3.92.0) — per-team toggle rides along
                 // with the layout, same pattern as timelineConfig.

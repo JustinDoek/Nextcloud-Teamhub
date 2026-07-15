@@ -641,6 +641,54 @@ class TeamController extends Controller {
     }
 
     /**
+     * GET /api/v1/teams/{teamId}/messages/config
+     *
+     * Returns the Messages integration enabled state for this team.
+     *
+     * Storage: NC app-config keyed `messages_enabled_<teamId>` = "1"|"0".
+     * Default is "1" (enabled) — teams that have never touched the setting
+     * see the Message stream, PostMessageForm, and any message-related
+     * surfaces. Follows the same shape as the Timeline toggle above.
+     */
+    #[NoAdminRequired]
+    public function getMessagesConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $stored = $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1');
+            return new JSONResponse([
+                'messages_enabled' => $stored === '1',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/messages/config
+     *
+     * Updates the Messages enabled state. Body: { messages_enabled: 0|1 }.
+     * Team admin required (mirrors the timeline/decisions toggle auth).
+     */
+    #[NoAdminRequired]
+    public function saveMessagesConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            $raw = $this->request->getParam('messages_enabled');
+            $enabled = (string)((int)(bool)$raw);
+            $this->config->setAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, $enabled);
+
+            return new JSONResponse([
+                'messages_enabled' => $enabled === '1',
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save messages config', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /**
      * GET /api/v1/teams/{teamId}/budget/config
      *
      * Per-team on/off toggle for the Budget tab. Same NC-app-config storage

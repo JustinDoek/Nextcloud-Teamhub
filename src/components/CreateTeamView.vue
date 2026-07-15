@@ -295,6 +295,7 @@ import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutli
 import Gavel from 'vue-material-design-icons/Gavel.vue'
 import AccountClock from 'vue-material-design-icons/AccountClock.vue'
 import TimelineClockOutline from 'vue-material-design-icons/TimelineClockOutline.vue'
+import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import LockOutline from 'vue-material-design-icons/LockOutline.vue'
 import ResourcePicker from './ResourcePicker.vue'
@@ -360,6 +361,7 @@ export default {
                     decisions: true,
                     presence: false,
                     timeline: false,
+                    messages: true,
                     pages: true,
                 },
                 config: {
@@ -441,6 +443,13 @@ export default {
                     available: true,
                 },
                 {
+                    id: 'messages',
+                    label: t('teamhub', 'Messages'),
+                    description: t('teamhub', 'Team message stream — posts, questions, polls, pinned messages'),
+                    icon: MessageOutline,
+                    available: true,
+                },
+                {
                     id: 'pages',
                     label: t('teamhub', 'Pages'),
                     description: t('teamhub', 'Team documentation and knowledge base'),
@@ -460,21 +469,21 @@ export default {
                     // adding a projectMode watcher.
                     apps: { talk: 'create', files: 'create', calendar: 'create', deck: 'create' },
                     config: { open: false, invite: true, request: false, visible: false, protected: false },
-                    modules: { decisions: true, presence: false, timeline: true, pages: true },
+                    modules: { decisions: true, presence: false, timeline: true, messages: true, pages: true },
                     subtitle: t('teamhub', 'Set up a project team in a few steps'),
                     placeholder: t('teamhub', 'e.g. Website Redesign'),
                 },
                 collaboration: {
                     apps: { talk: 'create', files: 'create', calendar: null, deck: null },
                     config: { open: false, invite: true, request: false, visible: true, protected: false },
-                    modules: { decisions: true, presence: false, timeline: false, pages: true },
+                    modules: { decisions: true, presence: false, timeline: false, messages: true, pages: true },
                     subtitle: t('teamhub', 'Set up a collaboration space in a few steps'),
                     placeholder: t('teamhub', 'e.g. Design Guild'),
                 },
                 department: {
                     apps: { talk: 'create', files: 'create', calendar: 'create', deck: null },
                     config: { open: false, invite: false, request: false, visible: true, protected: false },
-                    modules: { decisions: true, presence: true, timeline: false, pages: true },
+                    modules: { decisions: true, presence: true, timeline: false, messages: true, pages: true },
                     subtitle: t('teamhub', 'Set up a department team in a few steps'),
                     placeholder: t('teamhub', 'e.g. Human Resources'),
                 },
@@ -897,6 +906,16 @@ export default {
                     axios.put(
                         generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/timeline/config`),
                         { timeline_enabled: 0 }
+                    )
+                )
+            }
+            // v3.104.1 — Messages is default on. Only PUT when unchecked so
+            // the backend default holds otherwise (fewer create-time calls).
+            if (!this.form.modules.messages) {
+                calls.push(
+                    axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages/config`),
+                        { messages_enabled: 0 }
                     )
                 )
             }

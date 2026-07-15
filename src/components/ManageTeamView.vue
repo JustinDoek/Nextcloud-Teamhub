@@ -152,148 +152,55 @@
                 </div>
             </div>
 
-            <!-- Meeting permissions -->
+            <!-- Permissions (v3.104.7) — merged Meeting + Custom links rows
+                 under one section using the compact manage-section__row
+                 pattern from Integration Settings → Messages. Auto-save on
+                 change; the shared endpoint (message/settings) drives Custom
+                 links, saveMeetingSettings drives the Meeting row. -->
             <div class="manage-section">
-                <h3>{{ t('teamhub', 'Meeting permissions') }}</h3>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'Set which membership level is required to create a team meeting.') }}
-                </p>
-                <div v-if="loadingMeetingSettings" class="section-loading">
-                    <NcLoadingIcon :size="24" />
-                </div>
-                <div v-else class="manage-settings">
-                    <div class="manage-settings-group">
-                        <label class="manage-meeting-label" for="meeting-min-level">
-                            {{ t('teamhub', 'Who can create a team meeting?') }}
-                        </label>
-                        <select
-                            id="meeting-min-level"
-                            v-model="meetingMinLevel"
-                            class="manage-meeting-select"
-                            @change="saveMeetingSettings">
-                            <option :value="1">{{ t('teamhub', 'Any member') }}</option>
-                            <option :value="4">{{ t('teamhub', 'Moderator or above') }}</option>
-                            <option :value="8">{{ t('teamhub', 'Admin or above') }}</option>
-                        </select>
-                        <p v-if="meetingSettingsSaved" class="manage-settings-saved">
-                            <CheckCircle :size="14" />{{ t('teamhub', 'Settings saved') }}
-                        </p>
-                        <p v-if="meetingSettingsError" class="manage-settings-error">
-                            {{ meetingSettingsError }}
-                        </p>
+                <h3>{{ t('teamhub', 'Permissions') }}</h3>
+
+                <!-- Meeting min-role -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Team meetings') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can create a team meeting.') }}</span>
                     </div>
+                    <select
+                        v-model="meetingMinLevel"
+                        :disabled="loadingMeetingSettings"
+                        class="teamhub-dec-level-select"
+                        :aria-label="t('teamhub', 'Who can create a team meeting.')"
+                        @change="saveMeetingSettings">
+                        <option :value="1">{{ t('teamhub', 'Any member') }}</option>
+                        <option :value="4">{{ t('teamhub', 'Moderator or above') }}</option>
+                        <option :value="8">{{ t('teamhub', 'Admin or above') }}</option>
+                    </select>
                 </div>
-            </div>
 
-        </div>
-
-        <!-- TAB: Messages -->
-        <div v-else-if="activeTab === 'messages'" class="manage-tab-content">
-            <div v-if="loadingMessageSettings" class="section-loading">
-                <NcLoadingIcon :size="32" />
-            </div>
-            <template v-else>
-                <!-- Pin level -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Pin messages') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Minimum role required to pin or unpin a message in this team. One message can be pinned at a time.') }}
-                    </p>
-                    <div class="manage-setting-row">
-                        <label class="manage-setting-label" for="pin-min-level">
-                            {{ t('teamhub', 'Minimum role to pin') }}
-                        </label>
-                        <select
-                            id="pin-min-level"
-                            v-model="messageSettingsForm.pinMinLevel"
-                            class="manage-setting-select">
-                            <option value="member">{{ t('teamhub', 'Member') }}</option>
-                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                        </select>
+                <!-- Custom links min-role -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Custom links') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can add, edit, or delete custom links in the team tab bar.') }}</span>
                     </div>
-                </div>
-
-                <!-- Post level -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Post messages') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Minimum role required to post new messages, questions, and polls in this team.') }}
-                    </p>
-                    <div class="manage-setting-row">
-                        <label class="manage-setting-label" for="post-min-level">
-                            {{ t('teamhub', 'Minimum role to post') }}
-                        </label>
-                        <select
-                            id="post-min-level"
-                            v-model="messageSettingsForm.postMinLevel"
-                            class="manage-setting-select">
-                            <option value="member">{{ t('teamhub', 'Member') }}</option>
-                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Link level -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Custom links') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Minimum role required to add, edit, or delete custom links in the tab bar of this team.') }}
-                    </p>
-                    <div class="manage-setting-row">
-                        <label class="manage-setting-label" for="link-min-level">
-                            {{ t('teamhub', 'Minimum role to manage links') }}
-                        </label>
-                        <select
-                            id="link-min-level"
-                            v-model="messageSettingsForm.linkMinLevel"
-                            class="manage-setting-select">
-                            <option value="member">{{ t('teamhub', 'Member') }}</option>
-                            <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
-                            <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Save -->
-                <div class="manage-section">
-                    <NcButton
-                        variant="primary"
+                    <select
+                        v-model="messageSettingsForm.linkMinLevel"
                         :disabled="savingMessageSettings"
-                        @click="saveMessageSettings">
-                        <template #icon>
-                            <NcLoadingIcon v-if="savingMessageSettings" :size="18" />
-                            <Check v-else :size="18" />
-                        </template>
-                        {{ savingMessageSettings ? t('teamhub', 'Saving…') : t('teamhub', 'Save permission settings') }}
-                    </NcButton>
-                    <span v-if="messageSettingsSaved" class="manage-saved-indicator">
-                        {{ t('teamhub', 'Saved') }}
-                    </span>
+                        class="teamhub-dec-level-select"
+                        :aria-label="t('teamhub', 'Who can add, edit, or delete custom links in the team tab bar.')"
+                        @change="saveMessageSettingsAuto">
+                        <option value="member">{{ t('teamhub', 'Any member') }}</option>
+                        <option value="moderator">{{ t('teamhub', 'Moderator or above') }}</option>
+                        <option value="admin">{{ t('teamhub', 'Admin or above') }}</option>
+                    </select>
                 </div>
 
-                <!-- Image cache -->
-                <div class="manage-section">
-                    <h3>{{ t('teamhub', 'Message image cache') }}</h3>
-                    <p class="manage-section__desc">
-                        {{ t('teamhub', 'Images inserted from your personal files are copied into a hidden cache folder (.teamhub-cache) inside the team folder so all members can view them. Clear this cache to free up storage — existing messages will show broken images.') }}
-                    </p>
-                    <NcButton
-                        variant="error"
-                        :disabled="clearingImageCache || !teamFilesFolderId"
-                        @click="clearImageCache">
-                        <template #icon>
-                            <NcLoadingIcon v-if="clearingImageCache" :size="18" />
-                            <TrashCan v-else :size="18" aria-hidden="true" />
-                        </template>
-                        {{ clearingImageCache ? t('teamhub', 'Clearing…') : t('teamhub', 'Clear image cache') }}
-                    </NcButton>
-                    <span v-if="!teamFilesFolderId" class="manage-section__hint">
-                        {{ t('teamhub', 'No Files folder connected — image cache is not available.') }}
-                    </span>
-                </div>
-            </template>
+                <p v-if="meetingSettingsError" class="manage-settings-error">
+                    {{ meetingSettingsError }}
+                </p>
+            </div>
+
         </div>
 
         <!-- TAB: Members -->
@@ -488,7 +395,11 @@
                 </p>
 
                 <!-- ── Internal integrations (built into TeamHub) ──────────── -->
-                <div v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection">
+                <!-- v3.104.1 — parent gate loosened to isTeamAdmin alone.
+                     Messages/Timeline/Budget/Time are always available (no
+                     instance-wide module gate) so the subsection must render
+                     even when neither Presence nor Decisions is on. -->
+                <div v-if="isTeamAdmin" class="integrations-subsection">
                     <h4 class="integrations-subsection__title">{{ t('teamhub', 'Internal integrations') }}</h4>
                     <div class="widgets-list">
                         <!-- Presence row — only shown when presence module is on -->
@@ -564,6 +475,34 @@
                                 :aria-label="t('teamhub', 'Enable Decisions for this team')"
                                 @update:model-value="setDecisionsEnabled($event)">
                                 {{ decisionsEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
+                        <!-- Messages row (v3.104.1) — per-team toggle. Default
+                             on: most teams communicate via the message stream.
+                             Disabling hides the message stream widget, the
+                             PostMessageForm, and every message surface. -->
+                        <div
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': messagesEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the Messages feature (a TeamHub built-in integration providing the team message stream, pins, polls, and posts) -->
+                                    {{ t('teamhub', 'Messages') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="messagesEnabled"
+                                :disabled="savingMessagesConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable Messages for this team')"
+                                @update:model-value="setMessagesEnabled($event)">
+                                {{ messagesEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
                             </NcCheckboxRadioSwitch>
                         </div>
 
@@ -665,7 +604,7 @@
                 </div>
 
                 <!-- ── Third-party integrations (registered by other apps) ── -->
-                <h4 v-if="isTeamAdmin && (presenceModuleEnabled || decisionsModuleEnabled)" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
+                <h4 v-if="isTeamAdmin" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
                 <div v-if="loadingWidgets" class="section-loading">
                     <NcLoadingIcon :size="32" />
                 </div>
@@ -1120,6 +1059,76 @@
         <!-- TAB: Integration settings (Decisions block + Timeline/Milestones block) -->
         <div v-else-if="activeTab === 'integration-settings'" class="manage-tab-content">
 
+            <!-- ── Messages block (v3.104.1) — always rendered. When the
+                 Messages integration is off, shows a hint pointing at the
+                 Integrations tab. When on, renders the compact role rows +
+                 image-cache action. Auto-saves on change (no Save button). -->
+            <div v-if="!messagesEnabled" class="manage-section" data-section="messages">
+                <h3>{{ t('teamhub', 'Messages') }}</h3>
+                <p class="manage-section-desc manage-section-desc--inline">
+                    {{ t('teamhub', 'Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.') }}
+                </p>
+            </div>
+
+            <div v-if="messagesEnabled" class="manage-section" data-section="messages">
+                <h3>{{ t('teamhub', 'Messages') }}</h3>
+
+                <!-- Pin min-role -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Minimum role to pin') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can pin or unpin a message. One message can be pinned at a time.') }}</span>
+                    </div>
+                    <select
+                        v-model="messageSettingsForm.pinMinLevel"
+                        :disabled="savingMessageSettings"
+                        class="teamhub-dec-level-select"
+                        :aria-label="t('teamhub', 'Minimum role to pin')"
+                        @change="saveMessageSettingsAuto">
+                        <option value="member">{{ t('teamhub', 'Member') }}</option>
+                        <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                        <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                    </select>
+                </div>
+
+                <!-- Post min-role -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Minimum role to post') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can post new messages, questions, and polls.') }}</span>
+                    </div>
+                    <select
+                        v-model="messageSettingsForm.postMinLevel"
+                        :disabled="savingMessageSettings"
+                        class="teamhub-dec-level-select"
+                        :aria-label="t('teamhub', 'Minimum role to post')"
+                        @change="saveMessageSettingsAuto">
+                        <option value="member">{{ t('teamhub', 'Member') }}</option>
+                        <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                        <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                    </select>
+                </div>
+
+                <!-- Image cache -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Message image cache') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.') }}</span>
+                    </div>
+                    <NcButton
+                        variant="error"
+                        :disabled="clearingImageCache || !teamFilesFolderId"
+                        :title="!teamFilesFolderId ? t('teamhub', 'No Files folder connected — image cache is not available.') : ''"
+                        @click="clearImageCache">
+                        <template #icon>
+                            <NcLoadingIcon v-if="clearingImageCache" :size="18" />
+                            <TrashCan v-else :size="18" aria-hidden="true" />
+                        </template>
+                        {{ clearingImageCache ? t('teamhub', 'Clearing…') : t('teamhub', 'Clear image cache') }}
+                    </NcButton>
+                </div>
+            </div>
+
             <!-- ── Decisions block — only rendered at all when the Decisions
                  module is available instance-wide. Within that, shows a hint
                  when this team hasn't toggled it on yet, or the full settings
@@ -1170,10 +1179,11 @@
                         <option :value="8">{{ t('teamhub', 'Admin') }}</option>
                     </select>
                 </div>
-            </div>
 
-            <div v-if="decisionsEnabled" class="manage-section">
-                <h3>{{ t('teamhub', 'Decision categories') }}</h3>
+                <!-- Categories sub-section (v3.104.6 — merged into the parent
+                     Decisions section so Integration Settings has one block
+                     per integration rather than two adjacent Decisions blocks). -->
+                <h4 class="manage-section__subhead">{{ t('teamhub', 'Categories') }}</h4>
                 <p class="manage-section-desc">
                     {{ t('teamhub', 'Define the categories proposers can choose from. Each category has one or more approvers — the people who can finalize decisions in that category. If you leave the approvers field empty, the team owner is used as the default approver.') }}
                 </p>
@@ -2384,6 +2394,11 @@ export default {
             // matches the backend default so first paint doesn't flicker the
             // toggle off before loadTimelineConfig() resolves.
             timelineEnabled:       true,
+            // Messages integration toggle (v3.104.1). Default true matches the
+            // backend default so first paint doesn't flicker the Disabled state
+            // before loadMessagesConfig resolves.
+            messagesEnabled:       true,
+            savingMessagesConfig:  false,
             // Budget integration toggle (v3.92.0) — Advanced projects only.
             // Row is v-if'd on project.mode === 'advanced'; the flag defaults
             // true so the toggle off before loadBudgetConfig resolves doesn't
@@ -2642,9 +2657,8 @@ export default {
 
         tabs() {
             const list = [
-                { key: 'description',  label: t('teamhub', 'Description'),  icon: 'TextIcon' },
+                { key: 'description',  label: t('teamhub', 'General'),  icon: 'TextIcon' },
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
-                { key: 'messages',     label: t('teamhub', 'Permissions'),  icon: 'MessageIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
             ]
             // Project tab — only for teams created from the Project template.
@@ -2827,13 +2841,11 @@ export default {
                 this.loadArchiveStatus()
                 this.loadArchiveSettings()
             }
-            if (tab === 'messages') {
-                this.loadMessageSettings()
-            }
             if (tab === 'integrations') {
                 this.loadPresenceConfig()
                 this.loadDecisionsConfig()
                 this.loadTimelineConfig()
+                this.loadMessagesConfig()
                 this.loadBudgetConfig()
                 this.loadTimeConfig()
             }
@@ -2841,6 +2853,11 @@ export default {
                 // Refresh decisions config and categories when switching to
                 // this tab.
                 this.loadDecisionsConfig()
+                // v3.104.1 — Messages settings (pin/post role, image cache)
+                // moved here from the Permissions tab. Refresh on tab entry so
+                // an admin toggling messages off/on elsewhere sees fresh state.
+                this.loadMessagesConfig()
+                this.loadMessageSettings()
                 // v3.71.9 — ensure the approver picker has the full effective
                 // member list (incl. indirect via groups/sub-teams).
                 this.$store.dispatch('fetchAllEffectiveMembers', this.team.id)
@@ -2909,7 +2926,7 @@ export default {
     methods: {
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT_TAB_FOCUS']),
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT_TAB_FOCUS']),
 
         loadAll() {
             this.loadMembers()
@@ -2921,6 +2938,12 @@ export default {
             this.loadPresenceConfig()
             this.loadDecisionsConfig()
             this.loadTimelineConfig()
+            this.loadMessagesConfig()
+            // Message role settings (pin/post/link) moved from the Permissions
+            // tab in v3.104.1 — pin/post live in Integration Settings → Messages,
+            // link lives in Settings → Custom links. Load once so both tabs see
+            // populated selects on first render.
+            this.loadMessageSettings()
         },
 
         getMemberRoleLabel(level) {
@@ -3323,6 +3346,28 @@ export default {
             }
         },
 
+        /**
+         * Auto-save variant (v3.104.1) used by the Integration Settings
+         * Messages block and the Settings tab Custom-links row. Same POST as
+         * saveMessageSettings but silent on success — no toast, no "Saved"
+         * badge — because it fires on every select change and would spam.
+         * Errors still surface via showError.
+         */
+        async saveMessageSettingsAuto() {
+            this.savingMessageSettings = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/settings`),
+                    this.messageSettingsForm
+                )
+                this.$store.dispatch('fetchMessageSettings', this.team.id)
+            } catch (e) {
+                showError(t('teamhub', 'Failed to save message settings'))
+            } finally {
+                this.savingMessageSettings = false
+            }
+        },
+
         async clearImageCache() {
             const folderId = this.teamFilesFolderId
             if (!folderId) return
@@ -3681,6 +3726,43 @@ export default {
                 }))
             } finally {
                 this.savingTimelineConfig = false
+            }
+        },
+
+        /**
+         * Messages per-team toggle (v3.104.1). Mirrors the timeline pattern.
+         * Store sync via SET_MESSAGES_CONFIG keeps TeamWidgetGrid and
+         * MobileWidgetView's message-stream gating reactive so the widget
+         * appears/disappears immediately when the admin flips the switch.
+         */
+        async loadMessagesConfig() {
+            if (!this.team?.id) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/config`)
+                )
+                this.messagesEnabled = !!data.messages_enabled
+                this.SET_MESSAGES_CONFIG(data)
+            } catch (err) {
+                // Non-fatal — default of true stays in place.
+            }
+        },
+
+        async setMessagesEnabled(val) {
+            this.savingMessagesConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/config`),
+                    { messages_enabled: val ? 1 : 0 }
+                )
+                this.messagesEnabled = !!data.messages_enabled
+                this.SET_MESSAGES_CONFIG(data)
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingMessagesConfig = false
             }
         },
 
@@ -4772,7 +4854,9 @@ export default {
 }
 
 .manage-section-desc {
-    font-size: 13px;
+    /* v3.104.9 — off-scale 13px replaced by --th-font-meta (12px) so section
+       descs match the row-desc used under Permissions / Integration Settings. */
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: -8px 0 16px;
 }
@@ -5042,6 +5126,16 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    /* v4.0.0 — NcCheckboxRadioSwitch labels inherit their font-size from
+       NC's global button reset (~16-18px), which overpowered the row text
+       in Circle Settings. Pin the whole group to body scale so labels
+       render at 14px like every other content string on the page. */
+    font-size: var(--th-font-body);
+}
+.manage-settings-group :deep(.checkbox-radio-switch__label),
+.manage-settings-group :deep(.checkbox-radio-switch label),
+.manage-settings-group :deep(label span) {
+    font-size: var(--th-font-body);
 }
 .manage-settings-group h4 {
     font-size: var(--th-font-meta);
@@ -6124,9 +6218,21 @@ export default {
 }
 
 .manage-section__desc {
-    font-size: 13px;
+    /* v3.104.9 — same token alignment as .manage-section-desc above. */
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 4px 0 0;
+}
+
+/* v3.104.6 — sub-heading inside a manage-section (e.g. "Categories" under
+   the Decisions section). Visually lighter than the section h3 so the
+   parent section still reads as one block, with a small top margin to
+   separate it from the preceding row group. */
+.manage-section__subhead {
+    margin: 18px 0 0;
+    font-size: var(--th-font-body);
+    font-weight: var(--th-font-weight-semibold);
+    color: var(--color-main-text);
 }
 /* ── Decision categories sub-panel (Session G) ── */
 .teamhub-dec-cats__info {

@@ -52,7 +52,7 @@
 
             <!-- Message stream -->
             <grid-item
-                v-if="getGridItem('msgstream')"
+                v-if="showMessagesWidget && getGridItem('msgstream')"
                 v-bind="getGridItem('msgstream')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
@@ -585,12 +585,15 @@
             class="teamhub-tablet-layout">
 
             <!-- ── Left: message stream (60%) ───────────────────── -->
-            <div class="teamhub-tablet-stream">
+            <!-- v3.104.1 — tablet layout drops the stream column entirely
+                 when Messages is disabled for the team so widgets fill the
+                 space rather than leaving a blank slab. -->
+            <div v-if="showMessagesWidget" class="teamhub-tablet-stream">
                 <MessageStream />
             </div>
 
-            <!-- ── Right: widget column (40%) ───────────────────── -->
-            <div class="teamhub-tablet-widgets">
+            <!-- ── Right: widget column (40%, or 100% when stream is off) ── -->
+            <div class="teamhub-tablet-widgets" :class="{ 'teamhub-tablet-widgets--full': !showMessagesWidget }">
 
                 <!-- Team info -->
                 <div v-if="getGridItem('widget-teaminfo')" class="teamhub-tablet-widget">
@@ -973,6 +976,10 @@ export default {
             'resourceWarnings',
             'presenceModuleEnabled', 'presenceConfig',
             'decisionsModuleEnabled', 'decisionsConfig',
+            // v3.104.1 — per-team Messages toggle; drives the msgstream widget
+            // and tablet-mode stream column so a team without messages doesn't
+            // render either surface.
+            'messagesConfig',
             // v3.97.0 — gate for the project-health widget. Both flags are
             // precomputed on the layout bundle; project.mode + phase come
             // with the same bundle. The widget also self-checks the payload,
@@ -998,6 +1005,14 @@ export default {
          */
         showDecisionsWidget() {
             return !!(this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled)
+        },
+
+        /**
+         * v3.104.1 — per-team Messages toggle. Default true, so a team that
+         * never touches the setting keeps its stream.
+         */
+        showMessagesWidget() {
+            return this.messagesConfig?.messages_enabled !== false
         },
 
         /**
@@ -1817,6 +1832,12 @@ export default {
     gap: 8px;
     padding: 12px 8px;
     box-sizing: border-box;
+}
+
+/* v3.104.1 — take the full width when the message stream column is hidden
+   because Messages is disabled for the team. */
+.teamhub-tablet-widgets--full {
+    flex: 1 1 100%;
 }
 
 /* ─── Individual tablet widget card ───────────────────────── */

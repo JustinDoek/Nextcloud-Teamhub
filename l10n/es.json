@@ -2148,7 +2148,19 @@
 		"This instance has already used its trial.": "Esta instancia ya ha usado su prueba.",
 		"Could not start trial.": "No se pudo iniciar la prueba.",
 		"Start a 30-day trial": "Iniciar prueba de 30 días",
-		"Trial activated — 30 days.": "Prueba activada — 30 días."
+		"Trial activated — 30 days.": "Prueba activada — 30 días.",
+		"Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.": "Habilitar el flujo de mensajes del equipo — publicaciones, preguntas, encuestas y mensajes fijados. Los límites de rol están en Ajustes de integración.",
+		"Enable Messages for this team": "Activar Mensajes para este equipo",
+		"Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.": "Los mensajes están desactivados para este equipo. Active el módulo en la pestaña Integraciones para configurar los límites de rol de fijado y publicación.",
+		"Who can pin or unpin a message. One message can be pinned at a time.": "Quién puede fijar o desfijar un mensaje. Solo un mensaje puede estar fijado a la vez.",
+		"Who can post new messages, questions, and polls.": "Quién puede publicar nuevos mensajes, preguntas y encuestas.",
+		"Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Las imágenes insertadas desde archivos personales se copian a una carpeta de caché oculta dentro de la carpeta del equipo para que todos los miembros puedan verlas. Borrar mostrará imágenes rotas en las publicaciones existentes.",
+		"Set which membership level is required to add, edit, or delete custom links in the team tab bar.": "Defina qué nivel de membresía se requiere para añadir, editar o eliminar enlaces personalizados en la barra de pestañas del equipo.",
+		"Who can manage custom links?": "¿Quién puede gestionar los enlaces personalizados?",
+		"Team message stream — posts, questions, polls, pinned messages": "Flujo de mensajes del equipo — publicaciones, preguntas, encuestas, mensajes fijados",
+		"Team meetings": "Reuniones del equipo",
+		"Who can create a team meeting.": "Quién puede crear una reunión de equipo.",
+		"Who can add, edit, or delete custom links in the team tab bar.": "Quién puede añadir, editar o eliminar enlaces personalizados en la barra de pestañas del equipo."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }
