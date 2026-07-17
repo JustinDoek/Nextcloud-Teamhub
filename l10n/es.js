@@ -2133,5 +2133,8 @@ OC.L10N.register(
     "Team meetings" : "Reuniones del equipo",
     "Who can create a team meeting." : "Quién puede crear una reunión de equipo.",
     "Who can add, edit, or delete custom links in the team tab bar." : "Quién puede añadir, editar o eliminar enlaces personalizados en la barra de pestañas del equipo.",
+    "Created from the Collaboration template." : "Creado desde la plantilla Colaboración.",
+    "Created from the Project template." : "Creado desde la plantilla Proyecto.",
+    "Created from the Department template." : "Creado desde la plantilla Departamento.",
 },
     "nplurals=2; plural=(n != 1);");

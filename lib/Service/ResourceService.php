@@ -846,6 +846,187 @@ class ResourceService {
 
         return ['success' => true, 'detail' => $result];
     }
+
+    /**
+     * v4.0.4 — safety-checked variant of deleteSpecificResource, intended for
+     * the team-delete cascade.
+     *
+     * Decides between two outcomes based on whether *another team* still has
+     * the same resource connected via teamhub_team_app_resources:
+     *   - No other teams share it  → deleteSpecificResource (destroys the
+     *     underlying NC resource).
+     *   - Another team shares it   → removeTeamAccess (strips this team's
+     *     ACL row, leaves the resource intact for the surviving teams).
+     *
+     * Only team-to-team sharing counts. Individual users invited to a Deck
+     * board, a Talk room, or the folder do not preserve the resource — the
+     * team that owned it is being deleted and the shared registry says no
+     * other team was co-owning. Those individuals will lose access as a
+     * consequence of the destroy, same as if the team owner had used the
+     * "Delete resource" action in Manage Team.
+     *
+     * @return array {mode: 'destroyed'|'detached', ...}
+     */
+    public function destroyOrDetachOnTeamDelete(string $teamId, string $app, string $resourceId): array {
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // Two-source safety check:
+        //  1. teamhub_team_app_resources — the registry we control. Fast and
+        //     covers every connection made through TeamHub itself.
+        //  2. Native NC storage (dav_shares / deck_board_acl / talk_attendees
+        //     / share) — catches teams whose access predates our registry OR
+        //     was granted via NC's own sharing UI without touching TeamHub.
+        //     v4.0.7 — added after a calendar that was shared with another
+        //     team via NC-native sharing was destroyed on team-delete because
+        //     only the registry check ran.
+        $otherTeamCount = $this->countOtherTeamsWithResource($db, $app, $resourceId, $teamId);
+        $nativeOtherOwners = $this->hasOtherCircleOwners($db, $app, $resourceId, $teamId);
+
+        if ($otherTeamCount > 0 || $nativeOtherOwners) {
+            $result = $this->removeTeamAccess($teamId, $app, $resourceId);
+            $this->logger->info('[TeamHub][ResourceService] team-delete cascade: resource preserved for other teams', [
+                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                'otherTeamCount' => $otherTeamCount,
+                'nativeOtherOwners' => $nativeOtherOwners,
+                'app_id' => Application::APP_ID,
+            ]);
+            return array_merge(
+                ['mode' => 'detached', 'otherTeamCount' => $otherTeamCount, 'nativeOtherOwners' => $nativeOtherOwners],
+                $result,
+            );
+        }
+
+        $result = $this->deleteSpecificResource($teamId, $app, $resourceId);
+        return array_merge(['mode' => 'destroyed'], $result);
+    }
+
+    /**
+     * v4.0.7 — belt to the registry check's braces. Queries the underlying
+     * NC storage for any OTHER circle principal on the same resource:
+     *
+     *   calendar → dav_shares.principaluri LIKE 'principals/circles/%'
+     *   deck     → deck_board_acl / deck_acl participant + type=7 (circle)
+     *   talk     → talk_attendees actor_type='circles'
+     *   files    → share.share_with + share_type=7 (circle) — legacy shares,
+     *              plus circles_group in group-folders for gf: resource IDs
+     *
+     * Individual user / group principals are ignored per Justin's rule:
+     * shared resources are preserved only when another *team* still owns them.
+     * Any error returns false (fail open into destroy) — better to hard-delete
+     * a lone resource than to leave orphans when the check itself is broken.
+     */
+    private function hasOtherCircleOwners(
+        \OCP\IDBConnection $db,
+        string             $app,
+        string             $resourceId,
+        string             $excludeTeamId
+    ): bool {
+        try {
+            switch ($app) {
+                case 'calendar':
+                    $qb = $db->getQueryBuilder();
+                    $qb->select($qb->func()->count('*', 'cnt'))
+                        ->from('dav_shares')
+                        ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
+                        ->andWhere($qb->expr()->eq('resourceid', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($qb->expr()->like('principaluri', $qb->createNamedParameter('principals/circles/%')))
+                        ->andWhere($qb->expr()->neq('principaluri', $qb->createNamedParameter('principals/circles/' . $excludeTeamId)));
+                    $r = $qb->executeQuery();
+                    $c = (int)$r->fetchOne();
+                    $r->closeCursor();
+                    return $c > 0;
+
+                case 'deck':
+                    foreach (['deck_board_acl', 'deck_acl'] as $tbl) {
+                        try {
+                            $qb = $db->getQueryBuilder();
+                            $qb->select($qb->func()->count('*', 'cnt'))
+                                ->from($tbl)
+                                ->where($qb->expr()->eq('board_id', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                                ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                                ->andWhere($qb->expr()->neq('participant', $qb->createNamedParameter($excludeTeamId)));
+                            $r = $qb->executeQuery();
+                            $c = (int)$r->fetchOne();
+                            $r->closeCursor();
+                            if ($c > 0) return true;
+                        } catch (\Throwable) {
+                            // Table doesn't exist on this NC/Deck version — try next.
+                        }
+                    }
+                    return false;
+
+                case 'talk':
+                    $qb = $db->getQueryBuilder();
+                    // Look up the room by token, then count other circle attendees.
+                    $rq = $qb->select('id')
+                        ->from('talk_rooms')
+                        ->where($qb->expr()->eq('token', $qb->createNamedParameter($resourceId)))
+                        ->setMaxResults(1)
+                        ->executeQuery();
+                    $rr = $rq->fetch();
+                    $rq->closeCursor();
+                    if (!$rr) return false;
+                    $roomId = (int)$rr['id'];
+                    $qb2 = $db->getQueryBuilder();
+                    $qb2->select($qb2->func()->count('*', 'cnt'))
+                        ->from('talk_attendees')
+                        ->where($qb2->expr()->eq('room_id', $qb2->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($qb2->expr()->eq('actor_type', $qb2->createNamedParameter('circles')))
+                        ->andWhere($qb2->expr()->neq('actor_id', $qb2->createNamedParameter($excludeTeamId)));
+                    $r = $qb2->executeQuery();
+                    $c = (int)$r->fetchOne();
+                    $r->closeCursor();
+                    return $c > 0;
+
+                case 'files':
+                    // Group Folder-backed: check groupfolders_circles for other
+                    // circles on the same folder id. Legacy share-based: check
+                    // share table for other circle-typed shares of the same node.
+                    if (str_starts_with($resourceId, 'gf:')) {
+                        $folderId = (int) substr($resourceId, 3);
+                        foreach (['group_folders_circles', 'groupfolders_circles'] as $tbl) {
+                            try {
+                                $qb = $db->getQueryBuilder();
+                                $qb->select($qb->func()->count('*', 'cnt'))
+                                    ->from($tbl)
+                                    ->where($qb->expr()->eq('folder_id', $qb->createNamedParameter($folderId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                                    ->andWhere($qb->expr()->neq('circle_id', $qb->createNamedParameter($excludeTeamId)));
+                                $r = $qb->executeQuery();
+                                $c = (int)$r->fetchOne();
+                                $r->closeCursor();
+                                if ($c > 0) return true;
+                            } catch (\Throwable) { /* try next table name variant */ }
+                        }
+                        return false;
+                    }
+                    // Legacy shared folder: share_type=7 is circle share.
+                    try {
+                        $qb = $db->getQueryBuilder();
+                        $qb->select($qb->func()->count('*', 'cnt'))
+                            ->from('share')
+                            ->where($qb->expr()->eq('file_source', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->andWhere($qb->expr()->neq('share_with', $qb->createNamedParameter($excludeTeamId)));
+                        $r = $qb->executeQuery();
+                        $c = (int)$r->fetchOne();
+                        $r->closeCursor();
+                        return $c > 0;
+                    } catch (\Throwable) {
+                        return false;
+                    }
+
+                default:
+                    return false;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ResourceService] hasOtherCircleOwners lookup failed — failing open to destroy', [
+                'app' => $app, 'resourceId' => $resourceId, 'excludeTeamId' => $excludeTeamId,
+                'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
     /**
      * Strip files access from a team for a given resource ID.
      * Routes to GroupFolderService for gf: prefixed IDs, FilesService otherwise.

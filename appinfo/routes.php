@@ -311,6 +311,12 @@ return [
         ['name' => 'team#getTimelineConfig',  'url' => '/api/v1/teams/{teamId}/timeline/config', 'verb' => 'GET'],
         ['name' => 'team#saveTimelineConfig', 'url' => '/api/v1/teams/{teamId}/timeline/config', 'verb' => 'PUT'],
 
+        // Team template label (v4.0.2) — collaboration | project | department.
+        // Written once by the create wizard; read by the Team info widget and
+        // Browse Teams to render a template badge.
+        ['name' => 'team#getTeamType',  'url' => '/api/v1/teams/{teamId}/type', 'verb' => 'GET'],
+        ['name' => 'team#saveTeamType', 'url' => '/api/v1/teams/{teamId}/type', 'verb' => 'PUT'],
+
         // Project Teams (v3.88.0) — persisted project-ness + Basic/Advanced mode
         // + PMC phase. get is team-member-gated; save + setPhase require team admin.
         // setPhase is valid only on advanced projects.

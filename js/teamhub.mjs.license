@@ -46,7 +46,7 @@ This file is generated from multiple sources. Included packages:
 	- version: 1.14.0
 	- license: MIT
 - teamhub
-	- version: 4.0.1
+	- version: 4.1.0
 	- license: undefined
 - vue
 	- version: 3.5.34

@@ -273,18 +273,25 @@ class MessageService {
                 );
             }
 
-            // Get member UIDs from DB for notifications — no Circles API needed.
-            $memberUids = $this->getTeamMemberUids($teamId);
-
-            // Send new-message notifications to all members.
-            $this->sendNotificationsWithName($teamId, $messageData['id'], $subject, $user->getDisplayName(), $teamName, $memberUids);
-
-            // Send targeted mention notifications to @mentioned users.
-            $this->sendMentionNotifications($teamId, $messageData['id'], $message, $user, $memberUids);
-
-            // Send email to all members if priority message.
-            if ($priority === 'priority') {
-                $this->sendPriorityEmailsWithName($subject, $message, $user->getDisplayName(), $teamName, $memberUids);
+            // Notifications are best-effort — the message row is already committed.
+            // v4.0.5 — the notification path used to fail the whole POST with 400
+            // when a member had a numeric UID because Notification::setUser() is
+            // strict-string and PHP array-key coercion made it int. We now catch
+            // Throwable per-recipient and around the whole notification block so
+            // no notification-side error can retroactively fail a message that
+            // was already stored.
+            try {
+                $memberUids = $this->getTeamMemberUids($teamId);
+                $this->sendNotificationsWithName($teamId, $messageData['id'], $subject, $user->getDisplayName(), $teamName, $memberUids);
+                $this->sendMentionNotifications($teamId, $messageData['id'], $message, $user, $memberUids);
+                if ($priority === 'priority') {
+                    $this->sendPriorityEmailsWithName($subject, $message, $user->getDisplayName(), $teamName, $memberUids);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MessageService] notification dispatch failed after message committed', [
+                    'teamId' => $teamId, 'messageId' => $messageData['id'] ?? null,
+                    'exception' => $e, 'app' => Application::APP_ID,
+                ]);
             }
 
             // v4.0.0 — include the author's display name so MessageStream
@@ -433,6 +440,14 @@ class MessageService {
      * @return string[] list of NC user IDs
      */
     private function getTeamMemberUids(string $teamId): array {
+        // v4.0.5 — dedup by value, not by array-key. PHP silently coerces any
+        // string array-key that matches ^-?[1-9][0-9]*$ into an int, so UIDs
+        // like "1724022" (common on LDAP/SAML instances that use the numeric
+        // subject as the internal username) came back as ints and blew up
+        // Notification::setUser() (strict string type) — the whole message
+        // POST returned 400 even though the message had already been written
+        // to the DB. Building a list of stringified values and running
+        // array_unique on it keeps every UID a string end-to-end.
         $uids = [];
 
         // Direct members (user_type=1, status=Member)
@@ -445,7 +460,7 @@ class MessageService {
             ->executeQuery();
         while ($row = $res->fetch()) {
             if (!empty($row['user_id'])) {
-                $uids[$row['user_id']] = true;
+                $uids[] = (string)$row['user_id'];
             }
         }
         $res->closeCursor();
@@ -468,7 +483,7 @@ class MessageService {
                 ->executeQuery();
             while ($row = $msRes->fetch()) {
                 if (!empty($row['user_id'])) {
-                    $uids[$row['user_id']] = true;
+                    $uids[] = (string)$row['user_id'];
                 }
             }
             $msRes->closeCursor();
@@ -479,7 +494,7 @@ class MessageService {
             ]);
         }
 
-        return array_keys($uids);
+        return array_values(array_unique($uids));
     }
 
     private function sendMentionNotifications(string $teamId, int $messageId, string $body, \OCP\IUser $author, array $memberUids): void {
@@ -490,10 +505,14 @@ class MessageService {
                 return;
             }
 
-            $memberSet = array_flip($memberUids);
+            // v4.0.5 — array_flip on a list that happens to contain int-typed
+            // UIDs produces int keys that don't match the string $mentionedId
+            // in a strict isset lookup. Force the flip target to strings.
+            $memberSet = array_flip(array_map('strval', $memberUids));
             $link = $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?team=' . urlencode($teamId);
 
             foreach ($mentionedIds as $mentionedId) {
+                $mentionedId = (string)$mentionedId;
                 if (!isset($memberSet[$mentionedId]) || $mentionedId === $author->getUID()) {
                     continue;
                 }
@@ -541,6 +560,12 @@ class MessageService {
 
             foreach ($memberUids as $userId) {
                 try {
+                    // v4.0.5 — defensive cast. getTeamMemberUids now returns
+                    // strings, but any future caller could feed us a raw DB
+                    // list where numeric UIDs still come back as ints. One
+                    // Throwable-catching pass here means a bad element skips
+                    // its notification instead of failing the whole POST.
+                    $userId = (string)$userId;
                     if ($userId === $currentUser->getUID()) continue;
 
                     $notification = $this->notificationManager->createNotification();
@@ -557,11 +582,11 @@ class MessageService {
                         ])
                         ->setLink($link);
                     $this->notificationManager->notify($notification);
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
                     $this->logger->error('Failed to notify member - ', ['exception' => $e, 'app' => Application::APP_ID]);
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Failed to send notifications - ', ['exception' => $e, 'app' => Application::APP_ID]);
         }
     }
@@ -576,6 +601,8 @@ class MessageService {
 
             foreach ($memberUids as $userId) {
                 try {
+                    // v4.0.5 — same defensive cast as sendNotificationsWithName.
+                    $userId = (string)$userId;
                     if ($userId === $currentUser->getUID()) continue;
 
                     $ncUser = $this->userManager->get($userId);
@@ -599,11 +626,11 @@ class MessageService {
                         "<p>" . nl2br(htmlspecialchars($message)) . "</p>"
                     );
                     $this->mailer->send($mail);
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
                     $this->logger->error('Failed to send priority email - ', ['exception' => $e, 'app' => Application::APP_ID]);
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Failed to send priority emails - ', ['exception' => $e, 'app' => Application::APP_ID]);
         }
     }

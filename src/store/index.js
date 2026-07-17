@@ -66,6 +66,10 @@ export default createStore({
         // Gates the message stream widget, PostMessageForm, and any surface
         // that renders team messages so a team can be run without a stream.
         messagesConfig: { messages_enabled: true },
+        // Team template label (v4.0.2): 'collaboration'|'project'|'department'|null.
+        // Set once by CreateTeamView after team creation; null for legacy
+        // teams so the frontend renders no template badge.
+        teamType: null,
         // Budget integration (v3.92.0): per-team toggle, default enabled.
         // Only surfaced in the UI for Advanced projects, but the store shape
         // is universal so consumers can guard the Budget tab consistently.
@@ -290,6 +294,7 @@ export default createStore({
         SET_DECISIONS_CONFIG(state, config) { state.decisionsConfig = config },
         SET_TIMELINE_CONFIG(state, config) { state.timelineConfig = config },
         SET_MESSAGES_CONFIG(state, config) { state.messagesConfig = config },
+        SET_TEAM_TYPE(state, teamType) { state.teamType = teamType },
         SET_BUDGET_CONFIG(state, config) { state.budgetConfig = config },
         SET_TIME_CONFIG(state, config) { state.timeConfig = config },
         SET_PROJECT(state, project) { state.project = project },

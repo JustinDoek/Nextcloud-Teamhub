@@ -972,7 +972,7 @@ export default {
     },
 
     emits: [
-        'layout-updated', 'manage-team', 'copy-link', 'invite',
+        'layout-updated', 'layout-autofit', 'manage-team', 'copy-link', 'invite',
         'schedule-meeting', 'add-event', 'add-meeting', 'add-deck-task', 'add-personal-task',
         'create-page', 'delete-page', 'pages-loaded', 'set-view',
         'widget-actions-loaded',
@@ -997,6 +997,9 @@ export default {
             // and tablet-mode stream column so a team without messages doesn't
             // render either surface.
             'messagesConfig',
+            // v4.0.2 — team template label from CreateTeamView. Renders as the
+            // leading badge in the Team info widget's labels row.
+            'teamType',
             // v3.97.0 — gate for the project-health widget. Both flags are
             // precomputed on the layout bundle; project.mode + phase come
             // with the same bundle. The widget also self-checks the payload,
@@ -1097,6 +1100,17 @@ export default {
         },
 
         /**
+         * v4.1.0 — stable string key over the SET of currently-visible widget
+         * ids. Sorted so the value only changes when membership changes, not
+         * when order shuffles inside the array. Consumed by the auto-fit
+         * watcher so a widget that becomes visible mid-session (e.g. Project
+         * Health after phase advance) gets its one-shot fit pass.
+         */
+        visibleWidgetIds() {
+            return this.visibleLayout.map(item => item.i).sort().join(',')
+        },
+
+        /**
          * URL to open the team folder directly in NC Files.
          * Uses the /files/{userId}/{path} route which NC Files maps to the
          * correct folder view regardless of whether it's a group folder or a
@@ -1136,6 +1150,32 @@ export default {
             if (!this.currentTeamId) return []
 
             const labels = []
+
+            // v4.0.2 — template label from CreateTeamView. Leading position
+            // so it reads as the team's identity. Legacy teams (teamType=null)
+            // render no template badge — legacyFallback picked by Justin.
+            if (this.teamType === 'collaboration') {
+                labels.push({
+                    key: 'type-collab',
+                    text: t('teamhub', 'Collaboration'),
+                    tooltip: t('teamhub', 'Created from the Collaboration template.'),
+                    tone: 'primary',
+                })
+            } else if (this.teamType === 'project') {
+                labels.push({
+                    key: 'type-project',
+                    text: t('teamhub', 'Project'),
+                    tooltip: t('teamhub', 'Created from the Project template.'),
+                    tone: 'primary',
+                })
+            } else if (this.teamType === 'department') {
+                labels.push({
+                    key: 'type-department',
+                    text: t('teamhub', 'Department'),
+                    tooltip: t('teamhub', 'Created from the Department template.'),
+                    tone: 'primary',
+                })
+            }
 
             // Join mode — always shown (either state is informative)
             if (config & CFG_OPEN) {
@@ -1232,6 +1272,46 @@ export default {
         },
     },
 
+    watch: {
+        /**
+         * v4.0.8 — first time the layout is fully hydrated after team open,
+         * run the auto-fit pass so any widget flagged autoFit (DEFAULT_LAYOUT
+         * items on a fresh team, or newly-added widgets) grows h to fit its
+         * rendered content instead of showing a scrollbar. immediate:true
+         * catches the case where layoutLoaded was already true when this
+         * component mounted (e.g. a team switch while the previous layout
+         * was cached).
+         */
+        layoutLoaded: {
+            immediate: true,
+            handler(newVal) {
+                if (newVal) {
+                    this.$nextTick(() => this.runAutoFitPass())
+                }
+            },
+        },
+
+        /**
+         * v4.1.0 — also re-run the auto-fit pass whenever the visible-widget
+         * set changes. Fixes widgets that were hidden on team open (e.g.
+         * Project Health only shows in Planning/Execution) — layoutLoaded had
+         * already flipped to true by the time they appeared, so the original
+         * watcher never fired for them. The pass itself is idempotent (skips
+         * items without autoFit), so extra invocations from unrelated widget
+         * toggles are cheap.
+         *
+         * Watching a joined id string rather than the array reference so we
+         * fire only when the SET of visible widgets actually changes — Vue's
+         * default deep-watch on visibleLayout would fire on every h/w mutation
+         * from the grid library itself and spam the pass during drag/resize.
+         */
+        visibleWidgetIds: {
+            handler() {
+                this.$nextTick(() => this.runAutoFitPass())
+            },
+        },
+    },
+
     methods: {
         t, n,
 
@@ -1302,9 +1382,83 @@ export default {
                 isResizable: true,
                 collapsed: false,
                 hSaved: 3,
+                // v4.0.8 — auto-fit on next mount so the newly-appearing widget
+                // opens with all content visible instead of a scrollbar. Cleared
+                // by runAutoFitPass once the fit runs.
+                autoFit: true,
             }
             this.gridLayout.push(newItem)
+            this.$nextTick(() => this.runAutoFitPass())
             return newItem
+        },
+
+        /**
+         * v4.0.8 — walk any item flagged autoFit, measure its rendered content
+         * vs allocated grid space, and grow h until content fits (capped at 8
+         * rows to keep runaway lists from stretching the whole page). After
+         * fitting, strip the autoFit flag and persist.
+         *
+         * Triggers:
+         *  1. Watcher on layoutLoaded — first team open with DEFAULT_LAYOUT.
+         *  2. getOrCreateIntegrationItem — user enables an integration in
+         *     Manage Team and its widget shows up on the home for the first time.
+         *
+         * Idempotent: items without autoFit are skipped; a re-run does nothing.
+         */
+        async runAutoFitPass() {
+            // Two nextTicks + a small settle timeout give the browser time to
+            // finish the initial layout AND for widget bodies that fetch data
+            // asynchronously (calendar, deck, files) to have their first paint.
+            // We accept that widgets whose content lands after the settle
+            // window will still show a scrollbar the first time — the flag is
+            // cleared so they won't grow spuriously on later loads.
+            await this.$nextTick()
+            await new Promise(r => setTimeout(r, 250))
+
+            const rowHeight = 80
+            const margin    = 12
+            const maxH      = 8
+            let changed     = false
+
+            // Match rendered .vue-grid-item nodes to visibleLayout by index —
+            // vue-grid-layout renders items in the same order the array holds.
+            const nodes = this.$el?.querySelectorAll?.('.vue-grid-item') || []
+            const visible = this.visibleLayout
+            if (nodes.length !== visible.length) return
+
+            visible.forEach((visItem, idx) => {
+                const fullItem = this.gridLayout.find(g => g.i === visItem.i)
+                if (!fullItem || !fullItem.autoFit) return
+
+                const card = nodes[idx].querySelector('.teamhub-widget-card')
+                if (!card) { delete fullItem.autoFit; changed = true; return }
+
+                // scrollHeight reflects the space the content wants; clientHeight
+                // is what the grid gave us. 4 px tolerance avoids single-pixel
+                // rounding growth.
+                const needed    = card.scrollHeight
+                const allocated = card.clientHeight
+                if (needed > allocated + 4) {
+                    const extraPx     = needed - allocated
+                    const rowStridePx = rowHeight + margin
+                    const extraRows   = Math.ceil(extraPx / rowStridePx)
+                    const newH        = Math.min(maxH, (fullItem.h || 3) + extraRows)
+                    if (newH !== fullItem.h) {
+                        fullItem.h      = newH
+                        fullItem.hSaved = newH
+                        this.gridLayout[this.gridLayout.indexOf(fullItem)] = { ...fullItem, autoFit: undefined }
+                    }
+                }
+                delete fullItem.autoFit
+                changed = true
+            })
+
+            if (changed) {
+                // Route through onLayoutUpdated so inactive items are preserved,
+                // then emit a distinct event that TeamView saves unconditionally
+                // (regular layout-updated is gated on editMode).
+                this.$emit('layout-autofit', this.gridLayout)
+            }
         },
 
         isCollapsed(id) {

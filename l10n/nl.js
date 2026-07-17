@@ -2193,5 +2193,8 @@ OC.L10N.register(
     "Team meetings" : "Teamvergaderingen",
     "Who can create a team meeting." : "Wie mag een teamvergadering aanmaken.",
     "Who can add, edit, or delete custom links in the team tab bar." : "Wie mag aangepaste koppelingen in de teamtabbalk toevoegen, bewerken of verwijderen.",
+    "Created from the Collaboration template." : "Gemaakt vanuit het Samenwerkingssjabloon.",
+    "Created from the Project template." : "Gemaakt vanuit het Projectsjabloon.",
+    "Created from the Department template." : "Gemaakt vanuit het Afdelingssjabloon.",
 },
     "nplurals=2; plural=(n != 1);");

@@ -9,6 +9,7 @@ use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Db\TeamAppMapper;
+use OCA\TeamHub\Db\TeamTypeMapper;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
 use OCP\IUserSession;
@@ -58,6 +59,7 @@ class TeamService {
         private AuditService         $auditService,
         private PendingDeletionMapper $pendingMapper,
         private GroupFolderService   $groupFolderService,
+        private TeamTypeMapper       $teamTypeMapper,
     ) {
     }
 
@@ -480,14 +482,68 @@ class TeamService {
             }
         } catch (\Throwable $e) { /* non-fatal — name is just metadata */ }
 
-        // Collect the app_ids that currently have provisioned resources for
-        // this team. We read teamhub_team_apps directly (not via getTeamApps())
-        // so we don't need to go through TeamAppMapper and can catch any error.
-        // We delete resources for ALL apps found in the table, regardless of the
-        // `enabled` flag — a disabled app may still have its resource provisioned
-        // (the resource persists when an app tab is hidden; it is only deleted
-        // when the admin explicitly removes it via the manage-team interface).
-        $appsToClean = [];
+        // ── Step 2: Delete every connected NC app resource for this team ────
+        //
+        // v4.0.3 — Prior versions built the cleanup list from teamhub_team_apps
+        // (the app-level enabled/disabled table). That table is empty for teams
+        // whose admin never toggled an app, so a team with connected Talk /
+        // Files / Deck / Calendar resources would keep them alive after the
+        // circle was destroyed — leaving orphaned resources across Nextcloud.
+        //
+        // The correct source of truth for "what does this team actually have
+        // connected" is teamhub_team_app_resources: one row per connected
+        // resource, one team can have multiple resources of the same app.
+        // ResourceService::deleteSpecificResource handles per-app ID-based
+        // destruction (works whether the resource was created by TeamHub or
+        // pre-existed), marks the registry row deleted, and does not depend
+        // on the circle still being an ACL member.
+        //
+        // Iteration BEFORE circle destruction is still important — some
+        // per-app deletes want the circle to exist for cross-referencing
+        // (e.g. calendar principal URI), and the audit log wants to know the
+        // resource was still connected at the moment of deletion.
+        $delegatedApps = [];
+        try {
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('app_id', 'resource_id')
+                ->from('teamhub_team_app_resources')
+                ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('active')))
+                ->executeQuery();
+            while ($row = $res->fetch()) {
+                $app = (string)($row['app_id'] ?? '');
+                $rid = (string)($row['resource_id'] ?? '');
+                if ($app === '' || $rid === '') continue;
+                $delegatedApps[$app] = true;
+                try {
+                    // v4.0.4 — safety check: only destroy the underlying NC
+                    // resource when this team is the last team connected to it.
+                    // Multi-team shares fall back to removing this team's ACL
+                    // access so surviving teams keep working. Individual user
+                    // shares don't preserve the resource — see docblock on
+                    // ResourceService::destroyOrDetachOnTeamDelete.
+                    $result = $this->resourceService->destroyOrDetachOnTeamDelete($teamId, $app, $rid);
+                    $this->logger->debug('[TeamHub][TeamService] deleteTeam: resource processed', [
+                        'teamId' => $teamId, 'app' => $app, 'resourceId' => $rid,
+                        'result' => $result, 'class' => Application::APP_ID,
+                    ]);
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][TeamService] deleteTeam: resource destruction failed', [
+                        'teamId' => $teamId, 'app' => $app, 'resourceId' => $rid,
+                        'error' => $e->getMessage(), 'class' => Application::APP_ID,
+                    ]);
+                }
+            }
+            $res->closeCursor();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TeamService] deleteTeam: could not read teamhub_team_app_resources', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // Intravox has no per-resource row in teamhub_team_app_resources —
+        // the page-to-team association lives in teamhub_team_apps (enabled=1
+        // implies a page exists). Handle it via the per-app delete path.
         try {
             $qb = $db->getQueryBuilder();
             $res = $qb->select('app_id')
@@ -495,41 +551,26 @@ class TeamService {
                 ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
                 ->executeQuery();
             while ($row = $res->fetch()) {
-                if (!empty($row['app_id'])) {
-                    $appsToClean[] = (string)$row['app_id'];
+                $app = (string)($row['app_id'] ?? '');
+                if ($app === '' || isset($delegatedApps[$app])) continue;
+                try {
+                    $result = $this->resourceService->deleteTeamResource($teamId, $app);
+                    $this->logger->debug('[TeamHub][TeamService] deleteTeam: legacy per-app cleanup', [
+                        'teamId' => $teamId, 'app' => $app, 'result' => $result,
+                        'class' => Application::APP_ID,
+                    ]);
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][TeamService] deleteTeam: legacy per-app cleanup failed', [
+                        'teamId' => $teamId, 'app' => $app, 'error' => $e->getMessage(),
+                        'class' => Application::APP_ID,
+                    ]);
                 }
             }
             $res->closeCursor();
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][TeamService] deleteTeam: could not read teamhub_team_apps', [
-                'teamId' => $teamId,
-                'error'  => $e->getMessage(),
-                'app'    => Application::APP_ID,
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-        }
-
-        // ── Step 2: Delete provisioned Nextcloud app resources ────────────────
-        // Run BEFORE circle destruction so that sub-services that need to
-        // look up the circle (e.g. CalDAV principaluri = principals/circles/{id})
-        // still find it. Each app is independently try/caught so one failure
-        // does not prevent the others or the circle deletion from proceeding.
-        foreach ($appsToClean as $app) {
-            try {
-                $result = $this->resourceService->deleteTeamResource($teamId, $app);
-                $this->logger->debug('[TeamHub][TeamService] deleteTeam: resource deleted', [
-                    'teamId' => $teamId,
-                    'app'    => $app,
-                    'result' => $result,
-                    'class'  => Application::APP_ID,
-                ]);
-            } catch (\Throwable $e) {
-                $this->logger->warning('[TeamHub][TeamService] deleteTeam: resource deletion failed', [
-                    'teamId' => $teamId,
-                    'app'    => $app,
-                    'error'  => $e->getMessage(),
-                    'class'  => Application::APP_ID,
-                ]);
-            }
         }
 
         // ── Step 3: Destroy the circle ────────────────────────────────────────
@@ -864,9 +905,25 @@ class TeamService {
                     'isDirectMember'   => $isDirectMember,
                     'requiresApproval' => !$isOpen,
                     'image_url'        => $this->teamImageService->getImageUrl($row['unique_id']),
+                    // v4.0.2 — filled in below via a single batch lookup so
+                    // BrowseTeamsView can render the template badge. Absent
+                    // for legacy teams => frontend shows no template label.
+                    'type'             => null,
                 ];
             }
             $result->closeCursor();
+
+            // Batch-load template types for every team in one query rather
+            // than N+1 lookups. Legacy teams stay null.
+            if ($teams !== []) {
+                $typesByTeam = $this->teamTypeMapper->findTypesByTeams(
+                    array_map(static fn($t) => (string)$t['id'], $teams)
+                );
+                foreach ($teams as &$t) {
+                    $t['type'] = $typesByTeam[$t['id']] ?? null;
+                }
+                unset($t);
+            }
 
             return $teams;
 

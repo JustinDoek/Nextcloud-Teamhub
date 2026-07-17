@@ -1487,22 +1487,11 @@
                     </p>
                 </div>
 
-                <!-- Save button for archive settings -->
-                <div class="archive-admin__actions">
-                    <NcButton
-                        variant="primary"
-                        :disabled="archiveSettingsSaving"
-                        @click="saveArchiveSettings">
-                        <template #icon>
-                            <NcLoadingIcon v-if="archiveSettingsSaving" :size="18" />
-                            <ContentSave v-else :size="18" />
-                        </template>
-                        {{ archiveSettingsSaving ? t('teamhub', 'Saving…') : t('teamhub', 'Save archive settings') }}
-                    </NcButton>
-                    <span v-if="archiveSettingsSaved" class="archive-admin__ok">
-                        ✓ {{ t('teamhub', 'Archive settings saved') }}
-                    </span>
-                    <span v-if="archiveSettingsError" class="archive-admin__err">
+                <!-- v4.0.3 — auto-save on change (see watch.archiveSettings).
+                     Explicit Save button removed; only surface an error message
+                     when the auto-save round-trip fails. -->
+                <div v-if="archiveSettingsError" class="archive-admin__actions">
+                    <span class="archive-admin__err">
                         {{ archiveSettingsError }}
                     </span>
                 </div>
@@ -2208,6 +2197,23 @@ export default {
         },
     },
     watch: {
+        /**
+         * v4.0.3 — auto-save archive settings on any change. Gated on
+         * archiveSettingsLoaded so the initial hydration from the server
+         * (which mutates archiveSettings) doesn't immediately POST the same
+         * values back. Debounced to coalesce burst changes (e.g. typing in
+         * the archive-location field character by character).
+         */
+        archiveSettings: {
+            deep: true,
+            handler() {
+                if (!this.archiveSettingsLoaded) return
+                clearTimeout(this._archiveAutoSaveTimer)
+                this._archiveAutoSaveTimer = setTimeout(() => {
+                    this.saveArchiveSettings()
+                }, 400)
+            },
+        },
         activeTab(tab) {
             if (tab === 'integrations' && this.integrations.length === 0 && !this.integrationsLoading) {
                 this.loadIntegrations()

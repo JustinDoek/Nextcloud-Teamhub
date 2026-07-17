@@ -2160,7 +2160,10 @@
 		"Team message stream — posts, questions, polls, pinned messages": "Flusso di messaggi del team — post, domande, sondaggi, messaggi fissati",
 		"Team meetings": "Riunioni del team",
 		"Who can create a team meeting.": "Chi può creare una riunione del team.",
-		"Who can add, edit, or delete custom links in the team tab bar.": "Chi può aggiungere, modificare o eliminare collegamenti personalizzati nella barra delle schede del team."
+		"Who can add, edit, or delete custom links in the team tab bar.": "Chi può aggiungere, modificare o eliminare collegamenti personalizzati nella barra delle schede del team.",
+		"Created from the Collaboration template.": "Creato dal modello Collaborazione.",
+		"Created from the Project template.": "Creato dal modello Progetto.",
+		"Created from the Department template.": "Creato dal modello Dipartimento."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

@@ -61,7 +61,17 @@
                         <AccountGroup v-else :size="48" class="team-card__icon" />
                     </div>
                     <div class="team-card__info">
-                        <h3 class="team-card__name">{{ team.name }}</h3>
+                        <div class="team-card__name-row">
+                            <h3 class="team-card__name">{{ team.name }}</h3>
+                            <!-- v4.0.2 — template badge fed by teamhub_team_type.
+                                 Legacy teams (team.type=null) render nothing. -->
+                            <span
+                                v-if="teamTypeLabel(team.type)"
+                                class="team-card__type-badge"
+                                :title="teamTypeTooltip(team.type)">
+                                {{ teamTypeLabel(team.type) }}
+                            </span>
+                        </div>
                         <p v-if="team.description" class="team-card__description">
                             {{ team.description }}
                         </p>
@@ -206,9 +216,15 @@ export default {
             }
             const query = this.searchQuery.toLowerCase()
             return this.teams.filter(team => {
-                const nameMatch = team.name.toLowerCase().includes(query)
-                const descMatch = team.description?.toLowerCase().includes(query)
-                return nameMatch || descMatch
+                const nameMatch  = team.name.toLowerCase().includes(query)
+                const descMatch  = team.description?.toLowerCase().includes(query)
+                // v4.0.9 — also match on the localized template badge so a
+                // user browsing in Dutch can type "Samenwerking" and land on
+                // every collaboration team. teamTypeLabel returns null for
+                // legacy teams without a stored type — those simply skip the
+                // label check and fall back to name/description matching.
+                const labelMatch = this.teamTypeLabel(team.type)?.toLowerCase().includes(query)
+                return nameMatch || descMatch || labelMatch
             })
         },
     },
@@ -217,6 +233,24 @@ export default {
     },
     methods: {
         t,
+
+        /**
+         * v4.0.2 — team.type comes straight from teamhub_team_type
+         * ('collaboration'|'project'|'department') or null for legacy teams.
+         * Legacy teams show no badge (per team-type feature fallback design).
+         */
+        teamTypeLabel(type) {
+            if (type === 'collaboration') return t('teamhub', 'Collaboration')
+            if (type === 'project')       return t('teamhub', 'Project')
+            if (type === 'department')    return t('teamhub', 'Department')
+            return null
+        },
+        teamTypeTooltip(type) {
+            if (type === 'collaboration') return t('teamhub', 'Created from the Collaboration template.')
+            if (type === 'project')       return t('teamhub', 'Created from the Project template.')
+            if (type === 'department')    return t('teamhub', 'Created from the Department template.')
+            return ''
+        },
 
         async loadTeams() {
             this.loading = true
@@ -398,10 +432,31 @@ export default {
     min-width: 0;
 }
 
+.team-card__name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 8px 0;
+}
+
 .team-card__name {
     font-size: 18px;
     font-weight: 600;
-    margin: 0 0 8px 0;
+    margin: 0;
+}
+
+/* v4.0.2 — template badge (Collaboration/Project/Department) next to the
+   team name. Neutral primary tone; sits at the same visual weight as the
+   circles-config labels shown inside the Team info widget. */
+.team-card__type-badge {
+    font-size: var(--th-font-micro);
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--border-radius-pill);
+    background: var(--color-primary-element);
+    color: var(--color-primary-element-text);
+    white-space: nowrap;
 }
 
 .team-card__description {

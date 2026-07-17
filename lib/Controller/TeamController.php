@@ -15,6 +15,7 @@ use OCA\TeamHub\Service\MilestoneService;
 use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TaskService;
 use OCA\TeamHub\Service\TeamService;
+use OCA\TeamHub\Service\TeamTypeService;
 use OCA\TeamHub\Service\TimelineService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -43,6 +44,7 @@ class TeamController extends Controller {
         private MaintenanceService $maintenanceService,
         private TaskService $taskService,
         private TimelineService $timelineService,
+        private TeamTypeService $teamTypeService,
         private MilestoneService $milestoneService,
         // v3.98.2 — for the createDeckStack endpoint powering the Compass
         // "Define workstreams" Planning-phase activity.
@@ -683,6 +685,43 @@ class TeamController extends Controller {
             ]);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to save messages config', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/type
+     *
+     * Returns the team's template label as chosen in the create wizard.
+     * Response shape: { "type": "collaboration" | "project" | "department" | null }.
+     * Legacy teams (created before v4.0.2) return null.
+     */
+    #[NoAdminRequired]
+    public function getTeamType(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            return new JSONResponse(['type' => $this->teamTypeService->getType($teamId)]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/type
+     *
+     * Sets the team's template label. Body: { type: 'collaboration'|'project'|'department' }.
+     * Admin-gated (mirrors the timeline/messages toggles) and validated
+     * server-side by TeamTypeService.
+     */
+    #[NoAdminRequired]
+    public function saveTeamType(string $teamId): JSONResponse {
+        try {
+            $type = (string)$this->request->getParam('type', '');
+            $stored = $this->teamTypeService->setType($teamId, $type);
+            return new JSONResponse(['type' => $stored]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save team type', [
                 'teamId' => $teamId,
             ]);
         }

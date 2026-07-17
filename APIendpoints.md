@@ -248,6 +248,82 @@ Accepts any truthy/falsy representation (bool, 0/1, "0"/"1"). Coerced to a stric
 
 ---
 
+### `GET /api/v1/teams/{teamId}/type`  *(added 4.1.0)*
+
+Fetch the team's template label as chosen in the create-team wizard.
+
+**Auth**: team member required.
+
+**Response 200**:
+```json
+{ "type": "collaboration" }
+```
+
+Values: `"collaboration"` | `"project"` | `"department"` | `null`. Legacy teams created before 4.1.0 have no row in `teamhub_team_type` and return `null` — the frontend renders no template badge for those.
+
+**Storage**: `teamhub_team_type` — one row per team, `team_id` primary key, `type` (STRING 32), `created_by`, `created_at`. Not extending `teamhub_project.type` because doing so would flip the `isProject` gate across 14+ services.
+
+**Failures**: `403` if not a member.
+
+---
+
+### `PUT /api/v1/teams/{teamId}/type`  *(added 4.1.0)*
+
+Set the team's template label. Called once by `CreateTeamView` after team creation.
+
+**Auth**: team **admin** required (`TeamTypeService::setType`).
+
+**Body**:
+```json
+{ "type": "project" }
+```
+
+Server-side validated against `TeamTypeService::ALLOWED = ['collaboration','project','department']` — anything else returns 400.
+
+**Response 200**:
+```json
+{ "type": "project" }
+```
+
+**Failures**:
+- `400` — value not in the allowed enum
+- `403` — not a team admin
+- `500` — internal error (logged)
+
+---
+
+## Browse-teams endpoint (extended 4.1.0)
+
+### `GET /api/v1/teams/browse`
+
+Existing endpoint — response objects now include a `type` field carrying the template label so `BrowseTeamsView` can render a per-card badge and search on the localized label.
+
+**Response addition (4.1.0)** — per-team object:
+```json
+{
+  "id": "...", "name": "...", "description": "...",
+  "isMember": true, "isDirectMember": true,
+  "requiresApproval": false, "image_url": "...",
+  "type": "collaboration"
+}
+```
+
+Fetched via `TeamTypeMapper::findTypesByTeams` in one batch, keeping the endpoint at a single extra SQL call regardless of team count. `type` is `null` for legacy teams.
+
+---
+
+## Layout endpoint (updated 4.1.0)
+
+### `GET /api/v1/teams/{teamId}/layout`
+
+Response additions in both team-row and cascade-to-default branches (in addition to earlier ones):
+
+- **`messagesConfig`** (4.0.0) — `{ messages_enabled: bool }`, so the frontend can gate the message stream widget without a second fetch.
+- **`teamType`** (4.1.0) — `"collaboration" | "project" | "department" | null`. Populated from `teamhub_team_type` via `TeamTypeService::getType`. `null` for legacy teams so the badge renders nothing.
+- **`autoFit` on DEFAULT_LAYOUT items** (4.1.0) — new grid items carry `autoFit: true`. The frontend measures rendered content on first mount and grows `h` to fit, then strips the flag and re-saves. Persisted in `teamhub_layouts` if still set at save time so the pass survives a page reload.
+
+---
+
 ## Timeline iframe page (added 3.78.0, params extended through 3.78.9)
 
 ### `GET /apps/teamhub/timeline/{teamId}`

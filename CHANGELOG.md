@@ -3,6 +3,62 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.1.0] — 2026-07-16 — Messages-as-integration, team-template labels, delete-team correctness, project-tab auto-save
+
+First proper 4.x session on top of the 4.0.0 marketing cut. Wide session — new subsystems, several long-running bug reports closed, documentation and API reference brought current.
+
+### Added
+
+- **Messages internal integration.** New per-team `messages_enabled` flag (default true) toggleable under Manage Team → Integrations → Messages. Endpoints `GET/PUT /api/v1/teams/{teamId}/messages/config`. Layout bundle now carries `messagesConfig` so the desktop message-stream widget, tablet stream column, mobile Home tab, and post form can gate on it without a second fetch.
+- **Team template label.** New table `teamhub_team_type` (migration `Version000400002Date20260716000000`) — one row per team, `team_id` PK, `type` (STRING 32). Written by `CreateTeamView` after team creation via new `GET/PUT /api/v1/teams/{teamId}/type`. Rendered as the leading badge in the Team info widget (`teamLabels`) and as a pill on Browse Teams cards. Deliberately a separate table rather than extending `teamhub_project.type` (would flip `isProject` across 14+ services).
+- New `TeamTypeMapper` (single + batch lookups) and `TeamTypeService` (admin-gated setter with enum validation against `['collaboration','project','department']`).
+- BrowseTeamsView search now also matches the localized template label.
+- Messages checkbox in the CreateTeamView modules list; unchecked path fires `PUT /messages/config` with `messages_enabled: 0` after team creation.
+- Post-message action moved from the first row of the Message stream widget into the widget header as a `.teamhub-widget-header-btn`. `MessageStream` accepts `:hide-header="true"` on desktop and exposes `openPostForm()` for the ref-based header trigger.
+- **Auto-fit widget heights on new team open.** DEFAULT_LAYOUT items carry `autoFit: true`; on first mount `TeamWidgetGrid.runAutoFitPass` measures rendered content vs allocated grid rows and grows `h` to fit (capped at 8). New `layout-autofit` event that TeamView saves unconditionally, bypassing the edit-mode gate. Also triggers when the set of visible widgets changes (watcher on a sorted-joined `visibleWidgetIds` computed) — so phase-gated widgets like Project Health, which appear mid-session, get the fit pass instead of keeping their initial scrollbar.
+- **Auto-save on the Project tab.** Project dates, Budget project settings, per-workstream row, Time project settings, and per-member time row all switched to `@change` → per-section `autoSaveXxx()` debounced wrapper (400 ms). Add/Remove editor on lane rows also triggers auto-save. Save buttons removed; success toasts stripped.
+- **Auto-save on Admin Settings → Archive.** Deep watcher with 400 ms debounce persists on every change; Save button removed.
+- New `Permissions` section on the Settings tab grouping Meeting min-role + Custom links min-role, both auto-save (compact `manage-section__row` layout).
+- New "Internal integrations" documentation section in `docs/team-management/widgets-and-tabs.md` listing every built-in toggleable feature.
+- Documented paths corrected in `docs/user/messages.md` (Pin/Post moved to Integration settings), `docs/team-management/team-links.md` (Custom-links under Settings → Permissions), `docs/team-management/decisions.md` (stale Manage-Team → Decisions paths rewritten to Integration settings).
+- New "Database identifier length" rule in `SKILLS.md`.
+
+### Changed
+
+- `MessageService::getTeamMemberUids` dedup switched from array-key (which coerces numeric UIDs to int per PHP spec) to value-based `array_values(array_unique(map(strval, …)))`. Fixes a real 400-error report where a team member with UID `1724022` broke every post's notification dispatch.
+- Callsites in `sendNotificationsWithName` / `sendMentionNotifications` / `sendPriorityEmailsWithName` all cast to string before `setUser`, wrap each per-recipient call in `catch(\Throwable)`, and outer catches widened from `Exception` to `Throwable`. `createMessage` now wraps the whole notification-dispatch block so notification errors can never fail a POST whose message row was already committed.
+- `TeamService::deleteTeam` rewritten. Old logic iterated `teamhub_team_apps` (app enabled flags) so teams whose admin never touched an app toggle had their Talk rooms / Deck boards / calendars / team folders survive. New logic iterates `teamhub_team_app_resources` (source of truth for connected resources) and calls `ResourceService::deleteSpecificResource` per row. Intravox — no per-resource row — still handled via the legacy per-app path.
+- `ResourceService::destroyOrDetachOnTeamDelete` gains `hasOtherCircleOwners` — a per-app defensive check against native NC storage (`dav_shares`, `deck_board_acl`, `talk_attendees`, `share`, `group_folders_circles`). If any OTHER circle principal has access, resource is preserved and only this team's ACL is stripped. Individual user shares don't preserve — team-only rule per spec.
+- `MessageCard` renders `message.author_display_name` with UID fallback. `getTeamMessages` and `createMessage` enrich payloads with the display name in one IUserManager pass.
+- Description tab in Manage Team renamed to General.
+- Meeting permissions + Custom links now share a single "Permissions" section on the Settings tab (compact `manage-section__row` layout).
+- Decision categories merged into the Decisions section on Integration Settings (one block per integration, `<h4>` sub-heading).
+- `.manage-section-desc` off-scale `13 px` → `var(--th-font-meta)` (12 px) to match the row-desc pattern.
+- CreateTeamView modules list has a `messages` entry (default checked).
+- LayoutController's DEFAULT_LAYOUT items carry `autoFit: true`; save-layout preserves it when explicitly sent.
+
+### Fixed
+
+- **[Client bug]** Migration `Version000393000` (`teamhub_budget_lane_editor`, 26 chars) failed on install/upgrade with `Primary index name on "oc_teamhub_budget_lane_editor" is too long.` — Doctrine's auto-generated PK name (`<table>_pkey` = 31 chars) exceeded NC DBAL's 30-char identifier cap. Added explicit `'th_ble_pk'` to `setPrimaryKey`.
+- **[Client bug]** `TalkService::deleteRoomById` returned `SQLSTATE[42000]` (`unbound :dcValue1`) on team-delete because three separate `$db->getQueryBuilder()` calls per statement produced a placeholder registered on one QB and referenced from another. Consolidated to one QB per statement (per-attendees delete, per-rooms delete).
+- **[Client bug]** Calendar shared with a second team via native NC sharing got destroyed on team-delete because the safety check only consulted `teamhub_team_app_resources`. Now cross-checks `dav_shares` (and equivalents for Deck / Talk / Files).
+- **[Client bug]** Post message from a numeric-UID user returned 400 "Failed to post" toast even though the message was posted. See `getTeamMemberUids` dedup fix above.
+- Mobile bottom bar's Files icon rendered blank — `Folder` was used in `availableWidgets` but never imported into `MobileWidgetView`.
+- Route ordering: `PUT /messages/config` used to be caught by `PUT /messages/{messageId}` (`updateMessage`) with `messageId='config'`. Config routes moved before the catchall.
+
+### Removed
+
+- Manage Team → **Permissions** tab (key `messages`). Pin/Post role → Integration settings → Messages. Custom-links role → Settings → Permissions. Image cache → Integration settings → Messages.
+- Per-workstream and per-time-member Save buttons on the Project tab (auto-save now).
+- Save-project-settings buttons on the Budget and Time blocks (auto-save now).
+- Save-dates button on the Project dates block (auto-save now).
+- Save-archive-settings button on Admin Settings (auto-save now).
+- Success toasts on the five auto-saved paths — per-keystroke toasts would be noise; errors still surface.
+
+### Security
+
+- All new endpoints (`messages/config`, `type`) gate reads via `MemberService::requireMemberLevel` and writes via `requireAdminLevel`. Body params on `saveTeamType` validated against a fixed enum server-side. `saveMessagesConfig` coerces boolean input to strict `"0"`/`"1"`. No new sensitive data exposed.
+
 ## [3.104.0] — 2026-07-13 — Budget + Time iframes production pass + Team Apps relocation
 
 Long polish session on top of v3.103.0's iframe rebuild. No API changes; no PHP touched; three new strings translated to all locales.

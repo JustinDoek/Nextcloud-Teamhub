@@ -17,7 +17,7 @@ Each team gets a shared home with:
 - **Internal integrations** - Added TeamHub native integrations for Decisions, Precense, Timeline, Budget and Time  
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>4.0.1</version>
+    <version>4.1.0</version>
     <licence>agpl</licence>
     <author mail="teamhub@tldr.host" homepage="https://tldr.host/teamhub">Justin Doek</author>
     <namespace>TeamHub</namespace>

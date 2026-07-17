@@ -55,7 +55,12 @@ class Version000393000Date20260705000000 extends SimpleMigrationStep {
             'default' => 0,
         ]);
 
-        $t->setPrimaryKey(['id']);
+        // Explicit short PK name required — the table name is 26 chars and
+        // Doctrine's auto-generated PK name would be "teamhub_budget_lane_editor_pkey"
+        // (31 chars), which exceeds NC DBAL's 30-char identifier cap. Same
+        // fix as th_tar_pk on teamhub_team_app_resources. Documented as a
+        // hard rule in SKILLS.md § "Database identifier length".
+        $t->setPrimaryKey(['id'], 'th_ble_pk');
         $t->addUniqueIndex(['lane_id', 'user_id'], 'th_bl_editor_uq');
         // Reverse lookup: "which lanes can user X edit?" — used every fetch.
         $t->addIndex(['user_id'], 'th_bl_editor_uidx');

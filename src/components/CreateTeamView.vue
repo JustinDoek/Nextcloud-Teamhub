@@ -813,6 +813,17 @@ export default {
                     } catch { this.setTask(i++, 'error') }
                 }
 
+                // v4.0.2 — persist the template label so the Team info widget
+                // and Browse Teams can render it. Fire-and-forget: a failure
+                // here shouldn't block team creation completion; the label
+                // just won't show until an admin re-saves the team type.
+                try {
+                    await axios.put(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/type`),
+                        { type: this.form.teamType }
+                    )
+                } catch { /* non-fatal */ }
+
                 // Show completed progress for a moment, then show "Open team" button
                 await new Promise(r => setTimeout(r, 600))
                 this.createdTeam = team

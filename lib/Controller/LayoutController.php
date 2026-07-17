@@ -10,6 +10,7 @@ use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
 use OCA\TeamHub\Service\ProjectService;
+use OCA\TeamHub\Service\TeamTypeService;
 use OCA\TeamHub\Service\TimeService;
 use OCA\TeamHub\Service\TimelineService;
 use OCP\AppFramework\Controller;
@@ -52,6 +53,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 9,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-teaminfo',
@@ -61,6 +63,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 2,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-members',
@@ -70,6 +73,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 2,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-calendar',
@@ -79,6 +83,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 3,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-deck',
@@ -88,6 +93,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 3,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-activity',
@@ -97,6 +103,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 3,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-pages',
@@ -106,6 +113,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 3,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-files-center',
@@ -115,6 +123,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 4,
+            'autoFit'     => true,
         ],
         [
             'i'           => 'widget-decisions',
@@ -124,6 +133,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 4,
+            'autoFit'     => true,
         ],
         // v3.97.0 — Project Health widget. Only rendered for Advanced-project
         // members in Planning or Execution phase who can see both Budget and
@@ -142,6 +152,7 @@ class LayoutController extends Controller {
             'isResizable' => true,
             'collapsed'   => false,
             'hSaved'      => 4,
+            'autoFit'     => true,
         ],
     ];
 
@@ -194,6 +205,7 @@ class LayoutController extends Controller {
         private ProjectService $projectService,
         private BudgetService $budgetService,
         private TimeService $timeService,
+        private TeamTypeService $teamTypeService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -262,6 +274,10 @@ class LayoutController extends Controller {
             'messagesConfig'         => [
                 'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
             ],
+            // v4.0.2 — team template label ('collaboration'|'project'|'department'|null).
+            // Legacy teams (pre-4.0.2) have no row and land at null so the
+            // Team info widget/BrowseTeamsView hide the badge.
+            'teamType'               => $this->teamTypeService->getType($teamId),
             'budgetConfig'           => [
                 'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
                 // v3.94.0 — tab visibility uses a project-level role floor
@@ -313,6 +329,10 @@ class LayoutController extends Controller {
             'messagesConfig'         => [
                 'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
             ],
+            // v4.0.2 — team template label ('collaboration'|'project'|'department'|null).
+            // Legacy teams (pre-4.0.2) have no row and land at null so the
+            // Team info widget/BrowseTeamsView hide the badge.
+            'teamType'               => $this->teamTypeService->getType($teamId),
             'budgetConfig'           => [
                 'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
                 // v3.94.0 — tab visibility uses a project-level role floor
@@ -529,7 +549,7 @@ class LayoutController extends Controller {
                 ]);
                 continue;
             }
-            $cleanLayout[] = [
+            $cleanItem = [
                 'i'           => $id,
                 'x'           => max(0, (int)($item['x'] ?? 0)),
                 'y'           => max(0, (int)($item['y'] ?? 0)),
@@ -541,6 +561,16 @@ class LayoutController extends Controller {
                 'collapsed'   => (bool)($item['collapsed'] ?? false),
                 'hSaved'      => max(1, min(50, (int)($item['hSaved'] ?? (int)($item['h'] ?? 3)))),
             ];
+            // v4.0.8 — only preserve autoFit when the frontend explicitly sends
+            // true. Once the frontend runs its measurement pass it strips the
+            // flag from the save payload, so subsequent loads no longer trigger
+            // a fit. Persisting the flag is important though: if the user opens
+            // and closes the team without a resize (e.g. mobile view where the
+            // pass doesn't run), the flag survives for a later desktop visit.
+            if (isset($item['autoFit']) && $item['autoFit'] === true) {
+                $cleanItem['autoFit'] = true;
+            }
+            $cleanLayout[] = $cleanItem;
         }
 
         $tabOrder = $params['tabOrder'] ?? null;

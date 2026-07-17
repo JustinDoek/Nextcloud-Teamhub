@@ -107,6 +107,7 @@
                 :widget-dynamic-actions="widgetDynamicActions"
                 :layout-differs-from-default="layoutDiffersFromDefault"
                 @layout-updated="onLayoutUpdated"
+                @layout-autofit="onLayoutAutofit"
                 @manage-team="openManageTeam"
                 @copy-link="copyTeamLink"
                 @invite="showInviteModal = true"
@@ -593,7 +594,7 @@ export default {
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
-            'timelineConfig', 'messagesConfig', 'budgetConfig', 'timeConfig', 'project',
+            'timelineConfig', 'messagesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -1272,7 +1273,7 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_TEAM_TYPE', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
         toggleEditMode() { this.editMode = !this.editMode },
@@ -1344,6 +1345,10 @@ export default {
                 if (data.messagesConfig) {
                     this.SET_MESSAGES_CONFIG(data.messagesConfig)
                 }
+                // Team template label (v4.0.2) — always emitted (null for
+                // legacy teams). Reset the store so switching from a labelled
+                // team to a legacy one clears the badge.
+                this.SET_TEAM_TYPE(data.teamType ?? null)
                 // Budget integration (v3.92.0) — per-team toggle rides along
                 // with the layout, same pattern as timelineConfig.
                 if (data.budgetConfig) {
@@ -1389,6 +1394,17 @@ export default {
         onLayoutUpdated(newLayout) {
             this.gridLayout = newLayout
             if (this.editMode && this.layoutLoaded) this._debouncedSave()
+        },
+
+        /**
+         * v4.0.8 — auto-fit pass finished growing widgets to fit content.
+         * Persist immediately, regardless of editMode, so the flag doesn't
+         * survive across loads and the fitted heights become the user's saved
+         * layout from now on.
+         */
+        onLayoutAutofit(newLayout) {
+            this.gridLayout = newLayout
+            if (this.layoutLoaded) this.saveLayout()
         },
 
         onTabReorder() {

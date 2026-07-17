@@ -741,12 +741,20 @@ class TalkService {
             }
             $roomId = (int)$row['id'];
 
-            $db->getQueryBuilder()->delete('talk_attendees')
-                ->where($db->getQueryBuilder()->expr()->eq('room_id', $db->getQueryBuilder()->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            // v4.0.7 — each of the three chained getQueryBuilder() calls
+            // returns a DIFFERENT QueryBuilder instance, and createNamedParameter
+            // registers the placeholder on the QB it was called on. The where()
+            // then executes on yet another QB where the placeholder was never
+            // registered, so the raw `:dcValue1` string ends up in the SQL and
+            // MariaDB returns 42000 syntax error. Reuse a single QB per statement.
+            $daq = $db->getQueryBuilder();
+            $daq->delete('talk_attendees')
+                ->where($daq->expr()->eq('room_id', $daq->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
-            $db->getQueryBuilder()->delete('talk_rooms')
-                ->where($db->getQueryBuilder()->expr()->eq('id', $db->getQueryBuilder()->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            $drq = $db->getQueryBuilder();
+            $drq->delete('talk_rooms')
+                ->where($drq->expr()->eq('id', $drq->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
             $this->logger->info('[TeamHub][TalkService] deleteRoomById: room deleted', [

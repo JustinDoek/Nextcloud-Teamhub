@@ -2193,5 +2193,8 @@ OC.L10N.register(
     "Team meetings" : "Holdmøder",
     "Who can create a team meeting." : "Hvem kan oprette et holdmøde.",
     "Who can add, edit, or delete custom links in the team tab bar." : "Hvem kan tilføje, redigere eller slette brugerdefinerede links i holdets fanebjælke.",
+    "Created from the Collaboration template." : "Oprettet fra Samarbejde-skabelonen.",
+    "Created from the Project template." : "Oprettet fra Projekt-skabelonen.",
+    "Created from the Department template." : "Oprettet fra Afdeling-skabelonen.",
 },
     "nplurals=2; plural=(n != 1);");

@@ -1546,7 +1546,8 @@
                         v-model="projectDatesForm.startDate"
                         type="date"
                         class="teamhub-project__date-input"
-                        :disabled="savingProjectDates">
+                        :disabled="savingProjectDates"
+                        @change="autoSaveProjectDates">
 
                     <label class="teamhub-project__label" for="project-target-end">{{ t('teamhub', 'Target end date') }}</label>
                     <input
@@ -1554,16 +1555,10 @@
                         v-model="projectDatesForm.targetEnd"
                         type="date"
                         class="teamhub-project__date-input"
-                        :disabled="savingProjectDates">
+                        :disabled="savingProjectDates"
+                        @change="autoSaveProjectDates">
                 </div>
-                <div class="teamhub-project__dates-actions">
-                    <NcButton
-                        variant="primary"
-                        :disabled="savingProjectDates || !projectDatesDirty"
-                        @click="saveProjectDates">
-                        {{ savingProjectDates ? t('teamhub', 'Saving') : t('teamhub', 'Save dates') }}
-                    </NcButton>
-                </div>
+                <!-- v4.0.10 — Save button removed, dates auto-save on change. -->
                 <p v-if="projectDatesError" class="teamhub-project__dates-error" role="alert">
                     {{ projectDatesError }}
                 </p>
@@ -1719,6 +1714,8 @@
                 </div>
 
                 <template v-else-if="budgetCfg">
+                    <!-- v4.0.10 — Save button removed; each field auto-saves
+                         on change (blur / commit for number+text inputs). -->
                     <div class="teamhub-budget-cfg__totals">
                         <label class="teamhub-budget-cfg__label">
                             {{ t('teamhub', 'Total budget') }}
@@ -1728,11 +1725,15 @@
                                 step="0.01"
                                 min="0"
                                 class="teamhub-budget-cfg__input"
-                                :placeholder="t('teamhub', 'e.g. 10000')" />
+                                :placeholder="t('teamhub', 'e.g. 10000')"
+                                @change="autoSaveBudgetTotal" />
                         </label>
                         <label class="teamhub-budget-cfg__label">
                             {{ t('teamhub', 'Currency') }}
-                            <select v-model="budgetCfg.currency" class="teamhub-budget-cfg__select">
+                            <select
+                                v-model="budgetCfg.currency"
+                                class="teamhub-budget-cfg__select"
+                                @change="autoSaveBudgetTotal">
                                 <option value="">{{ t('teamhub', 'Not set') }}</option>
                                 <option v-for="c in currencyOptions" :key="c" :value="c">{{ c }}</option>
                             </select>
@@ -1746,16 +1747,13 @@
                                     :aria-label="t('teamhub', 'Explain who sees the Budget tab')"
                                     @click="showPermInfo()">?</button>
                             </span>
-                            <select v-model.number="budgetCfg.budgetViewMinLevel" class="teamhub-budget-cfg__select">
+                            <select
+                                v-model.number="budgetCfg.budgetViewMinLevel"
+                                class="teamhub-budget-cfg__select"
+                                @change="autoSaveBudgetTotal">
                                 <option v-for="opt in laneLevelOptions" :key="'bv-' + opt.value" :value="opt.value">{{ opt.label }}</option>
                             </select>
                         </label>
-                        <NcButton
-                            variant="primary"
-                            :disabled="savingBudgetTotal"
-                            @click="saveBudgetTotal">
-                            {{ savingBudgetTotal ? t('teamhub', 'Saving') : t('teamhub', 'Save project settings') }}
-                        </NcButton>
                     </div>
 
                     <p v-if="!budgetCfg.lanes.length" class="manage-section-desc" style="margin-top: 12px;">
@@ -1783,7 +1781,7 @@
                                         :aria-label="t('teamhub', 'Explain additional editors')"
                                         @click="showPermInfo()">?</button>
                                 </th>
-                                <th scope="col"><span class="hidden-visually">{{ t('teamhub', 'Actions') }}</span></th>
+                                <!-- v4.0.10 — Actions column dropped; lane rows auto-save on change. -->
                             </tr>
                         </thead>
                         <tbody>
@@ -1796,10 +1794,14 @@
                                         step="0.01"
                                         min="0"
                                         class="teamhub-budget-cfg__input teamhub-budget-cfg__input--narrow"
-                                        :placeholder="t('teamhub', 'Not set')" />
+                                        :placeholder="t('teamhub', 'Not set')"
+                                        @change="autoSaveBudgetLane(lane)" />
                                 </td>
                                 <td>
-                                    <select v-model.number="lane.editMinLevel" class="teamhub-budget-cfg__select">
+                                    <select
+                                        v-model.number="lane.editMinLevel"
+                                        class="teamhub-budget-cfg__select"
+                                        @change="autoSaveBudgetLane(lane)">
                                         <option v-for="opt in laneLevelOptions" :key="'e-' + opt.value" :value="opt.value">{{ opt.label }}</option>
                                     </select>
                                 </td>
@@ -1834,14 +1836,6 @@
                                             </ul>
                                         </div>
                                     </div>
-                                </td>
-                                <td>
-                                    <NcButton
-                                        variant="secondary"
-                                        :disabled="lane.saving"
-                                        @click="saveBudgetLane(lane)">
-                                        {{ lane.saving ? t('teamhub', 'Saving') : t('teamhub', 'Save') }}
-                                    </NcButton>
                                 </td>
                             </tr>
                         </tbody>
@@ -1886,6 +1880,7 @@
                 </div>
 
                 <template v-else-if="timeCfg">
+                    <!-- v4.0.10 — Save button removed; view-level select auto-saves on change. -->
                     <div class="teamhub-budget-cfg__totals">
                         <label class="teamhub-budget-cfg__label">
                             <span class="teamhub-budget-cfg__label-head">
@@ -1896,16 +1891,13 @@
                                     :aria-label="t('teamhub', 'Explain who sees the Time tab')"
                                     @click="timePermInfoOpen = true">?</button>
                             </span>
-                            <select v-model.number="timeCfg.timeViewMinLevel" class="teamhub-budget-cfg__select">
+                            <select
+                                v-model.number="timeCfg.timeViewMinLevel"
+                                class="teamhub-budget-cfg__select"
+                                @change="autoSaveTimeConfig">
                                 <option v-for="opt in laneLevelOptions" :key="'tv-' + opt.value" :value="opt.value">{{ opt.label }}</option>
                             </select>
                         </label>
-                        <NcButton
-                            variant="primary"
-                            :disabled="savingTimeCfg"
-                            @click="saveTimeConfig">
-                            {{ savingTimeCfg ? t('teamhub', 'Saving') : t('teamhub', 'Save project settings') }}
-                        </NcButton>
                     </div>
 
                     <!-- Per-member grid: name / available hours / save.
@@ -1922,7 +1914,7 @@
                             <tr>
                                 <th scope="col">{{ t('teamhub', 'Member') }}</th>
                                 <th scope="col">{{ t('teamhub', 'Available hours') }}</th>
-                                <th scope="col"><span class="hidden-visually">{{ t('teamhub', 'Actions') }}</span></th>
+                                <!-- v4.0.10 — Actions column dropped; hours auto-save on change. -->
                             </tr>
                         </thead>
                         <tbody>
@@ -1935,15 +1927,8 @@
                                         step="0.5"
                                         min="0"
                                         class="teamhub-budget-cfg__input teamhub-budget-cfg__input--narrow"
-                                        :placeholder="t('teamhub', 'Uncapped')" />
-                                </td>
-                                <td>
-                                    <NcButton
-                                        variant="secondary"
-                                        :disabled="m.saving"
-                                        @click="saveTimeMember(m)">
-                                        {{ m.saving ? t('teamhub', 'Saving') : t('teamhub', 'Save') }}
-                                    </NcButton>
+                                        :placeholder="t('teamhub', 'Uncapped')"
+                                        @change="autoSaveTimeMember(m)" />
                                 </td>
                             </tr>
                         </tbody>
@@ -3876,7 +3861,7 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/time`),
                     { time_view_min_level: this.timeCfg.timeViewMinLevel }
                 )
-                showSuccess(t('teamhub', 'Time settings saved'))
+                // v4.0.10 — dropped success toast; auto-save is silent.
             } catch (err) {
                 showError(t('teamhub', 'Failed to save: {error}', {
                     error: err?.response?.data?.error || err.message,
@@ -3897,7 +3882,7 @@ export default {
                     { available_minutes: minutes }
                 )
                 m.availableMinutes = minutes
-                showSuccess(t('teamhub', '{name} saved', { name: m.displayName }))
+                // v4.0.10 — dropped per-member success toast; auto-save is silent.
             } catch (err) {
                 showError(t('teamhub', 'Failed to save: {error}', {
                     error: err?.response?.data?.error || err.message,
@@ -3975,7 +3960,7 @@ export default {
                     startDate,
                     targetEnd,
                 })
-                showSuccess(t('teamhub', 'Project dates saved'))
+                // v4.0.10 — dropped success toast; auto-save is silent, UI state is confirmation enough.
             } catch (err) {
                 const msg = err?.response?.data?.error
                 this.projectDatesError = msg
@@ -3985,6 +3970,35 @@ export default {
             } finally {
                 this.savingProjectDates = false
             }
+        },
+
+        /**
+         * v4.0.10 — debounced auto-save wrappers for the Project tab.
+         * Each on-change field on the tab pipes through here so we coalesce
+         * bursty typing (e.g. two date fields set in quick succession, or
+         * currency dropdown + total-budget number entered together) into one
+         * network round-trip. Errors still surface via the underlying save
+         * method; success is silent.
+         */
+        autoSaveProjectDates() {
+            clearTimeout(this._autoSaveProjectDatesTimer)
+            this._autoSaveProjectDatesTimer = setTimeout(() => this.saveProjectDates(), 400)
+        },
+        autoSaveBudgetTotal() {
+            clearTimeout(this._autoSaveBudgetTotalTimer)
+            this._autoSaveBudgetTotalTimer = setTimeout(() => this.saveBudgetTotal(), 400)
+        },
+        autoSaveBudgetLane(lane) {
+            clearTimeout(lane._autoSaveTimer)
+            lane._autoSaveTimer = setTimeout(() => this.saveBudgetLane(lane), 400)
+        },
+        autoSaveTimeConfig() {
+            clearTimeout(this._autoSaveTimeCfgTimer)
+            this._autoSaveTimeCfgTimer = setTimeout(() => this.saveTimeConfig(), 400)
+        },
+        autoSaveTimeMember(m) {
+            clearTimeout(m._autoSaveTimer)
+            m._autoSaveTimer = setTimeout(() => this.saveTimeMember(m), 400)
         },
 
         /**
@@ -4066,7 +4080,7 @@ export default {
                         budget_view_min_level:  this.budgetCfg.budgetViewMinLevel,
                     }
                 )
-                showSuccess(t('teamhub', 'Budget settings saved'))
+                // v4.0.10 — dropped success toast; auto-save is silent.
             } catch (err) {
                 const msg = err?.response?.data?.error
                 showError(msg
@@ -4089,7 +4103,7 @@ export default {
                         editor_uids:     lane.editors.map(e => e.uid),
                     }
                 )
-                showSuccess(t('teamhub', 'Workstream saved'))
+                // v4.0.10 — dropped success toast; auto-save is silent.
             } catch (err) {
                 const msg = err?.response?.data?.error
                 showError(msg
@@ -4136,10 +4150,14 @@ export default {
             lane.editors.push({ uid: suggestion.uid, displayName: suggestion.displayName })
             lane.editorSearch = ''
             lane.editorSuggestions = []
+            // v4.0.10 — Save button removed; persist immediately.
+            this.autoSaveBudgetLane(lane)
         },
 
         removeEditor(lane, uid) {
             lane.editors = lane.editors.filter(e => e.uid !== uid)
+            // v4.0.10 — same as addEditor: persist without needing a Save button.
+            this.autoSaveBudgetLane(lane)
         },
 
         showPermInfo() {
