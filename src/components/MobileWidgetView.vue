@@ -308,6 +308,9 @@ export default {
             // v3.104.1 — drops msgstream from the icon bar / canvas when
             // Messages is off for the team.
             'messagesConfig',
+            // Team-wide dashboard customization — hidden_widgets also drops
+            // widgets from the mobile icon bar so mobile matches desktop.
+            'dashboardConfig',
             // v3.97.0 — same gate as TeamWidgetGrid for the Project Health widget.
             'budgetConfig', 'timeConfig', 'project',
         ]),
@@ -438,7 +441,10 @@ export default {
                 })
             })
 
-            return list
+            // Team-wide owner/admin hidden widgets — drop them from the mobile
+            // icon bar too so mobile matches the desktop dashboard.
+            const hidden = this.dashboardConfig?.hidden_widgets || []
+            return hidden.length ? list.filter(item => !hidden.includes(item.key)) : list
         },
 
         /**

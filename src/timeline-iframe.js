@@ -203,10 +203,11 @@
             overdueHtml +
             '<span class="echip__badge">' + esc(badgeText) + '</span>';
 
-        if (ev.url) {
+        var chipHref = safeHref(ev.url);
+        if (chipHref) {
             var a = document.createElement('a');
             a.className = cls + ' echip--url';
-            a.href = ev.url;
+            a.href = chipHref;
             a.target = '_blank';
             a.rel = 'noopener noreferrer';
             a.title = ev.title;
@@ -225,6 +226,17 @@
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    // Only http(s) and root-relative (single-slash) URLs are allowed as chip
+    // hrefs. Everything else — javascript:, data:, vbscript:, and
+    // protocol-relative //host — is dropped so a crafted event URL can never
+    // execute script or navigate off-origin.
+    function safeHref(u) {
+        if (u == null) return null;
+        var s = String(u).trim();
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.charAt(0) === '/' && s.charAt(1) !== '/') return s;
+        return null;
     }
     function trunc(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
 

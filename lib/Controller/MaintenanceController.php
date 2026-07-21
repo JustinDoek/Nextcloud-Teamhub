@@ -158,6 +158,26 @@ class MaintenanceController extends Controller {
     }
 
     /**
+     * GET /api/v1/admin/compliance/summary
+     * v4.2.10 — Aggregated counts + sample data for the Compliance-tab pills
+     * that surface TeamHub-scoped governance risks (ghost memberships +
+     * orphan teams). Cheap enough to run on tab-open — delegates to the same
+     * MaintenanceService methods the Maintenance-tab manual buttons use.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function complianceSummary(): JSONResponse {
+        try {
+            return new JSONResponse($this->maintenanceService->getComplianceSummary());
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MaintenanceController] complianceSummary failed', [
+                'exception' => $e, 'app' => 'teamhub',
+            ]);
+            return new JSONResponse(['error' => 'Compliance summary failed'], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * GET /api/v1/admin/users/search?q=term
      * User search for the owner picker — returns matching NC users.
      */

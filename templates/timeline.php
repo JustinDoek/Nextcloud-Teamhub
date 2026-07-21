@@ -739,6 +739,17 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+    // Only http(s) and root-relative (single-slash) URLs are allowed as chip /
+    // popover hrefs. Everything else — javascript:, data:, vbscript:, and
+    // protocol-relative //host — is dropped so a crafted event URL can never
+    // execute script or navigate off-origin when a chip is activated.
+    function safeHref(u) {
+        if (u == null) return null;
+        var s = String(u).trim();
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.charAt(0) === '/' && s.charAt(1) !== '/') return s;
+        return null;
+    }
     function trunc(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
 
     function fetchAndRender() {
@@ -1485,10 +1496,11 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
             overdueHtml +
             (badgeText ? '<span class="echip__badge">' + esc(badgeText) + '</span>' : '');
 
-        if (ev.url) {
+        var chipHref = safeHref(ev.url);
+        if (chipHref) {
             var a = document.createElement('a');
             a.className = cls + ' echip--url';
-            a.href = ev.url;
+            a.href = chipHref;
             // The href + target=_top is retained so middle-click / ctrl-click
             // / cmd-click open the item in the parent window the way users
             // expect from any link. Plain left-click is intercepted below
@@ -1719,8 +1731,9 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
         var description = meta.description ? esc(meta.description) : '';
         var snippet     = meta.snippet     ? esc(meta.snippet)     : '';
 
-        var openBtn = ev.url
-            ? '<a class="th-popover__open" href="' + esc(ev.url) + '" target="_top" rel="noopener noreferrer">'
+        var openHref = safeHref(ev.url);
+        var openBtn = openHref
+            ? '<a class="th-popover__open" href="' + esc(openHref) + '" target="_top" rel="noopener noreferrer">'
               + 'Open in ' + esc(appName) + ' →</a>'
             : '';
 

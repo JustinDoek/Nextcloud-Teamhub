@@ -34,6 +34,7 @@ class MessageService {
     private MemberService $memberService;
     private DecisionService $decisionService;
     private \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper;
+    private TalkService $talkService;
     public function __construct(
         MessageMapper $messageMapper,
         IUserSession $userSession,
@@ -48,7 +49,8 @@ class MessageService {
         IURLGenerator $urlGenerator,
         MemberService $memberService,
         DecisionService $decisionService,
-        \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper
+        \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper,
+        TalkService $talkService,
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -65,6 +67,7 @@ class MessageService {
         $this->memberService = $memberService;
         $this->decisionService = $decisionService;
         $this->attachmentMapper = $attachmentMapper;
+        $this->talkService = $talkService;
     }
 
     private function getCirclesManager() {
@@ -166,6 +169,7 @@ class MessageService {
         string $messageType = 'normal',
         ?array $pollOptions = null,
         ?array $decisionData = null,
+        bool $isPublic = false,
     ): array {
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -178,6 +182,16 @@ class MessageService {
 
         if (!in_array($messageType, ['normal', 'poll', 'question', 'decision'])) {
             $messageType = 'normal';
+        }
+
+        // Public visibility is admin-gated per-team. If the team's toggle is
+        // off, force-strip is_public regardless of what the client sent — the
+        // frontend hides the checkbox but the service layer is the security
+        // boundary (SKILLS §Security standards, "The frontend is not a
+        // security boundary"). Only 'normal' messages can be public; polls,
+        // questions and decisions are always team-scoped.
+        if ($isPublic && ($messageType !== 'normal' || !$this->getAllowPublicMessages($teamId))) {
+            $isPublic = false;
         }
 
         // Decision-type guard: if the caller asked for a decision but the
@@ -223,7 +237,7 @@ class MessageService {
                 $this->db->beginTransaction();
                 try {
                     $messageData = $this->messageMapper->create(
-                        $teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions
+                        $teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions, $isPublic
                     );
                     // Required field check happens inside propose(), but we
                     // pre-validate impact so we fail fast.
@@ -269,7 +283,7 @@ class MessageService {
                 }
             } else {
                 $messageData = $this->messageMapper->create(
-                    $teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions
+                    $teamId, $user->getUID(), $subject, $message, $priority, $messageType, $pollOptions, $isPublic
                 );
             }
 
@@ -723,6 +737,8 @@ class MessageService {
 
     /**
      * Return message settings for a team (pin level + post level) as strings.
+     * v4.2.11 — also returns allowPublicMessages (bool) so the frontend can
+     * decide whether to render the Public checkbox in the compose form.
      */
     public function getMessageSettings(string $teamId): array {
         $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel_' . $teamId, '');
@@ -732,17 +748,20 @@ class MessageService {
         $postSetting = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, 'member');
         $linkSetting = $this->config->getAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, 'admin');
         return [
-            'pinMinLevel'  => $pinSetting,
-            'postMinLevel' => $postSetting,
-            'linkMinLevel' => $linkSetting,
+            'pinMinLevel'         => $pinSetting,
+            'postMinLevel'        => $postSetting,
+            'linkMinLevel'        => $linkSetting,
+            'allowPublicMessages' => $this->getAllowPublicMessages($teamId),
         ];
     }
 
     /**
      * Save per-team message settings.
      * Accepts pinMinLevel, postMinLevel, and linkMinLevel, all as strings: 'member'|'moderator'|'admin'.
+     * v4.2.11 — also accepts allowPublicMessages (bool) — admin-only toggle
+     * for whether the compose form exposes the Public checkbox.
      */
-    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel, string $linkMinLevel = 'admin'): void {
+    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel, string $linkMinLevel = 'admin', bool $allowPublicMessages = false): void {
         $valid = ['member', 'moderator', 'admin'];
         if (!in_array($pinMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid pinMinLevel: ' . $pinMinLevel);
@@ -756,6 +775,430 @@ class MessageService {
         $this->config->setAppValue(Application::APP_ID, 'pinMinLevel_'  . $teamId, $pinMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, $postMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, $linkMinLevel);
+        $this->config->setAppValue(
+            Application::APP_ID,
+            'allowPublicMessages_' . $teamId,
+            $allowPublicMessages ? '1' : '0',
+        );
+    }
+
+    /**
+     * Whether the team admin has enabled the Public checkbox for members
+     * composing normal messages. Default off — public visibility is opt-in.
+     */
+    public function getAllowPublicMessages(string $teamId): bool {
+        return $this->config->getAppValue(Application::APP_ID, 'allowPublicMessages_' . $teamId, '0') === '1';
+    }
+
+    /**
+     * v4.2.12 — Return the current user's "What's happening" feed page.
+     *
+     * Combines team messages from every team the caller is a member of
+     * (direct + effective via groups) with public messages from teams they
+     * are NOT in. One paginated DB query — see MessageMapper::findFeed for
+     * the OR-branch semantics.
+     *
+     * Each returned row carries a synthetic `source` field ('team'|'public')
+     * so the frontend can badge public posts without re-doing the
+     * team-membership lookup client-side.
+     *
+     * @return array{items:array, hasMore:bool, total:int, limit:int, offset:int}
+     */
+    public function getPersonalFeed(bool $includeTeam, bool $includePublic, int $limit, int $offset, bool $includeTalk = false): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new AccessDeniedException('User not authenticated');
+        }
+
+        $userTeamIds = $this->getCurrentUserTeamIds();
+
+        // v4.2.14 — Talk items (polls + thread starters) from rooms
+        // connected to the user's teams. Fetched separately from
+        // teamhub_messages because the schema lives in Talk's own tables;
+        // merged with messages by created_at DESC after the fact.
+        //
+        // Strategy: fetch up to (limit + offset) items from each source
+        // (messages + polls + threads), merge in memory, slice to the
+        // page window. Wasteful for very deep offsets but correct — a
+        // recent-activity feed is not typically browsed past page ~5,
+        // and the alternative (cursor-based multi-source pagination) is
+        // significantly more code for negligible real-world benefit.
+        $rooms      = $includeTalk ? $this->talkService->listRoomsForTeams($userTeamIds) : [];
+        $roomIds    = array_map(static fn($r) => (int)$r['id'], $rooms);
+        $roomIndex  = [];
+        foreach ($rooms as $r) {
+            $roomIndex[(int)$r['id']] = $r;
+        }
+        $roomTeamMap = $includeTalk && !empty($roomIds)
+            ? $this->buildRoomTeamMap($roomIds, $userTeamIds)
+            : [];
+
+        // Fetch enough per source to serve any page in the window.
+        $fetchCap = $limit + $offset;
+        $talkPolls   = ($includeTalk && !empty($roomIds))
+            ? $this->talkService->findRecentPolls($roomIds, $fetchCap, 0)
+            : [];
+        $talkThreads = ($includeTalk && !empty($roomIds))
+            ? $this->talkService->findRecentThreads($roomIds, $fetchCap, 0)
+            : [];
+
+        // Message count (for the "Page N of M" total). Talk item counts are
+        // added in as best-effort estimates — we don't run separate COUNT
+        // queries against Talk tables per request; the fetched-list length
+        // is a lower bound and good enough for pagination UX.
+        $messageTotal = $this->messageMapper->countFeed($userTeamIds, $includeTeam, $includePublic);
+        $total = $messageTotal + count($talkPolls) + count($talkThreads);
+
+        $messageRows = $this->messageMapper->findFeed(
+            $userTeamIds,
+            $includeTeam,
+            $includePublic,
+            $fetchCap,
+            0,
+        );
+        // Tag messages so the merge stage can identify by source cheaply.
+        // Talk items already carry `source` set by TalkService.
+        // We defer the message-side source classification (team vs public)
+        // until after the merge, per prior behaviour.
+
+        $merged = array_merge(
+            array_map(static fn($m) => $m + ['__kind' => 'message'], $messageRows),
+            array_map(static function ($p) use ($roomIndex, $roomTeamMap) {
+                $p['__kind']   = 'talk';
+                $p['team_id']  = $roomTeamMap[$p['room_id']] ?? '';
+                $p['room_name'] = $roomIndex[$p['room_id']]['name']  ?? '';
+                $p['room_token'] = $roomIndex[$p['room_id']]['token'] ?? '';
+                return $p;
+            }, $talkPolls),
+            array_map(static function ($t) use ($roomIndex, $roomTeamMap) {
+                $t['__kind']   = 'talk';
+                $t['team_id']  = $roomTeamMap[$t['room_id']] ?? '';
+                $t['room_name'] = $roomIndex[$t['room_id']]['name']  ?? '';
+                $t['room_token'] = $roomIndex[$t['room_id']]['token'] ?? '';
+                return $t;
+            }, $talkThreads),
+        );
+        usort($merged, static fn($a, $b) => ($b['created_at'] ?? 0) <=> ($a['created_at'] ?? 0));
+
+        // Apply pagination window on the merged, sorted list.
+        $rows = array_slice($merged, $offset, $limit);
+        $hasMore = ($offset + $limit) < $total;
+
+        // Classify source per row. Talk items carry their own source
+        // ('talk-poll' / 'talk-thread') from TalkService; message rows are
+        // classified now as 'team' when the team is in the user's set, else
+        // 'public'. `isPublic` (from the mapper) drives the badge — a public
+        // own-team message still gets the badge but has source='team'.
+        $teamIdSet = array_flip($userTeamIds);
+        foreach ($rows as &$m) {
+            if (($m['__kind'] ?? '') === 'talk') {
+                // Talk rows already have source set. Nothing to add here.
+                continue;
+            }
+            $m['source'] = isset($teamIdSet[$m['team_id'] ?? '']) ? 'team' : 'public';
+        }
+        unset($m);
+
+        // Hydrate author display names in one pass — works for both
+        // message rows (author_id) and Talk rows (actor_id). Two loops
+        // to build the UID set then a single IUserManager pass.
+        $uids = [];
+        foreach ($rows as $m) {
+            $uid = $m['author_id'] ?? ($m['actor_id'] ?? '');
+            if ($uid !== '') {
+                $uids[$uid] = true;
+            }
+        }
+        $nameMap = [];
+        foreach (array_keys($uids) as $uid) {
+            try {
+                $u = $this->userManager->get($uid);
+                $nameMap[$uid] = $u ? (string)$u->getDisplayName() : $uid;
+            } catch (\Throwable) {
+                $nameMap[$uid] = $uid;
+            }
+        }
+
+        // Hydrate team display names in one circles_circle SELECT.
+        $teamIds = [];
+        foreach ($rows as $m) {
+            if (!empty($m['team_id'])) {
+                $teamIds[$m['team_id']] = true;
+            }
+        }
+        $teamNameMap = [];
+        if (!empty($teamIds)) {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('unique_id', 'display_name')
+                ->from('circles_circle')
+                ->where($qb->expr()->in(
+                    'unique_id',
+                    $qb->createNamedParameter(array_keys($teamIds), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                ));
+            $r = $qb->executeQuery();
+            while ($row = $r->fetch()) {
+                $teamNameMap[(string)$row['unique_id']] = (string)($row['display_name'] ?? '');
+            }
+            $r->closeCursor();
+        }
+
+        foreach ($rows as &$m) {
+            $uid = $m['author_id'] ?? ($m['actor_id'] ?? '');
+            $m['author_display_name'] = $nameMap[$uid] ?? $uid;
+            // Keep author_id populated for Talk rows too so the frontend
+            // has one field to read for avatar / display purposes.
+            if (!isset($m['author_id']) && isset($m['actor_id'])) {
+                $m['author_id'] = $m['actor_id'];
+            }
+            $m['team_name'] = $teamNameMap[$m['team_id'] ?? ''] ?? ($m['team_name'] ?? '');
+            // Internal sort helper — drop it from the response.
+            unset($m['__kind']);
+        }
+        unset($m);
+
+        return [
+            'items'   => $rows,
+            'hasMore' => $hasMore,
+            'total'   => $total,
+            'limit'   => $limit,
+            'offset'  => $offset,
+        ];
+    }
+
+    /**
+     * v4.2.14 — resolve a Talk room → team_id mapping, restricted to teams
+     * the current user is in. Used when building the feed so a Talk item
+     * gets attributed to a team the click-through can actually open.
+     *
+     * A room may have multiple circle-attendee rows (in theory), so a room
+     * can map to more than one team; we pick the first team from the
+     * caller's own $userTeamIds that matches. Deterministic — the query
+     * orders by attendee id so the pick is stable across calls.
+     *
+     * @return array<int, string>  room_id → team_id
+     */
+    private function buildRoomTeamMap(array $roomIds, array $userTeamIds): array {
+        if (empty($roomIds) || empty($userTeamIds)) {
+            return [];
+        }
+        $out = [];
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('room_id', 'actor_id')
+                ->from('talk_attendees')
+                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->in(
+                    'room_id',
+                    $qb->createNamedParameter($roomIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY),
+                ))
+                ->andWhere($qb->expr()->in(
+                    'actor_id',
+                    $qb->createNamedParameter($userTeamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                ))
+                ->orderBy('id', 'ASC');
+            $res = $qb->executeQuery();
+            while ($row = $res->fetch()) {
+                $rid = (int)$row['room_id'];
+                if (!isset($out[$rid])) {
+                    // First match per room wins — deterministic thanks to
+                    // the ORDER BY above.
+                    $out[$rid] = (string)$row['actor_id'];
+                }
+            }
+            $res->closeCursor();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MessageService] buildRoomTeamMap failed', [
+                'rooms' => count($roomIds), 'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+        }
+        return $out;
+    }
+
+    /**
+     * Resolve the current user's team ids (direct + effective via groups /
+     * sub-teams). Reads directly from Circles' own tables — mirrors the
+     * approach in TeamService::getUserTeams because probeCircles() on this
+     * instance filters out teams with non-zero config (DESIGN §2.1).
+     *
+     * Returns a plain string array of `circles_circle.unique_id` values.
+     *
+     * @return string[]
+     */
+    private function getCurrentUserTeamIds(): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            return [];
+        }
+        $uid = $user->getUID();
+
+        $ids = [];
+
+        // Direct membership: circles_member rows with user_type=1, status=Member.
+        $qb = $this->db->getQueryBuilder();
+        $res = $qb->select('circle_id')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($uid)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->executeQuery();
+        while ($row = $res->fetch()) {
+            if (!empty($row['circle_id'])) {
+                $ids[(string)$row['circle_id']] = true;
+            }
+        }
+        $res->closeCursor();
+
+        // Indirect membership: circles_membership entries keyed on the
+        // user's personal-circle single_id (added via a group or a
+        // sub-team). Silently skipped on Circles versions that don't have
+        // this table.
+        try {
+            $singleId = $this->memberService->resolveUserSingleId($uid, $this->db);
+            if ($singleId) {
+                $msQb  = $this->db->getQueryBuilder();
+                $msRes = $msQb->select('circle_id')
+                    ->from('circles_membership')
+                    ->where($msQb->expr()->eq('single_id', $msQb->createNamedParameter($singleId)))
+                    ->executeQuery();
+                while ($row = $msRes->fetch()) {
+                    if (!empty($row['circle_id'])) {
+                        $ids[(string)$row['circle_id']] = true;
+                    }
+                }
+                $msRes->closeCursor();
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][MessageService] getCurrentUserTeamIds: circles_membership lookup skipped', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // v4.2.16 — filter out personal (`user:...`) and group (`group:...`)
+        // circles the same way TeamService::getUserTeams does. Without this
+        // filter, users appear to have 44 "teams" when they actually have
+        // 18 real teams — noisy for the feed and confusing in debug logs.
+        $idList = array_keys($ids);
+        if (!empty($idList)) {
+            try {
+                $nQb  = $this->db->getQueryBuilder();
+                $nRes = $nQb->select('unique_id', 'name')
+                    ->from('circles_circle')
+                    ->where($nQb->expr()->in(
+                        'unique_id',
+                        $nQb->createNamedParameter($idList, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                    ))
+                    ->executeQuery();
+                $keep = [];
+                while ($row = $nRes->fetch()) {
+                    $name = (string)($row['name'] ?? '');
+                    if (str_starts_with($name, 'user:') || str_starts_with($name, 'group:')) {
+                        continue;
+                    }
+                    $keep[(string)$row['unique_id']] = true;
+                }
+                $nRes->closeCursor();
+                $ids = $keep;
+            } catch (\Throwable $e) {
+                // Fall through with the unfiltered list on introspection
+                // failure — better to over-include than to lock the feed.
+            }
+        }
+
+        // Exclude teams pending deletion — same rule TeamService::getUserTeams
+        // applies. A pending-deletion team is hidden from all member queries
+        // except the admin pending-deletion endpoint.
+        $idList = array_keys($ids);
+        if (!empty($idList)) {
+            try {
+                $pdQb  = $this->db->getQueryBuilder();
+                $pdRes = $pdQb->select('team_id')
+                    ->from('teamhub_pending_dels')
+                    ->where($pdQb->expr()->in(
+                        'team_id',
+                        $pdQb->createNamedParameter($idList, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                    ))
+                    ->andWhere($pdQb->expr()->eq('status', $pdQb->createNamedParameter('pending')))
+                    ->executeQuery();
+                while ($row = $pdRes->fetch()) {
+                    unset($ids[(string)$row['team_id']]);
+                }
+                $pdRes->closeCursor();
+            } catch (\Throwable $e) {
+                // Table may not exist on older TeamHub schema versions —
+                // fall through with the unfiltered list.
+            }
+        }
+
+        return array_keys($ids);
+    }
+
+    /**
+     * Return the most recent public messages across all teams on this NC
+     * instance. Used by GET /api/v1/messages/public — the personal
+     * aggregated feed will call this in addition to the caller's own
+     * team-messages so posts from teams the user is not in also surface.
+     *
+     * Author display names are hydrated in a single IUserManager pass so the
+     * feed renders "Jane Doe" rather than raw UIDs; team display names are
+     * hydrated in one circles_circle SELECT for the same reason.
+     *
+     * @param int   $limit          max rows to return (caller-clamped to sane bounds)
+     * @param int   $offset         pagination offset
+     * @param array $excludeTeamIds team ids to skip — callers pass the user's
+     *                              own team memberships so a post doesn't
+     *                              appear once as "team" and once as "public"
+     */
+    public function getPublicMessages(int $limit = 20, int $offset = 0, array $excludeTeamIds = []): array {
+        $messages = $this->messageMapper->findPublic($limit, $offset, $excludeTeamIds);
+
+        // Resolve author display names in one pass.
+        $uids = [];
+        foreach ($messages as $m) {
+            if (!empty($m['author_id'])) {
+                $uids[$m['author_id']] = true;
+            }
+        }
+        $nameMap = [];
+        foreach (array_keys($uids) as $uid) {
+            try {
+                $u = $this->userManager->get($uid);
+                $nameMap[$uid] = $u ? (string)$u->getDisplayName() : $uid;
+            } catch (\Throwable) {
+                $nameMap[$uid] = $uid;
+            }
+        }
+
+        // Resolve team display names in one pass over the distinct team_ids.
+        $teamIds = [];
+        foreach ($messages as $m) {
+            if (!empty($m['team_id'])) {
+                $teamIds[$m['team_id']] = true;
+            }
+        }
+        $teamNameMap = [];
+        if (!empty($teamIds)) {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('unique_id', 'display_name')
+                ->from('circles_circle')
+                ->where($qb->expr()->in(
+                    'unique_id',
+                    $qb->createNamedParameter(array_keys($teamIds), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                ));
+            $r = $qb->executeQuery();
+            while ($row = $r->fetch()) {
+                $teamNameMap[(string)$row['unique_id']] = (string)($row['display_name'] ?? '');
+            }
+            $r->closeCursor();
+        }
+
+        foreach ($messages as &$m) {
+            $m['author_display_name'] = $nameMap[$m['author_id'] ?? ''] ?? ($m['author_id'] ?? '');
+            $m['team_name']           = $teamNameMap[$m['team_id'] ?? ''] ?? '';
+        }
+        unset($m);
+
+        return $messages;
     }
 
     /**

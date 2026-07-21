@@ -248,6 +248,140 @@ Accepts any truthy/falsy representation (bool, 0/1, "0"/"1"). Coerced to a stric
 
 ---
 
+## Public messages (added 4.2.11)
+
+The Public flag on a message opts it out of team scope. Public messages surface on `GET /api/v1/messages/public` and (in a follow-up session) on the personal aggregated feed.
+
+Publishing is admin-gated per-team: `MessageService::createMessage` force-strips `is_public` when the team's `allowPublicMessages_<teamId>` setting is off or when `messageType !== 'normal'`. Polls, questions, and decisions are always team-scoped.
+
+### `POST /api/v1/teams/{teamId}/messages`  *(field added 4.2.11)*
+
+Same endpoint as before with one added optional field:
+
+**Body addition**:
+```json
+{ "isPublic": true }
+```
+
+`isPublic` defaults to `false`. Backend forces it to `false` when the team admin has not enabled the toggle or when the message type is anything other than `normal`, so an API caller cannot bypass the gate by hand-crafting the request.
+
+---
+
+### `GET /api/v1/teams/{teamId}/messages/settings`  *(response addition 4.2.11)*
+
+The settings envelope gains `allowPublicMessages` (bool), so the frontend knows whether to render the Public checkbox on the compose form.
+
+**Response 200**:
+```json
+{
+  "pinMinLevel": "moderator",
+  "postMinLevel": "member",
+  "linkMinLevel": "admin",
+  "allowPublicMessages": false
+}
+```
+
+### `POST /api/v1/teams/{teamId}/messages/settings`  *(field added 4.2.11)*
+
+Body accepts `allowPublicMessages` (bool/int/string coerced). Team admin required — same as before.
+
+---
+
+### `GET /api/v1/messages/feed`  *(added 4.2.12, extended 4.2.13/4.2.14, licensed 4.3.0)*
+
+The personal "What’s new" feed. Combines team messages from every team the caller is a member of, public messages from other teams, and Talk polls + thread starters from rooms connected to any of the caller's teams. One paginated call, chronological.
+
+**Auth**: authenticated NC user (`#[NoAdminRequired]`). **License**: requires an active TeamHub license (`enforcementLevel` = `none` or `grace`). Unlicensed / soft-locked instances receive `403 { error, licenseGate: true, enforcementLevel }` — frontend surfaces a license-specific error and the sidebar entry is hidden.
+
+**Query params**:
+- `includeTeam` (bool, default `1`) — accepts `1/0/true/false/yes/no/on/off`.
+- `includePublic` (bool, default `1`) — same coercions.
+- `includeTalk` (bool, default `1`) — same coercions. When on, adds Talk polls (`source: 'talk-poll'`) and thread starters (`source: 'talk-thread'`) from rooms the caller can reach via a team membership. Talk items carry `room_id`, `room_token`, `room_name`, and the resolved `team_id` (first-matching own-team via `talk_attendees`).
+- `limit` (int, 1–100, default 20)
+- `offset` (int, ≥0, default 0)
+
+**Response 200**:
+```json
+{
+  "items": [
+    {
+      "id": 1234,
+      "team_id": "abc123",
+      "team_name": "Marketing",
+      "source": "public",
+      "author_id": "jdoek",
+      "author_display_name": "Justin Doek",
+      "subject": "Q3 goals",
+      "message": "…",
+      "priority": "normal",
+      "messageType": "normal",
+      "pinned": false,
+      "isPublic": true,
+      "created_at": 1750000000,
+      "updated_at": 1750000000,
+      "comment_count": 0
+    }
+  ],
+  "hasMore": true,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+`source` is a synthetic per-row field: `'team'` when the row's `team_id` is in the caller's own team memberships, `'public'` otherwise. The classification is done server-side so the frontend doesn't need to re-check membership. A user's own-team public post shows once, classified as `'team'`.
+
+`hasMore` is computed by asking the DB for `limit + 1` rows and stripping the extra one — no follow-up COUNT query.
+
+**Failures**: `403` — not authenticated. `500` — internal error (logged; generic body returned).
+
+**Routing note**: registered above the `/messages/{messageId}` catchalls in `appinfo/routes.php` so the literal `feed` segment wins over `{messageId}=feed`.
+
+---
+
+### `GET /api/v1/messages/public`  *(added 4.2.11)*
+
+Return the most recent public messages across every team on this NC instance. Any authenticated user may call it — a message the poster marked public has opted out of team-scope confidentiality.
+
+**Auth**: authenticated NC user (`#[NoAdminRequired]`).
+
+**Query params**:
+- `limit` (int, 1–100, default 20)
+- `offset` (int, ≥0, default 0)
+- `excludeTeamIds` (comma-separated team ids to skip; capped at 500 to keep the `NOT IN` clause tractable). The personal aggregated feed passes the caller's own team memberships so a message doesn't render twice.
+
+**Response 200**:
+```json
+{
+  "messages": [
+    {
+      "id": 1234,
+      "team_id": "abc123",
+      "team_name": "Marketing",
+      "author_id": "jdoek",
+      "author_display_name": "Justin Doek",
+      "subject": "Q3 goals",
+      "message": "…",
+      "priority": "normal",
+      "messageType": "normal",
+      "pinned": false,
+      "isPublic": true,
+      "created_at": 1750000000,
+      "updated_at": 1750000000,
+      "comment_count": 0
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "count": 1
+}
+```
+
+**Failures**: `500` — internal error (logged with `[TeamHub][MessageController]` prefix; generic body returned).
+
+**Routing note**: registered above the `/messages/{messageId}` catchalls in `appinfo/routes.php` so the literal `public` segment wins over `{messageId}=public`.
+
+---
+
 ### `GET /api/v1/teams/{teamId}/type`  *(added 4.1.0)*
 
 Fetch the team's template label as chosen in the create-team wizard.
@@ -292,6 +426,68 @@ Server-side validated against `TeamTypeService::ALLOWED = ['collaboration','proj
 
 ---
 
+### `GET /api/v1/teams/{teamId}/dashboard/config`  *(added 4.1.2)*
+
+Fetch the team-wide dashboard customization: which widgets the owner/admin has hidden from every member's Home dashboard, and which tab opens when a member enters the team.
+
+**Auth**: team member required.
+
+**Response 200**:
+```json
+{ "hidden_widgets": ["widget-activity", "widget-files-center"], "default_tab": "decisions" }
+```
+
+- `hidden_widgets` — array of widget ids removed from every member's grid (desktop, tablet, mobile). Their grid positions are preserved, so un-hiding restores placement.
+- `default_tab` — tab key opened on team entry; `"msgstream"` (Home) is the default. Falls back to Home if the configured tab isn't currently available.
+
+**Storage**: NC app-config — `dashboard_hidden_<teamId>` (JSON array) and `dashboard_tab_<teamId>` (string). Same per-team pattern as the messages/timeline toggles; no table. Also emitted inline on the layout bundle as `dashboardConfig`.
+
+**Failures**: `403` if not a member.
+
+---
+
+### `PUT /api/v1/teams/{teamId}/dashboard/config`  *(added 4.1.2)*
+
+Update the team-wide dashboard customization. Changes the dashboard for **every** member.
+
+**Auth**: team **admin** required (level ≥ 8).
+
+**Body** (either or both keys; a missing key is left unchanged, so the frontend persists one field at a time):
+```json
+{ "hidden_widgets": ["widget-activity"], "default_tab": "budget" }
+```
+
+- `hidden_widgets` — full replacement list (array of widget-id strings, or a JSON-encoded string). Deduped, capped at 100, each ≤ 128 chars.
+- `default_tab` — tab key string (≤ 64 chars; blank/oversized coerces to `"msgstream"`).
+
+**Response 200**: the full stored config (same shape as GET).
+
+**Failures**:
+- `403` — not a team admin
+- `500` — internal error (logged)
+
+---
+
+## Teams-list endpoint (extended 4.1.2)
+
+### `GET /api/v1/teams`
+
+Existing endpoint — response objects now include a `level` field carrying the current user's role in each team, so the sidebar 3-dot menu can gate its actions (Manage/Invite/Leave) per team without a second fetch.
+
+**Response addition (4.1.2)** — per-team object:
+```json
+{
+  "id": "...", "name": "...", "description": "...",
+  "members": 5, "unread": 0, "image_url": "...",
+  "config": 8,
+  "level": 8
+}
+```
+
+- `level` — current user's Circles level in this team. Values: `0` (indirect member via a group or sub-team), `1` (member), `4` (moderator), `8` (admin), `9` (owner). Sourced from the existing SELECT on `circles_member.level` — no extra query. Indirect access maps to `0` because the underlying LEFT JOIN returns NULL for those rows.
+
+---
+
 ## Browse-teams endpoint (extended 4.1.0)
 
 ### `GET /api/v1/teams/browse`
@@ -321,6 +517,7 @@ Response additions in both team-row and cascade-to-default branches (in addition
 - **`messagesConfig`** (4.0.0) — `{ messages_enabled: bool }`, so the frontend can gate the message stream widget without a second fetch.
 - **`teamType`** (4.1.0) — `"collaboration" | "project" | "department" | null`. Populated from `teamhub_team_type` via `TeamTypeService::getType`. `null` for legacy teams so the badge renders nothing.
 - **`autoFit` on DEFAULT_LAYOUT items** (4.1.0) — new grid items carry `autoFit: true`. The frontend measures rendered content on first mount and grows `h` to fit, then strips the flag and re-saves. Persisted in `teamhub_layouts` if still set at save time so the pass survives a page reload.
+- **`dashboardConfig`** (4.1.2) — `{ hidden_widgets: string[], default_tab: string }`. Team-wide customization set by owner/admin in Manage Team → Settings → Dashboard. Drives the widget grid on desktop, tablet, and mobile plus the on-open tab selection. Same shape and semantics as `GET /teams/{teamId}/dashboard/config`.
 
 ---
 
@@ -501,11 +698,11 @@ Per-team behaviour:
 
 ---
 
-## Telemetry endpoint (response shape extended 3.86.0)
+## Telemetry endpoint (response shape extended 3.86.0; v4.3.0 makes `enabled` license-derived + PUT deprecated)
 
 ### `GET /api/v1/admin/telemetry`
 
-Returns the admin telemetry settings plus a live preview of the next outgoing report.
+Returns the current telemetry state plus a live preview of the next outgoing report.
 
 **Auth**: NC admin required (`#[AuthorizedAdminSetting]` on `AdminSettings`).
 
@@ -517,6 +714,8 @@ Returns the admin telemetry settings plus a live preview of the next outgoing re
   "preview":    { /* TelemetryService::collectStats() output */ }
 }
 ```
+
+**`enabled` semantics (changed 4.3.0)**: was a manual admin toggle stored in `appconfig.telemetry_enabled`. Since 4.3.0 it is DERIVED from `LicenseService::getEnforcementLevel()` — `false` when the enforcement level is `none` or `grace` (a paying customer we already know), `true` otherwise (unlicensed instances contribute to the free-tier usage view). The `PUT /api/v1/admin/telemetry` endpoint is kept for API back-compat but is a no-op — the underlying `TelemetryService::setEnabled()` is marked `@deprecated`.
 
 **`preview` field added 3.86.0**:
 - `unique_team_members` (int) — distinct effective people across every TeamHub team (`circles_membership` ↦ `circles_circle source=16` ↦ `circles_member user_type IN (1, 4)`). Same metric the admin Statistics tab's "Unique team members" card displays. Intended as the per-seat license counter for any future commercial-license model.
@@ -1027,6 +1226,49 @@ Update a log row. **Auth**: the row's `created_by` OR a team admin.
 ### `DELETE /api/v1/teams/{teamId}/time/logs/{logId}`
 
 Delete a log row. **Auth**: same as PUT.
+
+---
+
+## Compliance — code-integrity endpoint (added 4.2.0)
+
+Drives the "Code integrity" section at the top of the Compliance admin tab (renamed from `Audit` in the same session). Backed by `IntegrityService`, which reads `appinfo/integrity.json` (a SHA-256 manifest generated at build time by `scripts/generate-integrity.js`) and compares it against files on disk.
+
+### `GET /api/v1/admin/integrity`
+
+Runs the integrity check and returns a full report.
+
+**Auth**: `#[AuthorizedAdminSetting(settings: AdminSettings::class)]` — TeamHub-delegated admin (same trust boundary as the rest of AdminSettings). `#[NoCSRFRequired]` because it is a read-only GET.
+
+**Response 200**:
+```json
+{
+  "status":               "compliant",
+  "manifest_version":     1,
+  "app_version":          "4.2.0",
+  "generated_at":         "2026-07-19T10:15:00Z",
+  "algorithm":            "sha256",
+  "files_checked":        847,
+  "altered":              [],
+  "missing":              [],
+  "unexpected":           [],
+  "altered_truncated":    false,
+  "missing_truncated":    false,
+  "unexpected_truncated": false,
+  "checked_at":           "2026-07-19T10:16:22Z"
+}
+```
+
+Field reference:
+- `status` — `"compliant"` when altered + missing + unexpected are all empty AND the manifest was found; `"not_compliant"` when any list is non-empty; `"manifest_missing"` when `appinfo/integrity.json` is absent or unparseable (installs older than 4.2.0 that were not rebuilt with the new build script).
+- `manifest_version` / `app_version` / `generated_at` / `algorithm` — echoed from the manifest header; `null` when the manifest is missing.
+- `files_checked` — total number of file entries in the manifest that were compared (does not include the "unexpected" walk).
+- `altered` — relative paths whose current SHA-256 differs from the expected value.
+- `missing` — relative paths listed in the manifest but no longer present on disk.
+- `unexpected` — files present on disk under a covered directory (`appinfo`, `lib`, `js`, `css`, `templates`, `img`, `l10n`, `sql`) but not listed in the manifest. `.map` sourcemaps and dotfiles are skipped to avoid false positives from dev leftovers.
+- `*_truncated` — `true` when the corresponding list was capped at 500 entries. The list still renders; the flag surfaces that not everything is shown.
+- `checked_at` — ISO-8601 timestamp of when this response was computed (server time).
+
+**Failures**: `500` on any unexpected `\Throwable` from the service — the response body is `{"error": "Integrity check failed"}` and the full exception is written to the NC log with the `[TeamHub][IntegrityController]` prefix. There is no per-file failure mode; unreadable files are counted as `altered` (since `hash_file` returns `false`).
 
 ---
 

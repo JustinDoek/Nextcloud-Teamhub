@@ -496,6 +496,9 @@ export default {
             orderedTabs: [],
             editMode: false,
             layoutLoaded: false,
+            // Team id the configured default tab has already been applied for
+            // this open. Reset on team change so each fresh open re-applies.
+            defaultTabAppliedFor: null,
             _debouncedSave: null,
             // ── Viewport flags ────────────────────────────────────────
             // isMobile: phone (≤768px any) OR tablet portrait (≤1024px portrait)
@@ -595,6 +598,9 @@ export default {
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
             'timelineConfig', 'messagesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
+            // Sidebar 3-dot action intent — TeamView consumes it after the
+            // team's layout has loaded, then clears it.
+            'dashboardConfig', 'pendingTeamAction',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -1083,6 +1089,7 @@ export default {
                 this.orderedTabs = []
                 this.layoutLoaded = false
                 this.editMode = false
+                this.defaultTabAppliedFor = null
                 this.preloadedViews = new Set()
                 this.SET_PRESENCE_CONFIG({ presence_enabled: false, hide_reasons: false })
                 this.SET_DECISIONS_CONFIG({ decisions_enabled: false })
@@ -1105,6 +1112,18 @@ export default {
             handler() {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
             },
+        },
+        // v4.2.0 — when the admin changes the team's default tab in Manage
+        // Team → Settings → Dashboard, the store's dashboardConfig.default_tab
+        // updates immediately via SET_DASHBOARD_CONFIG. Reset the one-shot
+        // guard and re-run applyDefaultTab so the currently-open team jumps to
+        // the new default without needing a browser reload. applyDefaultTab is
+        // idempotent and only fires when the user is still on Home, so it
+        // never yanks someone off a tab they navigated to themselves.
+        'dashboardConfig.default_tab'() {
+            if (!this.layoutLoaded) return
+            this.defaultTabAppliedFor = null
+            this.applyDefaultTab()
         },
         // Same pattern for decisionsConfig — rebuild tabs when per-team toggle changes.
         decisionsConfig: {
@@ -1151,6 +1170,27 @@ export default {
         externalMenuItems() { this.syncExtTabs() },
 
         /**
+         * Sidebar 3-dot menu can request an action (Invite / Leave team) on a
+         * team that isn't open yet. App.vue selects the team, then sets this
+         * flag. We fire once the team is actually mounted and its resources
+         * have loaded — checking currentTeamId prevents a cold-start race
+         * where the flag arrives before the watcher re-mounts. Cleared after
+         * consumption so the same action doesn't fire twice.
+         */
+        pendingTeamAction: {
+            immediate: true,
+            handler(action) {
+                if (!action || !this.currentTeamId) return
+                if (action === 'invite') {
+                    this.showInviteModal = true
+                } else if (action === 'leave') {
+                    this.onLeaveTeam()
+                }
+                this.$store.commit('SET_PENDING_TEAM_ACTION', null)
+            },
+        },
+
+        /**
          * Re-apply snap when resources change (widget enabled/disabled).
          * Skipped during edit mode to avoid disrupting drag interactions.
          */
@@ -1159,6 +1199,14 @@ export default {
             handler() {
                 if (this.layoutLoaded && !this.editMode) {
                     this.applySnap()
+                }
+                // v4.2.2 — resource additions/removals change which built-in
+                // tabs isBuiltinTabRenderable considers valid, so the store's
+                // availableTabs (source for the Default-tab select) needs to
+                // recompute. Cheap: same buildOrderedTabs call the config
+                // watchers already use with the current savedOrder.
+                if (this.layoutLoaded) {
+                    this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
                 }
             },
         },
@@ -1273,9 +1321,34 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_TEAM_TYPE', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_TEAM_TYPE', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS', 'SET_DASHBOARD_CONFIG']),
 
         setView(view) { this.SET_VIEW(view) },
+
+        /**
+         * Apply the team's configured default tab on first open. The owner/admin
+         * picks it in Manage Team → Settings → Dashboard; it rides in on the
+         * layout bundle as dashboardConfig.default_tab. Fires at most once per
+         * team open (defaultTabAppliedFor guard, reset on team change), only
+         * while the user is still on Home — so it never yanks them off a tab a
+         * deep-link already opened — and only when the target tab is actually
+         * available. Anything unavailable falls back to Home (msgstream) by
+         * simply doing nothing.
+         */
+        applyDefaultTab() {
+            if (this.defaultTabAppliedFor === this.currentTeamId) return
+            this.defaultTabAppliedFor = this.currentTeamId
+
+            const target = this.dashboardConfig?.default_tab || 'msgstream'
+            if (target === 'msgstream') return
+            // Never override a view a deep-link (or the user) already switched to.
+            if (this.currentView !== 'msgstream') return
+            // Fall back to Home when the configured tab isn't currently available
+            // (integration removed, project left advanced mode, etc.).
+            if (!(this.orderedTabs || []).some(tab => tab.key === target)) return
+
+            this.SET_VIEW(target)
+        },
         toggleEditMode() { this.editMode = !this.editMode },
 
         /**
@@ -1345,6 +1418,11 @@ export default {
                 if (data.messagesConfig) {
                     this.SET_MESSAGES_CONFIG(data.messagesConfig)
                 }
+                // Team-wide dashboard customization (hidden widgets + default
+                // tab) rides along with the layout, same pattern as messagesConfig.
+                if (data.dashboardConfig) {
+                    this.SET_DASHBOARD_CONFIG(data.dashboardConfig)
+                }
                 // Team template label (v4.0.2) — always emitted (null for
                 // legacy teams). Reset the store so switching from a labelled
                 // team to a legacy one clears the badge.
@@ -1369,6 +1447,7 @@ export default {
                 this.maybeShowProjectGuideForNewTeam()
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
+                this.applyDefaultTab()
                 this.applySnap()
             } catch (err) {
                 console.warn('[TeamHub][TeamView] loadLayout: failed', err?.message)
@@ -1456,6 +1535,36 @@ export default {
             // Dynamic integration widgets.
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
             return active
+        },
+
+        /**
+         * Labeled catalog of the home widgets currently active for this team
+         * (mirrors getActiveWidgetIds), minus the message-stream widget —
+         * Messages visibility is owned by its own integration toggle. Consumed
+         * by Manage Team → Settings → Dashboard for the per-widget show/hide
+         * switches. Integration widgets carry their registry title.
+         */
+        buildDashboardWidgetCatalog() {
+            const labels = {
+                'widget-teaminfo':       t('teamhub', 'Team info'),
+                'widget-members':        t('teamhub', 'Members'),
+                'widget-activity':       t('teamhub', 'Activity'),
+                'widget-calendar':       t('teamhub', 'Calendar'),
+                'widget-deck':           t('teamhub', 'Tasks'),
+                'widget-pages':          t('teamhub', 'Pages'),
+                'widget-files-center':   t('teamhub', 'File center'),
+                'widget-decisions':      t('teamhub', 'Decisions'),
+                'widget-project-health': t('teamhub', 'Project health'),
+            }
+            const catalog = []
+            this.getActiveWidgetIds().forEach(id => {
+                if (id === 'msgstream' || id.startsWith('widget-int-')) return
+                if (labels[id]) catalog.push({ key: id, label: labels[id] })
+            })
+            ;(this.teamWidgets || []).forEach(w => {
+                catalog.push({ key: 'widget-int-' + w.registry_id, label: w.title || t('teamhub', 'Widget') })
+            })
+            return catalog
         },
 
         /**
@@ -1570,6 +1679,42 @@ export default {
                 ordered = all
             }
             this.orderedTabs = ordered
+
+            // Publish the selectable tab list (Home + ordered tabs) and the
+            // hideable widget catalog to the store so Manage Team → Settings →
+            // Dashboard can render pickers that match exactly what this member
+            // sees — without duplicating the activation logic over there.
+            //
+            // v4.2.2 — filter out tabs that TeamTabBar.isTabRenderable would
+            // hide anyway (Chat/Files/Calendar/Deck without a backing resource).
+            // Otherwise the Default-tab select offered options that render
+            // nothing for the team. orderedTabs itself is left unfiltered so
+            // saved tab order survives a temporary resource dropout.
+            this.$store.commit('SET_AVAILABLE_TABS', [
+                { key: 'msgstream', label: t('teamhub', 'Home') },
+                ...ordered
+                    .filter(tab => this.isBuiltinTabRenderable(tab.key))
+                    .map(tab => ({ key: tab.key, label: tab.label })),
+            ])
+            this.$store.commit('SET_DASHBOARD_WIDGET_CATALOG', this.buildDashboardWidgetCatalog())
+        },
+
+        /**
+         * Mirror of TeamTabBar.isTabRenderable for the four resource-gated
+         * built-in tabs. Non-built-in tabs (presence, decisions, timeline,
+         * budget, time, ext-* integrations, link-* custom links) are already
+         * filtered by their own gates at the point of insertion in
+         * buildAllTabDescriptors, so they always return true here.
+         */
+        isBuiltinTabRenderable(key) {
+            const r = this.resources || {}
+            switch (key) {
+            case 'talk':     return !!(r.talk && r.talk.token)
+            case 'files':    return !!(r.files && r.files.path)
+            case 'calendar': return Array.isArray(r.calendar) && r.calendar.length > 0
+            case 'deck':     return Array.isArray(r.deck) && r.deck.length > 0
+            default:         return true
+            }
         },
 
         buildAllTabDescriptors() {

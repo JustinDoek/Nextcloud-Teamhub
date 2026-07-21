@@ -64,6 +64,7 @@ class TeamImageService {
      */
     public function storeImage(string $teamId, string $rawData, string $mimeType): void {
 
+        $this->assertSafeTeamId($teamId);
         $this->validateMime($mimeType);
 
         $gdImage = $this->loadGdImage($rawData, $mimeType);
@@ -82,6 +83,7 @@ class TeamImageService {
      * Remove a team image. Silent if no image exists.
      */
     public function removeImage(string $teamId): void {
+        $this->assertSafeTeamId($teamId);
         try {
             $folder = $this->getOrCreateFolder();
             $file   = $folder->getFile($teamId . self::FILE_EXT);
@@ -100,6 +102,7 @@ class TeamImageService {
      */
     public function getImageData(string $teamId): ?string {
         try {
+            $this->assertSafeTeamId($teamId);
             $folder = $this->getOrCreateFolder();
             $file   = $folder->getFile($teamId . self::FILE_EXT);
             $data   = $file->getContent();
@@ -116,6 +119,7 @@ class TeamImageService {
      */
     public function hasImage(string $teamId): bool {
         try {
+            $this->assertSafeTeamId($teamId);
             $folder = $this->getOrCreateFolder();
             $folder->getFile($teamId . self::FILE_EXT);
             return true;
@@ -142,6 +146,22 @@ class TeamImageService {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Reject any teamId that could escape the team-images folder when used as
+     * a filename. Circle IDs are short alphanumeric tokens; a value containing
+     * a path separator, a null byte, or a parent reference is never legitimate
+     * and must not reach ISimpleFolder::getFile()/newFile().
+     */
+    private function assertSafeTeamId(string $teamId): void {
+        if ($teamId === ''
+            || str_contains($teamId, '/')
+            || str_contains($teamId, '\\')
+            || str_contains($teamId, "\0")
+            || str_contains($teamId, '..')) {
+            throw new \InvalidArgumentException('Invalid team identifier.');
+        }
+    }
 
     private function validateMime(string $mimeType): void {
         // Strip charset/boundary suffixes (e.g. "image/jpeg; charset=binary")

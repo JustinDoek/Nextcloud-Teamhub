@@ -283,6 +283,13 @@ class TeamService {
                 $id     = $row['unique_id'];
                 $unread = $unreadCounts[$id] ?? 0;
 
+                // Current user's role level in THIS team. The SQL LEFT JOIN
+                // returns m.level for a direct member row; NULL for indirect
+                // access (via a group or sub-team). Indirect members have no
+                // moderation rights, so 0 is the correct representation for
+                // the frontend's role-gated sidebar actions.
+                $level = $row['level'] !== null ? (int)$row['level'] : 0;
+
                 $teams[] = [
                     'id'          => $id,
                     'name'        => $row['name'],
@@ -293,6 +300,11 @@ class TeamService {
                     // Circles config bitmask — exposed so the frontend can render
                     // human-readable "team type" labels (open/invite/public/etc).
                     'config'      => (int)($row['config'] ?? 0),
+                    // Current user's role in this team (0 = indirect member,
+                    // 1 = member, 4 = moderator, 8 = admin, 9 = owner). Used by
+                    // the sidebar 3-dot action menu to gate Manage team (>=8),
+                    // Invite (>=4), Copy link (>=1) and Leave team (1..8).
+                    'level'       => $level,
                 ];
             }
 

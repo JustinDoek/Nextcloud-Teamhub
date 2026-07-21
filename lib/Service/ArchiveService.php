@@ -815,6 +815,11 @@ class ArchiveService {
      * @return array<string, mixed>|null
      */
     public function getTeamArchiveStatus(string $teamId): ?array {
+        // Only members may read a team's pending-deletion state. Without this
+        // gate any authenticated user could read another team's archive path,
+        // archiver UID and internal failure reason by iterating teamId.
+        $this->memberService->requireMemberLevel($teamId);
+
         $row = $this->pendingMapper->findByTeamId($teamId);
         if ($row === null) {
             return null;

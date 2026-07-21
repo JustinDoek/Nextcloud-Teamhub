@@ -691,6 +691,102 @@ class TeamController extends Controller {
     }
 
     /**
+     * GET /api/v1/teams/{teamId}/dashboard/config
+     *
+     * Returns the team-wide dashboard customization:
+     *   - hidden_widgets: string[] — widget ids the owner/admin has hidden from
+     *     the dashboard for every member (position memory is preserved so
+     *     un-hiding restores placement).
+     *   - default_tab: string — the tab key opened when a member enters the
+     *     team. Defaults to 'msgstream' (the Home dashboard).
+     *
+     * Storage: NC app-config `dashboard_hidden_<teamId>` (JSON array) and
+     * `dashboard_tab_<teamId>` (string) — same per-team pattern as the
+     * messages/timeline toggles. Readable by any team member.
+     */
+    #[NoAdminRequired]
+    public function getDashboardConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            return new JSONResponse($this->readDashboardConfig($teamId));
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Team operation failed');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/dashboard/config
+     *
+     * Updates the team-wide dashboard customization. Team admin (level >= 8)
+     * required — this changes the dashboard for every member. Body may carry
+     * either or both of:
+     *   - hidden_widgets: string[]  (full replacement list)
+     *   - default_tab:    string    (tab key)
+     * A missing key is left unchanged, so the frontend can persist one field
+     * at a time.
+     */
+    #[NoAdminRequired]
+    public function saveDashboardConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            $hiddenRaw = $this->request->getParam('hidden_widgets', null);
+            if ($hiddenRaw !== null) {
+                // Accept a JSON-encoded string as well as a native array.
+                if (is_string($hiddenRaw)) {
+                    $decoded   = json_decode($hiddenRaw, true);
+                    $hiddenRaw = is_array($decoded) ? $decoded : [];
+                }
+                $hidden = is_array($hiddenRaw)
+                    ? array_values(array_unique(array_filter(
+                        array_map('strval', $hiddenRaw),
+                        static fn (string $s): bool => $s !== '' && strlen($s) <= 128
+                    )))
+                    : [];
+                // Defensive cap — a team never has anywhere near this many widgets.
+                $hidden = array_slice($hidden, 0, 100);
+                $this->config->setAppValue(Application::APP_ID, 'dashboard_hidden_' . $teamId, json_encode($hidden));
+            }
+
+            $tabRaw = $this->request->getParam('default_tab', null);
+            if ($tabRaw !== null) {
+                $tab = trim((string)$tabRaw);
+                if ($tab === '' || strlen($tab) > 64) {
+                    $tab = 'msgstream';
+                }
+                $this->config->setAppValue(Application::APP_ID, 'dashboard_tab_' . $teamId, $tab);
+            }
+
+            return new JSONResponse($this->readDashboardConfig($teamId));
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save dashboard config', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /**
+     * Read the stored dashboard config for a team as a plain array. Shared by
+     * the getter and the setter's response so the default values live in one
+     * place. Mirrors the shape emitted in the layout bundle.
+     *
+     * @return array{hidden_widgets: string[], default_tab: string}
+     */
+    private function readDashboardConfig(string $teamId): array {
+        $hidden = json_decode(
+            $this->config->getAppValue(Application::APP_ID, 'dashboard_hidden_' . $teamId, '[]'),
+            true
+        );
+        if (!is_array($hidden)) {
+            $hidden = [];
+        }
+        return [
+            'hidden_widgets' => array_values(array_map('strval', $hidden)),
+            'default_tab'    => $this->config->getAppValue(Application::APP_ID, 'dashboard_tab_' . $teamId, 'msgstream'),
+        ];
+    }
+
+    /**
      * GET /api/v1/teams/{teamId}/type
      *
      * Returns the team's template label as chosen in the create wizard.

@@ -55,8 +55,6 @@ class Version000377001Date20260614000000 extends SimpleMigrationStep {
     }
 
     public function postSchemaChange(IOutput $output, Closure $schemaClosure, array $options): void {
-        error_log('[TeamHub][Migration][v3.77.1] postSchemaChange: setting decisions_module_enabled = 1');
-
         try {
             $qb = $this->db->getQueryBuilder();
             $affected = $qb->update('appconfig')
@@ -64,8 +62,6 @@ class Version000377001Date20260614000000 extends SimpleMigrationStep {
                 ->where($qb->expr()->eq('appid',     $qb->createNamedParameter('teamhub')))
                 ->andWhere($qb->expr()->eq('configkey', $qb->createNamedParameter('decisions_module_enabled')))
                 ->executeStatement();
-
-            error_log('[TeamHub][Migration][v3.77.1] postSchemaChange: rows updated = ' . $affected);
 
             // Log to the migration output so NC admin can see what happened.
             if ($affected > 0) {
@@ -79,7 +75,6 @@ class Version000377001Date20260614000000 extends SimpleMigrationStep {
             // still be on for installations where the key was never written.
             // Log the error but do not abort the migration.
             $output->warning('TeamHub: Could not update decisions_module_enabled: ' . $e->getMessage());
-            error_log('[TeamHub][Migration][v3.77.1] postSchemaChange failed: ' . $e->getMessage());
         }
     }
 }

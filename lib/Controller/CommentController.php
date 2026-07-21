@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\CommentMapper;
 use OCA\TeamHub\Db\MessageMapper;
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\MemberService;
@@ -49,18 +50,31 @@ class CommentController extends Controller {
             // is in a terminal decision state. Look up the comment first to
             // resolve message_id.
             $existing = $this->commentMapper->find($commentId);
-            if ($existing !== null) {
-                $lockError = $this->checkDecisionLockForMessage(
-                    (int)$existing['message_id'],
-                    $user->getUID(),
-                );
-                if ($lockError !== null) {
-                    return $lockError;
-                }
+            if ($existing === null) {
+                return new JSONResponse(['error' => 'Comment not found'], Http::STATUS_NOT_FOUND);
+            }
+
+            // Require membership of the comment's team before allowing an edit
+            // (a user removed from the team must not keep editing old comments).
+            try {
+                $message = $this->messageMapper->find((int)$existing['message_id']);
+            } catch (\Throwable $e) {
+                return new JSONResponse(['error' => 'Message not found'], Http::STATUS_NOT_FOUND);
+            }
+            $this->memberService->requireMemberLevel((string)$message['team_id']);
+
+            $lockError = $this->checkDecisionLockForMessage(
+                (int)$existing['message_id'],
+                $user->getUID(),
+            );
+            if ($lockError !== null) {
+                return $lockError;
             }
 
             $data = $this->commentMapper->update($commentId, $user->getUID(), $comment);
             return new JSONResponse($data);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to update comment', [
                 'commentId' => $commentId,
@@ -75,8 +89,21 @@ class CommentController extends Controller {
     #[NoCSRFRequired]
     public function listComments(int $messageId): JSONResponse {
         try {
+            // Resolve the parent message's team and require membership before
+            // exposing its comment thread. A comment row carries no team_id of
+            // its own, so without this an authenticated non-member could read
+            // any team's comments by iterating messageId.
+            try {
+                $message = $this->messageMapper->find($messageId);
+            } catch (\Throwable $e) {
+                return new JSONResponse(['error' => 'Message not found'], Http::STATUS_NOT_FOUND);
+            }
+            $this->memberService->requireMemberLevel((string)$message['team_id']);
+
             $comments = $this->commentMapper->findByMessageId($messageId);
             return new JSONResponse($comments);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to list comments', [
                 'messageId' => $messageId,
@@ -99,6 +126,16 @@ class CommentController extends Controller {
         }
 
         try {
+            // Resolve the message's team and require membership before allowing
+            // a comment write — a non-member must not be able to post into a
+            // team's thread by iterating messageId.
+            try {
+                $message = $this->messageMapper->find($messageId);
+            } catch (\Throwable $e) {
+                return new JSONResponse(['error' => 'Message not found'], Http::STATUS_NOT_FOUND);
+            }
+            $this->memberService->requireMemberLevel((string)$message['team_id']);
+
             // Decision lock: when the parent message has a decision in
             // status='decided' or 'withdrawn', comments are frozen for
             // non-admins. Admins may still moderate (write).
@@ -120,6 +157,8 @@ class CommentController extends Controller {
             );
 
             return new JSONResponse($data, Http::STATUS_CREATED);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to create comment', [
                 'messageId' => $messageId,

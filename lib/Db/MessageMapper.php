@@ -121,7 +121,7 @@ class MessageMapper {
     /**
      * Create a new message.
      */
-    public function create(string $teamId, string $authorId, string $subject, string $message, string $priority = 'normal', string $messageType = 'normal', ?array $pollOptions = null): array {
+    public function create(string $teamId, string $authorId, string $subject, string $message, string $priority = 'normal', string $messageType = 'normal', ?array $pollOptions = null, bool $isPublic = false): array {
         $qb = $this->db->getQueryBuilder();
         $now = time();
 
@@ -133,6 +133,9 @@ class MessageMapper {
             'priority'     => $qb->createNamedParameter($priority),
             'message_type' => $qb->createNamedParameter($messageType),
             'pinned'       => $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT),
+            // PARAM_INT (not PARAM_BOOL) — Postgres refuses 't'/'f' coercion
+            // on SMALLINT via PARAM_BOOL (DESIGN §2.4).
+            'is_public'    => $qb->createNamedParameter($isPublic ? 1 : 0, IQueryBuilder::PARAM_INT),
             'created_at'   => $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT),
             'updated_at'   => $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT),
         ];
@@ -302,6 +305,146 @@ class MessageMapper {
     }
 
     /**
+     * v4.2.13 — Fetch the "What’s new" personal feed page.
+     *
+     * Semantics:
+     *   - Team messages: any message whose team_id is in $userTeamIds.
+     *     Includes both non-public and public posts in those teams.
+     *   - Public messages: any message with is_public=1, ANY team.
+     *     Includes public posts from the user's own teams too, so
+     *     toggling Team off + Public on still shows own-team public posts.
+     *
+     * When both toggles are on the WHERE becomes `team_id IN userTeams OR
+     * is_public = 1`. Rows are unique so a message that satisfies both
+     * clauses appears once. Frontend classifies each row's `source`
+     * ('team' if team_id ∈ userTeams else 'public') for optional grouping,
+     * but the Public badge is driven by isPublic — a public post in the
+     * user's own team is badged public and still shown once.
+     *
+     * When both toggles are false the query returns [] without running.
+     *
+     * Callers are trusted to pass $userTeamIds already validated as the
+     * viewer's own memberships — this mapper does not re-check auth.
+     */
+    public function findFeed(array $userTeamIds, bool $includeTeam, bool $includePublic, int $limit, int $offset): array {
+        // Build WHERE on the same qb we'll execute — createNamedParameter
+        // binds names per-qb, so a throwaway builder would leave stale
+        // placeholders unbound.
+        $qb = $this->db->getQueryBuilder();
+        $where = $this->buildFeedWhere($userTeamIds, $includeTeam, $includePublic, $qb);
+        if ($where === null) {
+            return [];
+        }
+        $qb->select('*')
+            ->from('teamhub_messages')
+            ->where($where['expr'])
+            ->orderBy('created_at', 'DESC')
+            ->setMaxResults($limit)
+            ->setFirstResult($offset);
+
+        $result = $qb->executeQuery();
+        $messages = [];
+        while ($row = $result->fetch()) {
+            $messages[] = $this->rowToArray($row);
+        }
+        $result->closeCursor();
+        return $messages;
+    }
+
+    /**
+     * v4.2.13 — total row count matching the feed's WHERE clause. Used
+     * so the frontend can render "Page N of M" and disable Next reliably.
+     */
+    public function countFeed(array $userTeamIds, bool $includeTeam, bool $includePublic): int {
+        $qb = $this->db->getQueryBuilder();
+        $where = $this->buildFeedWhere($userTeamIds, $includeTeam, $includePublic, $qb);
+        if ($where === null) {
+            return 0;
+        }
+        $qb->select($qb->createFunction('COUNT(*) AS cnt'))
+            ->from('teamhub_messages')
+            ->where($where['expr']);
+        $result = $qb->executeQuery();
+        $row    = $result->fetch();
+        $result->closeCursor();
+        return (int)($row['cnt'] ?? 0);
+    }
+
+    /**
+     * Shared WHERE-clause builder for findFeed / countFeed.
+     * Returns null when the WHERE would be trivially empty (both toggles
+     * off, or Team-only with no team memberships) so the caller can skip
+     * the query entirely.
+     *
+     * Pass a $qb to bind named parameters onto it. If omitted, a fresh
+     * throwaway QB is used — safe for the null-check case where you only
+     * want to know whether a query is worth running.
+     *
+     * @return array{expr: mixed}|null
+     */
+    private function buildFeedWhere(array $userTeamIds, bool $includeTeam, bool $includePublic, ?\OCP\DB\QueryBuilder\IQueryBuilder $qb = null): ?array {
+        if (!$includeTeam && !$includePublic) {
+            return null;
+        }
+        $qb = $qb ?? $this->db->getQueryBuilder();
+
+        $or = $qb->expr()->orX();
+        if ($includeTeam && !empty($userTeamIds)) {
+            $or->add($qb->expr()->in(
+                'team_id',
+                $qb->createNamedParameter($userTeamIds, IQueryBuilder::PARAM_STR_ARRAY),
+            ));
+        }
+        if ($includePublic) {
+            $or->add($qb->expr()->eq(
+                'is_public',
+                $qb->createNamedParameter(1, IQueryBuilder::PARAM_INT),
+            ));
+        }
+        if ($or->count() === 0) {
+            return null;
+        }
+        return ['expr' => $or];
+    }
+
+    /**
+     * Find messages marked is_public across all teams. Used by the personal
+     * aggregated feed (GET /api/v1/messages/public) so a member can see
+     * public posts from teams they don't belong to.
+     *
+     * Callers must still exclude any team ids the user is already a member
+     * of if they want to avoid a double-listing in the aggregated feed —
+     * that scoping decision is caller-side, not baked in here.
+     */
+    public function findPublic(int $limit = 20, int $offset = 0, array $excludeTeamIds = []): array {
+        $qb = $this->db->getQueryBuilder();
+
+        $qb->select('*')
+            ->from('teamhub_messages')
+            ->where($qb->expr()->eq('is_public', $qb->createNamedParameter(1, IQueryBuilder::PARAM_INT)))
+            ->orderBy('created_at', 'DESC')
+            ->setMaxResults($limit)
+            ->setFirstResult($offset);
+
+        if (!empty($excludeTeamIds)) {
+            $qb->andWhere($qb->expr()->notIn(
+                'team_id',
+                $qb->createNamedParameter($excludeTeamIds, IQueryBuilder::PARAM_STR_ARRAY)
+            ));
+        }
+
+        $result = $qb->executeQuery();
+        $messages = [];
+
+        while ($row = $result->fetch()) {
+            $messages[] = $this->rowToArray($row);
+        }
+
+        $result->closeCursor();
+        return $messages;
+    }
+
+    /**
      * Get the Unix timestamp of the most recent message for a team (0 if none).
      */
     public function getLatestMessageTimestamp(string $teamId): int {
@@ -397,6 +540,7 @@ class MessageMapper {
             'priority'        => $row['priority'] ?? 'normal',
             'messageType'     => $row['message_type'] ?? 'normal',
             'pinned'          => (bool)($row['pinned'] ?? false),
+            'isPublic'        => (bool)($row['is_public'] ?? false),
             'pollOptions'     => $pollOptions,
             'pollClosed'      => (bool)($row['poll_closed'] ?? false),
             'questionSolved'  => (bool)($row['question_solved'] ?? false),

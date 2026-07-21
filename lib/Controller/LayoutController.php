@@ -274,6 +274,10 @@ class LayoutController extends Controller {
             'messagesConfig'         => [
                 'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
             ],
+            // Team-wide dashboard customization: owner/admin-hidden widgets +
+            // the default tab opened on team entry. Read by every member;
+            // written only by admins (TeamController::saveDashboardConfig).
+            'dashboardConfig'        => $this->dashboardConfigFor($teamId),
             // v4.0.2 — team template label ('collaboration'|'project'|'department'|null).
             // Legacy teams (pre-4.0.2) have no row and land at null so the
             // Team info widget/BrowseTeamsView hide the badge.
@@ -329,6 +333,10 @@ class LayoutController extends Controller {
             'messagesConfig'         => [
                 'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
             ],
+            // Team-wide dashboard customization: owner/admin-hidden widgets +
+            // the default tab opened on team entry. Read by every member;
+            // written only by admins (TeamController::saveDashboardConfig).
+            'dashboardConfig'        => $this->dashboardConfigFor($teamId),
             // v4.0.2 — team template label ('collaboration'|'project'|'department'|null).
             // Legacy teams (pre-4.0.2) have no row and land at null so the
             // Team info widget/BrowseTeamsView hide the badge.
@@ -591,6 +599,26 @@ class LayoutController extends Controller {
         }
 
         return [$cleanLayout, $cleanTabOrder, null];
+    }
+
+    /**
+     * Team-wide dashboard config emitted in the layout bundle. Kept in sync
+     * with TeamController::readDashboardConfig (same app-config keys/defaults).
+     *
+     * @return array{hidden_widgets: string[], default_tab: string}
+     */
+    private function dashboardConfigFor(string $teamId): array {
+        $hidden = json_decode(
+            $this->config->getAppValue(Application::APP_ID, 'dashboard_hidden_' . $teamId, '[]'),
+            true
+        );
+        if (!is_array($hidden)) {
+            $hidden = [];
+        }
+        return [
+            'hidden_widgets' => array_values(array_map('strval', $hidden)),
+            'default_tab'    => $this->config->getAppValue(Application::APP_ID, 'dashboard_tab_' . $teamId, 'msgstream'),
+        ];
     }
 
     /**

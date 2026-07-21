@@ -120,29 +120,10 @@
                     <div class="teamhub-widget-header">
                         <InformationOutline :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Info') }}</h2>
-                        <NcActions class="teamhub-widget-actions">
-                            <NcActionButton v-if="isTeamAdmin" @click="$emit('manage-team')">
-                                <template #icon><Cog :size="20" /></template>
-                                {{ t('teamhub', 'Manage team') }}
-                            </NcActionButton>
-                            <NcActionButton @click="$emit('copy-link')">
-                                <template #icon><ContentCopy :size="20" /></template>
-                                {{ t('teamhub', 'Copy team link') }}
-                            </NcActionButton>
-                            <NcActionButton v-if="isTeamModerator" @click="$emit('invite')">
-                                <template #icon><AccountPlus :size="20" /></template>
-                                {{ t('teamhub', 'Invite user') }}
-                            </NcActionButton>
-                            <NcActionButton
-                                :disabled="!isCurrentUserDirectMember"
-                                :title="!isCurrentUserDirectMember
-                                    ? t('teamhub', 'You were added via a group or team. Ask your administrator to remove you.')
-                                    : ''"
-                                @click="isCurrentUserDirectMember && onLeaveTeamClick()">
-                                <template #icon><LocationExit :size="20" /></template>
-                                {{ t('teamhub', 'Leave team') }}
-                            </NcActionButton>
-                        </NcActions>
+                        <!-- Actions (Manage team / Copy link / Invite / Leave)
+                             moved to the sidebar team-item 3-dot menu so the
+                             Team info widget can be hidden by the owner without
+                             stranding them. -->
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-teaminfo')"
                             :widget-name="t('teamhub', 'Team Info')"
@@ -620,27 +601,8 @@
                             <span>{{ t('teamhub', 'Team info') }}</span>
                             <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-teaminfo') }" />
                         </button>
-                        <NcActions class="teamhub-tablet-widget__actions">
-                            <NcActionButton v-if="isTeamAdmin" @click="$emit('manage-team')">
-                                <template #icon><Cog :size="20" /></template>
-                                {{ t('teamhub', 'Manage team') }}
-                            </NcActionButton>
-                            <NcActionButton @click="$emit('copy-link')">
-                                <template #icon><ContentCopy :size="20" /></template>
-                                {{ t('teamhub', 'Copy team link') }}
-                            </NcActionButton>
-                            <NcActionButton v-if="isTeamModerator" @click="$emit('invite')">
-                                <template #icon><AccountPlus :size="20" /></template>
-                                {{ t('teamhub', 'Invite user') }}
-                            </NcActionButton>
-                            <NcActionButton
-                                :disabled="!isCurrentUserDirectMember"
-                                :title="!isCurrentUserDirectMember ? t('teamhub', 'You were added via a group or team. Ask your administrator to remove you.') : ''"
-                                @click="isCurrentUserDirectMember && onLeaveTeamClick()">
-                                <template #icon><LocationExit :size="20" /></template>
-                                {{ t('teamhub', 'Leave team') }}
-                            </NcActionButton>
-                        </NcActions>
+                        <!-- Actions moved to the sidebar team-item 3-dot menu.
+                             See the desktop grid variant above for the note. -->
                     </div>
                     <div v-if="!isCollapsed('widget-teaminfo')" class="teamhub-tablet-widget__body">
                         <div class="teamhub-tablet-teaminfo">
@@ -997,6 +959,9 @@ export default {
             // and tablet-mode stream column so a team without messages doesn't
             // render either surface.
             'messagesConfig',
+            // Team-wide dashboard customization — hidden_widgets removes widgets
+            // from every member's grid; default_tab is consumed on team open.
+            'dashboardConfig',
             // v4.0.2 — team template label from CreateTeamView. Renders as the
             // leading badge in the Team info widget's labels row.
             'teamType',
@@ -1086,6 +1051,14 @@ export default {
                 active.add('widget-project-health')
             }
             ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
+
+            // Team-wide owner/admin hidden widgets — removed from every member's
+            // dashboard. Their positions stay in gridLayout (position memory), so
+            // a widget toggled back on returns to its place. Applied last so it
+            // overrides every activation rule above.
+            const hidden = this.dashboardConfig?.hidden_widgets || []
+            hidden.forEach(id => active.delete(id))
+
             return active
         },
 
@@ -1363,7 +1336,14 @@ export default {
         },
 
         getGridItem(id) {
-            return this.gridLayout.find(item => item.i === id) || null
+            // v4.2.3 — source from visibleLayout, not gridLayout. visibleLayout
+            // already drops widgets whose resource gate is false OR that the
+            // admin hid via dashboardConfig.hidden_widgets. Every widget's
+            // v-if in this template calls getGridItem, so switching the source
+            // makes toggling a widget off in Manage Team → Settings → Widgets
+            // actually unmount the widget instead of just removing it from
+            // the layout prop while the grid-item stayed rendered.
+            return this.visibleLayout.find(item => item.i === id) || null
         },
 
         getOrCreateIntegrationItem(registryId) {

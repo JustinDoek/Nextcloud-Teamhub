@@ -144,18 +144,15 @@ class TeamImageController extends Controller {
     #[NoCSRFRequired]
     public function serve(string $teamId): DataDisplayResponse|JSONResponse {
 
-        // Membership check: any member may view the image
+        // Membership check: any team member (including indirect members added
+        // via a group or sub-team) may view the image. requireMemberLevel
+        // accepts level >= 1 and indirect access, which is exactly the intended
+        // scope. Without this check any authenticated user could fetch any
+        // team's image by iterating teamId.
         try {
-            // requireModeratorLevel would be too strict for viewing — do a
-            // lightweight direct check instead. Level > 0 = any active member.
-            // We reuse the same DB query pattern as getMemberLevelFromDb() but
-            // without injecting IDBConnection here — delegate to MemberService.
-            // MemberService::requireModeratorLevel throws on non-members, which
-            // is what we want; but level 1 members should also see the image.
-            // Solution: catch the "Insufficient permissions" error but not the
-            // "not a member" error.
-        } catch (\Exception $e) {
-            // The check below handles this
+            $this->memberService->requireMemberLevel($teamId);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => 'Forbidden'], Http::STATUS_FORBIDDEN);
         }
 
         $data = $this->teamImageService->getImageData($teamId);

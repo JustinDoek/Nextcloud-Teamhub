@@ -72,17 +72,56 @@ class TelemetryService {
     // -------------------------------------------------------------------------
 
     /**
-     * Returns true when telemetry is enabled (opt-in by default, admin can disable).
+     * Whether telemetry (anonymous usage statistics) is currently sending.
+     *
+     * v4.2.4 — derived from license state instead of an explicit admin
+     * toggle. Rule: any customer with a currently-honoured license (Active,
+     * Trial, or Grace) is a known paying customer and does not need to be
+     * counted. Instances that are Unlicensed or Soft-locked send telemetry
+     * so Justin can see the free-tier usage footprint.
+     *
+     * Implementation note: we read the JWT config value directly and peek-
+     * decode it, rather than calling `LicenseService::getEnforcementLevel()`.
+     * LicenseService already depends on TelemetryService (via
+     * `countLicensedSeats`, v3.100.6), so injecting it back here would be a
+     * circular constructor dependency that NC's DI can't resolve — the
+     * initial attempt at that broke both the License tab (LicenseController
+     * → LicenseService construction) and the Reporting KPIs
+     * (MaintenanceController → TelemetryService construction). Peek-decode
+     * is enough for this decision: we only need to know if a JWT is
+     * installed and not too-far past its exp; signature verification is
+     * LicenseService's job and doesn't affect "should we send stats".
      */
     public function isEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, self::KEY_ENABLED, '1') === '1';
+        $rawJwt = $this->config->getAppValue(Application::APP_ID, 'license_jwt', '');
+        if ($rawJwt === '') {
+            return true;   // no license at all — free tier, keep telemetry on
+        }
+        try {
+            $peeked = \OCA\TeamHub\Util\Jwt::peek($rawJwt);
+        } catch (\Throwable) {
+            return true;   // malformed JWT is effectively unlicensed
+        }
+        $payload = $peeked['payload'] ?? null;
+        if (!is_array($payload)) {
+            return true;
+        }
+        $exp = $payload['exp'] ?? null;
+        // Grace window: LicenseService::GRACE_DAYS is 30 days past exp.
+        // Anything within [not-yet-expired, exp + 30d] counts as "licensed".
+        // Beyond that, soft-lock — telemetry resumes.
+        $graceCutoff = is_int($exp) ? ($exp + 30 * 86400) : 0;
+        return time() > $graceCutoff;
     }
 
     /**
-     * Enable or disable telemetry. Only meaningful when called by an NC admin.
+     * @deprecated v4.3.0 — telemetry is derived from license state; no
+     *   longer settable. The MaintenanceController endpoint that used to
+     *   call this is kept as a legacy no-op for API back-compat.
      */
     public function setEnabled(bool $enabled): void {
-        $this->config->setAppValue(Application::APP_ID, self::KEY_ENABLED, $enabled ? '1' : '0');
+        // Intentional no-op. Kept only so the (now vestigial) admin PUT
+        // endpoint doesn't fatal. isEnabled() ignores the stored value.
     }
 
     /**

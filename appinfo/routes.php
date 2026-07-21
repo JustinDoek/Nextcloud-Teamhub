@@ -120,6 +120,15 @@ return [
         ['name' => 'message#getMessageSettings',  'url' => '/api/v1/teams/{teamId}/messages/settings',      'verb' => 'GET'],
         ['name' => 'message#saveMessageSettings', 'url' => '/api/v1/teams/{teamId}/messages/settings',      'verb' => 'POST'],
         ['name' => 'message#getAggregatedMessages','url' => '/api/v1/messages/aggregated',                   'verb' => 'GET'],
+        // v4.2.11 — public feed: is_public messages across every team on
+        // this instance. Member-callable (any authenticated user). MUST
+        // remain above the `{messageId}` catch-alls below, otherwise the
+        // path `public` would be captured by votePoll/getPollResults etc.
+        ['name' => 'message#listPublicMessages',  'url' => '/api/v1/messages/public',                        'verb' => 'GET'],
+        // v4.2.12 — personal "What's happening" feed: team + public in
+        // one paginated call. Same routing rule as `public` above — this
+        // fixed segment must stay above the `{messageId}` catchalls.
+        ['name' => 'message#getPersonalFeed',     'url' => '/api/v1/messages/feed',                          'verb' => 'GET'],
         ['name' => 'message#votePoll',            'url' => '/api/v1/messages/{messageId}/vote',              'verb' => 'POST'],
         ['name' => 'message#getPollResults',      'url' => '/api/v1/messages/{messageId}/poll-results',      'verb' => 'GET'],
         ['name' => 'message#closePoll',           'url' => '/api/v1/messages/{messageId}/close-poll',        'verb' => 'POST'],
@@ -232,6 +241,16 @@ return [
         ['name' => 'audit#saveRetention', 'url' => '/api/v1/admin/audit/retention',                      'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
+        // Compliance — code-integrity check (v4.2.0)
+        // Admin-only. Verifies shipped files against appinfo/integrity.json.
+        // ----------------------------------------------------------------
+        ['name' => 'integrity#check',     'url' => '/api/v1/admin/integrity',                            'verb' => 'GET'],
+
+        // v4.2.10 — Aggregated governance-risk counts (ghost memberships
+        // + orphan teams) for the Compliance-tab summary pills.
+        ['name' => 'maintenance#complianceSummary', 'url' => '/api/v1/admin/compliance/summary',         'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
         // Archive — owner initiation + admin governance
         // ----------------------------------------------------------------
         // Owner: initiate archive-and-delete for the team.
@@ -316,6 +335,12 @@ return [
         // Browse Teams to render a template badge.
         ['name' => 'team#getTeamType',  'url' => '/api/v1/teams/{teamId}/type', 'verb' => 'GET'],
         ['name' => 'team#saveTeamType', 'url' => '/api/v1/teams/{teamId}/type', 'verb' => 'PUT'],
+
+        // Team-wide dashboard customization — hidden widgets + default tab.
+        // Stored as app-config: dashboard_hidden_<teamId> (JSON array) and
+        // dashboard_tab_<teamId> (string). Read by members, written by admins.
+        ['name' => 'team#getDashboardConfig',  'url' => '/api/v1/teams/{teamId}/dashboard/config', 'verb' => 'GET'],
+        ['name' => 'team#saveDashboardConfig', 'url' => '/api/v1/teams/{teamId}/dashboard/config', 'verb' => 'PUT'],
 
         // Project Teams (v3.88.0) — persisted project-ness + Basic/Advanced mode
         // + PMC phase. get is team-member-gated; save + setPhase require team admin.

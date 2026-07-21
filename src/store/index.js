@@ -23,7 +23,7 @@ export default createStore({
         messagesPage: 1,       // current page (1-based)
         messagesTotal: 0,      // total non-pinned message count from last fetch
         messagesLimit: 5,      // messages per page
-        messageSettings: { pinMinLevel: 'moderator', postMinLevel: 'member' }, // per-team message settings
+        messageSettings: { pinMinLevel: 'moderator', postMinLevel: 'member', linkMinLevel: 'admin', allowPublicMessages: false }, // per-team message settings
         comments: {},          // { messageId: [comments] }
         members: [],
         allEffectiveMembers: [],   // flat [{userId, displayName, email?, phone?, ncStatus?}] of ALL members including indirect (via groups/teams) — used by the MembersWidget and for @mention autocomplete
@@ -66,6 +66,21 @@ export default createStore({
         // Gates the message stream widget, PostMessageForm, and any surface
         // that renders team messages so a team can be run without a stream.
         messagesConfig: { messages_enabled: true },
+        // Team-wide dashboard customization (owner/admin controlled):
+        //   hidden_widgets — widget ids removed from every member's dashboard
+        //   default_tab    — tab key opened when a member enters the team
+        // Rides along with the layout bundle, same pattern as messagesConfig.
+        dashboardConfig: { hidden_widgets: [], default_tab: 'msgstream' },
+        // Published by TeamView so Manage Team → Settings → Dashboard can offer
+        // exactly the tabs/widgets this member actually has, without re-deriving
+        // the (complex) activation logic there.
+        availableTabs: [],            // [{ key, label }] — Home + ordered tabs
+        dashboardWidgetCatalog: [],   // [{ key, label }] — hideable home widgets
+        // One-shot action intent set by the sidebar 3-dot menu so App.vue can
+        // trigger Invite / Leave team on a not-yet-open team. TeamView watches
+        // the pair (pendingTeamAction, currentTeamId), fires the action once
+        // the team is mounted, then clears the flag. Values: 'invite'|'leave'|null.
+        pendingTeamAction: null,
         // Team template label (v4.0.2): 'collaboration'|'project'|'department'|null.
         // Set once by CreateTeamView after team creation; null for legacy
         // teams so the frontend renders no template badge.
@@ -294,6 +309,10 @@ export default createStore({
         SET_DECISIONS_CONFIG(state, config) { state.decisionsConfig = config },
         SET_TIMELINE_CONFIG(state, config) { state.timelineConfig = config },
         SET_MESSAGES_CONFIG(state, config) { state.messagesConfig = config },
+        SET_DASHBOARD_CONFIG(state, config) { state.dashboardConfig = config },
+        SET_AVAILABLE_TABS(state, tabs) { state.availableTabs = tabs },
+        SET_DASHBOARD_WIDGET_CATALOG(state, catalog) { state.dashboardWidgetCatalog = catalog },
+        SET_PENDING_TEAM_ACTION(state, action) { state.pendingTeamAction = action },
         SET_TEAM_TYPE(state, teamType) { state.teamType = teamType },
         SET_BUDGET_CONFIG(state, config) { state.budgetConfig = config },
         SET_TIME_CONFIG(state, config) { state.timeConfig = config },
@@ -362,7 +381,7 @@ export default createStore({
             commit('SET_PINNED_MESSAGE', null)
             commit('SET_MESSAGES_PAGE', 1)
             commit('SET_MESSAGES_TOTAL', 0)
-            commit('SET_MESSAGE_SETTINGS', { pinMinLevel: 'moderator', postMinLevel: 'member' })
+            commit('SET_MESSAGE_SETTINGS', { pinMinLevel: 'moderator', postMinLevel: 'member', linkMinLevel: 'admin', allowPublicMessages: false })
             commit('SET_MEMBERS', [])
             commit('SET_ALL_EFFECTIVE_MEMBERS', [])
             commit('SET_RESOURCES', {})
@@ -444,10 +463,10 @@ export default createStore({
             }
         },
 
-        async postMessage({ commit, state, dispatch }, { subject, message, priority, messageType, pollOptions, decision }) {
+        async postMessage({ commit, state, dispatch }, { subject, message, priority, messageType, pollOptions, decision, isPublic }) {
             const { data } = await axios.post(
                 generateUrl(`/apps/teamhub/api/v1/teams/${state.currentTeamId}/messages`),
-                { subject, message, priority, messageType, pollOptions, decision }
+                { subject, message, priority, messageType, pollOptions, decision, isPublic: !!isPublic }
             )
             commit('ADD_MESSAGE', data)
             // Refresh unread counts so other users' badges reflect the new message.

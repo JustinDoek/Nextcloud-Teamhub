@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\ArchiveService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -138,6 +139,8 @@ class ArchiveController extends Controller {
         try {
             $row = $this->archiveService->getTeamArchiveStatus($teamId);
             return new JSONResponse(['pending' => $row]);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }

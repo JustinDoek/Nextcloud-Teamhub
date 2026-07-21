@@ -16,9 +16,27 @@
 
                 <NcAppNavigationItem
                     :name="t('teamhub', 'Browse Teams')"
+                    :active="activeView === 'browse'"
                     @click="showView('browse')">
                     <template #icon>
                         <Magnify :size="20" />
+                    </template>
+                </NcAppNavigationItem>
+
+                <!-- v4.2.12 — Personal "What’s new" feed. Aggregates recent
+                     messages from every team the user is a member of plus
+                     public messages from other teams. Sits under Browse
+                     Teams because it's a cross-team view, not a per-team one.
+                     v4.3.0 — gated behind an active TeamHub license. The
+                     backend endpoint enforces the gate too (SKILLS §Security
+                     standards: frontend is not a security boundary). -->
+                <NcAppNavigationItem
+                    v-if="isLicensed"
+                    :name="t('teamhub', 'What’s new')"
+                    :active="activeView === 'feed'"
+                    @click="showView('feed')">
+                    <template #icon>
+                        <Rss :size="20" />
                     </template>
                 </NcAppNavigationItem>
 
@@ -40,6 +58,48 @@
                              the literal string "NaN" (root cause of the 3.81.x bug). -->
                         <NcCounterBubble type="highlighted" :count="team.unread" />
                     </template>
+                    <!-- Team actions — moved here from the Team-info widget so
+                         Team info can be hidden without losing Manage/Invite/
+                         Leave. Role-gated per team via team.level (0 = indirect,
+                         1 = member, 4 = moderator, 8 = admin, 9 = owner). -->
+                    <template #actions>
+                        <!-- v4.2.2: NcActionButton.closeAfterClick defaults
+                             to FALSE in @nextcloud/vue 9, so the popover
+                             would otherwise stay open after our handler
+                             runs. Explicit true on all four so the menu
+                             collapses as soon as the user picks an action. -->
+                        <NcActionButton
+                            v-if="(team.level || 0) >= 8"
+                            close-after-click
+                            :aria-label="t('teamhub', 'Manage team')"
+                            @click="onSidebarManageTeam(team.id)">
+                            <template #icon><CogOutline :size="20" /></template>
+                            {{ t('teamhub', 'Manage team') }}
+                        </NcActionButton>
+                        <NcActionButton
+                            close-after-click
+                            :aria-label="t('teamhub', 'Copy team link')"
+                            @click="onSidebarCopyLink(team.id)">
+                            <template #icon><LinkVariant :size="20" /></template>
+                            {{ t('teamhub', 'Copy link') }}
+                        </NcActionButton>
+                        <NcActionButton
+                            v-if="(team.level || 0) >= 4"
+                            close-after-click
+                            :aria-label="t('teamhub', 'Invite members')"
+                            @click="onSidebarInvite(team.id)">
+                            <template #icon><AccountPlus :size="20" /></template>
+                            {{ t('teamhub', 'Invite members') }}
+                        </NcActionButton>
+                        <NcActionButton
+                            v-if="(team.level || 0) >= 1 && (team.level || 0) < 9"
+                            close-after-click
+                            :aria-label="t('teamhub', 'Leave team')"
+                            @click="onSidebarLeave(team.id)">
+                            <template #icon><LocationExit :size="20" /></template>
+                            {{ t('teamhub', 'Leave team') }}
+                        </NcActionButton>
+                    </template>
                 </NcAppNavigationItem>
 
                 <NcEmptyContent
@@ -51,23 +111,65 @@
                     </template>
                 </NcEmptyContent>
 
-                <!-- Docs / help link — at bottom of list, visually separated.
-                     v3.100.15: uses NcButton so it inherits NC's hover/focus
-                     ring, keyboard behaviour and the six-lock circular sizing
-                     from SKILLS.md (raw <button> previously required its own
-                     44×44 pill CSS to hold shape). -->
-                <div class="teamhub-feedback-separator" />
-                <li class="teamhub-feedback-item">
-                    <NcButton
-                        variant="tertiary"
-                        :title="t('teamhub', 'Help & Documentation')"
-                        :aria-label="t('teamhub', 'Help & Documentation')"
-                        @click="openDocs">
-                        <template #icon>
-                            <HelpCircleOutlineIcon :size="20" />
-                        </template>
-                    </NcButton>
-                </li>
+                <!-- v4.2.6 — sidebar footer. Rendered only on UNLICENSED
+                     instances: brand mark + wordmark + "Development version"
+                     label above the docs/help ? button. On licensed instances
+                     (Active/Trial/Grace) the whole block is hidden — no
+                     brand, no version tag, no help button. License state
+                     comes from the member-callable /api/v1/license/entitlements
+                     endpoint (loaded once on mount). Fails-open: if the
+                     entitlements call fails we assume unlicensed so the
+                     branding still appears rather than silently vanishing. -->
+                <template v-if="!isLicensed">
+                    <div class="teamhub-feedback-separator" />
+                    <!-- v4.2.8 — brand mark + wordmark + tagline + help button
+                         collapsed into a single row. Help button sits on the
+                         right, pushed there by margin-left:auto on the button
+                         wrapper, so the wordmark + tagline stay left-aligned
+                         and the ? affordance mirrors the sidebar header rhythm. -->
+                    <li class="teamhub-brand-item">
+                        <div class="teamhub-brand__mark" aria-hidden="true">
+                            <!-- Concept 01A "The Living Network" — flat icon variant
+                                 from marketing/brand.html. Central Signal Orange hub +
+                                 seven satellites with Hub-Blue linkers. Fixed viewBox
+                                 so it scales cleanly at any size. -->
+                            <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="TeamHub">
+                                <g stroke="var(--th-brand-linker)" stroke-width="1.4" opacity="0.5" stroke-linecap="round">
+                                    <line x1="32" y1="34" x2="14" y2="16"/>
+                                    <line x1="32" y1="34" x2="28" y2="10"/>
+                                    <line x1="32" y1="34" x2="46" y2="16"/>
+                                    <line x1="32" y1="34" x2="54" y2="32"/>
+                                    <line x1="32" y1="34" x2="48" y2="50"/>
+                                    <line x1="32" y1="34" x2="28" y2="56"/>
+                                    <line x1="32" y1="34" x2="10" y2="44"/>
+                                </g>
+                                <circle cx="14" cy="16" r="3.5" fill="#328FB7"/>
+                                <circle cx="28" cy="10" r="2.8" fill="#FE7161"/>
+                                <circle cx="46" cy="16" r="4"   fill="#7FDDEE"/>
+                                <circle cx="54" cy="32" r="3"   fill="#328FB7"/>
+                                <circle cx="48" cy="50" r="3.5" fill="#FE7161"/>
+                                <circle cx="28" cy="56" r="4"   fill="#7FDDEE"/>
+                                <circle cx="10" cy="44" r="2.8" fill="#328FB7"/>
+                                <circle cx="32" cy="34" r="9"   fill="#FB5000"/>
+                            </svg>
+                        </div>
+                        <div class="teamhub-brand__text">
+                            <span class="teamhub-brand__wordmark">TeamHub</span>
+                            <span class="teamhub-brand__tagline">{{ t('teamhub', 'Development version') }}</span>
+                        </div>
+                        <div class="teamhub-brand__help">
+                            <NcButton
+                                variant="tertiary"
+                                :title="t('teamhub', 'Help & Documentation')"
+                                :aria-label="t('teamhub', 'Help & Documentation')"
+                                @click="openDocs">
+                                <template #icon>
+                                    <HelpCircleOutlineIcon :size="20" />
+                                </template>
+                            </NcButton>
+                        </div>
+                    </li>
+                </template>
             </template>
         </NcAppNavigation>
 
@@ -87,6 +189,21 @@
                 v-else-if="activeView === 'browse'"
                 @team-joined="onTeamJoined"
                 @team-opened="selectTeamFromSidebar" />
+
+            <WhatsHappeningView
+                v-else-if="activeView === 'feed' && isLicensed"
+                @open-team="selectTeamFromSidebar"
+                @open-team-talk="onOpenTeamTalk" />
+
+            <!-- v4.3.0 — license-required fallback for the feed view.
+                 Reachable via a stale ?feed deep-link on an instance
+                 whose license was removed after the sidebar was rendered. -->
+            <NcEmptyContent
+                v-else-if="activeView === 'feed' && !isLicensed"
+                :name="t('teamhub', 'License required')"
+                :description="t('teamhub', 'What’s new requires an active TeamHub license. Add or renew a license in Admin settings → License to unlock the feed.')">
+                <template #icon><Rss :size="48" /></template>
+            </NcEmptyContent>
 
             <NcEmptyContent
                 v-else-if="!currentTeamId"
@@ -113,22 +230,30 @@ import { translate as t } from '@nextcloud/l10n'
 import { emit } from '@nextcloud/event-bus'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton } from '@nextcloud/vue'
+import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcActionButton } from '@nextcloud/vue'
+import { showSuccess, showError } from '@nextcloud/dialogs'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Magnify from 'vue-material-design-icons/Magnify.vue'
+import Rss from 'vue-material-design-icons/Rss.vue'
 import HelpCircleOutlineIcon from 'vue-material-design-icons/HelpCircleOutline.vue'
+import CogOutline from 'vue-material-design-icons/CogOutline.vue'
+import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
+import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
+import LocationExit from 'vue-material-design-icons/LocationExit.vue'
 import TeamView from './components/TeamView.vue'
 import BrowseTeamsView from './components/BrowseTeamsView.vue'
 import ManageTeamView from './components/ManageTeamView.vue'
 import CreateTeamView from './components/CreateTeamView.vue'
+import WhatsHappeningView from './components/WhatsHappeningView.vue'
 
 export default {
     name: 'App',
     components: {
-        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton,
-        AccountGroup, Plus, Magnify, HelpCircleOutlineIcon,
-        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView,
+        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcActionButton,
+        AccountGroup, Plus, Magnify, Rss, HelpCircleOutlineIcon,
+        CogOutline, LinkVariant, AccountPlus, LocationExit,
+        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView, WhatsHappeningView,
     },
     data() {
         return {
@@ -140,11 +265,36 @@ export default {
             isMobileSidebar: false,
             _mobileSidebarMql: null,
             _mobileSidebarMqlHandler: null,
+            // v4.2.7 — license state for the sidebar footer. Read once on
+            // mount via /api/v1/license/entitlements (member-callable, unlike
+            // /admin/license which requires admin). enforcementLevel is one
+            // of: 'none' (fully active) | 'grace' | 'soft-lock' | 'unlicensed'.
+            // Kept nullable — `null` means "not yet loaded or errored"; the
+            // isLicensed computed treats null as licensed=true so the brand
+            // block on licensed instances never flashes before hiding.
+            licenseEntitlements: null,
         }
     },
     computed: {
         ...mapState(['teams', 'currentTeamId', 'loading']),
         ...mapGetters(['currentTeam']),
+        /**
+         * True when a currently-honoured license is installed (Active, Trial,
+         * or Grace). Determines whether the sidebar hides the branding + help
+         * footer.
+         *
+         * v4.2.7 — defaults to TRUE while the entitlements call is in-flight
+         * or if it errored, so the branding never briefly flashes on a
+         * licensed instance before hiding. The trade-off is that a genuinely
+         * unlicensed instance won't see the brand block for the few hundred
+         * milliseconds it takes the endpoint to respond — an acceptable
+         * silence on unlicensed vs a broken-looking flicker on licensed.
+         */
+        isLicensed() {
+            if (this.licenseEntitlements === null) return true
+            const level = this.licenseEntitlements.enforcementLevel
+            return level === 'none' || level === 'grace'
+        },
     },
     async mounted() {
         // Detect viewport states where NC's sidebar renders as an overlay.
@@ -181,6 +331,17 @@ export default {
         this._unreadPollInterval = setInterval(() => {
             this.$store.dispatch('refreshUnreadCounts')
         }, 60000)
+
+        // v4.2.6 — one-shot license entitlements fetch for the sidebar
+        // footer's brand + help gate. Member-callable endpoint (no admin).
+        // Errors are swallowed silently — the sidebar just keeps its
+        // fails-open "assume unlicensed" state.
+        try {
+            const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/license/entitlements'))
+            this.licenseEntitlements = data || null
+        } catch (e) {
+            this.licenseEntitlements = null
+        }
     },
 
     beforeDestroy() {
@@ -201,7 +362,76 @@ export default {
     methods: {
         t,
         ...mapActions(['fetchTeams', 'selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET']),
+        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_PENDING_TEAM_ACTION']),
+
+        // ── Sidebar 3-dot actions (moved from the Team-info widget) ─────
+        //
+        // Manage/Invite/Leave rely on the currently-open team's state, so we
+        // always select the team first (no-op when it's already active).
+        // Invite + Leave publish a one-shot intent flag that TeamView consumes
+        // after mount, which handles the cold-start case where the team hasn't
+        // been opened this session yet.
+
+        /** Manage team — jump to the Manage Team view for the picked team. */
+        onSidebarManageTeam(teamId) {
+            if (this.currentTeamId !== teamId) {
+                this.selectTeam(teamId)
+            }
+            this.showView('manage')
+        },
+
+        /** Copy the deep-link that opens this team on any device. */
+        onSidebarCopyLink(teamId) {
+            const url = window.location.origin + generateUrl(`/apps/teamhub?team=${teamId}`)
+            const done = () => showSuccess(t('teamhub', 'Team link copied to clipboard'))
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(url).then(done).catch(() => this.fallbackCopy(url, done))
+            } else {
+                this.fallbackCopy(url, done)
+            }
+            this.closeSidebarIfOverlay()
+        },
+
+        /** Open the Invite modal for the picked team (opens Team view first). */
+        onSidebarInvite(teamId) {
+            if (this.currentTeamId !== teamId) {
+                this.selectTeam(teamId)
+            }
+            this.activeView = 'team'
+            this.SET_PENDING_TEAM_ACTION('invite')
+            this.closeSidebarIfOverlay()
+        },
+
+        /** Fire the leave flow via TeamView (which handles routing + toast). */
+        onSidebarLeave(teamId) {
+            if (this.currentTeamId !== teamId) {
+                this.selectTeam(teamId)
+            }
+            this.activeView = 'team'
+            this.SET_PENDING_TEAM_ACTION('leave')
+            this.closeSidebarIfOverlay()
+        },
+
+        /**
+         * document.execCommand('copy') fallback for the sparse browsers that
+         * still block Clipboard API on non-secure origins. Matches the pattern
+         * TeamView.fallbackCopy uses so both entry points behave identically.
+         */
+        fallbackCopy(text, onDone) {
+            const ta = document.createElement('textarea')
+            ta.value = text
+            ta.style.cssText = 'position:fixed;left:-999999px'
+            document.body.appendChild(ta)
+            ta.select()
+            try {
+                document.execCommand('copy')
+                onDone && onDone()
+            } catch (e) {
+                showError(t('teamhub', 'Copy failed'))
+            } finally {
+                document.body.removeChild(ta)
+            }
+        },
 
         /**
          * v3.75.1 — Consume the ?team=…&decision=… deep link in the URL.
@@ -311,6 +541,27 @@ export default {
         },
 
         /**
+         * v4.2.14 — feed click-through for Talk items. Opens the team's
+         * home view and switches its currentView to 'talk' so the Talk
+         * tab is the one rendered on arrival. Deep-linking to a specific
+         * message id inside the Talk embed is out of scope; the user
+         * lands in the room and can scroll or reply from there.
+         */
+        onOpenTeamTalk(teamId) {
+            this.activeView = 'team'
+            if (this.currentTeamId !== teamId) {
+                this.selectTeam(teamId)
+            }
+            // TeamView reads currentView from the store; set it after
+            // selectTeam has committed so the view switch doesn't get
+            // overwritten by the team-load default-tab logic.
+            this.$nextTick(() => {
+                this.SET_VIEW('talk')
+            })
+            this.closeSidebarIfOverlay()
+        },
+
+        /**
          * Close NC's sidebar when it is in overlay mode (phone / tablet portrait).
          * v9 NcAppNavigation has no `open` prop — its open state is internal and
          * controlled via the `toggle-navigation` event bus event.
@@ -384,6 +635,79 @@ export default {
     align-items: center;
     justify-content: center;
     padding: 4px 0;
+}
+
+/* v4.2.6 — Sidebar brand block (unlicensed instances only).
+   Concept 01A "Living Network" logo + Hub-Blue wordmark + tagline.
+   Palette: marketing/brand.html.
+     --th-brand-hub      #245C80  wordmark on light
+     --th-brand-linker   #245C80  hub-satellite lines on light, #7FDDEE on dark
+     --th-brand-tagline  muted secondary label
+   Dark-theme aware: the wordmark flips to white and the linker lines flip
+   to Signal Cyan (per the brand-file's on-ink treatment). */
+.teamhub-brand-item {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 2px;
+    --th-brand-hub: #245C80;
+    --th-brand-linker: #245C80;
+    --th-brand-tagline: var(--color-text-maxcontrast);
+}
+[data-theme-dark] .teamhub-brand-item,
+[data-theme-dark-highcontrast] .teamhub-brand-item,
+body.theme--dark .teamhub-brand-item {
+    --th-brand-hub: #FFFFFF;
+    --th-brand-linker: #7FDDEE;
+}
+@media (prefers-color-scheme: dark) {
+    .teamhub-brand-item {
+        --th-brand-hub: #FFFFFF;
+        --th-brand-linker: #7FDDEE;
+    }
+}
+.teamhub-brand__mark {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    display: block;
+    line-height: 0;
+}
+.teamhub-brand__mark svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.teamhub-brand__text {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+}
+.teamhub-brand__wordmark {
+    font-family: 'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--th-brand-hub);
+}
+.teamhub-brand__tagline {
+    font-size: var(--th-font-micro, 11px);
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--th-brand-tagline);
+    margin-top: 1px;
+}
+// v4.2.8 — help button sits on the same row, aligned to the right end.
+// margin-left:auto lets the text column keep its natural width and pushes
+// the help affordance against the sidebar's right edge.
+.teamhub-brand__help {
+    margin-left: auto;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
 }
 </style>
 

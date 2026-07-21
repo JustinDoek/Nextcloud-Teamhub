@@ -3,6 +3,316 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.3.0] — 2026-07-20 — Session close: "What’s new" personal feed
+
+Session-end major bump wrapping up the "What’s new" personal aggregated feed feature. Two big themes across 4.2.11 → 4.3.0:
+
+1. **Public-message plumbing + admin toggle** (v4.2.11) — messages can be marked public (opt-in per team, admin-gated); new `GET /api/v1/messages/public` endpoint; is_public column on `teamhub_messages`.
+2. **"What’s new" feed** (v4.2.12 onwards) — new sidebar entry, cross-team chronological feed combining team messages + public messages + Talk polls + Talk thread starters, with a right-side Feed control widget (Team / Public / Talk toggles + 20/50/100 per-page radios, localStorage-persisted), Prev/Next pagination.
+
+### Added in v4.3.0
+
+- **License gate on "What’s new".** Sidebar entry hidden when unlicensed; view branch shows a `License required` empty-state on stale deep-link; backend endpoint returns `403 { licenseGate: true, enforcementLevel }` when the instance's license is `unlicensed` or `soft-lock`. Frontend recognises the shape and surfaces a license-specific error instead of the generic one.
+- **Preview line restored on Talk thread cards** — cards now render subject + preview (both from `talk_threads.name`, matching other feed cards for visual consistency).
+- 3 new license-copy strings translated across nl/de/fr/da/es/it.
+
+### Removed in v4.3.0
+
+- All temporary `->debug('[TeamHub][TalkService]')` and `->debug('[TeamHub][MessageService] getPersonalFeed:')` lines added between v4.2.15 and v4.2.20 during the Talk-feed debug chase. Warning-level logs for genuine failures (SQL errors etc.) kept.
+
+### Session-end totals
+
+- Version: **4.3.0** (was 4.2.10 at session start)
+- New endpoints: `GET /api/v1/messages/public`, `GET /api/v1/messages/feed`
+- New DB migration: `Version000402011Date20260720000000` (adds `is_public` SMALLINT column to `teamhub_messages`)
+- New components: `WhatsHappeningView.vue`
+- Files touched: `lib/Controller/MessageController.php`, `lib/Service/MessageService.php`, `lib/Service/TalkService.php`, `lib/Db/MessageMapper.php`, `lib/Migration/Version000402011Date20260720000000.php`, `appinfo/routes.php`, `src/App.vue`, `src/components/WhatsHappeningView.vue`, `src/components/PostMessageForm.vue`, `src/components/ManageTeamView.vue`, `src/store/index.js`, `l10n/*.{js,json}` (× 7), `appinfo/info.xml`, `package.json`, `HANDOFF.md`, `CHANGELOG.md`, `APIendpoints.md`, `DESIGN.md`.
+- Translations: 40+ new strings across 7 locales.
+- No debug logging in shipped code.
+
+## [4.2.21] — 2026-07-20 — Thread title from `talk_threads.name` (evidence-based fix)
+
+The v4.2.20 diagnostic dump revealed the real schema:
+
+```
+row: { id:16928, room_id:394, last_message_id:0, num_replies:0,
+       last_activity:"2026-07-20 12:12:14",
+       name:"Wat weet je dat ik niet weet?" }
+```
+
+`talk_threads.name` already IS the thread title — Talk caches the topic message text on the thread row itself. And `comments.topic_id` doesn't exist on this NC's `comments` schema, so my fallback query threw. And every comment I hit via `comments.id = talk_threads.id` was a completely unrelated coincidence (matching ids across independent tables).
+
+### Fixed
+
+- **Read `talk_threads.name` directly.** Skips the entire comment hydration for threads. Fallback chain (`title`, `subject`, `topic`) preserves the code across Talk versions that name the column differently. Empty → skip the card.
+- **`last_activity` parsed as either datetime string or int.** `strtotime()` handles both shapes; datetime-string values no longer cast-to-year for a "1970" display.
+- **Author on thread cards left empty.** We don't have a reliable way to identify the topic message id on this Talk schema (no `topic_id` column, `talk_threads.id` doesn't map to a comment). The frontend hides the author line when it's blank rather than surfacing a random display name.
+- Retired all the comment-lookup code paths inside `findRecentThreads` (primary `id = thread.id` lookup, MIN(topic_id) fallback, decoder invocation, per-thread candidate map log). What's left is one `SELECT * FROM talk_threads WHERE room_id IN (…) ORDER BY id DESC LIMIT …` and a simple row-shaper.
+- Kept the v4.2.20 first-row dump log so we can confirm the shape stays stable across future Talk versions; still stripped at session end per SKILLS.md.
+
+## [4.2.20] — 2026-07-20 — Thread starter debug logging (data-first pass)
+
+Justin flagged v4.2.19 was still showing the first thread message body (`Ik ben erg nieuwschierig…`) instead of the actual thread title (`Wat weet je dat ik niet weet?`), and pointed out I was guessing. Stopped guessing.
+
+### Added (debug — stripped at session end)
+
+- **`findRecentThreads` first-row dump.** Full column set + values of the first `talk_threads` row so we can see whether the schema has a `name` / `title` / `subject` / `topic` column that carries the actual thread title (which is what Talk's UI shows and what my code should surface).
+- **Per-thread candidate map log.** For every thread, log: thread id, primary comment id (from `id = thread.id`), whether that comment was found, its message snippet, the fallback comment id (from `MIN(topic_id)`), whether IT was found, its message snippet, which path we picked, and the raw thread row. Comparing "primary_msg_snip" against the title Justin sees in Talk's UI will tell us which lookup is wrong and whether the true topic id lives in some other column entirely.
+- Internal `_raw` field is dropped from the returned rows before they leave the service — debug-only.
+
+Once we've got the log data, this session strips the debug lines and ships the actual fix.
+
+## [4.2.19] — 2026-07-20 — Thread topic-message fix + timestamp cleanup + label accuracy
+
+Three follow-ups from Justin's v4.2.18 test.
+
+### Fixed
+
+- **Thread card was showing the first REPLY, not the topic message.** My v4.2.18 `MIN(comments.id) WHERE topic_id = threadId` query returned the earliest reply — because the topic message itself has `topic_id = NULL` (or self-ref) on some Talk versions and doesn't participate in that GROUP BY. Corrected: primary lookup is now `comments.id IN (:threadIds)` (Talk convention: `talk_threads.id` = topic message id). Old MIN-based query kept as a fallback for threads whose topic comment isn't reachable by id.
+- **Thread timestamp stuck at `1970-01-01 01:33:46`** — the value ≈ 5626 sec = 1h 33m 46s in local timezone maps to unix ts ≈ 2026 UTC. That's `(int)"2026-07-20 …"` = 2026: `talk_threads.updated_at` (from my column-priority fallback) is a datetime STRING on this schema, not a BIGINT. Cast-to-int returned the year prefix. Removed the reliance on `talk_threads` timestamp columns entirely; display and sort both use the starter comment's `creation_timestamp` (safely parsed via `DateTime`).
+- **Thread card rendered subject and preview as identical text.** For a thread, the topic message IS the whole payload — no separate body/subject split. Preview line is gone; just the subject remains.
+
+### Changed
+
+- **Label accuracy on Talk items.** Click-through opens the team's Talk chat, not the specific poll/thread (Talk deep-link inside the iframe embed isn't wired). Renamed:
+  - Poll footer: `Open in Talk` → `Open chat`.
+  - Thread jump: `{n} reply — open thread` / `{n} replies — open thread` → `{n} reply — open chat` / `{n} replies — open chat`.
+  - Badge tooltips: `Talk poll in {room}` / `Talk thread in {room}` → `Poll in Talk chat {room}` / `Thread in Talk chat {room}`.
+- 3 new singular + 1 plural string translated across all 6 additional languages; 4 retired keys dropped.
+
+## [4.2.18] — 2026-07-20 — Thread starter fix + Talk system-message decoder + poll polish
+
+### Fixed
+
+- **Talk thread card showed the LAST reply, not the starter.** My v4.2.16 code picked the first available column from `first_message_id` / `topic_id` / `last_message_id` — and on this Talk version only `last_message_id` was present, so every thread rendered its newest reply as if it were the topic. Rewrite: starter is now resolved via `SELECT topic_id, MIN(id) FROM comments WHERE topic_id IN (:threadIds) GROUP BY topic_id`, which is the correct semantic ("the first comment posted with this topic id"). Falls back to `talk_threads.id` as the comment id when the `comments.topic_id` join throws (older NC core comments schema without threading columns).
+- **Talk system messages rendered as raw JSON** (`{"message":"file_shared","parameters":{"metaData":{"caption":"…"}}}`). New `TalkService::decodeTalkMessage` helper parses that JSON and extracts the caption / filename / object name for the feed. Regular chat messages (which don't start with `{`) pass through untouched.
+- **Thread timestamp fell through to `1970-01-01`** because the wrong-column starter (last_message_id) was often deleted / had a zero timestamp, and my ladder didn't kick in. Fixing the starter resolution above eliminates this side-effect.
+
+### Changed
+
+- **Poll card polish.** Each option is now a two-line block: label + count-and-percent on the top row, proportional bar underneath. Vote count and percent sit right next to the option label (no more wide gap to a far-right column). Footer row shows total voter count + "Open in Talk" affordance.
+- 1 new singular string + 1 plural string across nl/de/fr/da/es/it (`{n} of {total} votes`, `{n} voter / {n} voters`).
+
+## [4.2.17] — 2026-07-20 — Fix parse error in findRecentThreads
+
+v4.2.16 shipped with an orphan `->where(...)->orderBy($lastActivityCol ?? 'id', ...)` chain left behind after the initial `->select('*')...` statement in `TalkService::findRecentThreads`. PHP parse error crashed the whole app for the request. Removed the dead chain.
+
+## [4.2.16] — 2026-07-20 — Talk feed root-cause fix
+
+Justin's v4.2.15 debug logs pointed the finger squarely at `DbIntrospectionService::getTableColumns` returning an empty array for `talk_polls` and `talk_threads` even though the tables exist and have rows. All three introspection strategies were silently producing `[]` on this Talk / NC combination, and my defensive-select guard was returning early on that empty column list.
+
+### Fixed
+
+- **`TalkService::findRecentPolls` and `findRecentThreads` no longer depend on `DbIntrospectionService`.** They run `SELECT * FROM talk_polls|talk_threads WHERE room_id IN (…) ORDER BY id DESC LIMIT …` directly and read whatever keys they know about from each fetched row (defaulting the rest). If the table itself is missing, the query throws and we log the actual SQL error + return `[]` — an old Talk that predates threads still degrades gracefully.
+- **Thread column detection moved to first-row inspection.** After the SELECT runs, the first row's keys tell us which starter column (`first_message_id` / `topic_id` / `last_message_id`), replies column, and last-activity column this Talk version uses. Cheaper and more reliable than pre-query introspection.
+- **`MessageService::getCurrentUserTeamIds` now filters personal (`user:*`) and group (`group:*`) circles**, matching `TeamService::getUserTeams`. The v4.2.15 log showed `userTeamCount: 44` where the user actually has 18 real teams — the difference was pure noise from personal + group circle rows in `circles_member` / `circles_membership`.
+
+### Kept
+
+- The temporary debug log lines added in v4.2.15 stay in place until Justin confirms the feed populates on the test server. They will be stripped at session end per SKILLS.md § Session-end sequence step 2.
+
+## [4.2.15] — 2026-07-20 — Talk feed debug pass — Justin's test showed no items
+
+Investigation patch on top of 4.2.14. No Talk items were appearing on the feed even though a poll and thread existed in accessible rooms.
+
+### Fixed / Hardened
+
+- **`TalkService::findRecentPolls`** — some Talk versions ship `talk_polls` with no timestamp column, so `created_at=0` was assigned to every poll. The chronological merge in `getPersonalFeed` then sorted them past the pagination window with `usort($b['created_at'] - $a['created_at'])`. Fallback now synthesises a decreasing sequence from `time()` for polls without a real timestamp, so newest-by-id polls land near the top of the feed instead of the bottom.
+- **`TalkService::findRecentThreads`** — same fallback for threads when neither the `talk_threads.last_activity` column nor the starter comment provided a timestamp. Also filters `null` out of the `SELECT` list before `array_intersect` so a partially-populated Talk schema doesn't build a broken SQL.
+- **Defensive SELECT** — poll fetch verifies `id` + `room_id` are actually in the introspected column set; missing means "silently skip", not "generate broken SQL".
+
+### Added
+
+- **Debug logging** (temporary — removed at session end per SKILLS.md § Session-end sequence step 2) in `TalkService::listRoomsForTeams`, `findRecentPolls`, `findRecentThreads`, and `MessageService::getPersonalFeed` — traces schema, resolved room count, per-source counts, and merge summary. Justin can `sudo -u www-data tail -f nextcloud.log | grep '\[TeamHub\]'` on the test server to identify why the feed is empty.
+
+## [4.2.14] — 2026-07-20 — Talk polls & threads in the "What’s new" feed
+
+### Added
+
+- **Talk polls and thread starters** appear on the "What’s new" feed alongside team and public messages. Scope: rooms connected to any team the user is a member of. Merged chronologically with team + public messages in the same paginated result.
+- **New `TalkService::listRoomsForTeams(userTeamIds)`** — resolves the Talk rooms attributable to a set of team ids via `talk_attendees` circle-actor rows.
+- **New `TalkService::findRecentPolls(roomIds, limit, offset)`** — reads `talk_polls` defensively (schema varies between Talk versions; uses `DbIntrospectionService` to pick timestamp column and fall back to `id DESC` when absent). Returns question, options, vote tallies, num_voters, poll status.
+- **New `TalkService::findRecentThreads(roomIds, limit, offset)`** — reads `talk_threads` if the table exists (Talk 20+ / NC 30+; silently returns `[]` otherwise), joins to NC core `comments` for the starter's text, actor, and timestamp.
+- **`MessageService::buildRoomTeamMap`** — resolves each Talk room to a team_id the current user is a member of, so the feed click-through opens the right team.
+- **`MessageService::getPersonalFeed` gains `includeTalk`** — merges Talk items with messages via a naive fetch-per-source-then-sort pass; documented in-line as an acceptable trade-off for a recent-activity feed. Response envelope unchanged.
+- **`GET /api/v1/messages/feed?includeTalk=1`** — new query param, default on. Same param coercions as `includeTeam` / `includePublic`.
+- **Feed control widget: new "Talk polls & threads" switch** persisted in localStorage alongside the existing toggles.
+- **Poll card variant** — question + option list with vote counts, plus an "Open in Talk" affordance. Vote count `n()` plural-aware (`{n} vote / {n} votes`).
+- **Thread card variant** — first-line subject + preview + "{n} reply — open thread" plural-aware affordance.
+- **Talk badge** — neutral chip (`--color-background-dark` + `--color-main-text` + border), placed alongside the Public badge when both apply. Poll and thread rows also get a left-accent border in `--color-success` so they read distinct from team/public rows without shouting.
+- **Click-through**: `WhatsHappeningView` emits `open-team-talk` on any Talk card action. `App.vue`'s new `onOpenTeamTalk` handler selects the team, then on next tick sets `currentView='talk'` so the team's Talk tab is active on arrival. Deep-linking to a specific message inside the Talk embed is out of scope.
+- 8 new singular strings + 2 plural strings across nl/de/fr/da/es/it.
+
+### Changed
+
+- `getPersonalFeed`'s author-name hydration loop now handles both `author_id` (messages) and `actor_id` (Talk rows). Talk rows also get `author_id` mirrored from `actor_id` so the frontend has a single field to render avatars and display names.
+
+## [4.2.13] — 2026-07-20 — Feed polish: rename, pagination, badge legibility, filter semantics
+
+### Changed
+
+- **Renamed the feed from "What’s happening" to "What’s new"** — sidebar entry, view header, and all 7 locales. Component file stays `WhatsHappeningView.vue` (internal only).
+- **Feed filter semantics** — Team on / Public off previously suppressed a user's own-team public messages; and Team off / Public on previously excluded public messages posted from the user's own teams. `MessageMapper::findFeed` now uses a symmetric OR: Team means "any message in the user's teams", Public means "any message with is_public=1", both means the union. Rows are unique so a message that qualifies under both clauses appears once; the Public badge is driven by `isPublic`, not by which branch matched.
+- **Header layout** — title now stacks over the subtitle rather than sitting next to it. Left-padding added so neither line overlaps the NC sidebar-toggle button.
+- **Public badge** — background switched from `--color-primary-element-light` to solid `--color-primary-element` with on-primary text so it stays readable in both themes. Badge condition switched from `source === 'public'` to `isPublic`, so a public message the user's own team posted is still badged.
+- **Pagination** — the Load-more button is gone. Bottom of the feed now shows `Previous / Page N of M / Next` with proper disabled states. Backend `MessageService::getPersonalFeed` returns a `total` count (via new `MessageMapper::countFeed`) so the page indicator is accurate. `hasMore` is now computed from `total`, not from a fetched-one-extra probe.
+- **Per-page radio buttons in the Feed control widget now actually change the page size.** The previous per-item boolean `:model-value` binding never fired the group's change signal — clicking 50/100 did nothing. Rewritten to the canonical NcCheckboxRadioSwitch radio-group pattern (`v-model` on the shared variable, `:value` per item), with a `watch` on `perPage` that resets to page 1 and refetches.
+- **PostMessageForm now re-fetches message settings on every switch to the home tab.** An admin flipping the per-team Public toggle in Manage Team → Integration Settings → Messages is picked up the next time the composer's team-home tab becomes active, no browser reload needed.
+
+### Added
+
+- `MessageMapper::countFeed(userTeamIds, includeTeam, includePublic)` — returns the total matching-row count on the same WHERE clause the page fetch uses.
+- 6 new translation strings (What’s new, Previous, Next, Previous page, Next page, Page {page} of {total}) across nl/de/fr/da/es/it. Old "What’s happening" key dropped from every locale.
+
+### Removed
+
+- `WhatsHappeningView`'s Load-more button + `loadingMore` state + `loadMore()` action (superseded by pagination).
+
+## [4.2.12] — 2026-07-20 — "What’s happening" personal feed (session B)
+
+### Added
+
+- **"What’s happening" sidebar entry** under Browse Teams. New cross-team view showing a chronological feed of recent messages from every team the user is a member of, plus public messages from other teams. Sits above the "My Teams" caption in the sidebar.
+- **`WhatsHappeningView.vue`** — feed layout with a main scrolling list (author avatar, team-name link, optional Public badge, subject, 3-line body preview, timestamp, author) and a right-side **Feed control widget** with two switches (Team messages / Public messages) and a Per-page radio group (20 / 50 / 100). Load-more button paginates without leaving the view. On narrow screens (≤900 px) the widget stacks above the feed.
+- **`GET /api/v1/messages/feed`** — combined personal feed endpoint. Query params: `includeTeam`, `includePublic` (both default on), `limit` (1–100, default 20), `offset`. Returns `{ items, hasMore, limit, offset }` — each item carries a synthetic `source` of `'team'` or `'public'` so the frontend can badge without re-computing membership. One DB query via new `MessageMapper::findFeed` — team membership resolved once server-side via a new `MessageService::getCurrentUserTeamIds()` helper that mirrors `TeamService::getUserTeams` (direct + circles_membership) and excludes teams pending deletion.
+- **Per-user, per-browser control persistence** via `localStorage['teamhub.feedControls']`. Corrupt or hand-edited values are silently discarded; per-page is clamped to the allow-list.
+- 20 new translation strings across nl/de/fr/da/es/it.
+
+### Changed
+
+- Browse Teams sidebar entry now marks itself `:active` when `activeView === 'browse'` (was implicit before).
+
+## [4.2.11] — 2026-07-20 — Public messages: opt-in per team, feed API endpoint
+
+### Added
+
+- **Public flag on team messages.** `teamhub_messages` gains an `is_public` SMALLINT column (default 0). When a member ticks the new Public checkbox on the compose form, the message is marked public and can surface outside the team scope.
+- **Per-team admin toggle** in Manage Team → Integration settings → Messages: *Allow public messages*. Off by default — no member can publish public messages until the team admin turns it on. Toggle is auto-saved on change (same pattern as the pin/post role rows).
+- **Public checkbox on the compose form** (`PostMessageForm.vue`) — only rendered for plain `messageType === 'normal'` posts AND only when the team's `allowPublicMessages` setting is on. Switching to Poll / Question / Decision clears the flag. An info-icon tooltip explains what publishing does. Backend service-layer strips the flag defensively in every other case, so hiding the UI is UX polish, not the security boundary.
+- **New API endpoint** `GET /api/v1/messages/public` — member-callable, `#[NoAdminRequired]`, `#[NoCSRFRequired]`. Returns the most recent `is_public` messages across every team on this NC instance, with author and team display names hydrated in a single pass. Query params: `limit` (1-100, default 20), `offset`, `excludeTeamIds` (comma-separated, so the personal feed can skip the caller's own memberships to avoid double-listing). This is the API the personal aggregated feed will consume in the next session.
+- 5 new translation strings across nl/de/fr/da/es/it.
+
+### Changed
+
+- `MessageService::getMessageSettings` now returns `allowPublicMessages` alongside the pin/post/link role settings.
+- `MessageService::createMessage` and `MessageController::createMessage` accept an `isPublic` parameter, gated by the team setting and by `messageType === 'normal'`.
+
+## [4.2.10] — 2026-07-19 — Compliance: Ghost memberships + Orphan teams pills
+
+### Added
+
+- **Two new Compliance-tab pills** — `Ghost memberships: N` and `Orphan teams: N`, both TeamHub-scoped governance risks. Green when zero, red with the count when there are outstanding items. Each row's `i` popover explains what the check means, names one sample (ghost UID / orphan team) if any exist, and points at the Maintenance tab as the place to fix them.
+- **New backend endpoint** `GET /api/v1/admin/compliance/summary` (admin-only). Backed by new `MaintenanceService::getComplianceSummary()` which reuses the existing `findGhostMembers()` and `getOrphanedTeams()` queries and collapses each into `{count, sample}` — cheap enough to run on every Compliance-tab open. Refreshable via the Ghost row's refresh button; the Orphan row keeps its empty refresh slot to preserve `i`-icon alignment.
+- 14 new translation strings across nl/de/fr/da/es/it.
+
+## [4.2.9] — 2026-07-19 — Compliance rows: label outside pill, aligned info icons
+
+### Changed
+
+- **Compliance rows re-laid-out.** Label ("Code:", "Telemetry:") is now plain text OUTSIDE the pill; only the result ("Compliant" / "Not compliant" / "No manifest" / "On" / "Off") sits inside the coloured pill. Actions area at the row's right end is a fixed structure — `i` info button first, then a 44 px refresh slot. The refresh slot is reserved (but empty) on rows without a refresh action, so the `i` icons line up vertically across all rows regardless of whether a refresh button is present.
+
+## [4.2.8] — 2026-07-19 — Sidebar brand: help button inline on same row
+
+### Changed
+
+- **Help `?` button now sits inline with the brand mark + wordmark + "Development version" tagline**, instead of stacking on its own row below. Same `<li class="teamhub-brand-item">` flex row; new `.teamhub-brand__help` wrapper uses `margin-left: auto` to align the button to the sidebar's right edge. Retired the separate `.teamhub-feedback-item` row.
+
+## [4.2.7] — 2026-07-19 — Sidebar brand: no flash on licensed instances
+
+### Fixed
+
+- **Brand block briefly appeared then hid on licensed instances.** 4.2.6's `isLicensed` computed defaulted to `false` while the `/api/v1/license/entitlements` call was in flight, so licensed instances rendered the brand + "Development version" + help button for the ~200ms it took the endpoint to respond, then hid them all — a visible flicker. Flipped the default: `isLicensed === true` when `licenseEntitlements` is `null` (in-flight or errored). Licensed instances now stay quiet from first paint. Trade-off: a genuinely unlicensed instance sees an empty footer for the same ~200ms before the brand appears — an acceptable silence vs. a broken-looking flicker.
+
+## [4.2.6] — 2026-07-19 — Sidebar brand block (unlicensed instances)
+
+### Added
+
+- **Sidebar footer branding on unlicensed instances.** Below the teams list, unlicensed installs now show the TeamHub "Living Network" mark (concept 01A from `marketing/brand.html`) + the "TeamHub" wordmark in Hub Blue (`#245C80`) + a "Development version" tagline. The existing `?` Help & Documentation button sits below. When a valid license (Active / Trial / Grace) is installed, the whole footer block — brand mark, wordmark, tagline, AND help button — is hidden. License state comes from the member-callable `GET /api/v1/license/entitlements` endpoint (loaded once on mount, fails-open to "unlicensed" if the call errors).
+- Brand palette locked in scoped-CSS variables `--th-brand-hub` (wordmark) and `--th-brand-linker` (hub-satellite lines) so future consumers of the mark share the same tokens. Dark-theme awareness via `body.theme--dark` selectors + `prefers-color-scheme: dark` — wordmark flips to `#FFFFFF` and the linker lines flip to Signal Cyan `#7FDDEE` per the brand file's on-ink treatment.
+- One new translation string "Development version" — translated to nl/de/fr/da/es/it.
+
+## [4.2.5] — 2026-07-19 — Compliance/Reporting restructure — post-install fixes
+
+### Fixed
+
+- **License tab: "Could not load license status" on a licensed instance.** Root cause: 4.2.4 added `LicenseService` to `TelemetryService`'s constructor to derive `isEnabled()` from license state, but `LicenseService` has depended on `TelemetryService` since v3.100.6 (for `countLicensedSeats`). That's a constructor-injected cycle NC's DI container cannot resolve, so both services failed to instantiate — the License tab call chain (LicenseController → LicenseService) errored, and the Reporting-tab KPIs (MaintenanceController → TelemetryService) came back empty. Fix: `TelemetryService::isEnabled()` no longer imports `LicenseService`. It peek-decodes the JWT from `IConfig` directly, returning `false` while a JWT is present and within its 30-day grace window, `true` otherwise. Same derivation outcome, no cycle.
+- **Reporting tab: Teams / Unique team members KPI cards showed no data.** Same root cause as above.
+
+### Changed
+
+- **Whole Compliance tab gated on license.** 4.2.4 only wrapped the Code integrity + Telemetry rows; the Audit log NcSettingsSection below stayed visible on unlicensed instances. Per Justin's clarification the entire tab is a licensed feature now — including Audit log. When no valid license is installed the tab renders a single "Compliance tab requires an active TeamHub license. Add or renew a license in the License tab to unlock them." banner and nothing else. Banner string updated across all 7 locales (old "Compliance checks require…" replaced with "Compliance tab requires…").
+
+## [4.2.4] — 2026-07-19 — Compliance/Reporting restructure (in-session patch)
+
+Compliance tab moves to a compact pills + info-popover layout and becomes a licensed feature. Statistics tab renamed to Reporting; the Find-teams-for-user tool moves there. Usage-statistics telemetry is auto-derived from license state instead of a manual toggle.
+
+### Added
+
+- **Compliance tab is now licensed.** Content is gated on the license being Active, Trial, or Grace. Unlicensed or Soft-locked instances see a "License required" banner instead. Audit log section on the same tab stays available regardless.
+- **Compact "compliance rows" layout.** Each check renders as a status pill + info popover on a single line. Code integrity pill: `Code: Compliant | Not compliant | No manifest`. Telemetry pill: `Telemetry: On | Off`. Manifest version, generated timestamp, files-checked count, altered/missing/unexpected file counts moved into the info popover (`NcActions` with `NcActionText` rows).
+- **Telemetry compliance row** — new pill that shows whether anonymous usage statistics are being sent. Derived from license state on both the frontend (`telemetryEnabledDerived` computed) and the backend (`TelemetryService::isEnabled()` — now consults `LicenseService::getEnforcementLevel()`).
+
+### Changed
+
+- **Statistics tab renamed to Reporting.** Internal id stays `'statistics'` so scoped CSS + panel plumbing is untouched.
+- **"Find teams for a user" moved to Reporting.** Previously on Compliance; now sits under the Reporting tab alongside the Instance Summary KPI cards. Backing data/methods (`audit_userQuery` etc.) unchanged.
+- **Usage-statistics toggle removed from the UI.** Telemetry is now auto-derived: license present (Active/Trial/Grace) → OFF; license absent (Unlicensed/Soft-lock) → ON. The old `PUT /api/v1/admin/telemetry` endpoint stays as a legacy no-op so third-party integrations don't fatal; `TelemetryService::setEnabled` is marked `@deprecated`.
+- **12 new translation strings** wrapped in `t()` and translated to nl/de/fr/da/es/it (Reporting, Compliance checks, Telemetry:, On, Off, and the popover/banner copy).
+
+## [4.2.3] — 2026-07-19 — Two final follow-ups from 4.2.2 smoke test
+
+### Fixed
+
+- **Compliance still failed on `js/timeline.mjs`.** A legacy standalone-page bundle from a prior TeamHub version that lingered on Justin's server. Nothing loads it. Broadened `UNEXPECTED_SKIP_PREFIXES` from `js/chunks/` to the whole `js/` subtree — same rationale as before (a stray .mjs the templates don't reference can't execute in a browser, and the templates themselves are hash-checked, so an attacker can't quietly rewrite one to load it). Files listed IN the manifest under `js/` are still hash-checked; only the "on disk but absent from manifest" path is short-circuited.
+- **Widget-toggle in Manage Team → Settings didn't actually hide the widget on the dashboard.** Root cause: `TeamWidgetGrid.getGridItem(id)` was sourcing from `gridLayout` (the unfiltered position array) instead of `visibleLayout` (the filtered subset that already drops resource-less AND admin-hidden widgets). Every widget's template `v-if="getGridItem('…')"` therefore stayed true after a hide, and the widget kept rendering even though `<grid-layout :layout="visibleLayout">` had dropped its layout entry. One-line fix: `getGridItem` now searches `visibleLayout`.
+
+## [4.2.2] — 2026-07-19 — Second-round patch after 4.2.1 smoke test
+
+Three follow-ups from Justin's second smoke test — the 4.2.1 fixes for the popover and the default-tab filter didn't fully land.
+
+### Fixed
+
+- **Compliance still failed on orphan `js/chunks/*` on client servers.** Nextcloud's app upgrade path doesn't purge the old app directory before writing the new one, so chunk files from prior TeamHub versions persist on the server even after 4.2.1 (which cleans them from the local build). `IntegrityService::findUnexpected` now skips the `js/chunks/` subtree via a new `UNEXPECTED_SKIP_PREFIXES` constant — content-hashed chunk files that aren't referenced by any entry bundle can't execute in a browser anyway, so treating them as tampered was crying wolf. Files listed IN the manifest under `js/chunks/` are still hash-checked (altered/missing paths still work), so intentional tampering with a currently-shipped chunk is caught.
+- **Sidebar 3-dot popover: real fix this time.** 4.2.1's `$nextTick` wrap was a wrong guess. Inspection of `@nextcloud/vue 9`'s `NcActionButton` source shows `closeAfterClick` defaults to **false** — the popover never auto-closed. Added `close-after-click` on all four sidebar action buttons (Manage team / Copy link / Invite members / Leave team) and reverted the unnecessary `$nextTick` wrappers.
+- **Default-tab select: filter also on resource-less built-in tabs.** 4.2.1 filtered `link-*` (external URLs) but still offered Chat/Files/Calendar/Deck for teams with no matching resource. Added `isBuiltinTabRenderable` in `TeamView` mirroring `TeamTabBar.isTabRenderable`, and used it to filter what gets committed to the store's `availableTabs`. `orderedTabs` itself is unfiltered so saved tab order survives a temporary resource dropout. Also added a re-emit inside the existing `resources` watcher so a resource being added/removed refreshes the select without a reload.
+
+## [4.2.1] — 2026-07-19 — Post-4.2.0 install fixes
+
+Same-day patch layered on the 4.2.0 release. Four fixes from Justin's post-install smoke test.
+
+### Fixed
+
+- **Compliance check false-positive on `js/chunks/*`.** A fresh 4.2.0 install reported every chunk `.mjs` and `.mjs.license` file as non-compliant. Root cause: Vite is configured with `emptyOutDir: false` (intentional — it protects the app root from being wiped), so `js/chunks/` accumulates hashed chunks from every prior build. The manifest ended up covering three different `index-*.mjs` versions, and no server install could match. Fix: added `clean:chunks` + `prebuild` / `predev` npm scripts that wipe `js/chunks/` before Vite runs, so the manifest only ever describes the current build. `.mjs.license` files (Rollup license-comment sidecars) are also excluded from the manifest — they're pure metadata that some packagers strip.
+- **Sidebar 3-dot action popover stayed open after clicking an action.** The four handlers (`onSidebarManageTeam`, `onSidebarCopyLink`, `onSidebarInvite`, `onSidebarLeave`) changed heavy Vuex state synchronously, which interrupted NcActionButton's own close-after-click event before the parent NcActions could observe it. Fix: each handler body now runs inside `this.$nextTick()` so the popover close ticks first, then the app state change fires.
+- **Default-tab select offered custom external links.** Custom link tabs (`key: 'link-…'`) don't render inside the app — they open an external URL. Making one the "default tab on team entry" would launch the browser on every team visit. New `selectableDefaultTabs` computed filters `link-*` out of the select options.
+- **Default-tab change required a browser reload to take effect.** `applyDefaultTab` in TeamView is guarded by a `defaultTabAppliedFor === currentTeamId` one-shot flag (set on team open so a deep-link isn't yanked back to Home). When the admin changed the default via Manage Team → Settings, the store's `dashboardConfig.default_tab` updated but the guard blocked re-application. Added a watcher on `dashboardConfig.default_tab` that resets the guard and re-runs `applyDefaultTab`; still only fires when the user is on Home so no deep-link is disturbed.
+
+### Changed
+
+- **Widgets section on Manage Team → Settings is more compact.** The show/hide switches for each widget shared `manage-section__row` styling with the Permissions rows above — 12 px vertical padding and a hairline separator per row. With 8+ widgets the section ate a lot of vertical space. New `.manage-section__row--compact` modifier (border-none, 4 px vertical padding) is applied only to the widget rows via a new `.manage-dashboard__widget-rows` container. Permission rows above are untouched.
+
+## [4.2.0] — 2026-07-19 — Compliance tab + code-integrity check
+
+### Added
+
+- **Compliance tab** — the admin `Audit` tab is renamed to `Compliance` (label only; the internal id, panel plumbing, and the existing team-audit / audit-log sections are untouched).
+- **Code-integrity check.** New "Code integrity" section at the top of the Compliance tab. Reports `Compliant`, `Not compliant`, or `No manifest` with the manifest's app version, generation timestamp, files-checked count, last-verified timestamp, and expandable lists of altered / missing / unexpected files (each list capped at 500 entries with a truncation flag).
+- **Build-time manifest generator.** New `scripts/generate-integrity.js` walks a curated set of shipped directories (`appinfo`, `lib`, `js`, `css`, `templates`, `img`, `l10n`, `sql`) plus `composer.json`, writes SHA-256 hashes to `appinfo/integrity.json`. Wired into `npm run build` and `npm run dev`; also exposed as `npm run integrity` for manual regeneration.
+- **New `IntegrityService`** and **`IntegrityController`** (admin-gated via `#[AuthorizedAdminSetting]`, `#[NoCSRFRequired]`). Reads the manifest, re-hashes files on disk, walks the covered directories to detect files present on disk but absent from the manifest (unexpected files), and returns the full report.
+- **New endpoint** `GET /api/v1/admin/integrity`.
+
+### Changed
+
+- Admin Settings tab label `Audit` → `Compliance` (English canonical + 6 locales).
+
+### Security
+
+- Manifest verification uses `hash_equals` for the per-file comparison (constant-time). File paths inside the manifest are rejected if they contain `..` traversal segments (defence-in-depth; the manifest is generated by us and shipped in-band, so this is a "should never fire" guard).
+
+### Fixed
+
+- **`TeamView.loadLayout` swallowed layout hydration for any team with a saved `dashboardConfig`.** `SET_DASHBOARD_CONFIG` was defined in the store but missing from TeamView's `mapMutations` array. The call at `TeamView.vue:1404` threw `is not a function`, the surrounding `try` caught it, and every step that followed — `SET_TEAM_TYPE`, `SET_BUDGET_CONFIG`, `SET_TIME_CONFIG`, `SET_PROJECT`, `buildOrderedTabs`, `applyDefaultTab`, `applySnap` — never ran. Symptoms Justin reported on 4.1.2: the admin's chosen default tab was ignored, and per-widget enable/disable state on Manage Team → Settings only appeared to work after saving one setting (which committed the store directly, bypassing the load path). One-line fix: added `'SET_DASHBOARD_CONFIG'` to the `mapMutations` list.
+
 ## [4.1.0] — 2026-07-16 — Messages-as-integration, team-template labels, delete-team correctness, project-tab auto-save
 
 First proper 4.x session on top of the 4.0.0 marketing cut. Wide session — new subsystems, several long-running bug reports closed, documentation and API reference brought current.

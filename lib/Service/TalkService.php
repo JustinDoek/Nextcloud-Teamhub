@@ -1775,4 +1775,327 @@ class TalkService {
         }
     }
 
+    // =========================================================================
+    // v4.2.14 — "What’s new" feed integration: polls + threads reader
+    // =========================================================================
+
+    /**
+     * v4.2.18 — Talk stores certain comments as JSON system messages, e.g.
+     * `{"message":"file_shared","parameters":{"metaData":{"caption":"…"}}}`.
+     * Extract a human-readable string from that shape; regular chat
+     * messages (which don't start with `{`) pass through untouched.
+     *
+     * Not exhaustive — the verbs we don't know about return the verb
+     * humanised (`shared_by_current_user` → `Shared by current user`),
+     * which is not perfect but better than a wall of JSON in the feed.
+     */
+    private function decodeTalkMessage(string $raw): string {
+        if ($raw === '' || $raw[0] !== '{') {
+            return $raw;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded) || !isset($decoded['message'])) {
+            return $raw;
+        }
+        $verb   = (string)$decoded['message'];
+        $params = is_array($decoded['parameters'] ?? null) ? $decoded['parameters'] : [];
+
+        // File share: prefer the caption the user typed, else the filename.
+        if ($verb === 'file_shared') {
+            foreach (['metaData', 'file', 'share'] as $key) {
+                $meta = $params[$key] ?? null;
+                if (!is_array($meta)) continue;
+                $caption = trim((string)($meta['caption'] ?? ''));
+                if ($caption !== '') return $caption;
+                $name = trim((string)($meta['name'] ?? ''));
+                if ($name !== '') return $name;
+            }
+            return '📎 file';
+        }
+        // Object share (poll, geo, deck card…): use the object's name.
+        if ($verb === 'object_shared') {
+            $obj = $params['object'] ?? null;
+            if (is_array($obj)) {
+                $name = trim((string)($obj['name'] ?? ''));
+                if ($name !== '') return $name;
+            }
+            return '🔗 shared object';
+        }
+        // Fallback: humanise the verb so at least it's not raw JSON.
+        return ucfirst(str_replace('_', ' ', $verb));
+    }
+
+    /**
+     * Return the Talk rooms accessible to the current user via TeamHub team
+     * membership: every talk_rooms row whose circle attendee (actor_type=
+     * 'circles', actor_id=<team>) is one of the supplied team ids.
+     *
+     * Caller is trusted to pass $userTeamIds already validated as the
+     * viewer's own memberships.
+     *
+     * @return array<int, array{id:int, token:string, name:string}>
+     */
+    public function listRoomsForTeams(array $userTeamIds): array {
+        if (empty($userTeamIds) || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $qb->select('r.id', 'r.token', 'r.name')
+                ->from('talk_rooms', 'r')
+                ->innerJoin('r', 'talk_attendees', 'a',
+                    $qb->expr()->andX(
+                        $qb->expr()->eq('a.room_id',    'r.id'),
+                        $qb->expr()->eq('a.actor_type', $qb->createNamedParameter('circles')),
+                        $qb->expr()->in('a.actor_id',
+                            $qb->createNamedParameter($userTeamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                        ),
+                    ),
+                );
+            $res  = $qb->executeQuery();
+            $rows = [];
+            while ($row = $res->fetch()) {
+                $rows[] = [
+                    'id'    => (int)$row['id'],
+                    'token' => (string)($row['token'] ?? ''),
+                    'name'  => (string)($row['name'] ?? ''),
+                ];
+            }
+            $res->closeCursor();
+            return $rows;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] listRoomsForTeams failed', [
+                'teams' => count($userTeamIds), 'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Recent polls from a set of Talk room ids. Each row is shaped for the
+     * "What’s new" feed (source='talk-poll', team-mapping applied by the
+     * caller since a poll's room may serve multiple teams).
+     *
+     * The talk_polls schema shifts between Talk versions. Timestamp column
+     * (`created_at` vs `created`) is detected via DbIntrospectionService;
+     * when absent, rows are ordered by id DESC and carry created_at=0 —
+     * still useful, just sorted by insertion order.
+     *
+     * @return array<int, array{source:string, id:int, room_id:int, question:string, options:array, votes:array, num_voters:int, status:int, actor_id:string, created_at:int}>
+     */
+    public function findRecentPolls(array $roomIds, int $limit, int $offset): array {
+        if (empty($roomIds) || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        // v4.2.16 — no more DbIntrospection dependency. Justin's log showed
+        // introspection returning `cols: []` even though talk_polls exists,
+        // which made the previous defensive-select branch return early. We
+        // now try the modern-Talk column set with SELECT *; MariaDB and
+        // Postgres both return whatever columns the table has, and the
+        // consumer only reads keys it knows about. Any SQL failure is
+        // caught + logged with the actual error message.
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        try {
+            $qb = $db->getQueryBuilder();
+            $qb->select('*')
+                ->from('talk_polls')
+                ->where($qb->expr()->in(
+                    'room_id',
+                    $qb->createNamedParameter($roomIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY),
+                ))
+                // id is monotonic in every Talk version; safe universal order.
+                ->orderBy('id', 'DESC')
+                ->setMaxResults($limit)
+                ->setFirstResult($offset);
+
+            $res  = $qb->executeQuery();
+            $rows = [];
+            $now  = time();
+            $rank = 0;
+            while ($r = $res->fetch()) {
+                $options = json_decode((string)($r['options'] ?? '[]'), true) ?: [];
+                $votes   = json_decode((string)($r['votes']   ?? '{}'), true) ?: [];
+                // Prefer a real column if present; else synthesise a
+                // decreasing sequence so polls sort near the top of the
+                // merged feed rather than collapsing to created_at=0.
+                $ts = 0;
+                if (!empty($r['created_at']))     $ts = (int)$r['created_at'];
+                elseif (!empty($r['created']))    $ts = (int)$r['created'];
+                elseif (!empty($r['timestamp']))  $ts = (int)$r['timestamp'];
+                if ($ts <= 0) {
+                    $ts = $now - $rank * 60;
+                }
+                $rows[] = [
+                    'source'     => 'talk-poll',
+                    'id'         => (int)$r['id'],
+                    'room_id'    => (int)$r['room_id'],
+                    'question'   => (string)($r['question'] ?? ''),
+                    'options'    => $options,
+                    'votes'      => $votes,
+                    'num_voters' => (int)($r['num_voters'] ?? 0),
+                    'status'     => (int)($r['status'] ?? 0),
+                    'actor_id'   => (string)($r['actor_id'] ?? ''),
+                    'created_at' => $ts,
+                ];
+                $rank++;
+            }
+            $res->closeCursor();
+            return $rows;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] findRecentPolls failed', [
+                'rooms' => count($roomIds),
+                'error' => $e->getMessage(),
+                'class' => get_class($e),
+                'app'   => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Recent Talk thread starters from a set of Talk room ids. Threads
+     * are a Talk 20+ (NC 30+) feature — the table may not exist on older
+     * installs, in which case we return [] without erroring.
+     *
+     * A thread carries a `first_message_id` (or `last_message_id` and
+     * `num_replies`) that points into NC core `comments`. The starter's
+     * text + creation_timestamp comes from that comment; the reply count
+     * from the thread row itself.
+     *
+     * @return array<int, array{source:string, id:int, room_id:int, subject:string, message:string, num_replies:int, actor_id:string, created_at:int}>
+     */
+    public function findRecentThreads(array $roomIds, int $limit, int $offset): array {
+        if (empty($roomIds) || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        // v4.2.16 — same rationale as findRecentPolls: DbIntrospection
+        // wasn't reliably returning columns even when the table exists.
+        // Try SELECT * directly; if the table itself is missing (older
+        // Talk that predates threads) the query throws and we skip. The
+        // consumer only reads well-known keys and defaults the rest.
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        try {
+            $qb = $db->getQueryBuilder();
+            $qb->select('*')
+                ->from('talk_threads')
+                ->where($qb->expr()->in(
+                    'room_id',
+                    $qb->createNamedParameter($roomIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY),
+                ))
+                ->orderBy('id', 'DESC')
+                ->setMaxResults($limit)
+                ->setFirstResult($offset);
+            $res  = $qb->executeQuery();
+            $rawThreads = [];
+            while ($r = $res->fetch()) {
+                $rawThreads[] = $r;
+            }
+            $res->closeCursor();
+            if (empty($rawThreads)) {
+                return [];
+            }
+
+            // Hydrate the first-message comment for each thread. Convention
+            // on this schema (verified via the v4.2.20 debug log): the
+            // comment with id = talk_threads.id IS the first message posted
+            // in the thread. `talk_threads.name` caches the thread's title
+            // (the topic — the message being replied to). We use `name` as
+            // the subject and the comment.message as the body.
+            $threadIds = array_map(static fn($r) => (int)$r['id'], $rawThreads);
+            $commentMap = [];
+            try {
+                $cQb  = $this->container->get(\OCP\IDBConnection::class)->getQueryBuilder();
+                $cRes = $cQb->select('id', 'message', 'actor_id')
+                    ->from('comments')
+                    ->where($cQb->expr()->in(
+                        'id',
+                        $cQb->createNamedParameter($threadIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY),
+                    ))
+                    ->executeQuery();
+                while ($cr = $cRes->fetch()) {
+                    $commentMap[(int)$cr['id']] = [
+                        'message'  => (string)($cr['message'] ?? ''),
+                        'actor_id' => (string)($cr['actor_id'] ?? ''),
+                    ];
+                }
+                $cRes->closeCursor();
+            } catch (\Throwable $ce) {
+                // Non-fatal — cards degrade to subject-only.
+                $this->logger->warning('[TeamHub][TalkService] findRecentThreads: comment hydration failed', [
+                    'error' => $ce->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
+            $out  = [];
+            $now  = time();
+            $rank = 0;
+            foreach ($rawThreads as $r) {
+                $title = trim((string)($r['name'] ?? ''));
+                if ($title === '') {
+                    foreach (['title', 'subject', 'topic'] as $altCol) {
+                        if (!empty($r[$altCol])) {
+                            $title = trim((string)$r[$altCol]);
+                            break;
+                        }
+                    }
+                }
+                if ($title === '') {
+                    continue;
+                }
+
+                // `last_activity` is a datetime STRING on this schema
+                // (`"2026-07-20 12:12:14"`), not a Unix int. Parse both
+                // shapes so we work across Talk versions.
+                $tsRaw = $r['last_activity'] ?? ($r['last_message_at'] ?? ($r['updated_at'] ?? 0));
+                $ts = 0;
+                if (is_numeric($tsRaw)) {
+                    $ts = (int)$tsRaw;
+                } elseif (is_string($tsRaw) && $tsRaw !== '') {
+                    $parsed = strtotime($tsRaw);
+                    if ($parsed !== false) $ts = $parsed;
+                }
+                if ($ts <= 0) {
+                    $ts = $now - $rank * 60;
+                }
+
+                $numReplies = 0;
+                foreach (['num_replies', 'reply_count', 'replies'] as $rc) {
+                    if (isset($r[$rc])) { $numReplies = (int)$r[$rc]; break; }
+                }
+
+                // Body = first message in the thread. decodeTalkMessage
+                // unwraps Talk system-message JSON (file_shared → caption)
+                // so a file-share thread doesn't render raw JSON. Falls
+                // back to the title if the comment lookup came up empty.
+                $comment = $commentMap[(int)$r['id']] ?? null;
+                $body    = $comment
+                    ? $this->decodeTalkMessage($comment['message'])
+                    : $title;
+                $author  = $comment['actor_id'] ?? '';
+
+                $out[] = [
+                    'source'      => 'talk-thread',
+                    'id'          => (int)$r['id'],
+                    'room_id'     => (int)$r['room_id'],
+                    'subject'     => mb_strlen($title) > 120 ? (mb_substr($title, 0, 120) . '…') : $title,
+                    'message'     => $body,
+                    'num_replies' => $numReplies,
+                    'actor_id'    => $author,
+                    'created_at'  => $ts,
+                ];
+                $rank++;
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] findRecentThreads failed', [
+                'rooms' => count($roomIds),
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
 }

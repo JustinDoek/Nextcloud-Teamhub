@@ -201,6 +201,57 @@
                 </p>
             </div>
 
+            <!-- Dashboard — team-wide widget show/hide + default tab. This whole
+                 view is admin/owner only, so the section is admin-gated by
+                 construction. Auto-save: toggling a switch or changing the tab
+                 PUTs immediately and updates the live dashboard via the store. -->
+            <div class="manage-section" data-section="dashboard">
+                <h3>{{ t('teamhub', 'Dashboard') }}</h3>
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'Choose which widgets appear on the team Home dashboard for everyone, and which tab opens when a member enters the team.') }}
+                </p>
+
+                <!-- Default tab -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Default tab') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'The tab shown first when a member opens this team.') }}</span>
+                    </div>
+                    <select
+                        class="teamhub-dec-level-select"
+                        :disabled="dashboardSaving"
+                        :value="dashboardConfig.default_tab"
+                        :aria-label="t('teamhub', 'The tab shown first when a member opens this team.')"
+                        @change="saveDefaultTab($event.target.value)">
+                        <option v-for="tab in selectableDefaultTabs" :key="tab.key" :value="tab.key">{{ tab.label }}</option>
+                    </select>
+                </div>
+
+                <!-- Per-widget show/hide -->
+                <h4 class="manage-dashboard__widgets-title">{{ t('teamhub', 'Widgets') }}</h4>
+                <p v-if="!dashboardWidgetCatalog.length" class="manage-section-desc">
+                    {{ t('teamhub', 'No dashboard widgets are active for this team yet.') }}
+                </p>
+                <div v-else class="manage-dashboard__widget-rows">
+                    <div
+                        v-for="w in dashboardWidgetCatalog"
+                        :key="w.key"
+                        class="manage-section__row manage-section__row--compact">
+                        <div class="manage-section__row-info">
+                            <span class="manage-section__row-title">{{ w.label }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            type="switch"
+                            :model-value="isWidgetShown(w.key)"
+                            :disabled="dashboardSaving"
+                            :aria-label="t('teamhub', 'Show {widget} on the dashboard', { widget: w.label })"
+                            @update:model-value="val => toggleWidgetShown(w.key, val)" />
+                    </div>
+                </div>
+
+                <p v-if="dashboardError" class="manage-settings-error">{{ dashboardError }}</p>
+            </div>
+
         </div>
 
         <!-- TAB: Members -->
@@ -1107,6 +1158,25 @@
                         <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
                         <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
                     </select>
+                </div>
+
+                <!-- v4.2.11 — Allow members to publish messages outside the
+                     team. When on, PostMessageForm renders a Public checkbox
+                     for plain messages. Default off: public visibility is
+                     opt-in per team. -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Allow public messages') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'When on, members see a Public checkbox on the message composer. Public messages appear in every user’s personal feed, including users outside this team.') }}</span>
+                    </div>
+                    <NcCheckboxRadioSwitch
+                        v-model="messageSettingsForm.allowPublicMessages"
+                        :disabled="savingMessageSettings"
+                        type="switch"
+                        :aria-label="t('teamhub', 'Allow members to publish public messages')"
+                        @update:model-value="saveMessageSettingsAuto">
+                        {{ messageSettingsForm.allowPublicMessages ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                    </NcCheckboxRadioSwitch>
                 </div>
 
                 <!-- Image cache -->
@@ -2315,7 +2385,7 @@ export default {
             loadingWidgets: false,
             togglingWidget: null,
             // Message settings
-            messageSettingsForm: { pinMinLevel: 'moderator', postMinLevel: 'member', linkMinLevel: 'admin' },
+            messageSettingsForm: { pinMinLevel: 'moderator', postMinLevel: 'member', linkMinLevel: 'admin', allowPublicMessages: false },
             loadingMessageSettings: false,
             savingMessageSettings: false,
             messageSettingsSaved: false,
@@ -2354,6 +2424,11 @@ export default {
             // Meeting permissions
             loadingMeetingSettings: false,
             meetingMinLevel: 1,
+            // Dashboard section (Settings tab) — team-wide widget show/hide +
+            // default tab. Source of truth is the store's dashboardConfig; these
+            // are just the in-flight auto-save flags.
+            dashboardSaving: false,
+            dashboardError: null,
             meetingSettingsSaved: false,
             meetingSettingsError: null,
             // Owner transfer
@@ -2442,7 +2517,24 @@ export default {
         }
     },
     computed: {
-        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'project', 'projectTabFocus', 'manageTeamDeepLink']),
+        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'project', 'projectTabFocus', 'manageTeamDeepLink', 'dashboardConfig', 'availableTabs', 'dashboardWidgetCatalog']),
+
+        /** Set of widget ids the owner/admin has hidden from the dashboard. */
+        dashboardHiddenSet() {
+            return new Set((this.dashboardConfig && this.dashboardConfig.hidden_widgets) || [])
+        },
+
+        /**
+         * Options offered by the "Default tab" select on the Settings tab.
+         * Excludes custom external-link tabs (key `link-*`) — those open an
+         * external URL rather than an in-app view, so opening one "by default"
+         * on team entry would launch the browser at every visit. Everything
+         * else in `availableTabs` (Home, built-in tabs, integration tabs) is
+         * a legitimate default.
+         */
+        selectableDefaultTabs() {
+            return (this.availableTabs || []).filter(tab => !String(tab.key || '').startsWith('link-'))
+        },
 
         /** Ordered PMC phases — must match ProjectService::PHASES on the backend. */
         projectPhaseOptions() {
@@ -3304,6 +3396,7 @@ export default {
                     pinMinLevel:  resp.data.pinMinLevel  || 'moderator',
                     postMinLevel: resp.data.postMinLevel || 'member',
                     linkMinLevel: resp.data.linkMinLevel || 'admin',
+                    allowPublicMessages: !!resp.data.allowPublicMessages,
                 }
             } catch (e) {
                 showError(t('teamhub', 'Failed to load message settings'))
@@ -4590,6 +4683,47 @@ export default {
             } catch (e) {
                 const msg = e?.response?.data?.error || t('teamhub', 'Failed to save')
                 this.meetingSettingsError = msg
+            }
+        },
+
+        // Dashboard (Settings tab) — team-wide widget show/hide + default tab.
+        // -----------------------------------------------------------------
+
+        /** True when the given widget is currently shown on the dashboard. */
+        isWidgetShown(key) {
+            return !this.dashboardHiddenSet.has(key)
+        },
+
+        /** Toggle a single widget's visibility, then persist the full list. */
+        async toggleWidgetShown(key, shown) {
+            const hidden = new Set(this.dashboardHiddenSet)
+            if (shown) { hidden.delete(key) } else { hidden.add(key) }
+            await this.saveDashboardConfig({ hidden_widgets: Array.from(hidden) })
+        },
+
+        /** Persist the default tab opened when a member enters the team. */
+        async saveDefaultTab(tabKey) {
+            await this.saveDashboardConfig({ default_tab: tabKey })
+        },
+
+        /**
+         * PUT a partial dashboard config and mirror the result into the store so
+         * the live dashboard (widget grid + default tab) reacts immediately.
+         * Admin-gated server-side (requireAdminLevel); this view is admin-only.
+         */
+        async saveDashboardConfig(payload) {
+            this.dashboardSaving = true
+            this.dashboardError = null
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/dashboard/config`),
+                    payload,
+                )
+                this.$store.commit('SET_DASHBOARD_CONFIG', data)
+            } catch (e) {
+                this.dashboardError = e?.response?.data?.error || t('teamhub', 'Failed to save')
+            } finally {
+                this.dashboardSaving = false
             }
         },
 
@@ -6422,6 +6556,28 @@ export default {
     border-bottom: 1px solid var(--color-border);
 }
 .manage-section__row:last-child { border-bottom: none; }
+/* v4.2.0 — compact variant for the Widgets show/hide grid on the Settings
+   tab. The default `.manage-section__row` renders as a 12-px-padded flex row
+   with a hairline separator; stacking 8+ widget toggles that way ate too
+   much vertical space. Compact rows drop the border entirely and halve the
+   vertical padding so a full catalog fits without scrolling. */
+.manage-section__row--compact {
+    padding: 4px 0;
+    border-bottom: none;
+}
+.manage-dashboard__widget-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.manage-dashboard__widgets-title {
+    margin: 16px 0 4px;
+    font-size: var(--th-font-meta);
+    font-weight: var(--th-font-weight-semibold);
+    color: var(--color-text-maxcontrast);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
 .manage-section__row-info { flex: 1; min-width: 0; }
 .manage-section__row-title {
     display: block;

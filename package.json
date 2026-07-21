@@ -1,11 +1,15 @@
 {
   "name": "teamhub",
-  "version": "4.1.0",
+  "version": "4.3.0",
   "description": "Team collaboration hub for Nextcloud",
   "scripts": {
-    "dev": "vite build --mode development",
-    "build": "vite build",
-    "watch": "vite build --mode development --watch"
+    "clean:chunks": "node -e \"require('fs').rmSync('js/chunks',{recursive:true,force:true})\"",
+    "prebuild": "npm run clean:chunks",
+    "predev": "npm run clean:chunks",
+    "dev": "vite build --mode development && node scripts/generate-integrity.js",
+    "build": "vite build && node scripts/generate-integrity.js",
+    "watch": "vite build --mode development --watch",
+    "integrity": "node scripts/generate-integrity.js"
   },
   "browserslist": [
     "extends @nextcloud/browserslist-config"

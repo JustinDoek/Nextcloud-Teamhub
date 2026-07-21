@@ -8,6 +8,7 @@ use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\NotFoundException;
 use OCA\TeamHub\Exception\ValidationException;
 use OCA\TeamHub\Service\FilesService;
+use OCA\TeamHub\Service\LicenseService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCP\AppFramework\Controller;
@@ -28,6 +29,7 @@ class MessageController extends Controller {
         private MessageService $messageService,
         private MemberService $memberService,
         private FilesService $filesService,
+        private LicenseService $licenseService,
         private IUserSession $userSession,
         private LoggerInterface $logger,
     ) {
@@ -81,11 +83,12 @@ class MessageController extends Controller {
         string $priority = 'normal',
         string $messageType = 'normal',
         ?array $pollOptions = null,
-        ?array $decision = null
+        ?array $decision = null,
+        bool $isPublic = false,
     ): JSONResponse {
         try {
             $newMessage = $this->messageService->createMessage(
-                $teamId, $subject, $message, $priority, $messageType, $pollOptions, $decision
+                $teamId, $subject, $message, $priority, $messageType, $pollOptions, $decision, $isPublic,
             );
             return new JSONResponse($newMessage, Http::STATUS_CREATED);
         } catch (AccessDeniedException $e) {
@@ -148,6 +151,140 @@ class MessageController extends Controller {
             return new JSONResponse($messages);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * v4.2.11 — GET /api/v1/messages/public
+     *
+     * Returns the most recent messages flagged is_public across every team
+     * on this NC instance. Any authenticated user may call it; no per-team
+     * membership check applies, since a message the poster marked public
+     * has effectively opted out of team-scope confidentiality.
+     *
+     * Query params:
+     *   limit           int, 1-100, default 20
+     *   offset          int, ≥0,   default 0
+     *   excludeTeamIds  comma-separated list of team ids to exclude
+     *                   (the personal feed will pass the caller's own
+     *                   team memberships so a message doesn't render twice).
+     *
+     * Response 200:
+     *   { messages: [ { id, team_id, team_name, author_id, author_display_name,
+     *                   subject, message, ... , isPublic: true, created_at, ... } ],
+     *     limit, offset, count }
+     */
+    /**
+     * v4.2.12 — GET /api/v1/messages/feed
+     *
+     * The personal "What's happening" feed. Combines team messages from
+     * every team the caller is a member of with public messages from
+     * teams they aren't in. One paginated call, chronological.
+     *
+     * Query params:
+     *   includeTeam    "1"/"0"/true/false (default "1")
+     *   includePublic  "1"/"0"/true/false (default "1")
+     *   limit          int, 1-100, default 20
+     *   offset         int, ≥0,   default 0
+     *
+     * Response 200:
+     *   {
+     *     items:   [ { id, team_id, team_name, source: 'team'|'public',
+     *                   isPublic, author_id, author_display_name,
+     *                   subject, message, created_at, ... } ],
+     *     hasMore: bool,
+     *     total:   int,       // v4.2.13 — total rows across all pages
+     *     limit:   int,
+     *     offset:  int
+     *   }
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getPersonalFeed(): JSONResponse {
+        try {
+            // v4.3.0 — "What’s new" is a licensed feature. Same enforcement
+            // ladder as Compliance: `none` / `grace` = active, everything
+            // else refuses with 403 + licenseGate so the frontend can
+            // surface the "License required" state without treating the
+            // response as a generic error. Frontend also hides the sidebar
+            // item in the unlicensed case; the server check is the actual
+            // boundary (SKILLS §Security standards).
+            $level = $this->licenseService->getEnforcementLevel();
+            if ($level !== 'none' && $level !== 'grace') {
+                return new JSONResponse([
+                    'error'            => "What’s new requires an active TeamHub license.",
+                    'licenseGate'      => true,
+                    'enforcementLevel' => $level,
+                ], Http::STATUS_FORBIDDEN);
+            }
+
+            $includeTeam   = $this->parseBoolParam('includeTeam',   true);
+            $includePublic = $this->parseBoolParam('includePublic', true);
+            // v4.2.14 — Talk polls + threads from rooms connected to the
+            // user's team memberships. Default on so the feed matches the
+            // "shows everything relevant" expectation out of the box; the
+            // Feed control widget persists the user's off-preference.
+            $includeTalk   = $this->parseBoolParam('includeTalk',   true);
+            $limit  = min(100, max(1, (int)$this->request->getParam('limit', 20)));
+            $offset = max(0, (int)$this->request->getParam('offset', 0));
+
+            $result = $this->messageService->getPersonalFeed(
+                $includeTeam,
+                $includePublic,
+                $limit,
+                $offset,
+                $includeTalk,
+            );
+            return new JSONResponse($result);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MessageController] getPersonalFeed failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to load feed'], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private function parseBoolParam(string $name, bool $default): bool {
+        $raw = $this->request->getParam($name, null);
+        if ($raw === null) return $default;
+        if (is_bool($raw)) return $raw;
+        $s = strtolower((string)$raw);
+        return $s === '1' || $s === 'true' || $s === 'yes' || $s === 'on';
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function listPublicMessages(): JSONResponse {
+        try {
+            $limit  = min(100, max(1, (int)$this->request->getParam('limit', 20)));
+            $offset = max(0, (int)$this->request->getParam('offset', 0));
+
+            $excludeRaw = trim((string)$this->request->getParam('excludeTeamIds', ''));
+            $excludeTeamIds = [];
+            if ($excludeRaw !== '') {
+                // Split, trim, drop empties, cap the list size to keep the
+                // NOT IN clause tractable on very large team memberships.
+                $excludeTeamIds = array_slice(
+                    array_values(array_filter(array_map('trim', explode(',', $excludeRaw)), fn($v) => $v !== '')),
+                    0,
+                    500,
+                );
+            }
+
+            $messages = $this->messageService->getPublicMessages($limit, $offset, $excludeTeamIds);
+            return new JSONResponse([
+                'messages' => $messages,
+                'limit'    => $limit,
+                'offset'   => $offset,
+                'count'    => count($messages),
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MessageController] listPublicMessages failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to load public messages'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -407,9 +544,18 @@ class MessageController extends Controller {
             $pin  = trim((string)($body['pinMinLevel']  ?? 'moderator'));
             $post = trim((string)($body['postMinLevel'] ?? 'member'));
             $link = trim((string)($body['linkMinLevel'] ?? 'admin'));
-            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link);
+            // v4.2.11 — admin toggle for the Public checkbox on the compose
+            // form. Accept common JSON representations (true/false, 1/0,
+            // "1"/"0"); anything else is treated as off.
+            $allowPublicRaw = $body['allowPublicMessages'] ?? false;
+            $allowPublic    = $allowPublicRaw === true
+                || $allowPublicRaw === 1
+                || $allowPublicRaw === '1'
+                || $allowPublicRaw === 'true';
+            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link, $allowPublic);
             $this->logger->debug('[TeamHub][MessageController] saveMessageSettings', [
                 'teamId' => $teamId, 'pin' => $pin, 'post' => $post, 'link' => $link,
+                'allowPublicMessages' => $allowPublic,
                 'app'    => Application::APP_ID,
             ]);
             return new JSONResponse(['success' => true]);

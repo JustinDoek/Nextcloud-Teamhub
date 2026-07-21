@@ -333,6 +333,35 @@
             </div>
         </div>
 
+        <!-- v4.2.11 — Public visibility toggle. Only surfaced for plain
+             Message posts on teams whose admin has enabled it in Manage Team
+             → Integration settings → Messages. Backend forces the flag off
+             for polls / questions / decisions and when the team setting is
+             off, so hiding the checkbox client-side is UX polish, not the
+             security boundary. -->
+        <div v-if="showPublicToggle" class="post-form__public">
+            <label class="post-form__public-label">
+                <input
+                    v-model="isPublic"
+                    type="checkbox"
+                    class="post-form__public-check">
+                <!-- TRANSLATORS: checkbox label under the message composer that marks the message as viewable outside the team scope -->
+                <span>{{ t('teamhub', 'Public') }}</span>
+            </label>
+            <!-- Info affordance — a tooltip explains the effect of publishing
+                 the message beyond the team scope. Icon-only NcButton keeps
+                 the label out of the tab-order clutter while still meeting
+                 WCAG 4.1.2 via :aria-label. -->
+            <NcButton
+                variant="tertiary"
+                :aria-label="publicHintText"
+                :title="publicHintText">
+                <template #icon>
+                    <InformationOutline :size="16" />
+                </template>
+            </NcButton>
+        </div>
+
         <!-- Actions -->
         <div class="post-form__actions">
             <NcButton
@@ -440,6 +469,7 @@ import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
+import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 
 // TeamHub attachment folder inside the user's Files
 const ATTACH_FOLDER = 'TeamHub Attachments'
@@ -451,7 +481,7 @@ export default {
         MessageOutline, HelpCircleOutline, PollIcon, GavelIcon, Plus, Close, Send, SwapHorizontal,
         Paperclip, LinkVariant,
         FormatBold, FormatItalic, CodeTags, CodeBraces,
-        FormatHeader2, FormatListBulleted, ImageIcon, FolderIcon,
+        FormatHeader2, FormatListBulleted, ImageIcon, FolderIcon, InformationOutline,
     },
     emits: ['submitted', 'cancel'],
 
@@ -474,6 +504,12 @@ export default {
             // in created() (props aren't available at data() time in Options API
             // factory functions). The default below covers the normal inline case.
             messageType: 'normal',
+            // v4.2.11 — user's Public choice for this compose. Only meaningful
+            // for messageType==='normal' and only when the team admin has
+            // enabled the toggle (messageSettings.allowPublicMessages). The
+            // submit path defensively strips it in every other case so the
+            // frontend can't opt itself into public visibility.
+            isPublic: false,
             // Decision-specific fields (only used when messageType === 'decision')
             decisionImpact: '',
             decisionLevel: 'operational',
@@ -631,6 +667,24 @@ export default {
             return !!(this.decisionsConfig && this.decisionsConfig.decisions_level_enabled)
         },
 
+        /**
+         * v4.2.11 — Should the Public checkbox be rendered?
+         *
+         * Two gates: the message type must be a plain 'normal' message
+         * (polls, questions, decisions all stay team-scoped), and the team
+         * admin must have flipped the per-team allowPublicMessages toggle on.
+         */
+        showPublicToggle() {
+            return this.messageType === 'normal'
+                && !!this.messageSettings?.allowPublicMessages
+        },
+
+        // Tooltip / aria-label copy for the info icon next to the checkbox.
+        publicHintText() {
+            // TRANSLATORS: tooltip on the info icon next to the Public checkbox in the message compose form
+            return t('teamhub', 'When Public is on, this message can be seen outside the team on any authenticated user’s personal feed.')
+        },
+
         impactOptions() {
             return [
                 { value: 'low',    label: t('teamhub', 'Low') },
@@ -664,12 +718,30 @@ export default {
             if (newVal === 'decision' && this.showMilestonePickerCandidate) {
                 this.loadDecisionMilestones()
             }
+            // v4.2.11 — Public is a normal-message concept only. If the
+            // user flips to poll / question / decision after ticking
+            // Public, drop the flag so it doesn't silently re-apply if
+            // they later flip back to a normal message they didn't want
+            // published.
+            if (newVal !== 'normal') {
+                this.isPublic = false
+            }
         },
         // When the user navigates back to the message stream (e.g. from
         // the Decisions tab's Supersede flow), check the global handshake.
         currentView(newVal) {
             if (newVal === 'msgstream') {
                 this.consumeDecisionComposeHandshake()
+                // v4.2.13 — Re-fetch message settings whenever the home
+                // tab is (re)loaded so an admin's Public toggle change
+                // (Manage Team → Integration Settings → Messages) reaches
+                // the compose form without a browser reload. Fire-and-
+                // forget — the compose form stays usable while the
+                // (fast) settings request is in flight.
+                const teamId = this.$store.state.currentTeamId
+                if (teamId) {
+                    this.$store.dispatch('fetchMessageSettings', teamId)
+                }
             }
         },
     },
@@ -1287,6 +1359,9 @@ export default {
                     priority: 'normal',
                     pollOptions: null,
                     decision: null,
+                    // v4.2.11 — public visibility. Only ever sent for a
+                    // normal message; other types stay team-scoped.
+                    isPublic: this.messageType === 'normal' && !!this.isPublic,
                 }
                 if (this.messageType === 'poll') {
                     messageData.pollOptions = this.pollOptions.map(o => o.text.trim()).filter(Boolean)
@@ -1391,6 +1466,7 @@ export default {
                 this.subject = ''
                 this.body = ''
                 this.messageType = 'normal'
+                this.isPublic = false
                 this.pollOptions = [{ id: this.pollOptionSeq++, text: '' }, { id: this.pollOptionSeq++, text: '' }]
                 this.attachments = []
                 this.resetDecisionFields()
@@ -1548,6 +1624,27 @@ export default {
 .post-form__actions {
     display: flex;
     gap: 8px;
+}
+
+/* v4.2.11 — Public visibility row (sits above the Actions row).
+   Layout is [checkbox][label][info icon] — no separator, tight spacing. */
+.post-form__public {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.post-form__public-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--th-font-body, 14px);
+    cursor: pointer;
+    user-select: none;
+}
+.post-form__public-check {
+    /* Native checkbox — sized to NC's default touch target minimum
+       comes with the browser default; no bespoke sizing needed here. */
+    cursor: pointer;
 }
 
 /* Poll */

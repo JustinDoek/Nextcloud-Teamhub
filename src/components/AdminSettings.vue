@@ -334,33 +334,205 @@
                 </div>
             </NcSettingsSection>
 
+            <!-- ── Find teams for a user (moved from Compliance in v4.3.0) ── -->
             <NcSettingsSection
-                :name="t('teamhub', 'Usage statistics')"
-                :description="t('teamhub', 'TeamHub can send anonymous usage data to help improve the app. No URLs, hostnames, or user data are ever included — only an anonymous UUID and aggregate counts.')">
+                :name="t('teamhub', 'Find teams for a user')"
+                :description="t('teamhub', 'Search for a Nextcloud user to see every team they belong to and their role in each. Useful when a colleague changes jobs and you need to remove them from — or add them to — the right teams. Direct memberships can be removed from here; memberships inherited through a group or sub-team must be removed from that source.')">
 
-                <div v-if="telemetryLoading" class="admin-loading">
-                    <NcLoadingIcon :size="24" />
-                </div>
-                <template v-else>
-                    <NcCheckboxRadioSwitch
-                        :model-value="telemetry.enabled"
-                        type="switch"
-                        @update:model-value="toggleTelemetry">
-                        {{ t('teamhub', 'Send daily anonymous usage report') }}
-                    </NcCheckboxRadioSwitch>
+                <!-- User search -->
+                <div class="audit-user-lookup">
+                    <NcTextField
+                        v-model="audit_userQuery"
+                        :label="t('teamhub', 'Search user')"
+                        :placeholder="t('teamhub', 'Type a username or display name…')"
+                        class="audit-user-lookup__search"
+                        @input="onAuditUserQueryInput"
+                        @keydown.enter.prevent="runAuditUserSearchNow">
+                        <template #icon>
+                            <MagnifyIcon :size="18" />
+                        </template>
+                    </NcTextField>
 
-                    <div v-if="telemetry.enabled" class="admin-telemetry-details">
-                        <p class="admin-section-hint">
-                            {{ t('teamhub', 'Reports are sent once per day to:') }}
-                            <code>{{ telemetry.report_url }}</code>
-                        </p>
-                        <p class="admin-section-hint">{{ t('teamhub', 'Preview of what will be sent:') }}</p>
-                        <pre class="admin-telemetry-preview">{{ JSON.stringify(telemetry.preview, null, 2) }}</pre>
-                    </div>
-                    <p v-else class="admin-section-hint">
-                        {{ t('teamhub', 'Usage reporting is disabled. No data is sent.') }}
+                    <ul v-if="audit_userResults.length" class="admin-owner-results audit-user-lookup__results">
+                        <li
+                            v-for="u in audit_userResults"
+                            :key="u.uid"
+                            class="admin-owner-result"
+                            @mousedown.prevent="selectAuditUser(u)">
+                            {{ u.displayName }}
+                            <span class="admin-owner-result__uid">({{ u.uid }})</span>
+                        </li>
+                    </ul>
+                    <p v-else-if="audit_userSearching" class="admin-section-hint">
+                        <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
                     </p>
+                </div>
+
+                <!-- Selected user header + clear -->
+                <div v-if="audit_selectedUser" class="audit-user-selected">
+                    <span class="audit-user-selected__label">{{ t('teamhub', 'Showing teams for:') }}</span>
+                    <strong>{{ audit_selectedUser.displayName }}</strong>
+                    <span class="admin-owner-result__uid">({{ audit_selectedUser.uid }})</span>
+                    <NcButton
+                        variant="tertiary"
+                        :aria-label="t('teamhub', 'Clear selected user')"
+                        @click="clearAuditUser">
+                        {{ t('teamhub', 'Clear') }}
+                    </NcButton>
+                </div>
+
+                <!-- Loading -->
+                <div v-if="audit_teamsLoading" class="admin-loading">
+                    <NcLoadingIcon :size="24" />
+                    <span>{{ t('teamhub', 'Loading teams…') }}</span>
+                </div>
+
+                <!-- Error -->
+                <div v-else-if="audit_teamsError" class="admin-error">
+                    {{ audit_teamsError }}
+                </div>
+
+                <!-- Empty state for the selected user -->
+                <div v-else-if="audit_selectedUser && audit_teamRows.length === 0" class="admin-empty">
+                    {{ t('teamhub', 'This user is not a member of any team.') }}
+                </div>
+
+                <!-- Result table -->
+                <template v-else-if="audit_selectedUser && audit_teamRows.length">
+                    <div
+                        class="maint-grid audit-user-grid"
+                        role="table"
+                        :aria-label="t('teamhub', 'Teams this user belongs to')"
+                        aria-live="polite">
+
+                        <!-- Header row -->
+                        <div class="maint-grid__head" role="row">
+                            <div class="maint-grid__cell audit-user-grid__cell--check" role="columnheader">
+                                <input
+                                    type="checkbox"
+                                    :checked="audit_allRemovableSelected"
+                                    :indeterminate.prop="audit_someRemovableSelected && !audit_allRemovableSelected"
+                                    :disabled="!audit_anyRemovable"
+                                    :aria-label="t('teamhub', 'Select all removable teams')"
+                                    @change="toggleSelectAllRemovable">
+                            </div>
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Team') }}</div>
+                            <!-- TRANSLATORS: column header showing the user's role in a team (Owner, Admin, Moderator, Member) -->
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Role') }}</div>
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Owner') }}</div>
+                            <!-- TRANSLATORS: column header explaining how the user got into this team (direct, via group, via sub-team) -->
+                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Membership') }}</div>
+                        </div>
+
+                        <!-- Data rows -->
+                        <div
+                            v-for="row in audit_teamRows"
+                            :key="row.teamId"
+                            class="maint-grid__row"
+                            role="row">
+
+                            <!-- Checkbox cell -->
+                            <div class="maint-grid__cell audit-user-grid__cell--check" role="cell">
+                                <input
+                                    type="checkbox"
+                                    :checked="audit_selectedTeamIds.includes(row.teamId)"
+                                    :disabled="!row.removable"
+                                    :aria-label="t('teamhub', 'Select {team}', { team: row.teamName })"
+                                    @change="toggleAuditRow(row)">
+                            </div>
+
+                            <!-- Team name -->
+                            <div class="maint-grid__cell" role="cell">
+                                <span class="maint-team-name">{{ row.teamName }}</span>
+                                <div v-if="row.teamDescription" class="audit-user-grid__desc">
+                                    {{ row.teamDescription }}
+                                </div>
+                            </div>
+
+                            <!-- Role chip -->
+                            <div class="maint-grid__cell" role="cell">
+                                <span
+                                    class="audit-user-grid__role"
+                                    :class="`audit-user-grid__role--${row.role.toLowerCase()}`">
+                                    {{ auditRoleLabel(row.role) }}
+                                </span>
+                            </div>
+
+                            <!-- Owner -->
+                            <div class="maint-grid__cell" role="cell">
+                                <span v-if="row.ownerUid" class="maint-owner-name">
+                                    {{ row.ownerDisplayName || row.ownerUid }}
+                                    <span class="maint-owner-uid">({{ row.ownerUid }})</span>
+                                </span>
+                                <span v-else class="maint-no-owner">{{ t('teamhub', 'No owner') }}</span>
+                            </div>
+
+                            <!-- Membership source / blocking reason -->
+                            <div class="maint-grid__cell" role="cell">
+                                <template v-if="row.isOwner">
+                                    <!-- TRANSLATORS: shown next to an Owner row to explain why the remove checkbox is disabled -->
+                                    <span class="audit-user-grid__note audit-user-grid__note--warn">
+                                        {{ t('teamhub', 'Owner — reassign in the Maintenance tab first') }}
+                                    </span>
+                                </template>
+                                <template v-else-if="row.source === 'direct'">
+                                    <!-- TRANSLATORS: badge meaning the user was added to this team individually, not via a group or sub-team -->
+                                    <span class="audit-user-grid__source audit-user-grid__source--direct">
+                                        {{ t('teamhub', 'Direct') }}
+                                    </span>
+                                </template>
+                                <template v-else-if="row.source === 'group'">
+                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
+                                        {{ t('teamhub', 'Via group: {name}', { name: row.sourceName || '?' }) }}
+                                    </span>
+                                </template>
+                                <template v-else-if="row.source === 'team'">
+                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
+                                        {{ t('teamhub', 'Via team: {name}', { name: row.sourceName || '?' }) }}
+                                    </span>
+                                </template>
+                                <template v-else>
+                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
+                                        {{ t('teamhub', 'Inherited (source unknown)') }}
+                                    </span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action bar -->
+                    <div class="audit-user-actions">
+                        <span class="audit-user-actions__summary">
+                            {{ n('teamhub', '{n} team selected', '{n} teams selected', audit_selectedTeamIds.length, { n: audit_selectedTeamIds.length }) }}
+                        </span>
+                        <NcButton
+                            variant="error"
+                            :disabled="audit_selectedTeamIds.length === 0 || audit_removeBusy"
+                            @click="openAuditRemoveConfirm">
+                            <template #icon>
+                                <NcLoadingIcon v-if="audit_removeBusy" :size="18" />
+                                <AccountRemoveIcon v-else :size="18" />
+                            </template>
+                            {{ t('teamhub', 'Remove from selected teams') }}
+                        </NcButton>
+                    </div>
                 </template>
+
+                <!-- Confirm dialog -->
+                <NcDialog
+                    v-if="audit_removeConfirmOpen"
+                    :name="t('teamhub', 'Remove user from teams?')"
+                    :buttons="auditRemoveDialogButtons"
+                    size="normal"
+                    @closing="audit_removeConfirmOpen = false">
+                    <p>
+                        {{ n('teamhub',
+                              'You are about to remove {user} from {n} team. This cannot be undone.',
+                              'You are about to remove {user} from {n} teams. This cannot be undone.',
+                              audit_selectedTeamIds.length,
+                              { user: audit_selectedUser ? audit_selectedUser.displayName : '', n: audit_selectedTeamIds.length }) }}
+                    </p>
+                </NcDialog>
             </NcSettingsSection>
         </div>
 
@@ -969,7 +1141,10 @@
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
-             Audit tab
+             Compliance tab (id kept as 'audit' for scoped CSS + panel plumbing)
+             Whole panel — including Code integrity, Telemetry AND Audit log —
+             is gated on the license. Unlicensed / soft-locked instances see
+             one banner explaining why.
              ───────────────────────────────────────────────────────────────── -->
         <div
             v-show="activeTab === 'audit'"
@@ -977,205 +1152,243 @@
             role="tabpanel"
             class="teamhub-admin-panel">
 
-            <!-- ── Find teams for a user ───────────────────────────────────── -->
+            <!-- License-required state: single banner replaces every section
+                 on this tab when no active/trial/grace license is installed. -->
             <NcSettingsSection
-                :name="t('teamhub', 'Find teams for a user')"
-                :description="t('teamhub', 'Search for a Nextcloud user to see every team they belong to and their role in each. Useful when a colleague changes jobs and you need to remove them from — or add them to — the right teams. Direct memberships can be removed from here; memberships inherited through a group or sub-team must be removed from that source.')">
-
-                <!-- User search -->
-                <div class="audit-user-lookup">
-                    <NcTextField
-                        v-model="audit_userQuery"
-                        :label="t('teamhub', 'Search user')"
-                        :placeholder="t('teamhub', 'Type a username or display name…')"
-                        class="audit-user-lookup__search"
-                        @input="onAuditUserQueryInput"
-                        @keydown.enter.prevent="runAuditUserSearchNow">
-                        <template #icon>
-                            <MagnifyIcon :size="18" />
-                        </template>
-                    </NcTextField>
-
-                    <ul v-if="audit_userResults.length" class="admin-owner-results audit-user-lookup__results">
-                        <li
-                            v-for="u in audit_userResults"
-                            :key="u.uid"
-                            class="admin-owner-result"
-                            @mousedown.prevent="selectAuditUser(u)">
-                            {{ u.displayName }}
-                            <span class="admin-owner-result__uid">({{ u.uid }})</span>
-                        </li>
-                    </ul>
-                    <p v-else-if="audit_userSearching" class="admin-section-hint">
-                        <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
-                    </p>
+                v-if="!complianceUnlocked"
+                :name="t('teamhub', 'Compliance')">
+                <div class="integrity-banner integrity-banner--info">
+                    <InformationOutline :size="18" />
+                    <span>
+                        {{ t('teamhub', 'Compliance tab requires an active TeamHub license. Add or renew a license in the License tab to unlock them.') }}
+                    </span>
                 </div>
+            </NcSettingsSection>
 
-                <!-- Selected user header + clear -->
-                <div v-if="audit_selectedUser" class="audit-user-selected">
-                    <span class="audit-user-selected__label">{{ t('teamhub', 'Showing teams for:') }}</span>
-                    <strong>{{ audit_selectedUser.displayName }}</strong>
-                    <span class="admin-owner-result__uid">({{ audit_selectedUser.uid }})</span>
-                    <NcButton
-                        variant="tertiary"
-                        :aria-label="t('teamhub', 'Clear selected user')"
-                        @click="clearAuditUser">
-                        {{ t('teamhub', 'Clear') }}
-                    </NcButton>
-                </div>
+            <template v-else>
+            <!-- ── Compliance checks (v4.3.0) — compact pills + i-button ───── -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Compliance checks')"
+                :description="t('teamhub', 'At-a-glance compliance state for this TeamHub installation. Click the info icon on a row for details.')">
 
-                <!-- Loading -->
-                <div v-if="audit_teamsLoading" class="admin-loading">
-                    <NcLoadingIcon :size="24" />
-                    <span>{{ t('teamhub', 'Loading teams…') }}</span>
-                </div>
-
-                <!-- Error -->
-                <div v-else-if="audit_teamsError" class="admin-error">
-                    {{ audit_teamsError }}
-                </div>
-
-                <!-- Empty state for the selected user -->
-                <div v-else-if="audit_selectedUser && audit_teamRows.length === 0" class="admin-empty">
-                    {{ t('teamhub', 'This user is not a member of any team.') }}
-                </div>
-
-                <!-- Result table -->
-                <template v-else-if="audit_selectedUser && audit_teamRows.length">
-                    <div
-                        class="maint-grid audit-user-grid"
-                        role="table"
-                        :aria-label="t('teamhub', 'Teams this user belongs to')"
-                        aria-live="polite">
-
-                        <!-- Header row -->
-                        <div class="maint-grid__head" role="row">
-                            <div class="maint-grid__cell audit-user-grid__cell--check" role="columnheader">
-                                <input
-                                    type="checkbox"
-                                    :checked="audit_allRemovableSelected"
-                                    :indeterminate.prop="audit_someRemovableSelected && !audit_allRemovableSelected"
-                                    :disabled="!audit_anyRemovable"
-                                    :aria-label="t('teamhub', 'Select all removable teams')"
-                                    @change="toggleSelectAllRemovable">
-                            </div>
-                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Team') }}</div>
-                            <!-- TRANSLATORS: column header showing the user's role in a team (Owner, Admin, Moderator, Member) -->
-                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Role') }}</div>
-                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Owner') }}</div>
-                            <!-- TRANSLATORS: column header explaining how the user got into this team (direct, via group, via sub-team) -->
-                            <div class="maint-grid__cell" role="columnheader">{{ t('teamhub', 'Membership') }}</div>
+                <div class="compliance-rows">
+                    <!-- Row: Code integrity -->
+                    <div class="compliance-row" role="group" :aria-label="t('teamhub', 'Code integrity')">
+                        <div v-if="integrity.loading" class="integrity-loading">
+                            <NcLoadingIcon :size="18" />
+                            <span>{{ t('teamhub', 'Verifying code integrity…') }}</span>
                         </div>
-
-                        <!-- Data rows -->
-                        <div
-                            v-for="row in audit_teamRows"
-                            :key="row.teamId"
-                            class="maint-grid__row"
-                            role="row">
-
-                            <!-- Checkbox cell -->
-                            <div class="maint-grid__cell audit-user-grid__cell--check" role="cell">
-                                <input
-                                    type="checkbox"
-                                    :checked="audit_selectedTeamIds.includes(row.teamId)"
-                                    :disabled="!row.removable"
-                                    :aria-label="t('teamhub', 'Select {team}', { team: row.teamName })"
-                                    @change="toggleAuditRow(row)">
-                            </div>
-
-                            <!-- Team name -->
-                            <div class="maint-grid__cell" role="cell">
-                                <span class="maint-team-name">{{ row.teamName }}</span>
-                                <div v-if="row.teamDescription" class="audit-user-grid__desc">
-                                    {{ row.teamDescription }}
+                        <div v-else-if="integrity.error" class="admin-save-err">
+                            {{ integrity.error }}
+                        </div>
+                        <template v-else>
+                            <span class="compliance-row__label">{{ t('teamhub', 'Code:') }}</span>
+                            <span class="integrity-pill" :class="'integrity-pill--' + integrityPillLevel" role="status" aria-live="polite">
+                                <span class="integrity-pill__dot" />
+                                {{ integrityStatusLabel }}
+                            </span>
+                            <span class="compliance-row__spacer" />
+                            <div class="compliance-row__actions">
+                                <NcActions
+                                    :aria-label="t('teamhub', 'Code integrity details')"
+                                    :title="t('teamhub', 'Code integrity details')">
+                                    <template #icon>
+                                        <InformationOutline :size="18" />
+                                    </template>
+                                    <NcActionText>
+                                        <template #icon><InformationOutline :size="18" /></template>
+                                        {{ t('teamhub', 'Verifies shipped files against a SHA-256 manifest generated at build time.') }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report && integrity.report.app_version">
+                                        {{ t('teamhub', 'Manifest app version') }}: {{ integrity.report.app_version }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report && integrity.report.generated_at">
+                                        {{ t('teamhub', 'Manifest generated') }}: {{ formatIntegrityTimestamp(integrity.report.generated_at) }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report">
+                                        {{ t('teamhub', 'Files checked') }}: {{ integrity.report.files_checked }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report && integrity.report.checked_at">
+                                        {{ t('teamhub', 'Last verified') }}: {{ formatIntegrityTimestamp(integrity.report.checked_at) }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report && integrity.report.altered.length">
+                                        {{ n('teamhub',
+                                            '{n} altered file',
+                                            '{n} altered files',
+                                            integrity.report.altered.length,
+                                            { n: integrity.report.altered.length }) }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report && integrity.report.missing.length">
+                                        {{ n('teamhub',
+                                            '{n} missing file',
+                                            '{n} missing files',
+                                            integrity.report.missing.length,
+                                            { n: integrity.report.missing.length }) }}
+                                    </NcActionText>
+                                    <NcActionText v-if="integrity.report && integrity.report.unexpected.length">
+                                        {{ n('teamhub',
+                                            '{n} unexpected file',
+                                            '{n} unexpected files',
+                                            integrity.report.unexpected.length,
+                                            { n: integrity.report.unexpected.length }) }}
+                                    </NcActionText>
+                                </NcActions>
+                                <div class="compliance-row__refresh-slot">
+                                    <NcButton
+                                        variant="tertiary-no-background"
+                                        :aria-label="t('teamhub', 'Re-run integrity check')"
+                                        :title="t('teamhub', 'Re-run integrity check')"
+                                        :disabled="integrity.loading"
+                                        @click="loadIntegrity">
+                                        <template #icon>
+                                            <RefreshIcon :size="18" />
+                                        </template>
+                                    </NcButton>
                                 </div>
                             </div>
+                        </template>
+                    </div>
 
-                            <!-- Role chip -->
-                            <div class="maint-grid__cell" role="cell">
-                                <span
-                                    class="audit-user-grid__role"
-                                    :class="`audit-user-grid__role--${row.role.toLowerCase()}`">
-                                    {{ auditRoleLabel(row.role) }}
-                                </span>
-                            </div>
+                    <!-- Row: Telemetry (auto-derived from license state) -->
+                    <div class="compliance-row" role="group" :aria-label="t('teamhub', 'Telemetry')">
+                        <span class="compliance-row__label">{{ t('teamhub', 'Telemetry:') }}</span>
+                        <span
+                            class="integrity-pill"
+                            :class="'integrity-pill--' + (telemetryEnabledDerived ? 'warn' : 'ok')"
+                            role="status"
+                            aria-live="polite">
+                            <span class="integrity-pill__dot" />
+                            {{ telemetryEnabledDerived ? t('teamhub', 'On') : t('teamhub', 'Off') }}
+                        </span>
+                        <span class="compliance-row__spacer" />
+                        <div class="compliance-row__actions">
+                            <NcActions
+                                :aria-label="t('teamhub', 'Telemetry details')"
+                                :title="t('teamhub', 'Telemetry details')">
+                                <template #icon>
+                                    <InformationOutline :size="18" />
+                                </template>
+                                <NcActionText>
+                                    <template #icon><InformationOutline :size="18" /></template>
+                                    {{ telemetryEnabledDerived
+                                        ? t('teamhub', 'Anonymous usage statistics are sent daily. This instance has no active license, so telemetry is enabled.')
+                                        : t('teamhub', 'No usage data leaves this instance. An active license disables telemetry automatically.') }}
+                                </NcActionText>
+                            </NcActions>
+                            <!-- Fixed-width refresh slot kept EMPTY on this row
+                                 so the `i` icon lines up vertically with the
+                                 Code row's `i` icon. Reserving the space costs
+                                 nothing; removing it would break the alignment. -->
+                            <div class="compliance-row__refresh-slot" aria-hidden="true" />
+                        </div>
+                    </div>
 
-                            <!-- Owner -->
-                            <div class="maint-grid__cell" role="cell">
-                                <span v-if="row.ownerUid" class="maint-owner-name">
-                                    {{ row.ownerDisplayName || row.ownerUid }}
-                                    <span class="maint-owner-uid">({{ row.ownerUid }})</span>
-                                </span>
-                                <span v-else class="maint-no-owner">{{ t('teamhub', 'No owner') }}</span>
-                            </div>
-
-                            <!-- Membership source / blocking reason -->
-                            <div class="maint-grid__cell" role="cell">
-                                <template v-if="row.isOwner">
-                                    <!-- TRANSLATORS: shown next to an Owner row to explain why the remove checkbox is disabled -->
-                                    <span class="audit-user-grid__note audit-user-grid__note--warn">
-                                        {{ t('teamhub', 'Owner — reassign in the Maintenance tab first') }}
-                                    </span>
+                    <!-- Row: Ghost memberships (v4.2.10) — deleted NC users
+                         still listed as team members. Backed by
+                         MaintenanceService::findGhostMembers, remediated on
+                         the Maintenance tab. -->
+                    <div class="compliance-row" role="group" :aria-label="t('teamhub', 'Ghost memberships')">
+                        <span class="compliance-row__label">{{ t('teamhub', 'Ghost memberships:') }}</span>
+                        <template v-if="complianceSummary.loading">
+                            <span class="integrity-pill integrity-pill--unknown">
+                                <span class="integrity-pill__dot" />
+                                {{ t('teamhub', 'Checking…') }}
+                            </span>
+                        </template>
+                        <template v-else-if="complianceSummary.error">
+                            <span class="integrity-pill integrity-pill--unknown">
+                                <span class="integrity-pill__dot" />
+                                {{ t('teamhub', 'Unavailable') }}
+                            </span>
+                        </template>
+                        <template v-else>
+                            <span
+                                class="integrity-pill"
+                                :class="'integrity-pill--' + (ghostCount > 0 ? 'err' : 'ok')"
+                                role="status"
+                                aria-live="polite">
+                                <span class="integrity-pill__dot" />
+                                {{ ghostCount }}
+                            </span>
+                        </template>
+                        <span class="compliance-row__spacer" />
+                        <div class="compliance-row__actions">
+                            <NcActions
+                                :aria-label="t('teamhub', 'Ghost memberships details')"
+                                :title="t('teamhub', 'Ghost memberships details')">
+                                <template #icon>
+                                    <InformationOutline :size="18" />
                                 </template>
-                                <template v-else-if="row.source === 'direct'">
-                                    <!-- TRANSLATORS: badge meaning the user was added to this team individually, not via a group or sub-team -->
-                                    <span class="audit-user-grid__source audit-user-grid__source--direct">
-                                        {{ t('teamhub', 'Direct') }}
-                                    </span>
-                                </template>
-                                <template v-else-if="row.source === 'group'">
-                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
-                                        {{ t('teamhub', 'Via group: {name}', { name: row.sourceName || '?' }) }}
-                                    </span>
-                                </template>
-                                <template v-else-if="row.source === 'team'">
-                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
-                                        {{ t('teamhub', 'Via team: {name}', { name: row.sourceName || '?' }) }}
-                                    </span>
-                                </template>
-                                <template v-else>
-                                    <span class="audit-user-grid__source audit-user-grid__source--inherited">
-                                        {{ t('teamhub', 'Inherited (source unknown)') }}
-                                    </span>
-                                </template>
+                                <NcActionText>
+                                    <template #icon><InformationOutline :size="18" /></template>
+                                    {{ t('teamhub', 'Deleted Nextcloud users still listed as team members. Clean them up under Maintenance → Deleted users in teams.') }}
+                                </NcActionText>
+                                <NcActionText v-if="complianceSummary.report && complianceSummary.report.ghost_memberships.sample_uid">
+                                    {{ t('teamhub', 'Example: {uid}', { uid: complianceSummary.report.ghost_memberships.sample_uid }) }}
+                                </NcActionText>
+                            </NcActions>
+                            <div class="compliance-row__refresh-slot">
+                                <NcButton
+                                    variant="tertiary-no-background"
+                                    :aria-label="t('teamhub', 'Re-scan compliance summary')"
+                                    :title="t('teamhub', 'Re-scan compliance summary')"
+                                    :disabled="complianceSummary.loading"
+                                    @click="loadComplianceSummary">
+                                    <template #icon>
+                                        <RefreshIcon :size="18" />
+                                    </template>
+                                </NcButton>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Action bar -->
-                    <div class="audit-user-actions">
-                        <span class="audit-user-actions__summary">
-                            {{ n('teamhub', '{n} team selected', '{n} teams selected', audit_selectedTeamIds.length, { n: audit_selectedTeamIds.length }) }}
-                        </span>
-                        <NcButton
-                            variant="error"
-                            :disabled="audit_selectedTeamIds.length === 0 || audit_removeBusy"
-                            @click="openAuditRemoveConfirm">
-                            <template #icon>
-                                <NcLoadingIcon v-if="audit_removeBusy" :size="18" />
-                                <AccountRemoveIcon v-else :size="18" />
-                            </template>
-                            {{ t('teamhub', 'Remove from selected teams') }}
-                        </NcButton>
+                    <!-- Row: Orphan teams (v4.2.10) — teams with no owner.
+                         Backed by MaintenanceService::getOrphanedTeams; the
+                         Maintenance tab has the reassign-owner flow. -->
+                    <div class="compliance-row" role="group" :aria-label="t('teamhub', 'Orphan teams')">
+                        <span class="compliance-row__label">{{ t('teamhub', 'Orphan teams:') }}</span>
+                        <template v-if="complianceSummary.loading">
+                            <span class="integrity-pill integrity-pill--unknown">
+                                <span class="integrity-pill__dot" />
+                                {{ t('teamhub', 'Checking…') }}
+                            </span>
+                        </template>
+                        <template v-else-if="complianceSummary.error">
+                            <span class="integrity-pill integrity-pill--unknown">
+                                <span class="integrity-pill__dot" />
+                                {{ t('teamhub', 'Unavailable') }}
+                            </span>
+                        </template>
+                        <template v-else>
+                            <span
+                                class="integrity-pill"
+                                :class="'integrity-pill--' + (orphanCount > 0 ? 'err' : 'ok')"
+                                role="status"
+                                aria-live="polite">
+                                <span class="integrity-pill__dot" />
+                                {{ orphanCount }}
+                            </span>
+                        </template>
+                        <span class="compliance-row__spacer" />
+                        <div class="compliance-row__actions">
+                            <NcActions
+                                :aria-label="t('teamhub', 'Orphan teams details')"
+                                :title="t('teamhub', 'Orphan teams details')">
+                                <template #icon>
+                                    <InformationOutline :size="18" />
+                                </template>
+                                <NcActionText>
+                                    <template #icon><InformationOutline :size="18" /></template>
+                                    {{ t('teamhub', 'Teams with no live owner. Assign a new owner under Maintenance → All teams to restore governance.') }}
+                                </NcActionText>
+                                <NcActionText v-if="complianceSummary.report && complianceSummary.report.orphan_teams.sample_name">
+                                    {{ t('teamhub', 'Example: {team}', { team: complianceSummary.report.orphan_teams.sample_name }) }}
+                                </NcActionText>
+                            </NcActions>
+                            <div class="compliance-row__refresh-slot" aria-hidden="true" />
+                        </div>
                     </div>
-                </template>
-
-                <!-- Confirm dialog -->
-                <NcDialog
-                    v-if="audit_removeConfirmOpen"
-                    :name="t('teamhub', 'Remove user from teams?')"
-                    :buttons="auditRemoveDialogButtons"
-                    size="normal"
-                    @closing="audit_removeConfirmOpen = false">
-                    <p>
-                        {{ n('teamhub',
-                              'You are about to remove {user} from {n} team. This cannot be undone.',
-                              'You are about to remove {user} from {n} teams. This cannot be undone.',
-                              audit_selectedTeamIds.length,
-                              { user: audit_selectedUser ? audit_selectedUser.displayName : '', n: audit_selectedTeamIds.length }) }}
-                    </p>
-                </NcDialog>
+                </div>
             </NcSettingsSection>
 
             <!-- ── Audit log (existing) ────────────────────────────────────── -->
@@ -1381,6 +1594,7 @@
                 </div>
             </div>
             </NcSettingsSection>
+            </template>
         </div>
 
         <!-- ──────────────────────────────────────────────────────────────────
@@ -1878,6 +2092,7 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import {
     NcSettingsSection, NcButton, NcLoadingIcon,
     NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
+    NcActions, NcActionText,
 } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
@@ -1904,6 +2119,8 @@ import ContentCopyIcon from 'vue-material-design-icons/ContentCopy.vue'
 // v3.100.14: MDI icon for the group-chip remove button — replaces the
 // × multiplication-sign character (gui.md § 13). Cross-font consistency.
 import CloseIcon from 'vue-material-design-icons/Close.vue'
+// v4.2.0: Compliance tab — code-integrity status icons.
+import AlertOctagonIcon from 'vue-material-design-icons/AlertOctagon.vue'
 
 // Presence module — Session B1 / v3.42.0 admin sub-panels.
 import PresenceTypesManager     from './PresenceTypesManager.vue'
@@ -1915,11 +2132,13 @@ export default {
     components: {
         NcSettingsSection, NcButton, NcLoadingIcon,
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
+        NcActions, NcActionText,
         ContentSave, AccountGroup, AccountPlusIcon, EmailSendIcon, MessageTextIcon, PuzzleIcon,
         ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon, RestoreIcon,
         InformationOutline, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon,
         OfficeBuildingIcon,
         KeyIcon, ContentCopyIcon, CloseIcon,
+        AlertOctagonIcon,
         PresenceTypesManager, PresenceLocationsManager, PresenceHolidaysManager,
     },
     data() {
@@ -2023,6 +2242,28 @@ export default {
             ghostSearch: '',
             ghostSearchTimer: null,
             ghostRemoving: {},         // { 'userId:teamId': bool, 'userId:all': bool }
+            // ── Compliance tab — code integrity (v4.2.0) ───────────────
+            //   loaded: whether an initial check has been run
+            //   loading: request in flight
+            //   report: full JSON envelope from GET /api/v1/admin/integrity
+            //   error: user-facing error string, if any
+            integrity: {
+                loaded: false,
+                loading: false,
+                error: null,
+                report: null,
+            },
+
+            // v4.2.10 — Aggregated governance-risk summary shown as extra
+            // Compliance pills (ghost memberships + orphan teams). One-shot
+            // load per tab open, refreshed via loadComplianceSummary().
+            complianceSummary: {
+                loaded: false,
+                loading: false,
+                error: null,
+                report: null,
+            },
+
             // ── Audit tab ──────────────────────────────────────────────
             auditTeams: [],            // [{ team_id, display_name, event_count, last_event_at }]
             auditTeamsLoading: false,
@@ -2090,9 +2331,9 @@ export default {
                 { id: 'creation',      label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
                 { id: 'invitations',   label: this.t('teamhub', 'Invitations'),   icon: 'EmailSendIcon'   },
                 { id: 'integrations',  label: this.t('teamhub', 'Integrations'),  icon: 'PuzzleIcon'      },
-                { id: 'statistics',    label: this.t('teamhub', 'Statistics'),    icon: 'ChartBarIcon'    },
+                { id: 'statistics',    label: this.t('teamhub', 'Reporting'),     icon: 'ChartBarIcon'    },
                 { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },
-                { id: 'audit',         label: this.t('teamhub', 'Audit'),          icon: 'ShieldCheckIcon' },
+                { id: 'audit',         label: this.t('teamhub', 'Compliance'),     icon: 'ShieldCheckIcon' },
                 { id: 'archive',       label: this.t('teamhub', 'Archive'),        icon: 'ArchiveIcon'     },
                 // v3.100.0 — Track F. License tab always visible; state
                 // pill inside shows whether a valid key is installed.
@@ -2122,6 +2363,41 @@ export default {
             if (s.enforcementLevel === 'none')       return 'ok'
             if (s.enforcementLevel === 'grace')      return 'warn'
             return 'err'   // 'unlicensed' | 'soft-lock'
+        },
+
+        // ── v4.3.0 Compliance-tab computeds ─────────────────────────
+        /**
+         * The Compliance checks (Code integrity, Telemetry) are a licensed
+         * feature. Unlocked whenever the customer has a currently-honoured
+         * license — Active, Trial, or Grace. Soft-lock and Unlicensed hide
+         * the checks and surface a "License required" banner instead. The
+         * Audit log section on the same tab is not gated.
+         */
+        complianceUnlocked() {
+            const level = this.license.status?.enforcementLevel
+            return level === 'none' || level === 'grace'
+        },
+
+        /**
+         * Whether TeamHub is currently sending anonymous usage telemetry.
+         * Derived: if the license is active/trial/grace the customer is
+         * paying and we don't gather usage stats; otherwise (unlicensed or
+         * soft-locked) telemetry is on so Justin can see who is running
+         * TeamHub without a license. Mirrors TelemetryService::isEnabled()
+         * on the backend so the pill matches what the server is doing.
+         */
+        telemetryEnabledDerived() {
+            return !this.complianceUnlocked
+        },
+
+        // v4.2.10 — governance-risk counts for the extra Compliance pills.
+        // Default to 0 while the summary is loading / errored so the pill
+        // still renders (in "unknown" state via the surrounding v-if).
+        ghostCount() {
+            return this.complianceSummary.report?.ghost_memberships?.count ?? 0
+        },
+        orphanCount() {
+            return this.complianceSummary.report?.orphan_teams?.count ?? 0
         },
         licenseStatusLabel() {
             const s = this.license.status
@@ -2158,6 +2434,23 @@ export default {
 
         auditEventsTotalPages() {
             return Math.max(1, Math.ceil(this.auditEventsTotal / this.auditEventsPerPage))
+        },
+
+        // ── v4.2.0 Compliance — code integrity ─────────────────────
+        integrityPillLevel() {
+            const s = this.integrity.report?.status
+            if (s === 'compliant') return 'ok'
+            if (s === 'not_compliant') return 'err'
+            return 'unknown'   // manifest_missing OR no report loaded yet
+        },
+        integrityStatusLabel() {
+            const s = this.integrity.report?.status
+            switch (s) {
+            case 'compliant':        return this.t('teamhub', 'Compliant')
+            case 'not_compliant':    return this.t('teamhub', 'Not compliant')
+            case 'manifest_missing': return this.t('teamhub', 'No manifest')
+            default:                 return this.t('teamhub', 'Unknown')
+            }
         },
 
         canSaveRetention() {
@@ -2230,6 +2523,12 @@ export default {
                 }
                 if (!this.auditTeamsLoading && this.auditTeams.length === 0 && !this.auditTeamsError) {
                     this.loadAuditTeams()
+                }
+                if (!this.integrity.loaded && !this.integrity.loading) {
+                    this.loadIntegrity()
+                }
+                if (!this.complianceSummary.loaded && !this.complianceSummary.loading) {
+                    this.loadComplianceSummary()
                 }
             }
             if (tab === 'archive') {
@@ -3089,6 +3388,57 @@ export default {
 
         removeFromAllLabel(userId) {
             return this.t('teamhub', 'Remove {user} from all teams', { user: userId })
+        },
+
+        // ── Compliance tab — code integrity (v4.2.0) ─────────────────
+
+        async loadIntegrity() {
+            this.integrity.loading = true
+            this.integrity.error   = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/integrity'))
+                this.integrity.report = data
+                this.integrity.loaded = true
+            } catch (e) {
+                this.integrity.error = e?.response?.data?.error
+                    || e?.message
+                    || this.t('teamhub', 'Could not load integrity check.')
+            } finally {
+                this.integrity.loading = false
+            }
+        },
+
+        /**
+         * v4.2.10 — Aggregated governance-risk summary for the ghost-
+         * memberships and orphan-teams Compliance pills. Cheap enough to
+         * refetch on every tab open. Errors surface into the row like the
+         * integrity loader does.
+         */
+        async loadComplianceSummary() {
+            this.complianceSummary.loading = true
+            this.complianceSummary.error   = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/compliance/summary'))
+                this.complianceSummary.report = data
+                this.complianceSummary.loaded = true
+            } catch (e) {
+                this.complianceSummary.error = e?.response?.data?.error
+                    || e?.message
+                    || this.t('teamhub', 'Could not load compliance summary.')
+            } finally {
+                this.complianceSummary.loading = false
+            }
+        },
+
+        /**
+         * Formats an ISO-8601 timestamp using the browser locale, degrading
+         * gracefully to the raw string if the input is not parseable.
+         */
+        formatIntegrityTimestamp(iso) {
+            if (!iso) return ''
+            const d = new Date(iso)
+            if (isNaN(d.getTime())) return iso
+            return d.toLocaleString()
         },
 
         // ── Audit tab ──────────────────────────────────────────────────
@@ -4898,6 +5248,160 @@ export default {
 .audit-user-actions__summary {
     color: var(--color-text-maxcontrast);
     font-size: 13px;
+}
+
+/* ── v4.3.0 Compliance tab — compact rows ───────────────────────────── */
+/* v4.2.9 — label (subject) is plain text OUTSIDE the pill; only the result
+   ("Compliant", "Off") sits inside the coloured pill. Fixed-width actions
+   area at the row end guarantees the `i` icon lines up across rows even
+   when a row doesn't have a refresh button. Refresh sits AFTER the i in
+   the actions area, in its own fixed 44 px slot that's reserved (but empty)
+   on rows without a refresh action. */
+.compliance-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.compliance-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+}
+.compliance-row__label {
+    font-size: var(--th-font-body, 14px);
+    font-weight: 500;
+    color: var(--color-main-text);
+    flex: 0 0 auto;
+    min-width: 170px;
+}
+.compliance-row__spacer {
+    flex: 1 1 auto;
+}
+.compliance-row__actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+.compliance-row__refresh-slot {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 44px;
+}
+.integrity-pill--warn {
+    background: var(--color-warning);
+    color: var(--color-warning-text);
+}
+
+/* ── v4.2.0 Compliance tab — code integrity ─────────────────────────── */
+.integrity-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0;
+    color: var(--color-text-maxcontrast);
+}
+.integrity-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.integrity-status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.integrity-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.integrity-pill__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.integrity-pill--ok {
+    background: var(--color-success);
+    color: var(--color-success-text);
+}
+.integrity-pill--err {
+    background: var(--color-error);
+    color: var(--color-error-text);
+}
+.integrity-pill--unknown {
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+}
+.integrity-detail {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 16px;
+    margin: 0;
+    font-size: var(--th-font-body);
+}
+.integrity-detail dt {
+    color: var(--color-text-maxcontrast);
+    font-weight: 500;
+}
+.integrity-detail dd {
+    margin: 0;
+    word-break: break-word;
+}
+.integrity-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: var(--th-radius-card, 10px);
+    font-size: var(--th-font-body);
+}
+.integrity-banner--info {
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+}
+.integrity-banner--err {
+    background: var(--color-error);
+    color: var(--color-error-text);
+}
+.integrity-list summary {
+    cursor: pointer;
+    padding: 6px 0;
+    font-weight: 600;
+}
+.integrity-list summary:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+.integrity-list__trunc {
+    color: var(--color-text-maxcontrast);
+    font-weight: 400;
+    margin-left: 6px;
+}
+.integrity-list ul {
+    list-style: none;
+    padding: 4px 0 4px 8px;
+    margin: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    font-family: var(--font-face-monospace, monospace);
+    font-size: var(--th-font-meta);
+    color: var(--color-main-text);
+}
+.integrity-list li {
+    padding: 2px 0;
+    word-break: break-all;
 }
 
 /* ── v3.100.0 Licensing tab ─────────────────────────────────────────── */

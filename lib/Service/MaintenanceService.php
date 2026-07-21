@@ -1459,6 +1459,36 @@ class MaintenanceService {
     }
 
     /**
+     * v4.2.10 — Compliance-tab summary. Cheap: reuses findGhostMembers and
+     * getOrphanedTeams (both already scan the same rows the manual buttons
+     * on the Maintenance tab work with) and collapses each into a count +
+     * a first-hit sample string for the info popover. Called once per
+     * Compliance-tab open.
+     *
+     * @return array{
+     *     ghost_memberships: array{count: int, sample_uid: string|null},
+     *     orphan_teams:      array{count: int, sample_name: string|null}
+     * }
+     */
+    public function getComplianceSummary(): array {
+        $this->requireNcAdmin();
+
+        $ghosts = $this->findGhostMembers('');
+        $orphans = $this->getOrphanedTeams();
+
+        return [
+            'ghost_memberships' => [
+                'count'      => count($ghosts),
+                'sample_uid' => $ghosts[0]['userId'] ?? null,
+            ],
+            'orphan_teams' => [
+                'count'       => count($orphans),
+                'sample_name' => $orphans[0]['name'] ?? null,
+            ],
+        ];
+    }
+
+    /**
      * Remove a single ghost user from all teams, or from a specific team.
      *
      * @param string      $userId NC uid of the deleted user

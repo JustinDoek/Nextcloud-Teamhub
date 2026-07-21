@@ -70,23 +70,71 @@ class LinkPreviewService {
 
         try {
             $client = $this->clientService->newClient();
-            $response = $client->get($url, [
-                'timeout'         => self::TIMEOUT,
-                'allow_redirects' => ['max' => 5],
-                'headers'         => [
-                    // Present as a browser so sites don't block us outright
-                    'User-Agent' => 'Mozilla/5.0 (compatible; Nextcloud TeamHub link preview)',
-                    'Accept'     => 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-                ],
-                // Limit response size — we only need the <head> section
-                'on_headers' => function (\Psr\Http\Message\ResponseInterface $r) {
-                    $ct = $r->getHeaderLine('Content-Type');
-                    if (!empty($ct) && !str_contains($ct, 'text/html') && !str_contains($ct, 'application/xhtml')) {
-                        // Non-HTML resource (e.g. PDF, ZIP) — abort early
-                        throw new \RuntimeException('Non-HTML content type: ' . $ct);
+
+            // Manual redirect loop with per-hop IP re-validation. The client's
+            // own redirect-following is disabled so a public URL cannot 30x us
+            // to an internal address after passing the initial isAllowedUrl()
+            // gate (the classic post-allowlist SSRF), and every hop's host is
+            // re-resolved and re-checked before we fetch it. Mirrors the defence
+            // in LinkPreviewController::proxyImage.
+            $currentUrl = $url;
+            $response   = null;
+            $maxHops    = 5;
+
+            for ($hop = 0; $hop <= $maxHops; $hop++) {
+                // Re-validate this hop's host + resolved IP before fetching it.
+                // The very first URL was already checked by isAllowedUrl() above;
+                // this catches redirect targets and DNS changes between hops.
+                if (!$this->isAllowedUrl($currentUrl)) {
+                    return null;
+                }
+
+                $response = $client->get($currentUrl, [
+                    'timeout'         => self::TIMEOUT,
+                    'allow_redirects' => false,
+                    'headers'         => [
+                        // Present as a browser so sites don't block us outright
+                        'User-Agent' => 'Mozilla/5.0 (compatible; Nextcloud TeamHub link preview)',
+                        'Accept'     => 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+                    ],
+                    // Limit response size — we only need the <head> section. The
+                    // non-HTML abort is skipped for redirect responses, which are
+                    // handled by the loop below.
+                    'on_headers' => function (\Psr\Http\Message\ResponseInterface $r) {
+                        $status = $r->getStatusCode();
+                        if ($status >= 300 && $status < 400) {
+                            return;
+                        }
+                        $ct = $r->getHeaderLine('Content-Type');
+                        if (!empty($ct) && !str_contains($ct, 'text/html') && !str_contains($ct, 'application/xhtml')) {
+                            // Non-HTML resource (e.g. PDF, ZIP) — abort early
+                            throw new \RuntimeException('Non-HTML content type: ' . $ct);
+                        }
+                    },
+                ]);
+
+                $status = $response->getStatusCode();
+                if ($status >= 300 && $status < 400) {
+                    if ($hop === $maxHops) {
+                        return null;
                     }
-                },
-            ]);
+                    $location = $response->getHeader('Location');
+                    if ($location === '') {
+                        return null;
+                    }
+                    // Resolve relative redirects against the current URL, then
+                    // loop back to re-validate the new target's resolved IP.
+                    $currentUrl = $this->resolveRedirectLocation($currentUrl, $location);
+                    continue;
+                }
+
+                // Non-redirect response — done.
+                break;
+            }
+
+            if ($response === null) {
+                return null;
+            }
 
             $body = (string) $response->getBody();
             // Truncate to avoid parsing huge documents
@@ -94,6 +142,9 @@ class LinkPreviewService {
                 $body = substr($body, 0, self::MAX_BODY_BYTES);
             }
 
+            // Parse against the originally-requested URL so the response's
+            // `url` field (which the frontend keys previews on) stays stable
+            // across redirects — matches the pre-redirect-loop behaviour.
             $meta = $this->parseOpenGraph($body, $url);
             return $meta;
 
@@ -243,6 +294,35 @@ class LinkPreviewService {
         }
 
         return true;
+    }
+
+    /**
+     * Resolve a (possibly relative) redirect Location against the URL it came
+     * from. Absolute URLs pass through; root-relative and path-relative targets
+     * are joined onto the base origin/path so the next-hop validation in
+     * resolve() sees a complete URL. A non-https result is rejected at that
+     * next isAllowedUrl() check (fail-closed).
+     */
+    private function resolveRedirectLocation(string $baseUrl, string $location): string {
+        // Already absolute.
+        if (preg_match('#^https?://#i', $location) === 1) {
+            return $location;
+        }
+        $base = parse_url($baseUrl);
+        if (!isset($base['scheme'], $base['host'])) {
+            return $location;
+        }
+        $origin = $base['scheme'] . '://' . $base['host']
+            . (isset($base['port']) ? ':' . $base['port'] : '');
+
+        // Root-relative.
+        if (str_starts_with($location, '/')) {
+            return $origin . $location;
+        }
+        // Path-relative — strip the last path segment of the base.
+        $path = $base['path'] ?? '/';
+        $dir  = substr($path, 0, strrpos($path, '/') + 1);
+        return $origin . $dir . $location;
     }
 
     /**
