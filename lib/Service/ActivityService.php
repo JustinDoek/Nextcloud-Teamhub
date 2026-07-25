@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\AuditLogMapper;
 use OCA\TeamHub\Exception\AppNotAvailableException;
 use OCP\App\IAppManager;
+use OCP\IUserManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -28,6 +29,7 @@ class ActivityService {
     public function __construct(
         private ResourceService $resourceService,
         private IUserSession $userSession,
+        private IUserManager $userManager,
         private IAppManager $appManager,
         private ContainerInterface $container,
         private LoggerInterface $logger,
@@ -36,6 +38,26 @@ class ActivityService {
         private TimeService $timeService,
         private BudgetService $budgetService,
     ) {
+    }
+
+    /**
+     * Resolve a UID to its display name, with a per-request cache so a feed
+     * of 25 rows dominated by 3–4 actors only hits IUserManager 3–4 times.
+     * Falls back to the UID itself when the user is unknown (deleted user).
+     *
+     * @var array<string, string>
+     */
+    private array $displayNameCache = [];
+
+    private function resolveDisplayName(string $uid): string {
+        if ($uid === '') return '';
+        if (isset($this->displayNameCache[$uid])) {
+            return $this->displayNameCache[$uid];
+        }
+        $name = $this->userManager->get($uid)?->getDisplayName();
+        $resolved = ($name !== null && $name !== '') ? $name : $uid;
+        $this->displayNameCache[$uid] = $resolved;
+        return $resolved;
     }
 
     // -------------------------------------------------------------------------
@@ -281,11 +303,13 @@ class ActivityService {
                 } catch (\Throwable $e) { /* non-fatal */ }
             }
 
+            $actorUid = (string)($row['user'] ?: $row['affecteduser']);
             $items[] = [
                 'activity_id' => (int)$row['activity_id'],
                 'app'         => $row['app'],
                 'type'        => $row['type'],
-                'user'        => $row['user'] ?: $row['affecteduser'],
+                'user'        => $actorUid,
+                'displayName' => $this->resolveDisplayName($actorUid),
                 'subject'     => $subject,
                 'message'     => $row['message'] ?? '',
                 'datetime'    => (new \DateTime('@' . (int)$row['timestamp']))->format(\DateTime::ATOM),
@@ -368,11 +392,13 @@ class ActivityService {
             $eventType = (string)($row['event_type'] ?? '');
             $meta      = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
 
+            $actorUid = (string)($row['actor_uid'] ?? '');
             $out[] = [
                 'activity_id' => 'th-' . $row['id'],   // string key — avoids id collisions with NC's activity_id
                 'app'         => 'teamhub',
                 'type'        => $eventType,
-                'user'        => (string)($row['actor_uid'] ?? ''),
+                'user'        => $actorUid,
+                'displayName' => $this->resolveDisplayName($actorUid),
                 'subject'     => $eventType,           // frontend maps to a localized template
                 'message'     => '',
                 'datetime'    => (new \DateTime('@' . (int)$row['created_at']))->format(\DateTime::ATOM),

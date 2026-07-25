@@ -179,6 +179,92 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            case 'license_over_seats':
+                // Fired by LicenseExpiryNotificationJob when unique-team-member
+                // count first crosses the licensed seat cap. Same notification
+                // pushes on every transition from under → over so extending the
+                // license doesn't require re-firing manually.
+                $params = $notification->getSubjectParameters();
+                $used   = (int)($params['seatsUsed'] ?? 0);
+                $cap    = (int)($params['seatCap']   ?? 0);
+                $lockAt = (int)($params['seatLockAt'] ?? (int)ceil($cap * 1.2));
+
+                $notification->setRichSubject(
+                    'TeamHub license is over its seat cap ({used} of {cap})',
+                    [
+                        'used' => ['type' => 'highlight', 'id' => 'used', 'name' => (string)$used],
+                        'cap'  => ['type' => 'highlight', 'id' => 'cap',  'name' => (string)$cap],
+                    ]
+                );
+                $notification->setParsedSubject(
+                    'TeamHub license is over its seat cap (' . $used . ' of ' . $cap . ')'
+                );
+                $notification->setRichMessage(
+                    'Upgrade the license or reduce unique team members. Advanced-team creation and writes lock at ' . $lockAt . ' users.',
+                    []
+                );
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                try {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'settings.AdminSettings.index',
+                        ['section' => 'teamhub']
+                    ));
+                } catch (\Throwable $e) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute('teamhub.page.index'));
+                }
+                return $notification;
+
+            case 'license_expiring_trial':
+            case 'license_expiring_paid':
+                // Fired by LicenseExpiryNotificationJob. Both variants share
+                // the same shape and target audience; the copy differs so
+                // "your paid entitlement ends in N days" reads distinctly
+                // from "your trial ends in N days".
+                $params = $notification->getSubjectParameters();
+                $days   = (int)($params['daysRemaining'] ?? 0);
+                $isTrial = $notification->getSubject() === 'license_expiring_trial';
+
+                $rich = $isTrial
+                    ? 'Your TeamHub trial ends in {days} days'
+                    : 'Your TeamHub license paid entitlement ends in {days} days';
+                $plain = $isTrial
+                    ? 'Your TeamHub trial ends in ' . $days . ' days'
+                    : 'Your TeamHub license paid entitlement ends in ' . $days . ' days';
+
+                $notification->setRichSubject($rich, [
+                    'days' => [
+                        'type' => 'highlight',
+                        'id'   => (string)$days,
+                        'name' => (string)$days,
+                    ],
+                ]);
+                $notification->setParsedSubject($plain);
+
+                $notification->setRichMessage(
+                    $isTrial
+                        ? 'Install a paid license from your TeamHub admin panel to keep using Advanced features after the trial ends.'
+                        : 'Renew your TeamHub license from your admin panel — after the paid entitlement ends the license enters its grace period, then Advanced features lock.',
+                    []
+                );
+
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                // Deep-link to the License tab of TeamHub admin settings.
+                // Falls back to the app root if the settings route isn't
+                // resolvable — the licensing tab is discoverable from there.
+                try {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'settings.AdminSettings.index',
+                        ['section' => 'teamhub']
+                    ));
+                } catch (\Throwable $e) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute('teamhub.page.index'));
+                }
+                return $notification;
+
             default:
                 throw new UnknownNotificationException('Unknown subject');
         }

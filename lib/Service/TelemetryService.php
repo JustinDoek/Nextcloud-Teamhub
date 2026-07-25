@@ -138,7 +138,12 @@ class TelemetryService {
 
     /**
      * Collect stats and send the daily report if telemetry is enabled.
-     * Called by DailyReportJob.
+     *
+     * DEPRECATED (v4.3.20). The daily-report background job was removed
+     * with the air-gapped-only licensing model. This method now has no
+     * caller in-tree and stays only as a defensive no-op — the send()
+     * helper it delegates to would 404 anyway against the retired
+     * telemetry.php endpoint.
      */
     public function sendDailyReport(): void {
         if (!$this->isEnabled()) {
@@ -238,7 +243,13 @@ class TelemetryService {
         }
     }
 
-    private function countTeams(): int {
+    /**
+     * Total team count (TeamHub / NC Teams — source=16 only).
+     *
+     * Public since v4.3.20; retained here for any future in-app UI that
+     * wants to show the number. Not currently used by another service.
+     */
+    public function countTeams(): int {
         try {
             $qb = $this->db->getQueryBuilder();
             // source=16 → user-created circles (TeamHub / NC Teams).

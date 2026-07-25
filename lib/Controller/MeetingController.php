@@ -49,7 +49,6 @@ class MeetingController extends Controller {
     // -------------------------------------------------------------------------
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function createTeamMeeting(string $teamId): JSONResponse {
         $this->logger->debug('[TeamHub][MeetingController] createTeamMeeting — start', [
             'teamId' => $teamId, 'app' => Application::APP_ID,
@@ -205,7 +204,6 @@ class MeetingController extends Controller {
     // -------------------------------------------------------------------------
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function saveMeetingSettings(string $teamId): JSONResponse {
         $this->logger->debug('[TeamHub][MeetingController] saveMeetingSettings', [
             'teamId' => $teamId, 'app' => Application::APP_ID,

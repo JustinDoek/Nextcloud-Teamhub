@@ -40,7 +40,41 @@
  * manager NC core uses — the nonce is already present in the response's CSP
  * header so the browser allows the script to run.
  */
-$nonce = \OC::$server->getContentSecurityPolicyNonceManager()->getNonce();
+// CSP nonce lookup — history and reasoning:
+//   pre-NC 34: \OC::$server->getContentSecurityPolicyNonceManager()
+//              was a public shortcut on OC\Server.
+//   NC 34:     shortcut removed. No public OCP interface was ever
+//              introduced — v4.3.14 mistakenly tried
+//              \OCP\Security\ContentSecurityPolicyNonceManager
+//              (that class doesn't exist), so `$server->get()` threw
+//              QueryNotFoundException and the whole template blew up
+//              before rendering anything.
+//   Correct:   the OC-private class \OC\Security\CSP\ContentSecurityPolicyNonceManager
+//              still exists on every NC version we support (32–34).
+//              It's private API in principle but has been stable for
+//              years and Nextcloud's own core templates still resolve
+//              it the same way — there is no OCP replacement yet.
+//
+// Wrapped in try/catch with a two-step fallback: if the class ever
+// moves again, we log the miss and still render the iframe (script
+// will be blocked by CSP because no matching nonce, but at least the
+// user sees the "Loading…" HTML rather than a 500).
+$nonce = '';
+try {
+    $nonce = \OC::$server->get(\OC\Security\CSP\ContentSecurityPolicyNonceManager::class)->getNonce();
+} catch (\Throwable $nonceErr) {
+    // Legacy shortcut (pre-NC 34) — might survive on very old NC
+    // versions but be renamed on newer ones.
+    try {
+        $nonce = \OC::$server->getContentSecurityPolicyNonceManager()->getNonce();
+    } catch (\Throwable $legacyNonceErr) {
+        \OC::$server->get(\Psr\Log\LoggerInterface::class)->warning(
+            '[TeamHub] timeline template: could not resolve CSP nonce manager on this NC version — inline timeline script will be CSP-blocked. Errors: '
+            . $nonceErr->getMessage() . ' / ' . $legacyNonceErr->getMessage(),
+            ['app' => 'teamhub']
+        );
+    }
+}
 ?><!DOCTYPE html>
 <html lang="en">
 <head>

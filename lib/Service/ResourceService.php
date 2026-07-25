@@ -623,6 +623,11 @@ class ResourceService {
             'calendar'               => $this->appManager->isInstalled('calendar'),
             'deck'                   => $this->appManager->isInstalled('deck'),
             'intravox'               => $this->appManager->isInstalled('intravox'),
+            // v4.3.6 — surface Collectives to the create-team wizard so it can
+            // offer a "Wiki" module chip alongside Intranet. Toggle wiring for
+            // existing teams lives on the layout endpoint's collectivesConfig
+            // and doesn't need this.
+            'collectives'            => $this->appManager->isInstalled('collectives'),
             'groupfolders'           => $this->groupFolderService->isGroupFoldersAvailable(),
             'intravoxParentPath'     => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',

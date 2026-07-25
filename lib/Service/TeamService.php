@@ -49,6 +49,7 @@ class TeamService {
         private MemberService        $memberService,
         private ResourceService      $resourceService,
         private ActivityService      $activityService,
+        private CollectivesService   $collectivesService,
         private TeamAppMapper        $teamAppMapper,
         private IUserSession         $userSession,
         private IAppManager          $appManager,
@@ -416,6 +417,38 @@ class TeamService {
     // =========================================================================
 
     /**
+     * Validate a team name for NEW team creation.
+     *
+     * Applies only to `createTeam()` — existing teams (created before this
+     * guard landed) may contain any character and are treated as opaque
+     * strings by the rest of the app. This rule stops new teams from
+     * introducing the problem class going forward:
+     *   - `/` and `\` cause NC Folder::newFolder() to create nested dirs.
+     *   - Non-ASCII / punctuation cause downstream issues in Deck board
+     *     titles, Talk room names, Group Folder mount paths, and
+     *     Collectives / IntraVox page slugs.
+     *
+     * Rules:
+     *   - Non-empty after trim.
+     *   - ≤ 255 chars.
+     *   - Only ASCII letters (A–Z, a–z), digits (0–9), spaces, and `-`.
+     *
+     * @throws \InvalidArgumentException with a message safe to surface to the user.
+     */
+    public function assertValidTeamName(string $name): void {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            throw new \InvalidArgumentException('Team name cannot be empty.');
+        }
+        if (mb_strlen($trimmed) > 255) {
+            throw new \InvalidArgumentException('Team name is too long (max 255 characters).');
+        }
+        if (preg_match('/^[A-Za-z0-9 -]+$/', $trimmed) !== 1) {
+            throw new \InvalidArgumentException('Team name may only contain letters (A–Z, a–z), digits (0–9), spaces, and hyphens (-). Punctuation and non-ASCII characters are not allowed.');
+        }
+    }
+
+    /**
      * Create a new team.
      * Description is always set via updateTeamDescription() separately.
      */
@@ -425,6 +458,15 @@ class TeamService {
         if (!$user) {
             throw new \Exception('User not authenticated');
         }
+
+        // v4.3.19 — reject path-shaped team names at the top of the flow.
+        // Bug: a user typed "A/B" as a team name; downstream
+        // FilesService::createSharedFolder passed the name straight to
+        // NC's Folder::newFolder(), which resolves slashes as path
+        // separators and quietly created "A/" with subfolder "B/"
+        // instead of a single folder called "A/B". Guard the string at
+        // input rather than sanitising in every downstream folder call.
+        $this->assertValidTeamName($name);
 
         $circlesManager = $this->getCirclesManager();
         $federatedUser  = $circlesManager->getFederatedUser($user->getUID(), 1);
@@ -584,6 +626,18 @@ class TeamService {
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
+
+        // ── Step 2b: Cascade delete the team's Collective (v4.3.3) ───────────
+        // Collectives lives in appconfig-driven per-team toggle keys, not in
+        // teamhub_team_app_resources or teamhub_team_apps, so it doesn't get
+        // picked up by the resource-iteration loops above. Delete BEFORE the
+        // circle destroy in Step 3 — deleteCollective(id, uid, deleteCircle:
+        // false) needs the circle to still exist for the ACL check that
+        // proves $uid is a LEVEL_ADMIN member. deleteCircle=false because
+        // Step 3 handles the circle itself; passing true here would race
+        // with circleService->destroy on the same row.
+        // Best-effort — see CollectivesService::deleteForTeamCascade.
+        $this->collectivesService->deleteForTeamCascade($teamId, $user->getUID());
 
         // ── Step 3: Destroy the circle ────────────────────────────────────────
         $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);

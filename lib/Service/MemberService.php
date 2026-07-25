@@ -700,9 +700,16 @@ class MemberService {
         while ($row = $dRes->fetch()) {
             $userId = (string)$row['user_id'];
             $level  = (int)$row['level'];
+            // Prefer IUserManager (LDAP + prefs-table user-set names) over the
+            // users-table displayname column, which is often stale or NULL.
+            // Same resolution ladder as getEffectiveMembers() above.
+            $resolvedName = $this->userManager->get($userId)?->getDisplayName();
+            $displayName  = $resolvedName !== null && $resolvedName !== ''
+                ? $resolvedName
+                : (!empty($row['displayname']) ? $row['displayname'] : $userId);
             $direct[] = [
                 'userId'      => $userId,
-                'displayName' => !empty($row['displayname']) ? $row['displayname'] : $userId,
+                'displayName' => $displayName,
                 'role'        => match (true) {
                     $level >= 9 => 'Owner',
                     $level >= 8 => 'Admin',

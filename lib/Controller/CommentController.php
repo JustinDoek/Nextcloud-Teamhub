@@ -10,12 +10,14 @@ use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\MessageService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
+use OCP\IUserManager;
 use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
@@ -26,12 +28,54 @@ class CommentController extends Controller {
         private CommentMapper $commentMapper,
         private MessageMapper $messageMapper,
         private MemberService $memberService,
+        private MessageService $messageService,
         private AuditService $auditService,
         private DecisionService $decisionService,
         private IUserSession $userSession,
+        private IUserManager $userManager,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
+    }
+
+    /**
+     * Attach author_display_name to a single comment row or a list of
+     * them, so the frontend renders human names instead of raw UIDs
+     * (v4.3.16). Mirrors MessageService's hydration pass — one
+     * IUserManager lookup per distinct UID with in-process caching,
+     * deleted/missing users fall back to the raw UID.
+     *
+     * @template T of array<string,mixed>
+     * @param T|array<int,T> $comments Single row or list of rows.
+     * @return T|array<int,T> Same shape as input, with author_display_name filled in.
+     */
+    private function hydrateAuthorNames(array $comments): array {
+        // Detect list-of-rows vs single row.
+        $isList = isset($comments[0]) || $comments === [];
+        $rows   = $isList ? $comments : [$comments];
+
+        $uids = [];
+        foreach ($rows as $r) {
+            if (!empty($r['author_id'])) {
+                $uids[(string)$r['author_id']] = true;
+            }
+        }
+        $nameMap = [];
+        foreach (array_keys($uids) as $uid) {
+            try {
+                $u = $this->userManager->get($uid);
+                $nameMap[$uid] = $u ? (string)$u->getDisplayName() : $uid;
+            } catch (\Throwable) {
+                $nameMap[$uid] = $uid;
+            }
+        }
+        foreach ($rows as &$r) {
+            $uid = (string)($r['author_id'] ?? '');
+            $r['author_display_name'] = $nameMap[$uid] ?? $uid;
+        }
+        unset($r);
+
+        return $isList ? $rows : $rows[0];
     }
 
     #[NoAdminRequired]
@@ -72,7 +116,7 @@ class CommentController extends Controller {
             }
 
             $data = $this->commentMapper->update($commentId, $user->getUID(), $comment);
-            return new JSONResponse($data);
+            return new JSONResponse($this->hydrateAuthorNames($data));
         } catch (AccessDeniedException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
@@ -101,7 +145,7 @@ class CommentController extends Controller {
             $this->memberService->requireMemberLevel((string)$message['team_id']);
 
             $comments = $this->commentMapper->findByMessageId($messageId);
-            return new JSONResponse($comments);
+            return new JSONResponse($this->hydrateAuthorNames($comments));
         } catch (AccessDeniedException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {
@@ -136,6 +180,14 @@ class CommentController extends Controller {
             }
             $this->memberService->requireMemberLevel((string)$message['team_id']);
 
+            // v4.3.1 — per-team commentMinLevel floor. Membership was
+            // already verified above; this only refuses when the caller
+            // is a member but below the configured comment role floor
+            // (moderator/admin). Default 'member' is a no-op for existing
+            // installs. Same enforcement shape as postMinLevel in
+            // MessageService::postMessage.
+            $this->messageService->enforceCommentMinLevel((string)$message['team_id']);
+
             // Decision lock: when the parent message has a decision in
             // status='decided' or 'withdrawn', comments are frozen for
             // non-admins. Admins may still moderate (write).
@@ -156,7 +208,7 @@ class CommentController extends Controller {
                 $comment,
             );
 
-            return new JSONResponse($data, Http::STATUS_CREATED);
+            return new JSONResponse($this->hydrateAuthorNames($data), Http::STATUS_CREATED);
         } catch (AccessDeniedException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
         } catch (\Throwable $e) {

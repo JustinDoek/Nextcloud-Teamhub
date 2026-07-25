@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ActivityService;
+use OCA\TeamHub\Service\CollectivesService;
 use OCA\TeamHub\Service\DeckService;
 use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
@@ -40,6 +41,7 @@ class TeamController extends Controller {
         private ActivityService $activityService,
         private MessageService $messageService,
         private IntravoxService $intravoxService,
+        private CollectivesService $collectivesService,
         private FilesService $filesService,
         private MaintenanceService $maintenanceService,
         private TaskService $taskService,
@@ -279,7 +281,6 @@ class TeamController extends Controller {
      * Only team admins/owners may call this (enforced by MemberService level check).
      */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function updateTeamApps(string $teamId, array $apps): JSONResponse {
         try {
             // Only team admins and owners may enable/disable apps (hard-deletes data on disable)
@@ -329,7 +330,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function deleteTeamResource(string $teamId, string $app): JSONResponse {
         // Allowlist valid app values — reject anything unexpected before it reaches the service
         $allowed = ['spreed', 'files', 'calendar', 'deck', 'intravox'];
@@ -395,7 +395,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function createIntravoxPage(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -419,7 +418,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function deleteIntravoxPage(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -436,7 +434,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function invalidateIntravoxCache(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
@@ -447,8 +444,129 @@ class TeamController extends Controller {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Collectives team-app (v4.3.3)
+    // ─────────────────────────────────────────────────────────────────────
+
     #[NoAdminRequired]
     #[NoCSRFRequired]
+    public function getCollectivesConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            return new JSONResponse([
+                'collectives_enabled'   => $this->collectivesService->isEnabledForTeam($teamId),
+                'collectives_installed' => $this->collectivesService->isInstalled(),
+            ]);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    public function saveCollectivesConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+            $user = $this->userSession->getUser();
+            if ($user === null) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            $raw     = $this->request->getParam('collectives_enabled', false);
+            $enabled = $raw === true || $raw === 1 || $raw === '1' || $raw === 'true';
+
+            if ($enabled) {
+                $team   = $this->teamService->getTeam($teamId);
+                $result = $this->collectivesService->enableForTeam($teamId, $team['name'] ?? '', $user->getUID());
+                if (empty($result['ok'])) {
+                    return new JSONResponse(['error' => $result['error'] ?? 'enable failed'], Http::STATUS_BAD_REQUEST);
+                }
+                return new JSONResponse([
+                    'collectives_enabled'   => true,
+                    'collectives_installed' => $this->collectivesService->isInstalled(),
+                    'created'               => (bool)($result['created'] ?? false),
+                    'collectiveId'          => $result['collectiveId'] ?? null,
+                ]);
+            }
+
+            $result = $this->collectivesService->disableForTeam($teamId, $user->getUID());
+            return new JSONResponse([
+                'collectives_enabled'   => false,
+                'collectives_installed' => $this->collectivesService->isInstalled(),
+                'action'                => $result['action'] ?? 'noop',
+                'error'                 => $result['error'] ?? null,
+            ]);
+        } catch (\Exception $e) {
+            $this->logger->error('[TeamHub][TeamController] saveCollectivesConfig failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getCollectivesTeamRow(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            if ($uid === '') {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            return new JSONResponse($this->collectivesService->getTeamCollective($teamId, $uid));
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getCollectivesSubPages(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            if ($uid === '') {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            return new JSONResponse($this->collectivesService->getSubPages($teamId, $uid));
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    public function invalidateCollectivesCache(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $this->collectivesService->invalidateCache($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
+    public function createCollectivesPage(string $teamId): JSONResponse {
+        try {
+            // v4.3.9 — page-create authority follows Collectives' own ACL
+            // (member of the collective can add pages). We gate at team-
+            // member level here; Collectives itself refuses if the caller
+            // lacks its editLevel, which surfaces as an error field.
+            $this->memberService->requireMemberLevel($teamId);
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            if ($uid === '') {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            $title  = trim((string)($this->request->getParam('title') ?? ''));
+            $result = $this->collectivesService->createPage($teamId, $uid, $title);
+            if (empty($result['ok'])) {
+                return new JSONResponse(['error' => $result['error'] ?? 'create failed'], Http::STATUS_BAD_REQUEST);
+            }
+            return new JSONResponse($result);
+        } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    #[NoAdminRequired]
     public function leaveTeam(string $teamId): JSONResponse {
         try {
             $this->memberService->leaveTeam($teamId);
@@ -468,7 +586,6 @@ class TeamController extends Controller {
      * Called whenever the user navigates to a team. Clears the unread indicator.
      */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function markTeamSeen(string $teamId): JSONResponse {
         try {
             $this->messageService->markTeamSeen($teamId);
@@ -1460,7 +1577,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function requestJoinTeam(string $teamId): JSONResponse {
         try {
             $this->memberService->requestJoinTeam($teamId);
@@ -1475,7 +1591,6 @@ class TeamController extends Controller {
     // -------------------------------------------------------------------------
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function updateTeamDescription(string $teamId, string $description): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -1487,7 +1602,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function removeMember(string $teamId, string $userId): JSONResponse {
         try {
             // type=user (default), group, or circle — maps to Circles user_type
@@ -1505,7 +1619,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function updateMemberLevel(string $teamId, string $userId): JSONResponse {
         try {
             $body = $this->request->getParams();
@@ -1537,7 +1650,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function approveRequest(string $teamId, string $userId): JSONResponse {
         try {
             $this->memberService->approveRequest($teamId, $userId);
@@ -1548,7 +1660,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function rejectRequest(string $teamId, string $userId): JSONResponse {
         try {
             $this->memberService->rejectRequest($teamId, $userId);
@@ -1559,7 +1670,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function inviteMembers(string $teamId): JSONResponse {
         try {
             $this->memberService->requireModeratorLevel($teamId);
@@ -1573,7 +1683,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function createTeamResources(string $teamId): JSONResponse {
         try {
             // Resource creation (Talk room, Deck board, Calendar, Files) is a
@@ -1640,7 +1749,6 @@ class TeamController extends Controller {
     }
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function updateTeamConfig(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -1658,7 +1766,6 @@ class TeamController extends Controller {
     
 
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function deleteTeam(string $teamId): JSONResponse {
         try {
             $this->teamService->deleteTeam($teamId);
@@ -1683,7 +1790,6 @@ class TeamController extends Controller {
      * same pattern.
      */
     #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function transferOwner(string $teamId, string $userId = ''): JSONResponse {
         try {
             $this->memberService->requireOwnerLevel($teamId);
@@ -1797,6 +1903,44 @@ class TeamController extends Controller {
 
     // NC admin required — no #[NoAdminRequired] attribute intentionally omitted
     #[NoCSRFRequired]
+    public function collectivesDiagnostic(): JSONResponse {
+        // Admin-only diagnostic (v4.3.3) — mirrors intravoxDiagnostic /
+        // deckDiagnostic. Reports the OCA\Collectives\Service\CollectiveService
+        // and PageService public signatures on THIS install so we can
+        // catch method drift between Collectives versions before it
+        // manifests as widget failures. Read-only.
+        $currentUid = $this->userSession->getUser()?->getUID();
+        if ($currentUid === null || !$this->groupManager->isAdmin($currentUid)) {
+            return new JSONResponse(['error' => 'Admin required'], Http::STATUS_FORBIDDEN);
+        }
+        try {
+            $info = ['installed' => $this->collectivesService->isInstalled()];
+            if (!$info['installed']) {
+                return new JSONResponse($info);
+            }
+            $probes = [
+                'CollectiveService' => \OCA\Collectives\Service\CollectiveService::class,
+                'PageService'       => \OCA\Collectives\Service\PageService::class,
+            ];
+            foreach ($probes as $label => $className) {
+                try {
+                    $instance = $this->container->get($className);
+                    $info[$label] = [
+                        'class'   => get_class($instance),
+                        'methods' => $this->reflectPublicMethods($instance),
+                    ];
+                } catch (\Throwable $e) {
+                    $info[$label . '_error'] = $e->getMessage();
+                }
+            }
+            return new JSONResponse($info);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()]);
+        }
+    }
+
+    // NC admin required — no #[NoAdminRequired] attribute intentionally omitted
+    #[NoCSRFRequired]
     public function deckDiagnostic(): JSONResponse {
         // Admin-only diagnostic (v3.90.x) — Deck card/assignee creation has no
         // precedent anywhere in TeamHub (AddTaskModal.vue calls Deck's own OCS
@@ -1845,6 +1989,109 @@ class TeamController extends Controller {
                 }
             }
 
+            // v4.3.17 — deck_dependent_cards probe for the "why don't my
+            // dep lines show" case. Reports whether the table exists on
+            // this NC/Deck version, its actual column set, and — when a
+            // `?teamId=<id>` query param is present — every dep row for
+            // cards in that team's stacks alongside the resolved card
+            // titles. Read-only. Same auth as the rest of this endpoint
+            // (NC admin only). Sample use:
+            //   GET /api/v1/admin/deck-diagnostic
+            //   GET /api/v1/admin/deck-diagnostic?teamId=abc123
+            try {
+                /** @var \OCA\TeamHub\Service\DbIntrospectionService $introspect */
+                $introspect = $this->container->get(\OCA\TeamHub\Service\DbIntrospectionService::class);
+                $depCols    = $introspect->getTableColumns('deck_dependent_cards');
+                $depInfo    = [
+                    'columnsFound' => $depCols,
+                    'tableProbe'  => empty($depCols)
+                        ? 'DbIntrospectionService returned [] for deck_dependent_cards — either the table does not exist (Deck < 1.18) or introspection is failing on this NC version. isCardDependencySupported() will return false.'
+                        : 'ok',
+                ];
+                $teamId = $this->request->getParam('teamId');
+                if (!empty($teamId) && !empty($depCols)) {
+                    // Find every card in every board shared with this team,
+                    // then pull all dep rows referencing any of those cards.
+                    $boardIds = [];
+                    foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
+                        try {
+                            $qb = $this->db->getQueryBuilder();
+                            $r  = $qb->select('board_id')->from($aclTable)
+                                ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
+                                ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                                ->executeQuery();
+                            while ($row = $r->fetch()) { $boardIds[] = (int)$row['board_id']; }
+                            $r->closeCursor();
+                            if (!empty($boardIds)) break;
+                        } catch (\Throwable) {}
+                    }
+                    $cardIds = [];
+                    $cardsById = [];
+                    if (!empty($boardIds)) {
+                        try {
+                            $qb  = $this->db->getQueryBuilder();
+                            $qb->select('id', 'stack_id', 'title', 'deleted_at', 'archived')
+                                ->from('deck_cards', 'c')
+                                ->innerJoin('c', 'deck_stacks', 's', $qb->expr()->eq('c.stack_id', 's.id'))
+                                ->where($qb->expr()->in('s.board_id',
+                                    $qb->createNamedParameter($boardIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)));
+                            $r = $qb->executeQuery();
+                            while ($row = $r->fetch()) {
+                                $cid = (int)$row['id'];
+                                $cardIds[] = $cid;
+                                $cardsById[$cid] = [
+                                    'id'         => $cid,
+                                    'title'      => (string)$row['title'],
+                                    'deleted_at' => $row['deleted_at'] ?? null,
+                                    'archived'   => (int)($row['archived'] ?? 0),
+                                ];
+                            }
+                            $r->closeCursor();
+                        } catch (\Throwable $e) {
+                            $depInfo['cardsProbeError'] = $e->getMessage();
+                        }
+                    }
+                    $depInfo['teamId']           = $teamId;
+                    $depInfo['boardIdsResolved'] = $boardIds;
+                    $depInfo['cardsFound']       = count($cardIds);
+
+                    $depRows = [];
+                    if (!empty($cardIds)) {
+                        try {
+                            $qb  = $this->db->getQueryBuilder();
+                            $qb->select('card_id', 'dependent_card_id')
+                                ->from('deck_dependent_cards')
+                                ->where($qb->expr()->orX(
+                                    $qb->expr()->in('card_id',
+                                        $qb->createNamedParameter($cardIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)),
+                                    $qb->expr()->in('dependent_card_id',
+                                        $qb->createNamedParameter($cardIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)),
+                                ));
+                            $r = $qb->executeQuery();
+                            while ($row = $r->fetch()) {
+                                $a = (int)$row['card_id'];
+                                $b = (int)$row['dependent_card_id'];
+                                $depRows[] = [
+                                    'card_id'           => $a,
+                                    'card_title'        => $cardsById[$a]['title'] ?? '<not in this team>',
+                                    'dependent_card_id' => $b,
+                                    'dependent_title'   => $cardsById[$b]['title'] ?? '<not in this team>',
+                                    'interpretation'    => 'Per TeamHub docblock: card_id "' . ($cardsById[$a]['title'] ?? $a) . '" depends on dependent_card_id "' . ($cardsById[$b]['title'] ?? $b) . '". Expected connector: "' . ($cardsById[$b]['title'] ?? $b) . '" (blocker) → "' . ($cardsById[$a]['title'] ?? $a) . '" (blocked).',
+                                ];
+                            }
+                            $r->closeCursor();
+                        } catch (\Throwable $e) {
+                            $depInfo['depRowsProbeError'] = $e->getMessage();
+                        }
+                    }
+                    $depInfo['depRowCount'] = count($depRows);
+                    $depInfo['depRows']     = $depRows;
+                }
+                $info['dependencies'] = $depInfo;
+            } catch (\Throwable $e) {
+                $info['dependenciesProbeError'] = $e->getMessage();
+            }
+
             return new JSONResponse($info);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()]);
@@ -1868,7 +2115,6 @@ class TeamController extends Controller {
         return new JSONResponse(['types' => $this->memberService->getAllowedInviteTypes()]);
     }
 
-    #[NoCSRFRequired]
     public function saveAdminSettings(): JSONResponse {
         try {
             $body = $this->request->getParams();

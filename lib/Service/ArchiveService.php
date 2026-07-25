@@ -73,6 +73,7 @@ class ArchiveService {
         private FilesService           $filesService,
         private CalendarService        $calendarService,
         private DeckService            $deckService,
+        private CollectivesService     $collectivesService,
     ) {}
 
     // =========================================================================
@@ -2987,19 +2988,46 @@ HTML;
      */
     private function pendingToArray(PendingDeletion $p, ?int $now = null): array {
         $now ??= $this->timeFactory->getTime();
+        $archivedBy = (string)$p->getArchivedBy();
         return [
-            'id'             => $p->getId(),
-            'teamId'         => $p->getTeamId(),
-            'teamName'       => $p->getTeamName(),
-            'archivedAt'     => $p->getArchivedAt(),
-            'hardDeleteAt'   => $p->getHardDeleteAt(),
-            'daysRemaining'  => max(0, (int)ceil(($p->getHardDeleteAt() - $now) / 86400)),
-            'archivePath'    => $p->getArchivePath(),
-            'archiveBytes'   => $p->getArchiveBytes(),
-            'archivedBy'     => $p->getArchivedBy(),
-            'status'         => $p->getStatus(),
-            'failureReason'  => $p->getFailureReason(),
+            'id'                    => $p->getId(),
+            'teamId'                => $p->getTeamId(),
+            'teamName'              => $p->getTeamName(),
+            'archivedAt'            => $p->getArchivedAt(),
+            'hardDeleteAt'          => $p->getHardDeleteAt(),
+            'daysRemaining'         => max(0, (int)ceil(($p->getHardDeleteAt() - $now) / 86400)),
+            'archivePath'           => $p->getArchivePath(),
+            'archiveBytes'          => $p->getArchiveBytes(),
+            'archivedBy'            => $archivedBy,
+            'archivedByDisplayName' => $this->resolveArchiverDisplayName($archivedBy),
+            'status'                => $p->getStatus(),
+            'failureReason'         => $p->getFailureReason(),
         ];
+    }
+
+    /**
+     * Resolve the archiving admin's display name via IUserManager.
+     * Falls back to the UID for deleted users or the '(pseudonymized)'
+     * sentinel written when anonymizeData is enabled.
+     *
+     * @var array<string, string>
+     */
+    private array $archiverNameCache = [];
+
+    private function resolveArchiverDisplayName(string $uid): string {
+        if ($uid === '' || $uid === '(pseudonymized)') return $uid;
+        if (isset($this->archiverNameCache[$uid])) {
+            return $this->archiverNameCache[$uid];
+        }
+        try {
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+            $name = $userManager->get($uid)?->getDisplayName();
+        } catch (\Throwable $e) {
+            $name = null;
+        }
+        $resolved = ($name !== null && $name !== '') ? $name : $uid;
+        $this->archiverNameCache[$uid] = $resolved;
+        return $resolved;
     }
 
     // =========================================================================
@@ -3114,6 +3142,28 @@ HTML;
             ]);
         }
 
+        // Collectives — trash the collective (v4.3.11). See
+        // CollectivesService::suspendForTeam for the rationale (Collectives
+        // is Circle-backed so there's no per-user ACL to strip — trash is
+        // the closest equivalent to what the other suspends do).
+        try {
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            if ($uid !== '') {
+                $collMeta = $this->collectivesService->suspendForTeam($teamId, $uid);
+                if ($collMeta !== null) {
+                    $suspended['collectives'] = $collMeta;
+                    $this->logger->debug('[TeamHub][ArchiveService] Collectives access suspended', [
+                        'teamId' => $teamId, 'collectiveId' => $collMeta['collectiveId'],
+                        'app' => Application::APP_ID,
+                    ]);
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ArchiveService] Could not suspend Collectives access', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
         return $suspended;
     }
 
@@ -3214,6 +3264,23 @@ HTML;
                 ]);
             } catch (\Throwable $e) {
                 $this->logger->warning('[TeamHub][ArchiveService] Could not resume Deck access', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // Collectives — restore the trashed collective (v4.3.11).
+        if (isset($suspended['collectives']['collectiveId'])) {
+            try {
+                $uid = $this->userSession->getUser()?->getUID() ?? '';
+                if ($uid !== '') {
+                    $this->collectivesService->resumeForTeam($teamId, $uid, $suspended['collectives']);
+                    $this->logger->debug('[TeamHub][ArchiveService] Collectives access resumed', [
+                        'teamId' => $teamId, 'app' => Application::APP_ID,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][ArchiveService] Could not resume Collectives access', [
                     'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
                 ]);
             }

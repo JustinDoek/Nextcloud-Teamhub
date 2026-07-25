@@ -3,6 +3,580 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.4.2] — 2026-07-25 — CSRF hardening: state-changing endpoints now verify the token
+
+### Security
+
+- **Removed `#[NoCSRFRequired]` from 22 state-changing controller methods** across `MeetingController` and `TeamController`. Every write endpoint (POST/PUT/DELETE) now goes through NC's built-in CSRF token check. The frontend already sends the token on every request via the `@nextcloud/axios` interceptor, so this is transparent for legitimate callers and a hard-block on any forged same-origin request (defence in depth on top of the browser's default `SameSite=Lax` cookie policy).
+- **Methods now protected**: `MeetingController::createTeamMeeting`, `saveMeetingSettings`; `TeamController::updateTeamApps`, `deleteTeamResource`, `createIntravoxPage`, `deleteIntravoxPage`, `invalidateIntravoxCache`, `invalidateCollectivesCache`, `leaveTeam`, `markTeamSeen`, `requestJoinTeam`, `updateTeamDescription`, `removeMember`, `updateMemberLevel`, `approveRequest`, `rejectRequest`, `inviteMembers`, `createTeamResources`, `updateTeamConfig`, `deleteTeam`, `transferOwner`, `saveAdminSettings`.
+- **Kept `#[NoCSRFRequired]`** on `IntegrationController::registerIntegration` and `deregisterIntegration` — these are legitimately CSRF-exempt because external NC apps call them PHP-to-PHP from their own install / uninstall hooks (no browser session, no token). Documented reason preserved in the code.
+- GET endpoints across all controllers keep `#[NoCSRFRequired]` — that's the correct pattern for reads.
+
+### Verification checklist (after `npm run build` and redeploy)
+
+Any UI action that returns a 401 from the app after the rebuild means a caller isn't going through `@nextcloud/axios` or the axios interceptor isn't loaded. Smoke test the main write actions:
+
+- Create a team, edit its description, transfer ownership, delete a team
+- Invite a member, change a member role, remove a member
+- Approve / reject a pending join request; leave a team
+- Save Admin Settings (any tab); save a team's Config (any tab: budget/time/timeline/messages/collectives/dashboard/type)
+- Create / save meeting settings
+- Create / delete an IntraVox page; invalidate its cache
+- Update team apps; delete a team resource
+
+If any of those returns 401, the specific `#[NoCSRFRequired]` annotation can be added back and this changelog updated.
+
+## [4.4.1] — 2026-07-25 — Team-name guard now allows spaces
+
+### Changed
+
+- **`TeamService::assertValidTeamName`** — regex widened from `^[A-Za-z0-9-]+$` to `^[A-Za-z0-9 -]+$` so `"Marketing Team"`, `"Sales EU"`, etc. are valid. Frontend mirrors in `CreateTeamModal.vue` and `CreateTeamView.vue` updated. Error copy + persistent hint reworded to `"Letters, numbers, spaces, and hyphens (-) only."`.
+
+## [4.4.0] — 2026-07-25 — Session close: air-gapped-only, manual-issuance licensing + client-side seat enforcement + admin notifications + display-name + team-name guard
+
+Major-version rollup of the 4.3.19 → 4.3.22 arc into one release. Nothing new since 4.3.22; this bump seals the session.
+
+### What shipped across the arc
+
+**Licensing model — fully manual, air-gapped, no outbound calls.**
+- The daily-checkin `SendTelemetryJob` and `DailyReportJob` are gone; the boot-time install-event ping and the app-disabled uninstall ping are gone; the auto-renewal path is gone; the online trial-request path is gone. The app never contacts the licensing back-end for anything under 4.4.0+.
+- Trials and paid licenses are issued by hand from the licensing dashboard in response to email. The License tab exposes a "Request trial by email" `mailto:teamhub@tldr.host` with the instance UUID pre-filled, and a "Licensing info" link to `https://tldr.host/teamhub/licensing.html`. The old "Buy a license" link and "Start trial" button are gone.
+- License JWTs gain `paid_until` and `grace_days` claims. `exp = paid_until + grace_days`. Legacy JWTs without those claims fall back to `paid_until = exp`, `grace_days = 0`.
+- `POST /api/v1/admin/license/refresh` and `POST /api/v1/admin/license/trial` endpoints removed.
+
+**Client-side seat enforcement.**
+- New `seatEnforcement` axis in the license status envelope: `none` / `over-warn` / `over-lock`. Warn fires at `count > seats`, lock at `count > ceil(1.2 × seats)`. Unlimited-tier and legacy JWTs without `seats` claims resolve to `none`.
+- `allowsAdvancedCreation()` and `allowsAdvancedWrites()` now block on `over-lock` in addition to their existing temporal checks.
+- License tab shows warn (orange, `role="status"`) and lock (red, `role="alert"`) banners with the exact numbers and clear remediation copy.
+
+**Admin notifications — 14 days before license, 7 days before trial, and on seat overage.**
+- New `LicenseExpiryNotificationJob` (daily `TimedJob`) runs two independent checks per tick with per-event debounce markers in appconfig. Extending a license mints a new `paid_until` which invalidates the expiry marker, so the next approaching expiry produces its own single notification. Dropping under seat cap clears the over-seats marker so a later re-crossing fires again.
+- Three new `Notifier` subjects: `license_expiring_trial`, `license_expiring_paid`, `license_over_seats`. All deep-link to the TeamHub admin-settings section.
+
+**Display-name fixes across three surfaces.**
+- Activity widget, Admin Settings → Archive tab "Archived by", and Manage Team → Members tab all now show display names via `IUserManager` (with per-request cache in `ActivityService`) instead of falling back to account UIDs.
+
+**Team-name character guard.**
+- `TeamService::assertValidTeamName()` now enforces `^[A-Za-z0-9-]+$` for NEW teams only (existing teams stay opaque; `FilesService::sanitiseForFolderName` catches legacy path separators in folder creation). `CreateTeamModal.vue` and `CreateTeamView.vue` mirror the regex for inline feedback.
+
+### Session-end audit results
+
+- **Security & NC-guideline check**: 12-point walk clean. No new `#[NoCSRFRequired]`, no new `#[PublicPage]`, no new outbound fetches. `IClientService` dependency removed from `LicenseService`.
+- **Debug logging**: nothing to strip. `LicenseExpiryNotificationJob` uses only `error()` and `warning()` for real failures (permitted per SKILLS.md § step 2).
+- **WCAG 2.2 A/AA**: banners carry appropriate live-region roles, all new interactive elements are keyboard-native, no `outline: none`, no colour-only communication.
+- **Translation**: every new user-facing string wrapped in `t()`/`n()` with named placeholders. Notifier strings follow the file's pre-existing English-literal pattern (not a regression). Orphaned l10n keys (`Buy a license`, `Start a 30-day trial`, `Refresh now`, etc.) flagged for a future translations-review pass.
+
+### Session-end checklist compliance
+
+| Step | Status |
+|---|---|
+| Security & privacy scan | Clean — all new endpoints admin-gated, no user-controlled outbound URLs, no new secrets in logs |
+| NC security-guideline check | 100% — QueryBuilder + PARAM_INT bindings, no raw SQL, no new CSRF-required exemptions |
+| Remove debug logging | Nothing added; only warning/error failure logs on new job (permitted) |
+| Major version bump | 4.3.22 → 4.4.0 (info.xml + package.json in sync) |
+| HANDOFF.md | This entry |
+| CHANGELOG.md | This entry (per-patch entries retained for 4.3.19 – 4.3.22) |
+| APIendpoints.md | New License endpoints section; note added to Telemetry section about the retired daily-report path |
+| WCAG check | Banners with `role="status"` / `role="alert"`, native `<a>` mailto, error/hint routed through `NcTextField`'s ARIA bindings |
+| Translation check | All new strings via `t()` + named placeholders; orphan l10n keys flagged (non-blocking) |
+| Performance | New expiry job is one `getStatus()` call per day; no measurable cost. Seat enforcement is a memoized `countUniqueTeamMembers()` per status fetch — same query the Statistics tab already runs |
+| Database check | No new migrations or columns app-side (the seat model reads existing `seats` claim from JWT). Business-side has two migrations (`001_air_gapped_tiers.sql`, `002_drop_dead_schema.sql`) — apply on the licensing server, not this app |
+
+### Full session changed-files table (app side)
+
+| File | Change |
+|---|---|
+| `lib/Service/LicenseService.php` | Added `paid_until`/`grace_days` claim handling, `seatEnforcement`/`seatCap`/`seatLockAt` on status envelope, `computeSeatEnforcement()` helper, gates block on `over-lock`. Removed `TRIAL_URL`, `requestTrial()`, `recordTelemetry()`, `IClientService` DI, `TrialRequestException` import. Docblocks rewritten to reflect "no outbound calls, ever" model |
+| `lib/Service/ActivityService.php` | `IUserManager` DI + per-request display-name cache (`resolveDisplayName`); populates `displayName` alongside `user` on both NC-native activity rows and TeamHub audit rows |
+| `lib/Service/TelemetryService.php` | `countTeams` promoted to public; `sendDailyReport` marked DEPRECATED as defensive no-op |
+| `lib/Service/MemberService.php` | `getMembersForManage` direct-members loop uses the same `IUserManager` display-name ladder as `getEffectiveMembers` |
+| `lib/Service/ArchiveService.php` | `pendingToArray` returns `archivedByDisplayName` via container-resolved `IUserManager`; `(pseudonymized)` sentinel passes through |
+| `lib/Service/TeamService.php` | `assertValidTeamName` tightened to `^[A-Za-z0-9-]+$` for NEW teams |
+| `lib/Controller/LicenseController.php` | Removed `refresh()` + `requestTrial()` + `SendTelemetryJob` / `IJobList` / `UserRateLimit` / `TrialRequestException` imports |
+| `lib/Notification/Notifier.php` | New subjects: `license_expiring_trial`, `license_expiring_paid`, `license_over_seats` |
+| `lib/BackgroundJob/LicenseExpiryNotificationJob.php` | **New** — daily `TimedJob` with two independent checks (expiry + seat overage), per-event debounce markers |
+| `lib/AppInfo/Application.php` | Removed `sendInstallEvent()` boot call |
+| `lib/Listener/AppDisabledListener.php` | Removed `sendUninstallEvent()` call + `TelemetryService` DI |
+| `src/components/AdminSettings.vue` | License tab: "Buy license" → "Licensing info" → `licensing.html`; Start-trial button removed; "Request trial by email" mailto + hint added; seat-overage warn/lock banners. Archive tab "Archived by" uses `archivedByDisplayName`. `requestTrialMailto` computed |
+| `src/components/ActivityWidget.vue` | Uses `item.displayName` for subject text + NcAvatar |
+| `src/components/CreateTeamModal.vue` | Inline `validateTeamName()` mirror of backend regex + persistent hint |
+| `src/components/CreateTeamView.vue` | Same regex mirror in `nextStep()` |
+| `appinfo/routes.php` | Removed `license#refresh` + `license#requestTrial` |
+| `appinfo/info.xml` | Removed `SendTelemetryJob` + `DailyReportJob`; added `LicenseExpiryNotificationJob`; version → 4.4.0 |
+| `lib/Exception/TrialRequestException.php` | **Deleted** |
+| `lib/BackgroundJob/SendTelemetryJob.php`, `DailyReportJob.php` | **Deleted** |
+| `package.json`, `appinfo/info.xml` | Version → 4.4.0 |
+| `HANDOFF.md`, `CHANGELOG.md`, `APIendpoints.md` | Session-end updates |
+
+**Frontend build required (`npm run build`).**
+
+**Immediate next priority**: rebuild + redeploy on the test server. Verify (a) the "Licensing info" link opens `https://tldr.host/teamhub/licensing.html` in a new tab; (b) "Request trial by email" opens the mail client with UUID pre-filled and `teamhub@tldr.host` as recipient; (c) after installing a fresh JWT via PUT, `GET /api/v1/admin/license` returns `paidUntil`, `graceDays`, `seatEnforcement`, `seatCap`, `seatLockAt` populated; (d) manually forcing `seatsUsed` above `seats` shows the orange warn banner + fires the `license_over_seats` notification for admins on the next daily-job tick; (e) forcing count above `1.2 × seats` shows the red lock banner and blocks new Advanced-team creation from the CreateTeamView wizard.
+
+**Companion business-repo changes**: this app version pairs with the business site's manual-issuance UI (6 duration tiers × 3 seat tiers = 18 issue combinations, `002_drop_dead_schema.sql` migration retiring `trials_used` / `telemetry_reports` / three dead `licenses` columns). See the business repo's README for setup.
+
+---
+
+## [4.3.22] — 2026-07-24 — Fully-manual licensing pivot + client-side seat enforcement
+
+### Removed
+
+- **Online trial-request path.** The "Start trial" button in the License tab is gone; the trial endpoint (`POST /api/v1/admin/license/trial`), `LicenseService::requestTrial()`, the `TRIAL_URL` constant, `TrialRequestException`, and the `IClientService` dependency it required are all deleted. Trials and paid licenses are issued by hand from the licensing dashboard and delivered by email — the same "Request trial by email" mailto stays as the only path from the app.
+
+### Added
+
+- **Seat-enforcement axis in the license status envelope.** `LicenseService::getStatus()` now returns `seatEnforcement` (`none` / `over-warn` / `over-lock`), `seatCap`, and `seatLockAt`. Thresholds: `count > seats` → `over-warn`; `count > ceil(1.2 × seats)` → `over-lock`. Unlicensed, legacy JWTs without `seats`, and the unlimited tier (999999) all resolve to `none`. New private helper `computeSeatEnforcement()` centralises the math for all three status paths.
+- **Seat-overage gates.** `allowsAdvancedCreation()` and `allowsAdvancedWrites()` now block on `over-lock` in addition to their existing temporal checks. `over-warn` never blocks — it's banner-only.
+- **Seat-overage banner** in the License tab: warn variant (orange) between the status pill and the details table shows current/cap/lock-at counts and points at "upgrade or reduce members"; lock variant (red) spells out exactly what's blocked and why. Uses NC's warning/error CSS vars so it reads in both themes.
+- **`license_over_seats` notifier subject.** Rich subject highlights the used/cap counts; body copy names the lock threshold. Fires from `LicenseExpiryNotificationJob` on the first daily tick after the count crosses cap; debounced by license id (`license_over_seats_notified_for` appconfig marker) so it doesn't spam. When the count drops back under cap the marker is cleared, so a later re-crossing fires again.
+
+### Changed
+
+- **`LicenseExpiryNotificationJob`** now runs two checks per tick (expiry + seat overage) with independent debounce markers. Docblock rewritten to describe both axes.
+
+
+
+### Added
+
+- **`LicenseExpiryNotificationJob`** (daily `TimedJob`, registered in `appinfo/info.xml`). Runs once every 24 hours; when the saved license is a trial with paid_until ≤ 7 days away, or a paid license with paid_until ≤ 14 days away, it pushes a Nextcloud notification to every member of the `admin` group. Debounced by `(licenseId@paidUntil)` in appconfig so each approaching expiry produces at most one notification; extending the license from the licensing dashboard produces a fresh `paidUntil`, which invalidates the marker and re-arms the notification for the next approach.
+- **Two new `Notifier` subjects**: `license_expiring_trial` and `license_expiring_paid`. Rich subject highlights the day count; body copy differs between the two variants (trial: "install a paid license"; paid: "renew before the grace period ends"). Deep-links to the TeamHub admin settings section.
+
+### Changed
+
+- **`LicenseService::getStatus()` envelope gains `paidUntil`, `paidDaysRemaining`, `graceDays`** so the expiry job (and any future UI showing "your paid entitlement ends on X") can reason about paid_until separately from exp (which is paid_until + grace_days on the new-model JWTs). Legacy JWTs without those claims fall back to `paidUntil = exp` and `graceDays = 0`, keeping the API response shape valid.
+
+## [4.3.20] — 2026-07-24 — License tab: air-gapped-only model, one-shot trial telemetry, mailto fallback
+
+### Changed
+
+- **"Buy a license" renamed to "Licensing info"** and now points to `https://tldr.host/teamhub/licensing.html` (was `https://tldr.host/teamhub`).
+- **"Start a 30-day trial" simplified to "Start trial"** — trial length is a back-end decision now (currently 1 month air-gapped, extendable per-request from the licensing dashboard).
+- **Start-trial POST body carries one-shot telemetry**: `{uuid, email, teams, unique_members, reported_at}`. `teams` and `unique_members` come from `TelemetryService::countTeams()` / `countUniqueTeamMembers()`. Client IP is NOT sent (server rate-limits the request-IP but never persists it).
+- **License JWT gains `paid_until` and `grace_days` claims** on the licensing side (see business repo `migrations/001_air_gapped_tiers.sql`). Older JWTs without these claims are still accepted; missing claims are treated as `paid_until = exp` and `grace_days = 0`.
+
+### Added
+
+- **"Request trial by email" link** next to Start trial. Opens the admin's mail client with subject `Request trial key` and body pre-filled with the instance UUID. Companion hint clarifies that the reply-to address of the outgoing mail is where the license key will land.
+
+### Removed
+
+- **`SendTelemetryJob` and `DailyReportJob`** — daily check-ins had no receiving endpoint any more.
+- **Boot-time install-event ping** (`Application::boot` → `sendInstallEvent`) — same reason.
+- **`AppDisabledListener` uninstall-event call** — same. Integration-suspend behaviour on the same event is unchanged.
+- **`POST /api/v1/admin/license/refresh`** endpoint + `LicenseController::refresh()` — the "Refresh now" affordance it powered had already been removed from the UI.
+- **`LicenseService::recordTelemetry()`** — orphan after the daily-report job was removed. The two `license_last_telemetry_*` config keys remain in appconfig as dormant reads for the status envelope.
+
+## [4.3.19] — 2026-07-24 — Display name in Activity/Archive/Members + team-name character guard for new teams
+
+### Fixed
+
+- **Activity widget** now shows display names in subject text and passes UID + display name to `NcAvatar`. `ActivityService` resolves display names via `IUserManager` with a per-request cache (25 rows → 3–4 lookups typical) and attaches `displayName` alongside `user` on both NC-native activity rows and TeamHub audit rows.
+- **Admin Settings → Archive tab "Archived by"** shows the archiving admin's display name; UID moved to the row `title` tooltip. `ArchiveService::pendingToArray` returns new `archivedByDisplayName` (pulled via container-resolved `IUserManager`; `(pseudonymized)` sentinel passes through unchanged).
+- **Manage Team → Members tab** uses the same `IUserManager` display-name ladder already used by `getEffectiveMembers()` in `MemberService::getMembersForManage()`.
+
+### Added
+
+- **Team-name character guard for NEW teams** — `assertValidTeamName()` now enforces `^[A-Za-z0-9-]+$`. Existing teams with special characters are untouched (still treated as opaque strings; `FilesService::sanitiseForFolderName` catches legacy `/` or `\` in folder creation). Both `CreateTeamModal.vue` and `CreateTeamView.vue` mirror the regex on the frontend so users get inline feedback before the create request goes out. Persistent hint below the field: "Letters, numbers, and hyphens (-) only."
+
+## [4.3.18] — 2026-07-24 — Dep-lines: drop the DbIntrospection gate + always-on diagnostic
+
+### Fixed
+
+- **Sidebar "+ New Team" highlight softened.** Uses `--color-primary-element-light` (the state-tint variant NC uses for hover/selected states) instead of the full brand green, adds `border-radius: var(--border-radius-large)` for rounded corners, text/icon inherit `--color-main-text` so both themes read cleanly. Matches the "selected item" look Justin wanted rather than a full solid CTA.
+
+- **Dep-lines: dropped the `DbIntrospectionService::getTableColumns('deck_dependent_cards')` gate that was blocking the pipeline on NC 34.** That helper returned `[]` on NC 34 even when the table existed (its three strategies all miss against NC 34's schema layer), so `TimelineService::fetchDeckEvents` short-circuited before running the dep-fetch SELECT — no `blockedByCardIds` metadata reached the frontend, and no `console.warn` fired either because there was nothing to warn about. Now:
+  - **Backend** — the dep-fetch SELECT runs directly with try/catch. Missing table throws SQLSTATE[42S02] and we swallow it, same pattern `fetchDeckEvents` uses for its `SELECT * FROM deck_cards`. No pre-check.
+  - **Backend** — `isCardDependencySupported()` probes with a real `SELECT card_id LIMIT 0` instead of `DbIntrospection`. Missing table throws → false; table present → true. Frontend timelineConfig flag now reports the real answer.
+  - **Frontend** — `buildDependencyEdges` no longer gates on the `supported` param. Whatever events came in with `blockedByCardIds` attached, we render. If the backend attached none we naturally produce zero edges; no upstream gate can silently kill the render.
+  - **Unconditional console.log** every canvasLayout compute. Previous v4.3.17 warning only fired when supported+data+no-edges — a specific corner. Now every render dumps `supportedFlag`, `deckEventsTotal`, `eventsWithDeps`, `anchorsCount`, `edgesDrawn`, and the skip counters. Silent runs are impossible from here on.
+
+### How to read the console log
+
+Open a team's Timeline → devtools → find `[TeamHub][swimlane] buildDependencyEdges`.
+- `eventsWithDeps: 0` and you know deps exist → backend still isn't attaching. Run `GET /api/v1/admin/deck-diagnostic?teamId=<id>` and paste the `dependencies` block back.
+- `eventsWithDeps: N, edgesDrawn: 0` → frontend problem. `skipped.blockedMissing` / `skipped.blockerMissing` name which side is off-window; `missingBlockerIds` / `missingBlockedIds` list the IDs.
+- `edgesDrawn: N > 0` but you don't see lines on screen → visual/CSS issue; the SVG polylines are being generated. Try zooming in on where they should be.
+
+---
+
+## [4.3.17] — 2026-07-24 — Dep-line diagnostics + highlighted "+ New Team" sidebar action
+
+### Added
+
+- **`deck-diagnostic` extended to probe `deck_dependent_cards`** — the diagnostic endpoint now reports whether the table exists on this NC/Deck version (via `DbIntrospectionService`), its actual column set, and — when a `?teamId=<id>` query param is present — every dep row referencing any card in that team's boards, with the resolved card titles and an explicit interpretation line ("card X depends on Y; expected connector Y → X"). Read-only, NC admin only. Sample:
+  ```
+  GET /apps/teamhub/api/v1/admin/deck-diagnostic?teamId=<teamId>
+  ```
+  If the `dependencies.depRows` array is empty for a team you know has dep rows, the issue is DB scope (rows exist on different boards / cards) or table naming. If it lists rows but the swimlane still draws no lines, the issue is client-side — see the console warning below.
+- **Browser-console diagnostic when the swimlane finds nothing to draw.** `buildDependencyEdges` in `ProjectSwimlaneView.vue` now logs a structured `console.warn` when `cardDependenciesSupported === true` and there are events with `blockedByCardIds` but zero edges came out. Dumps: anchor keys currently in view, event count with deps, sample event metas (with `typeof cardId` / `typeof blockerId` so numeric/string coercion bugs surface), and skip counts by category (missing blocker anchor vs missing blocked anchor vs no blocker ids). Silent when there's nothing to reason about.
+
+- **"+ New Team" sidebar item now renders as the primary action.** Highlighted with `--color-primary-element` background + primary-text foreground (Files-style), matching NC's own convention where the first sidebar item is a primary CTA. Uses a `.teamhub-nav-primary` class + `:deep()` scoped selectors — the NC component's own template is scoped so plain descendant selectors don't reach the inner button. Not implemented via `:active` because that means "currently viewing" semantically; we want prominence regardless of the active view.
+
+### How to diagnose "dep lines still don't show"
+
+1. Open the team's Timeline (advanced project) → open browser devtools console.
+2. Look for a `[TeamHub][swimlane] Dep lines not drawn despite supported+data` warning.
+   - If it says `anchorsInView` is missing the blocker or blocked card ids → the card is filtered out (deleted / archived / not in current time window).
+   - If `cardIdType` or `blockerType` is `'string'` on one side and `'number'` on the other → a numeric coercion bug in the ID paths, please paste the sample and I'll fix.
+   - If the warning does not fire at all and `supported` is false somewhere → the `deck_dependent_cards` table wasn't detected on this install. Run `GET /apps/teamhub/api/v1/admin/deck-diagnostic` and check `dependencies.columnsFound` / `tableProbe`. Empty means `DbIntrospectionService` can't see it — either Deck < 1.18 or introspection is failing on NC 34.
+3. If you're an NC admin, run the deck-diagnostic with `?teamId=<teamId>` and paste back the `dependencies` block. That tells us definitively whether the rows exist on your side and how TeamHub interprets them.
+
+---
+
+## [4.3.16] — 2026-07-24 — Comments render display names instead of raw UIDs
+
+### Audit result
+
+Grepped the codebase for spots that render a raw NC UID where a display name belongs. Most components already resolve display names correctly — `MessageCard`, `DeckWidget`, `ProjectSwimlaneView`, `IntravoxWidget`, `ManageTeamView` (members / pending join requests), `AdminSettings` (owner rows) all use `author_display_name || author_id` or an equivalent name-first pattern. Admin-only surfaces (Maintenance owner rows, audit log, ghost users, budget-editor suggestions) intentionally show the UID in parens next to the display name for verification — left alone.
+
+The one concrete gap was **`CommentsSection.vue`**: comment rows rendered `{{ c.author_id }}` as the visible author label and passed the UID as the `display-name` prop to `NcAvatar`, and the composer avatar used the current user's UID for both `user` and `display-name`.
+
+### Fixed
+
+- **Comment rows now show the author's display name.** Backend: `CommentController` gains a `hydrateAuthorNames()` helper that walks the response, does one `IUserManager` lookup per distinct UID (deleted/missing users fall back to the raw UID), and stamps `author_display_name` on every row. All three response paths hydrate — `listComments`, `createComment`, `updateComment`. Same pattern `MessageService` already uses for messages.
+- **Frontend**: `CommentsSection.vue` now renders `c.author_display_name || c.author_id` both as the visible label and as the `NcAvatar` display-name prop. Composer avatar (currently-authoring user) uses a new `currentUserDisplayName` computed that reads `getCurrentUser().displayName` — was passing the UID before, which is what `NcAvatar` fell back to rendering when its remote avatar lookup missed.
+
+---
+
+## [4.3.15] — 2026-07-24 — Timeline nonce (take 2) + dep-lines for cards created outside the window
+
+### Fixed
+
+- **Timeline nonce (real fix).** 4.3.14 used `\OCP\Security\ContentSecurityPolicyNonceManager` — that class does not exist and never did; `$server->get()` threw `QueryNotFoundException` and the whole template blew up before rendering anything. The actual nonce manager lives at `\OC\Security\CSP\ContentSecurityPolicyNonceManager` (OC-private but stable across NC 32–34 — Nextcloud's own core templates resolve it the same way). Template now uses that with a two-step fallback (legacy `getContentSecurityPolicyNonceManager()` shortcut for very old NC versions, then a debug log if both miss) so we render the iframe even when the CSP nonce is unavailable — the inline script would still be CSP-blocked in that case, but the user sees the "Loading…" HTML rather than a 500.
+
+- **Deck-card dependency lines now show even for cards created outside the visible window.** Root cause: `TimelineService::fetchDeckEvents` attached `blockedByCardIds` metadata ONLY to `eventRole === 'created'` events, and `buildDependencyEdges` in the swimlane view iterated only those events. So a card whose `created` event fell outside the current time window (e.g. "Schedule the planning kickoff meeting" created 15 days ago, viewed on a 1-week window) had no `blockedByCardIds` meta anywhere on-screen and no connector line was drawn even though the card's due bar was clearly visible.
+
+  Now attached to **every** event of a dependency-having card in `TimelineService`, and the frontend's `buildDependencyEdges` iterates any deck event carrying the meta while deduping by `cardId` so multiple events for the same card produce one set of edges. Manhattan routing (4-point SVG polyline with `stroke-linejoin: round`) is unchanged — that part has always been correct.
+
+---
+
+## [4.3.14] — 2026-07-24 — NC 34 timeline nonce + Collectives lookup hardening
+
+### Fixed
+
+- **Timeline iframe crashed on NC 34** with `Call to undefined method OC\Server::getContentSecurityPolicyNonceManager()`. NC 34 removed that shortcut method from `OC\Server`. Template now uses the canonical DI accessor `\OC::$server->get(\OCP\Security\ContentSecurityPolicyNonceManager::class)` which works on every NC version we support.
+
+- **"Collective already exists" on Enable Wiki now recovers.** Same class of fix as the "Configuration value is not valid" recovery in 4.3.13: a team whose Collective row is still in the DB but which our pre-check missed (e.g. after a soft-delete cycle, or when the appconfig id-cache was cleared) was falling into `createCollective` which then refused as duplicate. Now catches the specific message, re-runs `CollectiveMapper::findByCircleId(includeTrash: true)`, adopts the existing row, and continues — the Wiki toggle flips on cleanly with the existing content intact.
+
+- **Pre-check now finds trashed collectives too** ([findExistingCollectiveByCircleId](lib/Service/CollectivesService.php:1227)). The mapper call was defaulting to `includeTrash=false`, so a collective that was trashed during a previous soft-delete or disable cycle stayed invisible to the enable-Wiki flow. Now passes `includeTrash: true` and, when the found row is trashed, calls `CollectiveService::restoreCollective` inline before returning the id — the admin clicks "Enable Wiki" and the collective comes back with its content intact.
+
+- **Stale cached collective id now gets cleaned up on the fly.** `getTeamCollective` path 1 (direct fetch by `collectives_collective_id_<teamId>` appconfig value) was pinging Collectives with a bogus id every request when the stored id pointed at a Collective that no longer exists (deleted directly in Collectives, renumbered, or rolled back mid-enable). Now when the direct fetch fails with a "not found"-shaped error, the stale appconfig entry is deleted so path 2 (`getCollectives` loop) and path 3 (mapper) can find the right row without the recurring NotFound noise.
+
+### Known — not fixed
+
+- **Dep-line rendering on advanced-project Timeline swimlane** — the code in `ProjectSwimlaneView.vue:467` is already Manhattan-routed (SVG `<polyline>` with four points and `stroke-linejoin: round` for smooth 90° corners), and `cardDependenciesSupported` derives from Deck 1.18+ `deck_dependent_cards` via `DbIntrospectionService`. If dep lines still don't show after this build on NC 34, the likely cause is either (a) `DbIntrospectionService` failing to read the `deck_dependent_cards` columns on NC 34 (visible via `/apps/teamhub/api/v1/admin/deck-diagnostic` — `card_dependencies_supported` should be true), or (b) the team's Deck cards genuinely have no `deck_dependent_cards` rows recording dependencies. Would need a screenshot of the diagnostic and one browser-console log with the swimlane view open to diagnose further.
+
+---
+
+## [4.3.13] — 2026-07-23 — Enable-Wiki recovery, click-to-iframe on Wiki widget, canonical subpage URLs
+
+### Fixed
+
+- **"Configuration value is not valid" on Enable Wiki now recovers automatically when it can.** The 4.3.12 trace pinned the failure to Collectives' `CircleHelper::flagCircleAsAppManaged` → NC Circles' `CirclesManager::flagAsAppManaged`, which writes a config flag on the Circle to lock it against user tampering. NC 33's typed IConfig rejects that write on the config bitmask TeamHub teams carry.
+
+  **Crucially, `flagAsAppManaged` runs AFTER Collectives has already inserted the Collective row** (create → then flag), so a Collective row is often present on disk even though `createCollective` threw. `enableForTeam` now catches this specific error and looks up the DB via `CollectiveMapper::findByCircleId($teamId, includeTrash: true)` — if the row exists, we use its id and proceed with the enable. Falling through leaves the Circle *not* app-managed-flagged, which only affects whether users can manually tamper with the Circle from the Circles UI; the Wiki works fine either way.
+
+  When no recovery row exists, the same full-trace log and actionable error message from 4.3.12 fire.
+
+- **Clicking a Wiki page or the collective in the widget now opens the iframe on that target instead of jumping to the Collectives app in a new browser tab.** Mirrors the FilesFavoritesWidget/RecentWidget's `openFileInEmbed` pattern: `IntravoxWidget.openInWikiEmbed` intercepts a plain click, commits `SET_COLLECTIVES_EMBED_PAGE_URL` + `SET_VIEW('collectives')`, and lets modified clicks (Ctrl / Cmd / Shift / middle) fall through to the browser's native new-tab open so power users can still park a page in a separate tab. `target="_blank"` removed from the Collectives links (the Intranet links keep it — the user only asked to switch this for Wiki).
+
+- **Widget subpage URLs now route to the correct page too.** `CollectivesService::getSubPages` was still building `?fileId=X` URLs from 4.3.5 — Collectives' router keys off path segments first and only treats `?fileId=` as a fallback, so a widget click landed on the collective's landing page. Now uses `PageService::getPageLink` (same fix as 4.3.12's create-page URL), so clicks route directly to the target page. Ad-hoc fallback kept for the (unlikely) case where `getPageLink` throws.
+
+---
+
+## [4.3.12] — 2026-07-23 — Circle-rebind soft-delete, canonical page URL, enable diagnostics
+
+### Changed
+
+- **Soft-delete now rebinds the collective to the owner's personal circle instead of trashing it** (v4.3.11 change reverted). New behaviour matches the user's precise ask: during the grace window the team owner keeps admin-grade access to the collective as their own; the team-circle is stripped from the collective's ACL so team members lose access via the widget/tab. The collective itself stays fully usable — no trip through Collectives → Trash.
+  - Implementation: direct UPDATE on `oc_collectives_collectives.circle_unique_id`, pointing it at the owner's personal circle (their `single_id` in NC Circles — every user has a source=1 self-circle). Same "reach into another app's table when the OCP surface doesn't cover it" pattern already used for Deck reads/writes. Documented inline as a targeted bypass; Collectives exposes no rebind method through its OCP surface.
+  - `resumeForTeam` reverses the UPDATE on restore, pointing `circle_unique_id` back at the team-circle so team members regain access.
+  - Personal-circle resolution reads from `circles_membership.single_id` joined to `circles_member` with `user_type=1` — same join `ArchiveService::captureEffectiveUsers` uses.
+  - Fallback: if the owner has no personal circle (rare — Circles account not yet initialised) or the UPDATE fails, we fall through to `trashCollective` so the collective still leaves team members' view. Owner then restores from Collectives → Trash. `resumeForTeam` handles both branches based on the metadata `suspendForTeam` returns.
+
+### Fixed
+
+- **"Create Wiki page" now opens the iframe *on the new page*, not on the collective's landing.** Backend was building the URL as `/apps/collectives/{slug}?fileId={id}` — Collectives' router keys off path segments first and treats `?fileId=` only as a slug-resolution fallback, so the landing loaded. Now uses Collectives' own `PageService::getPageLink()` (their canonical URL builder) which returns `{slug}/{page-title}?fileId={id}` — the path segment routes directly to the new page. Falls back to a manually-constructed variant if `getPageLink` throws.
+- **"Configuration value is not valid" enable error** now logs the full stack + file:line where Collectives (or Circles under it) failed. NC 33's typed IConfig raises this when an internal write fails validation, but from outside there's no way to know *which* write. The trace surfaces the exact Collectives frame that hit it. Also included the full string in the user-facing error so an admin knows where to look in the NC log.
+
+### Notes
+
+- If the user's team-delete "immediately deleted the collective" report reproduces on 4.3.12, the underlying archive `mode` is set to `'hard'` (produceTeamArchive step 17 fires `TeamService::deleteTeam` right after the archive ZIP, which cascades through `deleteForTeamCascade`). `suspendConnectedAppResources` is skipped in hard mode by design. Fix: change the admin archive setting to `soft30` or `soft60` so the suspend path (now the rebind above) runs instead of the immediate hard-delete.
+
+---
+
+## [4.3.11] — 2026-07-23 — Collectives soft-delete + hardening
+
+### Added
+
+- **Collectives now honours the team soft-delete flow.** `ArchiveService::suspendConnectedAppResources` (fired on team archive / soft-delete) now trashes the team's collective via Collectives' own `CollectiveService::trashCollective`, alongside the existing Talk / Files / Calendar / Deck suspends. `resumeConnectedAppResources` (fired on team restore) calls `restoreCollective` to bring it back. The team's Wiki toggle is flipped off during the grace window and back on at restore, so the widget/tab visibility tracks state without any manual admin action. Hard-delete on grace expiry still cascades through `TeamService::deleteTeam → CollectivesService::deleteForTeamCascade` (unchanged from 4.3.3, `deleteCircle=false`), so the collective is permanently removed at the same moment the circle is destroyed.
+  - Note on the "add owner as admin" ask: Collectives is Circle-backed by design — the collective's admin set is the Circle's admin set. The team owner already IS a Circle admin, so trashing the collective preserves their ability to pull content back from Collectives → Trash during the grace window without any extra binding. Rebinding to a personal circle isn't possible without breaking Collectives' Circle contract.
+
+### Fixed
+
+- **"File not found: 0" on Create Wiki page.** Fresh collectives can return an unresolved `parentId=0` from `PageService::findAll`, and Collectives' own zero-handling then falls into `nodeHelper->getFileById(0)` and throws "File not found: 0". `CollectivesService::createPage` now resolves the parent in three stages:
+  1. First existing page with `parentId > 0` — that's the collective's root folder fileId, shared by every root-level page.
+  2. If every page reports parent 0 (fresh materialisation), fall back to the first existing page's own **id** — creating the new page as a subpage of the landing page, which is a valid location and beats hard error.
+  3. Zero as a last resort — Collectives will try its own fallback.
+- **"Configuration value is not valid" on enable Wiki** now surfaces an actionable message. NC 33's typed IConfig throws this when Collectives (or Circles under it) writes a value that fails the new type/format constraints — intermittent on the TeamHub-teams config bitmask. Caller now reads "Collectives could not finish setting up this team's wiki because Nextcloud rejected one of its internal writes… please try the toggle again" instead of the raw internal error.
+- **"Create Wiki page" no longer opens the collective in a new browser tab.** Two fixes together: (a) the frontend now wraps the deep-link with `generateUrl` before handing it to the iframe, so installs with URL rewriting disabled get the `/index.php` prefix (the missing prefix was the top-navigate trigger on some setups); (b) `preloadedViews.add('collectives')` runs before `setView('collectives')` so the AppEmbed mounts *with* the deep-link URL rather than mounting on the collective landing and then swapping — the mid-mount URL change was the second half of the top-navigate.
+
+---
+
+## [4.3.10] — 2026-07-22 — `__call`-safe Collectives entity access
+
+Root-cause fix for the "This team has no collective bound yet" error on `POST /collectives/pages` and for the Wiki widget/tab showing empty on installs where NC Contacts *can* see the collective↔team binding.
+
+### Fixed
+
+- **`CollectivesService::getTeamCollective` was silently returning null even when the collective existed and the caller had full access.** The `getCollectives($userId)` loop gated its circle-id comparison on `method_exists($c, 'getCircleId')`. Collectives' `Collective` entity is built on NC's ORM (`OCP\AppFramework\Db\Entity`) which exposes field getters (`getCircleUniqueId()`, `getName()`, `getSlug()`, `getEmoji()`, `getParentId()`, …) via the `__call` magic method. **`method_exists()` does not detect `__call`-provided methods on all PHP/NC versions.** So the loop found the row, `method_exists()` returned false for BOTH candidate names (`getCircleId` and `getCircleUniqueId`), `$circleId=''`, no match, `null` returned.
+
+  Fixed by rewriting the resolver to try three paths in order:
+  1. **Direct fetch by cached id** — `getCollectiveWithShare($cachedId, $userId)`, the by-id ACL-enforced lookup Collectives itself uses. Wins outright when we already have the id from an earlier enable.
+  2. **`getCollectives($userId)` loop** — same as before but calls `safeGetCircleId()`, a helper that invokes both `getCircleUniqueId()` and `getCircleId()` inside a try/catch (so `__call` actually fires) instead of gating on `method_exists()`.
+  3. **DB-mapper fallback** — `\OCA\Collectives\Db\CollectiveMapper::findByCircleId($teamId)`. Bypasses Collectives' per-user ACL for the case where the collective was created directly in Collectives' UI, or where the fresh-enable Circle-member propagation hasn't landed yet.
+
+  Debug logs on every resolver call record which path won (`matchedBy`), so a follow-up bug is easy to trace next time.
+
+- **Same `__call`-safe treatment applied everywhere else the service touches Collectives' entity getters**: `serializeCollective`, `findExistingCollectiveByCircleId` (pre-check on enable), `createPage` (parent resolution from `findAll[0]->getParentId`), `getSubPages` (page id/title extraction), and the "collective landed on unexpected circle" sanity warn in `enableForTeam`. Every getter is now called inside a try/catch instead of gated on `method_exists()`.
+
+- **Null resolver results no longer cache for 5 minutes.** The old code cached the null answer in `ICache::createLocal()` for 5 minutes, so once a lookup failed (for any reason — race, ACL glitch, the `method_exists` bug above), the widget stayed silent for the full TTL even after the underlying condition cleared. Now only successful lookups cache; a failing read re-runs the (still cheap) three paths on the next request.
+
+### Impact
+
+- Existing installs where the Wiki toggle read "enabled" but the widget / tab / create-page endpoint acted as if no collective was bound will resolve on the next page load — no user action needed beyond a browser refresh (or the 5-minute cache-TTL expiry for the previously-cached null).
+
+---
+
+## [4.3.9] — 2026-07-22 — Wiki tab renders, Wiki pages list, "Create Wiki page" action
+
+Three concrete fixes for reports after 4.3.8.
+
+### Fixed
+
+- **Wiki tab was invisible in the tab bar despite the config being right.** `TeamTabBar.vue` renders every tab via a per-key `v-else-if` button block (Talk / Files / Calendar / Deck / Presence / Decisions / Timeline / Budget / Time) — I added `collectives` to the descriptor pipeline in 4.3.5 and to `ALLOWED_TAB_KEYS` / `DEFAULT_TAB_ORDER` / the watcher in 4.3.8 but never added the matching `v-else-if="tab.key === 'collectives'"` block. Result: the descriptor made it into `orderedTabs`, but the loop had no case to render it, so `<template>` walked past it silently. Added the button block (drag-reorder + active-class + setView, same shape as Decisions), the `isTabRenderable` case (returns true), and the `getTabIconName` case (returns `BookOpenOutline`).
+- **Widget was not listing pages inside the team's collective.** `CollectivesService::getSubPages` filtered results to `parentId === 0` on the assumption that top-level pages have parent 0. In practice Collectives assigns every real page's `parentId` to the fileId of its enclosing folder (never 0), so the filter dropped every page and left the widget's Wiki section silently empty. Dropped the filter — the widget now lists every page from `findAll`, sorted by title, capped at 20.
+
+### Added
+
+- **"Create Wiki page" action** in the Pages widget header (desktop grid + tablet layout + mobile actions sheet). Visible whenever the Wiki team-app is enabled; sits next to the existing Intranet create/delete actions when Intranet is also on. Modal in `TeamView.vue` mirrors the Intranet create dialog. On submit:
+  1. `POST /api/v1/teams/{teamId}/collectives/pages` with `{ title }` (new endpoint, member-gated; Collectives' own ACL still enforces write permission).
+  2. Backend calls `PageService::create(collectiveId, parentId, title, null, uid)`. Parent resolves from the first existing page's `parentId` (the enclosing folder every root-level page shares); falls through to 0 for a brand-new collective so Collectives picks its own root.
+  3. Response returns `{ id, title, url }` — the URL is a `?fileId=` deep-link into the collective.
+  4. Frontend commits the URL to a new store field `collectivesEmbedPageUrl` (mirrors `filesEmbedFileUrl` shape). `SET_VIEW` clears it on the next navigation away from `collectives`, so re-opening the Wiki tab later goes back to the collective's landing view. `collectivesUrl` in `TeamView` prefers the deep-link when set.
+  5. `SET_VIEW('collectives')` fires — the iframe opens directly on the new page.
+
+- **Existing Intranet actions relabeled** to "Create Intranet page" / "Delete Intranet page" so admins can tell the two provider actions apart in the same menu when both team-apps are on. Menu order is Intranet-create, Intranet-delete, Wiki-create.
+
+### Notes
+
+- Cron log the user pasted (`OCA\Circles\Model\Member::getBasedOn() returned null`) is Talk's `CircleMembershipListener` choking during a Circle member event — an NC-side incompatibility between Talk and Circles, not a TeamHub issue. Nothing we can fix from here; may be worth an upstream report if it persists.
+- The new backend endpoint uses `member` level. If you want moderator-only or admin-only page creation, tell me and I'll swap the gate.
+
+---
+
+## [4.3.8] — 2026-07-22 — Wiki tab wiring (recurring "new tab doesn't show up" fix)
+
+Three gaps that always come up when a new config-gated tab lands. Same fix each time — this is the canonical recipe.
+
+### Fixed
+
+- **`collectives` added to `LayoutController::ALLOWED_TAB_KEYS`.** Without it, any `saveLayout` PUT containing `collectives` in the tab order was silently dropped, so the tab could not persist even when it did show.
+- **`collectives` added to `LayoutController::DEFAULT_TAB_ORDER`** (positioned between `deck` and `timeline` to match `builtinViews` in `TeamView.vue`). `mergeNewTabs` runs on every layout GET and appends missing default tabs to existing users' saved `tab_order_json` — without the constant entry, existing users would never have received the tab key at all, so the frontend's tab-order source didn't contain it and the buildOrderedTabs filter had nothing to match.
+- **`collectivesConfig` watcher on `TeamView.vue`** that rebuilds `orderedTabs` when the toggle flips. Mirrors the watchers that already exist for `presenceConfig`, `decisionsConfig`, `timelineConfig`, `budgetConfig`, `timeConfig`, and `project`. Without this, `buildAllTabDescriptors` was already checking `collectivesConfig.collectives_enabled` but never ran again after the initial `loadLayout`, so enabling Wiki from Manage Team required a page reload for the tab to appear.
+
+Every new config-gated tab needs all three: (1) `ALLOWED_TAB_KEYS`, (2) `DEFAULT_TAB_ORDER`, (3) a mirroring `xxxConfig` watcher.
+
+---
+
+## [4.3.7] — 2026-07-22 — Unified Pages widget (Intranet + Wiki share one card)
+
+Rolls back the standalone Wiki widget introduced in 4.3.5. Intranet (Intravox) and Wiki (Collectives) now share a single home-view widget — one card, two sections — matching the earlier design intent that "the pages widget" serves both providers. The Wiki **iframe tab** (full-view Collectives app) is unchanged; only the mini home-view surface consolidates.
+
+### Changed
+
+- **`IntravoxWidget.vue` now renders both providers.** New Wiki section slots in below the Intranet section when Wiki is enabled and the caller can see the collective. Widget filename is unchanged so grid / tablet / mobile imports don't need to move. Both fetches run in parallel with independent `try`/`catch` — one provider failing doesn't hide the other. Emits both `pages-loaded` (Intravox payload) and `collective-loaded` (Collectives payload); TeamView's existing handlers cover both.
+- **Widget title reverts from "Intranet" to "Pages"** on the desktop grid, tablet layout, mobile home, drag-handle, dashboard catalog, and Manage Team → Settings → Dashboard hide/show list. The name is generic because the widget can now show either or both providers. Manage Team → Integrations toggles keep the distinct "Intranet" and "Wiki" labels — those refer to specific team-apps, not the widget.
+- **Grid gate widened** to `resources.intravox || collectivesConfig?.collectives_enabled`. Widget-pages appears the moment either team-app is on.
+- **Create/Delete page actions** in the widget header (and the tablet action menu) are now gated on `resources.intravox` — those buttons hit `/intravox/page`, so they only make sense when the Intranet provider is enabled. Wiki page management stays in Collectives' own UI.
+
+### Removed
+
+- **Standalone Wiki widget from every layer**: desktop grid item + tablet block + mobile canvas body + mobile home icon in `TeamWidgetGrid.vue` and `MobileWidgetView.vue`. `widget-collectives` gone from `getActiveWidgetIds`, the widget-catalog label map, `DEFAULT_LAYOUT`, and `ALLOWED_WIDGET_IDS`.
+- **`CollectivesWidget.vue`** deleted — the file was the standalone widget body and has no other consumer.
+- **`mergeNewWidgets` special-case for `widget-collectives`** deleted. `widget-files-center` returns to y=20 and `widget-decisions` to y=24 in `DEFAULT_LAYOUT` (both had been bumped in 4.3.6 to make room for the standalone widget).
+
+### Migration for existing installs
+
+- Any layout saved between 4.3.5 and 4.3.6 will have a `widget-collectives` entry pointing at the deleted widget. `mergeNewWidgets`'s legacy-prune list now includes `widget-collectives`, so those entries are stripped on the next layout GET — same mechanism that swept `widget-files-{favorites,recent,shared}` when they consolidated into `widget-files-center` in v3.62. No user action needed.
+
+### Unchanged
+
+- **Wiki iframe tab** at `/collectives/{name}` — still there, still gated on `collectivesConfig.collectives_enabled`, still uses `collectivesUrl` cached from the widget's `@collective-loaded` event (now emitted by the unified Pages widget).
+- **Manage Team → Integrations toggles** — Intranet and Wiki are still independent team-apps with independent toggles. Toggling either updates the same widget.
+- **Create-team wizard** — Wiki chip stays; enabling it after team-create still hits `PUT /collectives/config`.
+- **Backend `CollectivesService`** — no changes.
+
+---
+
+## [4.3.6] — 2026-07-22 — Collectives 1c hotfixes
+
+Five reports from smoke-testing 4.3.5.
+
+### Added
+
+- **Wiki module chip in the create-team wizard.** Was missing entirely in 4.3.5 — the wizard's `modules` array only had Intranet. Added a Wiki row gated on `collectivesAvailable` (new backend field on `GET /api/v1/apps/check` returning `IAppManager::isInstalled('collectives')`). Description: "Full collaborative wiki with a page tree, real-time co-editing, attachments, tags, templates, and trash. Best when the team maintains ongoing shared knowledge. - by Collectives". Default OFF in every template profile (project / collaboration / department / basic). When picked, a "Enabling Wiki" task fires after team-create and hits `PUT /collectives/config` — same code path Manage Team uses.
+- **`widget-collectives` in `getActiveWidgetIds`** on `TeamView.vue`. Without this the Wiki widget rendered on Home but had no entry in the Manage Team → Settings → Dashboard hide/show list, so admins couldn't hide it once enabled.
+
+### Fixed
+
+- **Wiki widget was landing "way down" on existing teams' saved layouts.** `DEFAULT_LAYOUT` had `widget-collectives` at y=41 and `mergeNewWidgets` appended it at the bottom of the right column for anyone with a saved layout. Now the widget defaults to y=20 (directly below `widget-pages` at y=17 h=3), with `widget-files-center` bumped from y=20 to y=23 and `widget-decisions` from y=24 to y=27 to make room. A matching special-case in `mergeNewWidgets` shifts every existing x=9 item with y >= 20 down by 3 the first time an existing user's layout receives the widget — same pattern as `widget-project-health` at [LayoutController.php:690](lib/Controller/LayoutController.php:690).
+- **Icon color on the Wiki toggle in Manage Team.** `BookOpenOutline` was rendering full brand-green while every other icon in the Integrations list rendered neutral, because `.team-app-icon` sets `color: var(--color-primary-element)` and other MDI glyphs in the list ignore `currentColor` in their SVG stroke while this one honours it. Added a `.team-app-icon--neutral` opt-out class (background tile kept, tint dropped) and applied it to the Wiki row.
+- **"A team with that name exists" error on toggle-on.** Collectives' `createCollective` binds by circle NAME, not circle id — when another circle on the instance already has the same name and the current admin isn't `LEVEL_ADMIN` of that other circle, Collectives' `findCircle` fallback throws. Two fixes:
+  - Added a **pre-check** in `CollectivesService::enableForTeam` that first calls `getCollectives($adminUid)` and reuses any existing collective already bound to this team's circle-id. Handles the "toggle off then on again" case that produced the log the user pasted.
+  - The genuine collision case now returns an **actionable error message** naming the collision and telling the admin to rename either team, instead of the raw "Failed to create collective: A team with that name exists".
+- **"Collective not found: 0" cache poisoning.** `serializeCollective` used to swallow `getId() === null` as `id=0` and cache that bogus row, so every subsequent `getSubPages` call fired `findAll(0, uid)` and got the collective-not-found log line the user pasted. `serializeCollective` now returns `null` on non-positive id (skipped by callers), `enableForTeam` fails cleanly rather than storing 0, and `getSubPages` has a defensive `if ($collectiveId <= 0) return [];` guard for any pre-existing appconfig rows still holding a 0.
+
+### Notes
+
+- The `collectives` Collectives warning "Could not find cache entry for collective 1" is Collectives' own internal cache warming — benign, no bug on the TeamHub side. It'll show once after each enable when Collectives hasn't primed its per-collective cache yet.
+- No new l10n strings this session — the wizard chip reuses existing "Wiki" / description strings from 4.3.5.
+
+---
+
+## [4.3.5] — 2026-07-22 — Collectives frontend (step 1c) + create-team wizard tweak
+
+Wires the Collectives (Wiki) backend from 4.3.3 into the UI. The new team-app renders as **"Wiki"** end-to-end; internal identifiers stay `collectives`. Iframe tab, home widget (desktop / tablet / mobile), Manage Team toggle, dashboard widget catalog, `DEFAULT_LAYOUT` entry.
+
+### Added
+
+- **New Wiki widget** — [src/components/CollectivesWidget.vue](src/components/CollectivesWidget.vue). Mirrors `IntravoxWidget`'s shape: header link to the team's collective (with emoji when set), then a short list of top-level pages, all opening in Collectives' own UI in a new tab. Data endpoints from 4.3.3 (`/collectives/team-collective`, `/collectives/subpages`). Emits `collective-loaded` on mount so `TeamView.vue` can deep-link the Wiki iframe tab to the same collective without a second fetch.
+- **Wiki iframe tab** in [TeamView.vue](src/components/TeamView.vue). Uses `AppEmbed` with `collectivesUrl` — the resolver caches the collective from the widget's payload and falls back to `/apps/collectives/` when the widget hasn't fired yet.
+- **Manage Team → Integrations → Wiki toggle** in [ManageTeamView.vue](src/components/ManageTeamView.vue). Sits directly below the Intranet toggle. Enable triggers auto-create (Collectives binds to the team-circle via the CircleExistsException fallback documented in `CollectivesService`). Disable opens a **confirm dialog** that reads the admin archive policy (`/project/closing/archive-policy`) and shows either:
+  - A destructive-warning alert with red framing when `dataLossWarning === true` (archive-off + hard-delete). Copy is Wiki-scoped ("the wiki and all its pages will be lost" — not the team-lifecycle wording of `ArchivePolicyWarningModal`).
+  - A short plain description of what will happen for the other three policy combinations (archive-first + hard, archive-first + soft30/60, no-archive + soft30/60).
+
+  Confirming fires the PUT; cancelling leaves the switch as-is. The backend dispatch (deleteCollective / trashCollective, `deleteCircle: false`) is unchanged from 4.3.3.
+- **Home layout entries** — desktop grid item + tablet block in `TeamWidgetGrid.vue`, mobile home icon in `MobileWidgetView.vue`. All three gated on `collectivesConfig.collectives_enabled`.
+- **`widget-collectives` in `DEFAULT_LAYOUT`** ([LayoutController.php:120](lib/Controller/LayoutController.php:120)) plus `ALLOWED_WIDGET_IDS`. New teams and existing users both receive the entry: `mergeNewWidgets` appends it at the bottom of the x=9 column for existing saved layouts.
+- **Vuex plumbing** — new `collectivesConfig` state, `SET_COLLECTIVES_CONFIG` mutation, layout consumer commit in `TeamView.vue`. Reset in `selectTeam` alongside every other per-team config.
+
+### Changed
+
+- **Create-team wizard Intranet description** — appended " - by Intravox" so the two Wiki/Intranet chips read distinctly in the picker.
+- Widget dashboard catalog map ([TeamView.vue:1554](src/components/TeamView.vue:1554)) gained `widget-collectives → 'Wiki'` so Manage Team → Settings → Dashboard offers the hide/show toggle for it.
+
+### Notes
+
+- New translation strings this session are English-only (Wiki chrome + description + confirm-dialog copy, ~10 strings). Other locales fall through to the English source until the next l10n pass.
+- Widget shows the team's collective **per-user**. Members without ACL access see no widget content; admins see the load-error hint. This mirrors Collectives' own per-user ACL model — TeamHub doesn't override it.
+- Templates and Advanced-project charter behaviour are unchanged. `IntravoxService::createPage(..., 'advanced')` still seeds only the Intravox "Contract"; Collectives-side charter seeding remains out of scope by decision earlier this session.
+
+### Deferred (still open from 4.3.3)
+
+1. `ArchiveService::extractCollectivesData` — the Wiki-off warning acknowledges this openly by not mentioning an archive bundle in the archive-off-but-not-hard case. Landing this closes the `archiveBeforeDelete=true` gap.
+2. Grace-period scheduled hard-delete for `soft30`/`soft60` — currently the Wiki lives in Collectives' own trash post-disable; a TeamHub-owned pending-row + sweep job will promote it to hard-delete on schedule when it lands.
+
+---
+
+## [4.3.4] — 2026-07-22 — Admin settings: telemetry surface cleanup
+
+### Removed
+
+- **License tab: "Telemetry" status block gone.** The Connected-license-only block that showed "Last sent … / Refresh now / View payload" was a UI for a mechanism that no longer runs — `SendTelemetryJob` was neutralised in 4.3.1 so licensed customers send nothing to the licensing back-end. Keeping the panel around suggested activity that isn't happening. Block removed from `AdminSettings.vue` (License tab section). Related dead code purged: `refreshTelemetry()` method, `formatLicenseAgo()` / `formatLicensePayload()` helpers, and the `.license-telemetry*` / `.license-payload` scoped CSS. `license.showPayload` / `license.refreshing` state fields are left as harmless orphans (removing them would touch every place that resets `license.*`).
+
+### Changed
+
+- **Reporting tab section order swapped.** New order: Instance summary → **Find teams for a user** → Telemetry contents. The overview was landing between the two operational tools, which pushed the user-lookup below the fold; moving it up keeps the actionable section reachable without scroll.
+- **Telemetry contents field list is hidden on licensed instances.** The status banner ("Telemetry is OFF — An active license was detected — no data on this list is being sent.") still renders on every instance, but the five grouped field lists (Instance identity / Teams & members / Modules / Integrations / Custom-link domains) now only render when `telemetry.enabled === true` — i.e. on unlicensed or soft-locked instances where the fields would actually leave. On a licensed instance the banner alone is the entire section, which is honest about what's happening: nothing.
+
+---
+
+## [4.3.3] — 2026-07-22 — Collectives backend (step 1b, backend-only)
+
+Backend for the Wiki (Collectives) team-app. **Backend-only patch — no frontend rendering yet.** The Manage Team toggle, iframe tab, and widget land in 1c and will exercise these endpoints; smoke-testing 4.3.3 alone requires calling the routes by hand (curl or the browser Network tab).
+
+### Added
+
+- **`lib/Service/CollectivesService.php`** — new service, parallel in shape to `IntravoxService`. Talks to `\OCA\Collectives\Service\CollectiveService` and `\OCA\Collectives\Service\PageService` in-process via the DI container. Zero direct `oc_collectives_*` DB writes. Public surface: `isInstalled`, `isEnabledForTeam`, `enableForTeam` (auto-creates the collective on first toggle-on, binds to the existing team-circle via Collectives' `CircleExistsException` fallback), `disableForTeam`, `getTeamCollective`, `getSubPages`, `invalidateCache`, `deleteForTeamCascade`.
+- **Six new routes** (all under `/api/v1/teams/{teamId}/collectives` plus one admin diagnostic):
+  - `GET  /collectives/config` — member; returns `{collectives_enabled, collectives_installed}`.
+  - `PUT  /collectives/config` — admin; toggle on triggers `enableForTeam`, toggle off triggers `disableForTeam`.
+  - `GET  /collectives/team-collective` — member; returns `{id, name, emoji, url}` or `null`.
+  - `GET  /collectives/subpages` — member; returns top-level pages ordered by title, capped at 20.
+  - `DELETE /collectives/subpages/cache` — member; bust the per-team resolver cache.
+  - `GET  /api/v1/admin/collectives-diagnostic` — NC admin; reflection probe over `CollectiveService` + `PageService`. Same shape as the existing `intravox-diagnostic` and `deck-diagnostic` endpoints; kept permanently so we can spot signature drift between Collectives versions.
+- **Layout endpoint** (`GET /api/v1/teams/{teamId}/layout`) — response gains `collectivesConfig: { collectives_enabled, collectives_installed }` in both the team-row and cascade-to-default branches, matching the `messagesConfig` / `timelineConfig` pattern.
+- **Team cascade** — `TeamService::deleteTeam` calls `CollectivesService::deleteForTeamCascade` between the per-resource iteration and the circle destroy (`deleteCollective(deleteCircle: false)`, so the circle destroy in step 3 owns the circle itself). Best-effort: a Collectives failure never blocks the team delete.
+
+### Toggle-off dispatch
+
+`PUT /collectives/config` with `collectives_enabled: 0` reads the existing admin archive policy (`archiveBeforeDelete` + `archiveMode`) and routes:
+
+- `archiveMode = 'hard'` → `CollectiveService::deleteCollective(id, uid, deleteCircle: false)`.
+- `archiveMode = 'soft30' | 'soft60'` → `CollectiveService::trashCollective(id, uid)` (Collectives' own trash; restorable by an NC admin from Collectives' UI).
+
+In every hard-delete path `deleteCircle` is **false** — TeamHub owns the Circle (the team). Passing `true` would take the whole team down as a side effect of the admin flipping a Wiki toggle. Enforced by the service, no override.
+
+### Deferred (documented in `CollectivesService` docblock)
+
+1. **Archive-bundle export.** When `archiveBeforeDelete=true`, the collective is deleted without first being written into the team's archive ZIP — `ArchiveService::extractCollectivesData` is a follow-up patch. Skipping is logged at WARN so it surfaces in the NC log. The `dataLossWarning` modal path from Plan v3 will land alongside the extractor in 1b.2.
+2. **Grace-period scheduled hard-delete.** `soft30`/`soft60` currently just trash; a new BackgroundJob + pending-row table to promote to hard-delete after N days lands with the extractor.
+
+### Notes
+
+- No new tables or migrations. Per-team state lives in `appconfig` under `collectives_enabled_<teamId>` and `collectives_collective_id_<teamId>` (cached collective id — avoids the O(collectives-visible-to-user) linear scan on every widget read).
+- Circle binding relies on Collectives' own `sanitiseFilename(teamName)` → `findCircle(safeName, uid, LEVEL_ADMIN)` fallback path in `createCollective`. If the sanitised name doesn't match the team-circle's name, Collectives makes a fresh Circle instead of binding — logged as WARN with `expectedCircle` / `boundCircle` fields, non-destructive to the team. Common team names (letters, numbers, spaces, dashes) round-trip fine.
+- Templates unchanged. The Advanced-project Contract seeding (`IntravoxService::createPage(..., 'advanced')`) continues to seed **only** Intravox; Collectives-side charter seeding is out of scope by user decision earlier in this session.
+
+### Next up
+
+- 1c — `CollectivesWidget` (rendered as "Wiki"), Manage Team toggle + description for Wiki, iframe tab, team-app grid entry. Uses the endpoints above.
+- 1d — `collectives_enabled` counter in `TelemetryService::collectStats()`.
+
+---
+
+## [4.3.2] — 2026-07-22 — Pages → Intranet rename (Collectives prep, step 1a)
+
+### Changed
+
+- **User-facing "Pages" is now "Intranet"** across every surface that referred to the current Intravox integration: create-team wizard chip ([CreateTeamView.vue:454](src/components/CreateTeamView.vue:454)), Manage Team → Integrations toggle ([ManageTeamView.vue:2857](src/components/ManageTeamView.vue:2857)), Manage Team → Settings → Dashboard widget catalog ([TeamView.vue:1554](src/components/TeamView.vue:1554)), desktop widget title / drag-handle / collapse control ([TeamWidgetGrid.vue:359,365,369,384](src/components/TeamWidgetGrid.vue:359)), tablet layout ([TeamWidgetGrid.vue:705](src/components/TeamWidgetGrid.vue:705)), and mobile home entry ([MobileWidgetView.vue:394](src/components/MobileWidgetView.vue:394)). Internal identifiers (`widget-pages`, `pages` app id, `IntravoxService`, `IntravoxWidget.vue`, `intravoxAvailable`, `intravoxParentPath`, config keys) are **unchanged** — the rename is label-only. This clears the name for the Collectives-backed widget (which will ship as "Wiki") to sit alongside without ambiguity.
+- **Manage Team toggle description** updated to "Structured team documentation page with sub-pages. Best for a single team briefing, contract, or knowledge landing spot." — the paired description for the Wiki toggle (Collectives) will land in step 1c.
+- Admin → Settings → **IntraVox integration** section is intentionally **not** renamed. It configures the underlying Intravox NC app's parent path; the brand name is the correct reference at that layer. Same reasoning applies to `IntraVox parent path`, code comments, and the `intravox-diagnostic` admin endpoint.
+
+### l10n
+
+- New msgid `Intranet` in `l10n/en.{js,json}` (English source only this session; other locales fall through until the next l10n pass).
+- Retired msgids `Pages` and `Team wiki and pages (Intravox)` from `l10n/en.{js,json}`. The 6 non-English locales still carry those keys; they become dead keys and will be pruned in the same l10n pass that translates `Intranet`.
+
+### Next steps (Collectives plan v3, per this session)
+
+1b — `CollectivesService`, `/collectives/*` routes, layout endpoint, cascade-delete, archive-policy-driven toggle-off, `ArchiveService::extractCollectivesData`, soft-delete grace, diagnostic endpoint.
+1c — `CollectivesWidget` (rendered as "Wiki"), Manage Team toggle for Wiki, iframe tab, team-app grid entry, `ArchivePolicyWarningModal` reused on toggle-off when the archive policy is hard-delete-without-archive.
+1d — `collectives_enabled` counter in `TelemetryService::collectStats()`.
+
+---
+
+## [4.3.1] — 2026-07-22 — Per-team comment role floor + telemetry policy tightening
+
+### Added
+
+- **`commentMinLevel` per-team setting.** New role dropdown in Manage Team → Integration settings → Messages, alongside the existing pin / post / link floors. Values: `member` | `moderator` | `admin`; default `member`, i.e. no behaviour change for existing installs. Enforced server-side by `MessageService::enforceCommentMinLevel` (called from `CommentController::createComment`), and mirrored client-side by a `canComment` Vuex getter so the composer greys out with an explanatory placeholder when the caller's role is below the floor. Indirect members (via a group or sub-team) resolve to level 1, matching the existing `postMinLevel` semantics.
+- Response addition on `GET /api/v1/teams/{teamId}/messages/settings`: `commentMinLevel` (string).
+- Body addition on `POST /api/v1/teams/{teamId}/messages/settings`: `commentMinLevel` (string, one of `'member'`/`'moderator'`/`'admin'`).
+- **Reporting → Telemetry contents overview restored.** New `NcSettingsSection` under Instance summary on the Reporting tab renders every field the daily telemetry report would include, grouped into five categories: Instance identity, Teams & members, Modules & feature adoption, Integrations, Custom-link domains. A status banner at the top says whether telemetry is currently on or off, and — when on — where it is sent (`report_url`). No admin toggle: the on/off decision has been license-derived since 4.3.0. Removed as a side-effect of the 4.3.0 Compliance re-layout; restored per user request with the license explanation folded into the section description.
+
+### Fixed
+
+- **Licensed instances were still POSTing to the telemetry back-end.** `TelemetryService::isEnabled()` correctly gates the free-tier daily / install / uninstall reports on license state (v4.2.4). But `SendTelemetryJob` — the daily seat-count + team-totals POST from Connected-licensed instances to the licensing back-end — ran on the opposite rule and kept firing while a license was applied. That is the "still see telemetry coming in on the licensing page" leak. `SendTelemetryJob::run()` now bails at the top when `licenseService->getStatus()['hasKey']` is truthy, making the job a permanent no-op on every licensed instance regardless of enforcement level. **Accepted consequences (documented in the job's inline comment):** no auto-renewal signal reaches the licensing back-end (customers must renew manually before their JWT `exp`); no revocation-via-telemetry path (back-end cannot revoke a license mid-term via a POST response). Same tradeoff Air-gapped licenses already accept. The job class stays registered so removing the early return is the whole re-enable path if the policy ever reverses.
+
+### Notes
+
+- No new tables or migrations — `commentMinLevel_<teamId>` lives in `appconfig`, same shape as `pinMinLevel_<teamId>` / `postMinLevel_<teamId>` / `linkMinLevel_<teamId>`.
+- `PUT /messages/settings` semantics unchanged: sending a body without `commentMinLevel` defaults it to `'member'`, so any pre-4.3.1 caller keeps working.
+- New translation strings — English only this session (comment role: 3; telemetry contents overview: ~30 field labels + section chrome). Other locales fall through to the English source until the next l10n pass.
+
+---
+
 ## [4.3.0] — 2026-07-20 — Session close: "What’s new" personal feed
 
 Session-end major bump wrapping up the "What’s new" personal aggregated feed feature. Two big themes across 4.2.11 → 4.3.0:

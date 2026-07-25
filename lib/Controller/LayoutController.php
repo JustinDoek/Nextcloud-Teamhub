@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\LayoutMapper;
 use OCA\TeamHub\Service\BudgetService;
+use OCA\TeamHub\Service\CollectivesService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
@@ -117,6 +118,8 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-files-center',
+            // v4.3.7 — restored to y=20 after removing the standalone
+            // widget-collectives (Wiki now renders inside widget-pages).
             'x'           => 9, 'y' => 20,
             'w'           => 3, 'h' => 4,
             'minW'        => 2, 'minH' => 2,
@@ -127,6 +130,7 @@ class LayoutController extends Controller {
         ],
         [
             'i'           => 'widget-decisions',
+            // v4.3.7 — restored to y=24 (see widget-files-center note).
             'x'           => 9, 'y' => 24,
             'w'           => 3, 'h' => 4,
             'minW'        => 2, 'minH' => 2,
@@ -156,7 +160,7 @@ class LayoutController extends Controller {
         ],
     ];
 
-    private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck', 'timeline'];
+    private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck', 'collectives', 'timeline'];
 
     // Maximum allowed JSON payload size in bytes (64 KB).
     private const MAX_PAYLOAD_BYTES = 65536;
@@ -188,7 +192,7 @@ class LayoutController extends Controller {
     ];
 
     // Allowed built-in tab keys.
-    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'presence', 'decisions', 'timeline'];
+    private const ALLOWED_TAB_KEYS = ['home', 'talk', 'files', 'calendar', 'deck', 'collectives', 'presence', 'decisions', 'timeline'];
 
     public function __construct(
         string $appName,
@@ -206,6 +210,7 @@ class LayoutController extends Controller {
         private BudgetService $budgetService,
         private TimeService $timeService,
         private TeamTypeService $teamTypeService,
+        private CollectivesService $collectivesService,
     ) {
         parent::__construct($appName, $request);
     }
@@ -274,6 +279,15 @@ class LayoutController extends Controller {
             'messagesConfig'         => [
                 'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
             ],
+            // v4.3.3 — Collectives team-app. Default OFF (teams opt in), same
+            // shape as messagesConfig/timelineConfig so the frontend can gate
+            // the Wiki widget + tab without a second fetch. `installed` lets
+            // the Manage Team toggle show "Not installed" instead of erroring
+            // when the Collectives NC app isn't present.
+            'collectivesConfig'      => [
+                'collectives_enabled'   => $this->collectivesService->isEnabledForTeam($teamId),
+                'collectives_installed' => $this->collectivesService->isInstalled(),
+            ],
             // Team-wide dashboard customization: owner/admin-hidden widgets +
             // the default tab opened on team entry. Read by every member;
             // written only by admins (TeamController::saveDashboardConfig).
@@ -332,6 +346,15 @@ class LayoutController extends Controller {
             ],
             'messagesConfig'         => [
                 'messages_enabled' => $this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1',
+            ],
+            // v4.3.3 — Collectives team-app. Default OFF (teams opt in), same
+            // shape as messagesConfig/timelineConfig so the frontend can gate
+            // the Wiki widget + tab without a second fetch. `installed` lets
+            // the Manage Team toggle show "Not installed" instead of erroring
+            // when the Collectives NC app isn't present.
+            'collectivesConfig'      => [
+                'collectives_enabled'   => $this->collectivesService->isEnabledForTeam($teamId),
+                'collectives_installed' => $this->collectivesService->isInstalled(),
             ],
             // Team-wide dashboard customization: owner/admin-hidden widgets +
             // the default tab opened on team entry. Read by every member;
@@ -634,8 +657,10 @@ class LayoutController extends Controller {
     private function mergeNewWidgets(array $layout): array {
         // Prune legacy widget IDs that have been consolidated into new ones.
         // widget-files-{favorites,recent,shared} → widget-files-center (v3.62).
+        // widget-collectives → widget-pages (v4.3.7 — Wiki content now renders
+        // inside the unified Pages widget instead of a standalone card).
         // Filter them out before merging so the new consolidated widget is added.
-        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared'];
+        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared', 'widget-collectives'];
         $pruned = false;
         $layout = array_values(array_filter($layout, static function (array $item) use ($legacyIds, &$pruned): bool {
             if (in_array($item['i'], $legacyIds, true)) {

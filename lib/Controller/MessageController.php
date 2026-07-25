@@ -540,10 +540,11 @@ class MessageController extends Controller {
     public function saveMessageSettings(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
-            $body = $this->request->getParams();
-            $pin  = trim((string)($body['pinMinLevel']  ?? 'moderator'));
-            $post = trim((string)($body['postMinLevel'] ?? 'member'));
-            $link = trim((string)($body['linkMinLevel'] ?? 'admin'));
+            $body    = $this->request->getParams();
+            $pin     = trim((string)($body['pinMinLevel']     ?? 'moderator'));
+            $post    = trim((string)($body['postMinLevel']    ?? 'member'));
+            $link    = trim((string)($body['linkMinLevel']    ?? 'admin'));
+            $comment = trim((string)($body['commentMinLevel'] ?? 'member'));
             // v4.2.11 — admin toggle for the Public checkbox on the compose
             // form. Accept common JSON representations (true/false, 1/0,
             // "1"/"0"); anything else is treated as off.
@@ -552,9 +553,9 @@ class MessageController extends Controller {
                 || $allowPublicRaw === 1
                 || $allowPublicRaw === '1'
                 || $allowPublicRaw === 'true';
-            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link, $allowPublic);
+            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link, $allowPublic, $comment);
             $this->logger->debug('[TeamHub][MessageController] saveMessageSettings', [
-                'teamId' => $teamId, 'pin' => $pin, 'post' => $post, 'link' => $link,
+                'teamId' => $teamId, 'pin' => $pin, 'post' => $post, 'link' => $link, 'comment' => $comment,
                 'allowPublicMessages' => $allowPublic,
                 'app'    => Application::APP_ID,
             ]);

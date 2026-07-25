@@ -104,7 +104,7 @@ class Application extends App implements IBootstrap {
             );
         });
 
-        // Note: DailyReportJob is registered via appinfo/info.xml <background-jobs> block.
+        // Note: Background jobs are registered via appinfo/info.xml <background-jobs> block.
         // registerBackgroundJob() was removed from IRegistrationContext in NC 33.
 
         // Note: Admin settings panel is registered via appinfo/info.xml <settings> block.
@@ -124,13 +124,8 @@ class Application extends App implements IBootstrap {
             // Never let a seeding failure crash the entire app boot.
         }
 
-        // Fire the install telemetry event once (guarded inside the service).
-        try {
-            $container = $context->getAppContainer();
-            $telemetry  = $container->get(\OCA\TeamHub\Service\TelemetryService::class);
-            $telemetry->sendInstallEvent();
-        } catch (\Throwable $e) {
-            // Never let telemetry affect boot.
-        }
+        // Air-gapped-only licensing model — no install/uninstall telemetry
+        // pings. The only outbound call the app ever makes to the licensing
+        // back-end is the one-shot Start-trial POST from the License tab.
     }
 }

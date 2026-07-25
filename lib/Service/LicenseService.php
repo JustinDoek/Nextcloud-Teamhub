@@ -4,10 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
-use OCA\TeamHub\Exception\TrialRequestException;
 use OCA\TeamHub\Util\Jwt;
 use OCP\DB\QueryBuilder\IQueryBuilder;
-use OCP\Http\Client\IClientService;
 use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\IUserSession;
@@ -29,25 +27,32 @@ use Psr\Log\LoggerInterface;
  * ----------------
  * A JWT signed with RS256 by our licensing back-end. Payload claims we care
  * about:
- *  - lic       — public license id (e.g. lic_2026_abc123)
- *  - uuid      — Nextcloud instanceid this license is bound to
- *  - kind      — "connected" | "airgapped"
- *  - seats     — int tier (25 | 100 | 250 | 999999 for unlimited) — null on airgapped
- *  - is_trial  — bool (Connected trials are still Connected licenses; this flag drives UI copy)
- *  - customer  — human-readable customer id, for admin display only
+ *  - lic         — public license id (e.g. lic_2026_abc123)
+ *  - uuid        — Nextcloud instanceid this license is bound to
+ *  - kind        — "airgapped" (only kind we issue from v4.3.20 on;
+ *                  historical "connected" rows still verify)
+ *  - seats       — null on airgapped (kept in the claim shape for legacy
+ *                  Connected rows still in the wild)
+ *  - is_trial    — bool; drives UI copy + reset-marker enforcement
+ *  - customer    — human-readable customer id, for admin display only
+ *  - paid_until  — unix ts of the moment paid entitlement ends (added
+ *                  v4.3.20 for grace-period rendering; older JWTs without
+ *                  this claim are treated as paid_until = exp)
+ *  - grace_days  — grace-period length in days (added v4.3.20; older JWTs
+ *                  without this claim default to 0)
  *  - iat/nbf/exp — standard JWT time claims (seconds since epoch)
  *
  * The instance verifies the JWT offline against a hardcoded public key
  * (see PUBLIC_KEY_PEM). No runtime call is made to enforce validity —
  * everything happens in-process, once, cached in-request.
  *
- * TELEMETRY (Connected only)
- * --------------------------
- * SendTelemetryJob POSTs {uuid, license_id, teams_total, teams_advanced,
- * unique_team_members, reported_at} to TELEMETRY_URL once per day. That
- * response may include a "renewed_jwt" — a fresh JWT with an extended
- * exp claim, which the job persists silently. Air-gapped licenses never
- * send telemetry and never auto-refresh.
+ * NO OUTBOUND CALLS
+ * -----------------
+ * Fully air-gapped, fully manual (v4.3.22+). The instance never contacts
+ * the licensing back-end for anything: no trials, no daily check-ins, no
+ * install/uninstall pings, no renewed-JWT downloads. Trials and paid
+ * licenses are issued by hand from the licensing dashboard in response
+ * to email, and the customer pastes the JWT into the License tab.
  *
  * ENFORCEMENT LEVELS
  * ------------------
@@ -100,20 +105,6 @@ class LicenseService {
 		. "VwIDAQAB\n"
         . "-----END PUBLIC KEY-----\n";
 
-    /**
-     * Where SendTelemetryJob POSTs its daily report.
-     */
-    public const TELEMETRY_URL = 'https://tldr.host/business/telemetry.php';
-
-    /**
-     * v3.100.2 — Where LicenseService::requestTrial() POSTs to auto-issue
-     * a 14-day Connected trial. The URL is deliberately server-side
-     * (never rendered in the browser) so the licensing back-end stays
-     * hidden from end users. Same host as TELEMETRY_URL — different
-     * script.
-     */
-    public const TRIAL_URL = 'https://tldr.host/business/trial.php';
-
     /** Days past exp before we escalate from grace to soft-lock. */
     private const GRACE_DAYS = 30;
 
@@ -125,13 +116,10 @@ class LicenseService {
     public function __construct(
         private IConfig          $config,
         private IDBConnection    $db,
-        private IClientService   $clientService,
         private IUserSession     $userSession,
-        // v3.100.6 — reuse the working query TelemetryService already
-        // uses for the Statistics tab. countLicensedSeats() delegates so
-        // the number the customer sees on their own Statistics page and
-        // the number our licensing back-end sees via telemetry are
-        // guaranteed to match.
+        // Reuse the working queries TelemetryService already exposes for
+        // the Statistics tab. countLicensedSeats() delegates to
+        // countUniqueTeamMembers() for the seat-cap comparison.
         private TelemetryService $telemetryService,
         private LoggerInterface  $logger,
     ) {}
@@ -152,12 +140,18 @@ class LicenseService {
      *   uuid: string|null,
      *   expiresAt: int|null,
      *   daysRemaining: int|null,
+     *   paidUntil: int|null,
+     *   paidDaysRemaining: int|null,
+     *   graceDays: int,
      *   enforcementLevel: 'none'|'grace'|'soft-lock'|'unlicensed',
      *   graceRemaining: int|null,
      *   invalidReason: string|null,
      *   instanceUuid: string,
      *   seatsUsed: int,
      *   seatsOverBy: int,
+     *   seatEnforcement: 'none'|'over-warn'|'over-lock',
+     *   seatCap: int|null,
+     *   seatLockAt: int|null,
      *   lastTelemetryAt: int|null,
      *   lastTelemetryPayload: array|null
      * }
@@ -204,12 +198,20 @@ class LicenseService {
                     'uuid'                 => $p['uuid']     ?? null,
                     'expiresAt'            => $expiry,
                     'daysRemaining'        => 0,
+                    // Legacy JWTs (issued before the air-gapped-tiers
+                    // migration) don't carry paid_until / grace_days.
+                    // Fall back to exp so callers can still reason about
+                    // "when did paid entitlement end".
+                    'paidUntil'            => (int)($p['paid_until'] ?? $expiry),
+                    'paidDaysRemaining'    => max(0, intdiv(((int)($p['paid_until'] ?? $expiry)) - $now, 86400)),
+                    'graceDays'            => (int)($p['grace_days'] ?? 0),
                     'enforcementLevel'     => $level,
                     'graceRemaining'       => $level === 'grace' ? $graceLeft : 0,
                     'invalidReason'        => $e->getMessage(),
                     'instanceUuid'         => $instanceUuid,
                     'seatsUsed'            => $seatsUsed,
                     'seatsOverBy'          => $this->overBy($seatsUsed, $p['seats'] ?? null),
+                    ...$this->computeSeatEnforcement($seatsUsed, $p['seats'] ?? null),
                     'lastTelemetryAt'      => $lastAt,
                     'lastTelemetryPayload' => $lastPayload,
                 ];
@@ -234,12 +236,19 @@ class LicenseService {
             'uuid'                 => $claims['uuid']     ?? null,
             'expiresAt'            => $expiry,
             'daysRemaining'        => $daysRem,
+            // Legacy JWTs (issued before the air-gapped-tiers migration)
+            // don't carry paid_until / grace_days. Fall back to exp so
+            // callers can still reason about "when does paid entitlement end".
+            'paidUntil'            => (int)($claims['paid_until'] ?? $expiry),
+            'paidDaysRemaining'    => max(0, intdiv(((int)($claims['paid_until'] ?? $expiry)) - $now, 86400)),
+            'graceDays'            => (int)($claims['grace_days'] ?? 0),
             'enforcementLevel'     => 'none',
             'graceRemaining'       => null,
             'invalidReason'        => null,
             'instanceUuid'         => $instanceUuid,
             'seatsUsed'            => $seatsUsed,
             'seatsOverBy'          => $this->overBy($seatsUsed, $claims['seats'] ?? null),
+            ...$this->computeSeatEnforcement($seatsUsed, $claims['seats'] ?? null),
             'lastTelemetryAt'      => $lastAt,
             'lastTelemetryPayload' => $lastPayload,
         ];
@@ -257,13 +266,19 @@ class LicenseService {
     /**
      * True iff this instance may create new Advanced teams and accept new
      * writes on existing Advanced-project surfaces (Budget expenses,
-     * TimeLogs, Milestones). Also true during grace — grace only blocks
-     * *creation of new Advanced teams*, existing teams keep writing until
-     * soft-lock kicks in.
+     * TimeLogs, Milestones).
+     *
+     * Temporal: 'none' and 'grace' allow writes; 'soft-lock' and
+     * 'unlicensed' don't.
+     * Seat: 'over-lock' blocks writes too (customer went past 120% of
+     * their cap). 'over-warn' does not block — banner only.
      */
     public function allowsAdvancedWrites(): bool {
-        $level = $this->getEnforcementLevel();
-        return $level === 'none' || $level === 'grace';
+        $status = $this->getStatus();
+        $level  = $status['enforcementLevel'] ?? 'unlicensed';
+        if ($level !== 'none' && $level !== 'grace') return false;
+        if (($status['seatEnforcement'] ?? 'none') === 'over-lock') return false;
+        return true;
     }
 
     /**
@@ -309,16 +324,20 @@ class LicenseService {
     /**
      * True iff this instance may create a NEW Advanced team. Blocks in
      * grace as well: no new Advanced teams once expired, only the
-     * existing ones grandfather.
+     * existing ones grandfather. Same policy for seat over-lock — once
+     * the customer is >120% of their seat cap, no new Advanced teams.
+     * over-warn (100–120% of cap) does not block creation.
      */
     public function allowsAdvancedCreation(): bool {
-        return $this->getEnforcementLevel() === 'none';
+        $status = $this->getStatus();
+        if (($status['enforcementLevel'] ?? 'unlicensed') !== 'none') return false;
+        if (($status['seatEnforcement']   ?? 'none') === 'over-lock') return false;
+        return true;
     }
 
     /**
      * Save a fresh JWT after verifying it. Called from LicenseController
-     * on PUT /license and from SendTelemetryJob when the licensing server
-     * returns a renewed_jwt. Any verification failure throws.
+     * on PUT /license. Any verification failure throws.
      */
     public function saveKey(string $jwt): array {
         $jwt = trim($jwt);
@@ -328,9 +347,9 @@ class LicenseService {
     }
 
     /**
-     * v3.100.7 — wipe the saved JWT from appconfig. Called only from
-     * SendTelemetryJob when the licensing back-end signals `revoked:
-     * true` (row deleted, uuid mismatch, or explicit revocation).
+     * Wipe the saved JWT from appconfig. Kept as a utility — no automated
+     * caller wires it up under the air-gapped model, but a future "reset
+     * license" affordance in the admin UI can hit it.
      *
      * Advanced projects created while the license was active stay
      * grandfathered per the enforcement-lifecycle docblock at the top
@@ -338,122 +357,6 @@ class LicenseService {
      */
     public function clearKey(): void {
         $this->config->deleteAppValue(Application::APP_ID, self::CFG_JWT);
-    }
-
-    /**
-     * v3.100.2 — Request a 14-day Connected trial license from the
-     * licensing back-end and install it silently. Called from the admin
-     * License tab "Start 14-day trial" button.
-     *
-     * Server-to-server: this PHP process POSTs to TRIAL_URL, never
-     * the browser. The back-end URL therefore stays hidden from the
-     * customer — no redirects to a login page they can't use.
-     *
-     * On success, the returned JWT is verified against the same
-     * PUBLIC_KEY_PEM as any manually pasted license and stored in
-     * appconfig. Any failure throws \RuntimeException with a message
-     * safe to surface to admins.
-     */
-    public function requestTrial(): array {
-        $uuid = $this->getInstanceUuid();
-        if ($uuid === '') {
-            throw new \RuntimeException('This instance has no UUID — trial cannot be requested.');
-        }
-        // Best-effort acting-admin email so the licensing back-end can
-        // upsert a real customer row instead of an anonymous placeholder.
-        $email = '';
-        $user  = $this->userSession->getUser();
-        if ($user !== null) {
-            $email = (string)($user->getEMailAddress() ?? '');
-        }
-
-        try {
-            $client = $this->clientService->newClient();
-            // v3.100.3 — use Guzzle's `json` option instead of `body` +
-            // Content-Type header. Under some NC/Guzzle configurations
-            // `body: <string>` gets sent as form-encoded (multipart) so
-            // php://input on the receiving end is empty and json_decode
-            // returns null → 400 "Invalid JSON body". `json` serializes
-            // the value AND sets Content-Type: application/json in one
-            // shot with no ambiguity.
-            $response = $client->post(self::TRIAL_URL, [
-                'timeout' => 15,
-                'headers' => [
-                    'User-Agent' => 'TeamHub-Trial/3.100.4',
-                ],
-                'json' => ['uuid' => $uuid, 'email' => $email],
-                // v3.100.4 — some NC/Guzzle stacks throw on 4xx by
-                // default, which turns our meaningful 409 "already used"
-                // into a generic ConnectException. Disable http_errors
-                // so 4xx/5xx come back as normal responses and we can
-                // read the {error} JSON below.
-                'http_errors' => false,
-            ]);
-        } catch (\Throwable $e) {
-            // v3.100.3 — surface the actual reason so admins can
-            // diagnose. Reasons that hit this branch (never returned a
-            // response): DNS failure, connection refused, TLS mismatch,
-            // Guzzle throwing on 4xx/5xx (depends on NC's config), or
-            // timeout. The message is admin-only (not leaked to
-            // end-users creating projects) so leaking the URL + reason
-            // is fine.
-            $reason = $e->getMessage();
-            $this->logger->warning(
-                '[TeamHub][LicenseService] trial request failed for ' . self::TRIAL_URL . ': ' . $reason,
-                ['app' => Application::APP_ID, 'exception' => $e],
-            );
-            throw new TrialRequestException(
-                'Could not reach the licensing server (' . self::TRIAL_URL . '). '
-                . 'Reason: ' . $reason,
-                400,
-            );
-        }
-
-        $status = $response->getStatusCode();
-        $bodyStr = (string)$response->getBody();
-        $decoded = json_decode($bodyStr, true);
-
-        if ($status === 409) {
-            // Already used — surface the server's message verbatim.
-            $msg = is_array($decoded) && !empty($decoded['error'])
-                ? (string)$decoded['error']
-                : 'This instance has already used its trial.';
-            throw new TrialRequestException($msg, 409);
-        }
-        if ($status === 429) {
-            $msg = is_array($decoded) && !empty($decoded['error'])
-                ? (string)$decoded['error']
-                : 'Too many trial requests — please try again later.';
-            throw new TrialRequestException($msg, 429);
-        }
-        if ($status < 200 || $status >= 300 || !is_array($decoded)) {
-            $msg = is_array($decoded) && !empty($decoded['error'])
-                ? (string)$decoded['error']
-                : 'Trial request failed.';
-            throw new TrialRequestException($msg, 400);
-        }
-        if (empty($decoded['jwt']) || !is_string($decoded['jwt'])) {
-            throw new TrialRequestException('Trial response was missing the license key.', 400);
-        }
-
-        // Install it. saveKey re-verifies signature + UUID binding before
-        // persisting; if the back-end signed with the wrong key or bound
-        // to a different UUID, this throws and nothing is stored.
-        return $this->saveKey($decoded['jwt']);
-    }
-
-    /**
-     * Record what SendTelemetryJob just sent. Called from the job itself
-     * so the "View last payload" modal in Admin UI can render exactly
-     * what left the instance.
-     */
-    public function recordTelemetry(int $sentAt, array $payload): void {
-        $this->config->setAppValue(Application::APP_ID, self::CFG_LAST_TELEMETRY_AT, (string)$sentAt);
-        $this->config->setAppValue(
-            Application::APP_ID,
-            self::CFG_LAST_TELEMETRY_PAYLOAD,
-            (string)json_encode($payload, JSON_UNESCAPED_SLASHES)
-        );
     }
 
     /** Nextcloud's install-time immutable instance identifier. */
@@ -516,6 +419,33 @@ class LicenseService {
         return max(0, $used - $seats);
     }
 
+    /**
+     * Compute seat-enforcement state for the status envelope.
+     *
+     *   none      — no cap (unlicensed / legacy JWT / unlimited), or under cap.
+     *   over-warn — count > cap but within 20% grace.
+     *   over-lock — count > 120% of cap.
+     *
+     * Returned as a fragment ready to spread into the status array so all
+     * three envelope paths (valid, grace-peek, empty) can share it.
+     *
+     * @return array{seatEnforcement: 'none'|'over-warn'|'over-lock', seatCap: int|null, seatLockAt: int|null}
+     */
+    private function computeSeatEnforcement(int $used, ?int $seats): array {
+        // No cap to compare against, or unlimited tier — nothing to enforce.
+        if ($seats === null || $seats <= 0 || $seats >= 999999) {
+            return ['seatEnforcement' => 'none', 'seatCap' => $seats, 'seatLockAt' => null];
+        }
+        $lockAt = (int)ceil($seats * 1.2);
+        if ($used > $lockAt) {
+            return ['seatEnforcement' => 'over-lock', 'seatCap' => $seats, 'seatLockAt' => $lockAt];
+        }
+        if ($used > $seats) {
+            return ['seatEnforcement' => 'over-warn', 'seatCap' => $seats, 'seatLockAt' => $lockAt];
+        }
+        return ['seatEnforcement' => 'none', 'seatCap' => $seats, 'seatLockAt' => $lockAt];
+    }
+
     private function emptyStatus(
         string $instanceUuid, int $seatsUsed, ?int $lastAt, ?array $lastPayload, ?string $reason = null,
     ): array {
@@ -530,12 +460,18 @@ class LicenseService {
             'uuid'                 => null,
             'expiresAt'            => null,
             'daysRemaining'        => null,
+            'paidUntil'            => null,
+            'paidDaysRemaining'    => null,
+            'graceDays'            => 0,
             'enforcementLevel'     => 'unlicensed',
             'graceRemaining'       => null,
             'invalidReason'        => $reason,
             'instanceUuid'         => $instanceUuid,
             'seatsUsed'            => $seatsUsed,
             'seatsOverBy'          => 0,
+            'seatEnforcement'      => 'none',
+            'seatCap'              => null,
+            'seatLockAt'           => null,
             'lastTelemetryAt'      => $lastAt,
             'lastTelemetryPayload' => $lastPayload,
         ];

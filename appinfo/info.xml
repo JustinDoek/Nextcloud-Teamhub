@@ -17,7 +17,7 @@ Each team gets a shared home with:
 - **Internal integrations** - Added TeamHub native integrations for Decisions, Precense, Timeline, Budget and Time  
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>4.3.0</version>
+    <version>4.4.2</version>
     <licence>agpl</licence>
     <author mail="teamhub@tldr.host" homepage="https://tldr.host/teamhub">Justin Doek</author>
     <namespace>TeamHub</namespace>
@@ -54,14 +54,13 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
     </settings>
 
     <background-jobs>
-        <job>OCA\TeamHub\BackgroundJob\DailyReportJob</job>
         <job>OCA\TeamHub\BackgroundJob\AuditMirrorJob</job>
         <job>OCA\TeamHub\BackgroundJob\PendingDeletionJob</job>
         <job>OCA\TeamHub\BackgroundJob\ResourceDiscoveryJob</job>
         <job>OCA\TeamHub\BackgroundJob\PresenceMaterialisationJob</job>
         <job>OCA\TeamHub\BackgroundJob\TalkMembershipReconcileJob</job>
         <job>OCA\TeamHub\BackgroundJob\MilestoneAutoPostJob</job>
-        <job>OCA\TeamHub\BackgroundJob\SendTelemetryJob</job>
+        <job>OCA\TeamHub\BackgroundJob\LicenseExpiryNotificationJob</job>
     </background-jobs>
 
     <repair-steps>

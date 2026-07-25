@@ -3,17 +3,13 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
-use OCA\TeamHub\BackgroundJob\SendTelemetryJob;
-use OCA\TeamHub\Exception\TrialRequestException;
 use OCA\TeamHub\Service\LicenseService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\AuthorizedAdminSetting;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
-use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\JSONResponse;
-use OCP\BackgroundJob\IJobList;
 use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
@@ -21,13 +17,17 @@ use Psr\Log\LoggerInterface;
  * Admin-only license management endpoints (v3.100.0, Track F).
  *
  * Endpoints:
- *  - GET  /api/v1/admin/license           — current license status envelope
- *  - PUT  /api/v1/admin/license           — save a new JWT (verified before persist)
- *  - POST /api/v1/admin/license/refresh   — manually trigger SendTelemetryJob
+ *  - GET  /api/v1/admin/license   — current license status envelope
+ *  - PUT  /api/v1/admin/license   — save a new JWT (verified before persist)
  *
  * Everything gated with #[AuthorizedAdminSetting] so delegated TeamHub
  * admins (see AdminSettings) can manage licenses without needing full
  * NC admin.
+ *
+ * There is no trial-request endpoint (v4.3.22+). Trials are issued by
+ * hand from the licensing dashboard in response to an email from the
+ * customer's admin, and the customer pastes the resulting JWT into the
+ * License tab. See the "Request trial by email" mailto in AdminSettings.
  */
 class LicenseController extends Controller {
 
@@ -35,7 +35,6 @@ class LicenseController extends Controller {
         string                  $appName,
         IRequest                $request,
         private LicenseService  $licenseService,
-        private IJobList        $jobList,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -109,68 +108,4 @@ class LicenseController extends Controller {
         return new JSONResponse($this->licenseService->getStatus());
     }
 
-    /**
-     * POST /api/v1/admin/license/refresh
-     * Schedules SendTelemetryJob to run on the next cron tick. Used by
-     * the "Refresh now" button in Admin settings — lets an admin verify
-     * connectivity without waiting for the daily sweep.
-     *
-     * Air-gapped licenses receive a 400 — telemetry doesn't apply.
-     * Unlicensed instances also receive a 400 — nothing to refresh.
-     */
-    /**
-     * POST /api/v1/admin/license/trial
-     *
-     * v3.100.2 — Requests a 14-day Connected trial license from the
-     * licensing back-end (server-to-server, browser never sees the URL)
-     * and installs the returned JWT. Returns the fresh license status
-     * envelope so the frontend can refresh without a second roundtrip.
-     *
-     * The one-shot per-UUID gate lives on the licensing back-end. This
-     * endpoint just relays and installs.
-     */
-    /**
-     * M-2 — NC-side throttle in addition to the licensing back-end's
-     * per-IP 10/hour cap. Prevents an attacker who cannot reach the
-     * back-end (e.g. outbound DNS blocked in a corporate LAN) from
-     * hammering the local endpoint and consuming clientService
-     * connections. Five requests per admin per hour is generous for a
-     * one-shot-per-UUID trial.
-     */
-    #[UserRateLimit(limit: 5, period: 3600)]
-    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    public function requestTrial(): JSONResponse {
-        try {
-            $this->licenseService->requestTrial();
-        } catch (TrialRequestException $e) {
-            // TrialRequestException carries the back-end's HTTP status
-            // directly, so no message-string parsing is needed at the
-            // controller boundary.
-            return new JSONResponse(['error' => $e->getMessage()], $e->getHttpStatus());
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][LicenseController] trial request unexpected error: ' . $e->getMessage(), [
-                'app' => 'teamhub',
-                'exception' => $e,
-            ]);
-            return new JSONResponse(['error' => 'Could not start trial.'], Http::STATUS_INTERNAL_SERVER_ERROR);
-        }
-        return new JSONResponse($this->licenseService->getStatus());
-    }
-
-    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
-    public function refresh(): JSONResponse {
-        $status = $this->licenseService->getStatus();
-        if (!$status['hasKey']) {
-            return new JSONResponse(['error' => 'No license key saved.'], Http::STATUS_BAD_REQUEST);
-        }
-        if (($status['kind'] ?? null) === 'airgapped') {
-            return new JSONResponse(
-                ['error' => 'Air-gapped licenses do not use telemetry.'],
-                Http::STATUS_BAD_REQUEST,
-            );
-        }
-        // add() is idempotent for TimedJob subclasses — no duplicate rows.
-        $this->jobList->add(SendTelemetryJob::class);
-        return new JSONResponse(['scheduled' => true]);
-    }
 }

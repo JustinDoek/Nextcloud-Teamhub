@@ -1068,8 +1068,15 @@ class TimelineService {
         // The frontend draws the connector arrow B → A (prerequisite →
         // blocked), the same predecessor→successor convention used for the
         // decision→task connector.
-        $depCols = $this->dbIntrospection->getTableColumns('deck_dependent_cards');
-        if (!empty($depCols) && !empty($allCardIds)) {
+        // v4.3.18 — dropped the DbIntrospectionService::getTableColumns
+        // pre-check that used to gate this whole block. On NC 34 that
+        // helper returned [] even when the table existed (its strategies
+        // all failed against NC 34's schema layer), so the dep-line
+        // pipeline silently skipped and no metadata reached the
+        // frontend. Just attempt the SELECT directly — a missing table
+        // throws SQLSTATE[42S02] and we swallow it, same pattern
+        // fetchDeckEvents uses for its `SELECT *` from `deck_cards`.
+        if (!empty($allCardIds)) {
             try {
                 $dqb  = $this->db->getQueryBuilder();
                 $dres = $dqb->select('card_id', 'dependent_card_id')
@@ -1087,9 +1094,19 @@ class TimelineService {
                 $dres->closeCursor();
 
                 if (!empty($blockedByMap)) {
+                    // v4.3.15 — attach blockedByCardIds to EVERY event
+                    // for a card that has dependencies, not just the
+                    // 'created' event. Previously the frontend only
+                    // rendered dep lines when a card's 'created' event
+                    // fell inside the visible time window, so a card
+                    // created weeks ago with dependencies never showed
+                    // a connector line even when its due/start bar was
+                    // clearly visible on the current-week view. The
+                    // frontend now dedupes by cardId, so multiple events
+                    // carrying the same meta don't produce duplicate
+                    // edges.
                     foreach ($events as &$ev) {
                         if ($ev['source'] === 'deck'
-                            && ($ev['meta']['eventRole'] ?? null) === 'created'
                             && isset($blockedByMap[$ev['meta']['cardId']])
                         ) {
                             $ev['meta']['blockedByCardIds'] = $blockedByMap[$ev['meta']['cardId']];
@@ -1124,7 +1141,21 @@ class TimelineService {
      * rather than showing a control that can never do anything (v3.78.8).
      */
     public function isCardDependencySupported(): bool {
-        return !empty($this->dbIntrospection->getTableColumns('deck_dependent_cards'));
+        // v4.3.18 — DbIntrospection returned [] for deck_dependent_cards
+        // on NC 34 even when the table existed. Probe with a real
+        // SELECT LIMIT 0 instead: table absent → SQLSTATE[42S02],
+        // table present → returns no rows but succeeds.
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('card_id')
+                ->from('deck_dependent_cards')
+                ->setMaxResults(0);
+            $r = $qb->executeQuery();
+            $r->closeCursor();
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     // =========================================================================

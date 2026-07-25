@@ -739,29 +739,35 @@ class MessageService {
      * Return message settings for a team (pin level + post level) as strings.
      * v4.2.11 — also returns allowPublicMessages (bool) so the frontend can
      * decide whether to render the Public checkbox in the compose form.
+     * v4.3.1 — also returns commentMinLevel: the per-team floor for who can
+     * post comments on a message. Default 'member' — any team member.
      */
     public function getMessageSettings(string $teamId): array {
         $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel_' . $teamId, '');
         if ($pinSetting === '') {
             $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
         }
-        $postSetting = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, 'member');
-        $linkSetting = $this->config->getAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, 'admin');
+        $postSetting    = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_'    . $teamId, 'member');
+        $linkSetting    = $this->config->getAppValue(Application::APP_ID, 'linkMinLevel_'    . $teamId, 'admin');
+        $commentSetting = $this->config->getAppValue(Application::APP_ID, 'commentMinLevel_' . $teamId, 'member');
         return [
             'pinMinLevel'         => $pinSetting,
             'postMinLevel'        => $postSetting,
             'linkMinLevel'        => $linkSetting,
+            'commentMinLevel'     => $commentSetting,
             'allowPublicMessages' => $this->getAllowPublicMessages($teamId),
         ];
     }
 
     /**
      * Save per-team message settings.
-     * Accepts pinMinLevel, postMinLevel, and linkMinLevel, all as strings: 'member'|'moderator'|'admin'.
+     * Accepts pinMinLevel, postMinLevel, linkMinLevel, and commentMinLevel,
+     * all as strings: 'member'|'moderator'|'admin'.
      * v4.2.11 — also accepts allowPublicMessages (bool) — admin-only toggle
      * for whether the compose form exposes the Public checkbox.
+     * v4.3.1 — added commentMinLevel to gate CommentController::createComment.
      */
-    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel, string $linkMinLevel = 'admin', bool $allowPublicMessages = false): void {
+    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel, string $linkMinLevel = 'admin', bool $allowPublicMessages = false, string $commentMinLevel = 'member'): void {
         $valid = ['member', 'moderator', 'admin'];
         if (!in_array($pinMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid pinMinLevel: ' . $pinMinLevel);
@@ -772,14 +778,58 @@ class MessageService {
         if (!in_array($linkMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid linkMinLevel: ' . $linkMinLevel);
         }
-        $this->config->setAppValue(Application::APP_ID, 'pinMinLevel_'  . $teamId, $pinMinLevel);
-        $this->config->setAppValue(Application::APP_ID, 'postMinLevel_' . $teamId, $postMinLevel);
-        $this->config->setAppValue(Application::APP_ID, 'linkMinLevel_' . $teamId, $linkMinLevel);
+        if (!in_array($commentMinLevel, $valid, true)) {
+            throw new \InvalidArgumentException('Invalid commentMinLevel: ' . $commentMinLevel);
+        }
+        $this->config->setAppValue(Application::APP_ID, 'pinMinLevel_'     . $teamId, $pinMinLevel);
+        $this->config->setAppValue(Application::APP_ID, 'postMinLevel_'    . $teamId, $postMinLevel);
+        $this->config->setAppValue(Application::APP_ID, 'linkMinLevel_'    . $teamId, $linkMinLevel);
+        $this->config->setAppValue(Application::APP_ID, 'commentMinLevel_' . $teamId, $commentMinLevel);
         $this->config->setAppValue(
             Application::APP_ID,
             'allowPublicMessages_' . $teamId,
             $allowPublicMessages ? '1' : '0',
         );
+    }
+
+    /**
+     * Return the minimum Circles level required to post comments for a team.
+     * Default: member (1) — everyone can comment unless overridden per team.
+     * Levels: member=1, moderator=4, admin=8.
+     */
+    public function getCommentMinLevel(string $teamId): int {
+        $setting = $this->config->getAppValue(Application::APP_ID, 'commentMinLevel_' . $teamId, 'member');
+        return match($setting) {
+            'moderator' => 4,
+            'admin'     => 8,
+            default     => 1,
+        };
+    }
+
+    /**
+     * Enforce the per-team commentMinLevel for the current user. Called from
+     * CommentController::createComment. Membership itself is enforced
+     * separately by MemberService::requireMemberLevel; this only guards the
+     * level floor on top.
+     *
+     * Indirect members (via a group or sub-team) have no direct row, so
+     * getMemberLevel returns 0 for them — when the floor is above 'member'
+     * they are refused. Same behaviour as the postMinLevel enforcement at
+     * postMessage() above.
+     */
+    public function enforceCommentMinLevel(string $teamId): void {
+        $required = $this->getCommentMinLevel($teamId);
+        if ($required <= 1) {
+            return;
+        }
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new AccessDeniedException('User not authenticated');
+        }
+        $level = $this->getMemberLevel($teamId, $user->getUID());
+        if ($level < $required) {
+            throw new AccessDeniedException('Insufficient permissions to post comments in this team');
+        }
     }
 
     /**

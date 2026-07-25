@@ -23,6 +23,7 @@ return [
         ['name' => 'team#getAdminSettings',       'url' => '/api/v1/admin/settings',                         'verb' => 'GET'],
         ['name' => 'team#saveAdminSettings',      'url' => '/api/v1/admin/settings',                         'verb' => 'POST'],
         ['name' => 'team#intravoxDiagnostic',     'url' => '/api/v1/admin/intravox-diagnostic',              'verb' => 'GET'],
+        ['name' => 'team#collectivesDiagnostic',  'url' => '/api/v1/admin/collectives-diagnostic',           'verb' => 'GET'],
         ['name' => 'team#deckDiagnostic',         'url' => '/api/v1/admin/deck-diagnostic',                  'verb' => 'GET'],
         ['name' => 'team#searchAdminGroups',      'url' => '/api/v1/admin/groups/search',                    'verb' => 'GET'],
         ['name' => 'team#getAllowedInviteTypes',  'url' => '/api/v1/invite-types',                            'verb' => 'GET'],
@@ -83,6 +84,18 @@ return [
         ['name' => 'team#getIntravoxSubPages',    'url' => '/api/v1/teams/{teamId}/intravox/subpages',       'verb' => 'GET'],
         ['name' => 'team#getIntravoxTeamPage',    'url' => '/api/v1/teams/{teamId}/intravox/team-page',      'verb' => 'GET'],
         ['name' => 'team#invalidateIntravoxCache', 'url' => '/api/v1/teams/{teamId}/intravox/subpages/cache', 'verb' => 'DELETE'],
+
+        // Collectives (v4.3.3) — parallel shape to Intravox above, but talks
+        // to \OCA\Collectives\Service\CollectiveService + PageService in
+        // process. See lib/Service/CollectivesService.php for the full
+        // dispatch story (toggle-on auto-create, toggle-off archive-policy
+        // routing, and the two currently-deferred pieces).
+        ['name' => 'team#getCollectivesConfig',    'url' => '/api/v1/teams/{teamId}/collectives/config',           'verb' => 'GET'],
+        ['name' => 'team#saveCollectivesConfig',   'url' => '/api/v1/teams/{teamId}/collectives/config',           'verb' => 'PUT'],
+        ['name' => 'team#getCollectivesTeamRow',   'url' => '/api/v1/teams/{teamId}/collectives/team-collective',  'verb' => 'GET'],
+        ['name' => 'team#getCollectivesSubPages',  'url' => '/api/v1/teams/{teamId}/collectives/subpages',         'verb' => 'GET'],
+        ['name' => 'team#invalidateCollectivesCache', 'url' => '/api/v1/teams/{teamId}/collectives/subpages/cache', 'verb' => 'DELETE'],
+        ['name' => 'team#createCollectivesPage',   'url' => '/api/v1/teams/{teamId}/collectives/pages',            'verb' => 'POST'],
 
         // Team actions
         ['name' => 'team#requestJoinTeam',        'url' => '/api/v1/teams/{teamId}/join',                    'verb' => 'POST'],
@@ -449,8 +462,6 @@ return [
         // ----------------------------------------------------------------
         ['name' => 'license#getStatus',    'url' => '/api/v1/admin/license',         'verb' => 'GET'],
         ['name' => 'license#saveKey',      'url' => '/api/v1/admin/license',         'verb' => 'PUT'],
-        ['name' => 'license#refresh',      'url' => '/api/v1/admin/license/refresh', 'verb' => 'POST'],
-        ['name' => 'license#requestTrial', 'url' => '/api/v1/admin/license/trial',   'verb' => 'POST'],
         ['name' => 'license#entitlements', 'url' => '/api/v1/license/entitlements',  'verb' => 'GET'],
     ],
 ];

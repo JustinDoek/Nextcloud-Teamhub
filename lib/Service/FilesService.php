@@ -343,10 +343,17 @@ class FilesService {
             }
         }
 
-        $folderName = $teamName;
+        // v4.3.19 — defensive sanitisation as belt-and-braces on top of
+        // TeamService::assertValidTeamName. If a legacy team from before
+        // that validator still carries "/" or "\" in its name, passing
+        // it to Folder::newFolder here would silently create a nested
+        // path ("A/B" → folder "A" with subfolder "B") instead of a
+        // single folder. Replace path separators + control chars with
+        // "-"; runs of "-" collapse; leading/trailing "-" trimmed.
+        $folderName = $this->sanitiseForFolderName($teamName);
         $counter    = 1;
         while ($targetFolder->nodeExists($folderName)) {
-            $folderName = $teamName . ' (' . $counter++ . ')';
+            $folderName = $this->sanitiseForFolderName($teamName) . ' (' . $counter++ . ')';
         }
         $folder = $targetFolder->newFolder($folderName);
 
@@ -1080,6 +1087,35 @@ class FilesService {
         ]);
 
         return $deleted;
+    }
+
+    /**
+     * Sanitise an arbitrary string into something safe to hand to
+     * Folder::newFolder() (v4.3.19). Any character that could be
+     * interpreted as a path separator or is otherwise illegal in a
+     * filename is collapsed to a single "-".
+     *
+     * Only called by createSharedFolder — TeamService::assertValidTeamName
+     * already rejects these chars at team-create time. This is the
+     * belt-and-braces net for teams renamed via the Circles UI or
+     * legacy rows that predate the input validator.
+     */
+    private function sanitiseForFolderName(string $name): string {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            return 'team';
+        }
+        // Replace path separators and control chars with "-".
+        $cleaned = preg_replace('#[/\\\\\x00-\x1F\x7F]+#u', '-', $trimmed);
+        // Collapse runs of "-" and trim.
+        $cleaned = trim((string)preg_replace('/-+/', '-', (string)$cleaned), '-');
+        if ($cleaned === '' || $cleaned === '.' || $cleaned === '..') {
+            return 'team';
+        }
+        if (mb_strlen($cleaned) > 255) {
+            $cleaned = mb_substr($cleaned, 0, 255);
+        }
+        return $cleaned;
     }
 
     private function nodeToArray(Node $node, string $teamFolderPath): array {
