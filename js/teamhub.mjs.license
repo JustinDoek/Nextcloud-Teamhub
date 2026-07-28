@@ -1,6 +1,7 @@
 SPDX-License-Identifier: AGPL-3.0-or-later
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: undefined
+SPDX-FileCopyrightText: Christopher Jeffrey
 SPDX-FileCopyrightText: Evan You
 SPDX-FileCopyrightText: Guillaume Chau
 SPDX-FileCopyrightText: Nextcloud GmbH and Nextcloud contributors
@@ -42,11 +43,14 @@ This file is generated from multiple sources. Included packages:
 - interactjs
 	- version: 1.10.27
 	- license: MIT
+- marked
+	- version: 14.1.4
+	- license: MIT
 - sortablejs
 	- version: 1.14.0
 	- license: MIT
 - teamhub
-	- version: 4.4.2
+	- version: 4.5.0
 	- license: undefined
 - vue
 	- version: 3.5.34

@@ -3,6 +3,301 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.5.0] — 2026-07-28 — In-app announcements + create-wizard button crop
+
+### Added
+
+- **In-app announcements from TeamHub HQ to unlicensed instances.** Envelope icon in the sidebar footer next to the help `?`; clicking it opens a popover with one "Click here to see it" link per unread message. Clicking the link renders the full markdown body in the main content area. Messages are `.md` files in `announcements/` registered via `announcements/registry.json`, each with a `role` (`admin` | `everyone`) and an exact `version` gate. The server filters by license state + version + role; per-user dismissal state lives in a new `teamhub_announce_read` table. Rendering is client-side via `marked` piped through `dompurify` with a strict tag/attribute allow-list (no `<script>`, `<iframe>`, `<style>`, and only `http(s)` / `mailto` URIs).
+- New endpoints under `/api/v1/announcements` — see `APIendpoints.md`. Filename travels as a query/body parameter, not a URL segment, so trailing `.md` on filenames does not confuse NC's Symfony routing.
+- Placeholder `announcements/welcome-4.5.0.md` (`role: admin`) so the affordance is visible on first install; replace with real release commentary or delete the registry entry to hide it.
+
+### Changed
+
+- **Create-team wizard, step 4: Create new / Connect existing buttons cropped.** `NcButton size="small"` drops the pair from ~44 px to NC's `--clickable-area-small` (~34 px), so they no longer dominate the app-row pills. Padding, font-size and icon scale follow from the size token — no CSS changes.
+
+### Added translations
+
+- 9 plain + 2 plural keys across all 7 locales (`.js` + `.json`); `npm run check:l10n` clean at 2422 (en) / 2448 (nl,de,fr,da) / 2420 (es,it).
+
+### Deps
+
+- Added `marked ^14.1.3` for announcement markdown rendering. **`npm install` required before `npm run build`.**
+
+### Database
+
+- New migration `Version000404017Date20260728000000` creates `teamhub_announce_read (user_id, filename, dismissed_at)` with composite PK. Table name is 21 chars — auto-generated PK name (`teamhub_announce_read_pkey` = 26 chars) is well under NC's 30-char cap. MariaDB and Postgres compatible.
+
+## [4.4.15] — 2026-07-28 — Follow-up fixes to the 4.4.14 polish pass
+
+### Fixed
+
+- **Compliance PDF: dead Print / Close buttons retired.** Their inline `onclick` handlers were blocked in the document-written blank tab (cross-origin restrictions on the `about:blank` target), so both buttons looked interactive but did nothing. `window.print()` still fires automatically on load; if the reader dismisses it they can use the browser's own File → Print / Save as PDF.
+- **Setup checklist: modules now read positively.** Both Presence and Decisions show ✓ when **enabled** and • when disabled — the opposite of what 4.4.14 shipped. The reasoning was "changed from shipped default," but the shipped default of both is enabled, which meant an admin saw ✓ next to a feature they had turned off — the exact wrong signal.
+- **Create-team wizard, step 4: Create / Connect uses two select buttons.** The 4.4.14 switch was unreliable; replaced with a pair of `NcButton`s whose active state uses `variant="primary"`. Native NC styling, keyboard accessible, `aria-pressed` reflects state for assistive tech.
+- **Sidebar callout: second line is now "Click the [icon] below"** with the help-circle icon rendered inline between the two text fragments, so the sentence names the button by its own glyph.
+
+### Added translations
+
+- 3 keys across all 7 locales (`.js` + `.json`); 2 dead keys retired.
+
+## [4.4.14] — 2026-07-28 — Polish pass + compliance PDF report
+
+### Added
+
+- **Compliance report as PDF.** New button on Admin → Compliance opens a print-optimised report in a new tab and invokes the browser's Save-as-PDF dialog. Client-side: no server-side PDF generator, no new deps. Each check carries a description of what it means alongside its status and value, plus generation date, TeamHub version, and (when installed) the customer name. Deliberately English-only — compliance PDFs are typically shared with auditors and regulators, and the code path uses variable keys that the l10n extractor cannot see.
+- **Invite types compliance row.** Warns when Allowed invite types lets team admins reach outside the server (email or federated), OK otherwise. Included in the PDF report.
+
+### Changed
+
+- **Integrations tab: idle status text retired.** The transient "Saving…" / "Settings saved" / error line stays with `aria-live`; the standing "Changes on this tab are saved automatically" was dropped as noise.
+- **Integrations tab: font size aligned with other admin tabs.** `admin-compact-row__name` / `__desc` no longer force 14 / 12 px; both inherit the settings page's ~15 px base, so this tab reads at the same weight as the rest.
+- **Setup checklist tick logic.** A row shows ✓ when its value differs from the shipped default and • when it matches. Under the new rule: creator group set, invite types changed, license installed, either module toggled off, IntraVox path set, RoomVox token stored, and any registered third-party integrations all trigger ✓.
+- **Setup checklist descriptions retired** on the invite-types row (the hint drifted from the count — Justin toggled federated off and the description still mentioned it) and on the Decisions module row. The row values already carry the signal.
+- **Create-team wizard, step 4: New/Existing pill → switch.** The segmented pill is gone. Talk / Files / Calendar / Deck rows now use an `NcCheckboxRadioSwitch` labelled "Create new" / "Connect existing", matching the on/off styling of every other toggle in the wizard.
+- **Sidebar Getting started callout: two clean lines.** The narrow sidebar wrapped "Click the ?" so the "?" fell alone on its own line. Split into "Need help getting started?" and "Click here for help [icon]" with the actual help icon rendered inline.
+- **Manage team → Integrations: Wiki renamed to Collective**, matching the create-team wizard rename in v4.4.10. Icon size dropped 22 → 18 and the icon well shrank 36 → 28 so this row sits at the same visual weight as the resource-section headers above.
+- **Manage team → Maintenance: Danger zone renamed to Delete team**, the redundant inner "Delete team" title retired. The description already reflects the admin's Archive-tab settings (archive-before-delete, soft30/soft60/hard) — kept unchanged.
+
+### Added translations
+
+- 16 keys across all 7 locales (`.js` + `.json`); 2 dead keys retired.
+
+### Removed
+
+- Segmented pill CSS (`.ctv__app-toggle`, `.ctv__toggle-btn`) — retired with the switch conversion.
+
+## [4.4.13] — 2026-07-28 — Admin settings: Invitations folded into Team creation, Integrations autosaves
+
+### Changed
+
+- **The Invitations tab is gone; "Allowed invite types" now sits on the Team creation tab**, directly under Creation permissions. Who may create a team and whom they may then invite is one decision, and a tab holding a single section of five booleans did not earn its own tab stop. `EmailSendIcon` retired with it.
+- **"Allowed invite types" laid out 2-up.** Five stacked full-width rows became an auto-fit grid that collapses to one column in a narrow pane without a media query — roughly half the previous height, same `NcCheckboxRadioSwitch` markup and descriptions.
+- **Integrations tab compacted from four `NcSettingsSection`s to two.** Presence and Decisions became rows under **Modules**; IntraVox and RoomVox became rows under **App integrations**. Each setting is now one row — name and description left, control right — instead of a section heading, a full-width paragraph, a control and a hint stacked per setting. Existing description strings are reused verbatim, so no translations were orphaned by the reflow.
+- **The Integrations tab autosaves; its Save button is gone.** The global save row already hid itself on five tabs and now hides on `integrations` too, replaced by an `aria-live` status line reading *"Changes on this tab are saved automatically."* / *"Saving…"* / *"Settings saved"*.
+
+### Added
+
+- **Four new setup-checklist rows.** *Allowed invite types* (counted, with a hint only when email or federated invites are on — the case an admin may not realise is enabled), *IntraVox integration*, *RoomVox integration*, and *Registered integrations*. All `info` state: an unconfigured optional integration is a choice, not a fault.
+- 9 translation keys across all 7 locales (`.js` + `.json`), two of them plural pairs.
+
+### Autosave behaviour worth knowing
+
+The two text fields save differently on purpose. The **IntraVox path** is debounced at 1200 ms — not a secret, idempotent to rewrite. The **RoomVox API token** saves on **blur instead**, because a debounce mid-typing would POST partial tokens and scatter truncated secrets through the server request log. An empty token buffer is a no-op, matching the existing backend contract where empty means "keep the stored value".
+
+### Removed
+
+- Dead `.admin-checks` CSS block, whose only consumer was the retired Invitations panel.
+
+## [4.4.12] — 2026-07-28 — "Getting started" callout points at the help button
+
+### Added
+
+- **Sidebar "Getting started" callout.** A speech bubble above the brand row reading *"Need help getting started? Click the ?"* plus a line telling the user how to turn it off. An unlabelled `?` glyph in a sidebar footer is not an affordance anyone acts on; this names the destination before the click. Structurally an `<li>` in the nav list — no portal, no positioning library, reads in DOM order for screen readers.
+- **Shown on the landing page only.** The new `isLandingView` computed mirrors the content area's else-if chain, so the callout appears with the "Welcome to TeamHub" state and not once a team, the create wizard, Browse Teams or the feed is open. Orientation belongs at the entry point, not over someone's shoulder while they work.
+- **Close button (X)** in the callout's top-right corner. Closes it for the rest of the browser session via `sessionStorage`; it does **not** write the stored preference, because the callout's own copy points at Personal settings → TeamHub as the permanent off switch and an X that silently did the same thing would make that sentence wrong. Storage access is wrapped — Safari private mode throws on `sessionStorage`, and a storage failure must never take down the sidebar.
+- **Per-user opt-out** at Settings → Personal → TeamHub → **Getting started**. Stored in `oc_preferences` as `teamhub`/`getting_started_hint`, default on.
+- **`PreferencesController`** with `GET`/`PUT /api/v1/preferences`. Separate from `LayoutController` (that owns per-team view state) and from `LicenseController` (a UI preference has no business riding on a licensing endpoint, even though the first consumer only renders when unlicensed).
+
+### Fixed
+
+- **Settings → Personal → TeamHub was a blank page whenever the Presence module was off instance-wide.** `personal.js` mounted `MyPresencePanel` only when presence was enabled, and Nextcloud offers no way to deregister an `ISettings` section dynamically — so the entry appeared in the personal-settings sidebar and opened onto nothing. A new `PersonalSettingsPanel.vue` wrapper now always mounts and gates the presence panel inside itself.
+
+### Licence gating
+
+The callout sits inside `App.vue`'s existing `v-if="!isLicensed"` block, so it inherits exactly the same gate as the help button it points at — a licensed instance can never render it. The `showGettingStartedHint` computed repeats the `!isLicensed` condition so the rule stays readable at the single place that decides it, and so moving the block later cannot silently drop the gate.
+
+### Added translations
+
+6 keys across all 7 locales (`.js` + `.json`).
+
+### Docs
+
+Four statements on the public docs site claimed **Personal → TeamHub** is only *visible* when the Presence module is enabled. That was already imprecise — the section was always registered and merely rendered empty — and is now wrong. Corrected in `user/presence.md` (×2), `USER_GUIDE.md`, and `nextcloud-admin/presence.md`.
+
+## [4.4.11] — 2026-07-28 — "Milestone reached" posts a real progress summary
+
+### Changed
+
+- **`MilestoneAutoPostService` body enrichment.** The post used to be a single "…was scheduled for today. Confirm progress with the team." line. It now also includes:
+  - A **"Since …"** context line naming the previous milestone with its localised date, falling back to the project start date, and finally to a bare "Up to this milestone date:" when neither is available.
+  - A **Deck-tasks summary** for cards whose `duedate` falls in `(previousMilestone.date, thisMilestone.date]` — total, completed, still open. Ownership matches the Project Compass widget's Milestones pillar so the "reached" message and the widget agree on which cards belong to which milestone. If nothing lands in the window, the paragraph reads "No tasks with a due date in this period."
+  - A **Decisions summary** (only when the module is on for the team) for decisions `created_at` in the same window — total proposed, decided (approved/denied), still awaiting a decision. Withdrawn proposals are counted in the "awaiting" bucket so the three sub-counts sum to total.
+- **`MilestoneAutoPostService` constructor** gained five dependencies: `DecisionMapper`, `DecisionTeamConfigMapper`, `TimelineService`, `IConfig`, `IDBConnection`. All are already used elsewhere in the app; no new services introduced. Global + per-team decisions gate is inlined (2 reads) rather than pulling `DecisionService`'s full graph into a background-job context.
+- **`postForMilestone` signature** — takes `Project` as a second argument so the caller (which already resolved it for the Advanced-mode gate) doesn't re-fetch it.
+
+### Added
+
+- 7 translation keys across all 7 locales (`.js` + `.json`) covering the new "Since …" line (three variants), the Deck paragraph (with and without matches), and the Decisions paragraph (with and without matches).
+
+### Deliberately unchanged
+
+- The subject line ("Milestone reached: %s") is untouched — same key, same locale coverage.
+- Non-Advanced-project skip path unchanged; only Advanced projects ever surface these counts.
+- `MessageMapper::create` call unchanged — the enrichment is entirely in the body string.
+
+## [4.4.10] — 2026-07-27 — Intravox and Collective are apps, not modules
+
+### Changed
+
+- **Create-team wizard, step 4** — Intravox (formerly labelled "Intranet") and Collective (formerly labelled "Wiki") now render in the App integrations block, immediately after Calendar and Deck, instead of under Team modules. Each of them provisions a resource (a documentation page / a wiki collective) rather than toggling a feature, so they belong with Talk / Files / Calendar / Deck rather than with Decisions / Presence / Timeline / Messages. Rendered as toggle-only rows because there is no existing intravox page or collective to connect to — always create.
+- **Renames.** "Intranet" → "Intravox" with the description "Create a team page on the intranet provided by Intravox." "Wiki" → "Collective" with the description "Create a wiki for this team." Labels are unwrapped by t() to match Talk / Deck / Calendar; only the descriptions are translated.
+
+### Added
+
+- 2 translation keys across all 7 locales (`.js` + `.json`) — the two new descriptions.
+
+### Removed
+
+- 2 translation keys across all 7 locales — the previous "Structured team documentation page with sub-pages - by Intravox" and "Full collaborative wiki with a page tree, real-time co-editing, attachments, tags, templates, and trash. Best when the team maintains ongoing shared knowledge. - by Collectives" descriptions, no longer referenced.
+
+### Data model
+
+Unchanged. `form.modules.pages` and `form.modules.wiki` still hold the wizard's choices, so `submit()`, the progress-task list, and `applyTemplateDefaults()` all keep working against the same fields. A new `moduleAvailability` computed replaced the previous "search moduleOptions by id" pattern used to gate profile defaults, so the two entries can leave moduleOptions without breaking template-driven initialisation.
+
+## [4.4.9] — 2026-07-27 — Compact Team Apps section on the Integrations tab
+
+### Changed
+
+- **Connect / Create buttons moved into each app section header** (Talk, Files, Calendar, Deck). They previously lived in a dedicated 44 px "actions row" below the resources; an empty Talk section rendered ~130 px of chrome for zero information. Header actions right-align and wrap to a second line when the team label is long, so nothing gets clipped.
+- **Row and header paddings tightened** across the section — `.team-app-section__header` 10 × 14 → 4 × 12, `.resource-row` 8 × 14 → 4 × 12, `.resource-row` `min-height: 44px` dropped (NcButtons inside enforce their own touch target; the row does not need to). `.team-apps-list` gap 6 px + per-section `margin-bottom: 10px` collapsed to a single 4 px gap so the two sources of vertical space stop compounding. `.team-app-item` (Wiki / Intravox) padding 10 × 12 → 6 × 12 so the toggle-driven rows line up with the tighter section headers.
+- **Empty states rendered consistently.** Calendar and Deck previously had no empty-state line at all; if you removed the last calendar the section collapsed to a lonely header. Both now show the same italic, muted "No X connected" line as Talk and Files.
+
+### Added
+
+- 2 translation keys across all 7 locales (`.js` + `.json`): "No boards connected", "No calendars connected".
+
+## [4.4.8] — 2026-07-27 — Leaving a team actually removes you
+
+### Fixed
+
+- **"Leave team" left the user in the team.** The direct `circles_member` row was deleted, but Circles' `circles_membership` cache — the denormalised table `TeamService::getUserTeams()` and every share picker read — was never rebuilt. The stale row kept the team in the sidebar with full access, while the now-zero direct level hid the Leave action from the 3-dot menu, so the user could not even retry. `MemberService::leaveTeam()` now calls `MembershipService::onUpdate()` after the delete, the same call `removeMember()` has always made for the same reason.
+- **The `indirect_member` sentinel was shown to users verbatim.** Both leave paths mapped the raw backend string into the error toast. They now show the existing translated explanation.
+
+### Changed
+
+- **`POST /api/v1/teams/{teamId}/leave` returns `stillMember`.** A user who is both a direct member and a member of an attached group legitimately keeps access after leaving — the response now says so, and the clients show "You are no longer a direct member, but you still have access…" instead of claiming a departure the sidebar contradicts. In `BrowseTeamsView` the card flips to the existing indirect-member state (Open + disabled Leave + "via group") rather than back to Join.
+
+### Added
+
+- 1 translation key across all 7 locales (`.js` + `.json`).
+
+## [4.4.7] — 2026-07-27 — Telemetry reporting restored for unlicensed instances
+
+Closes the open issue logged on 2026-07-27: the licence-derived telemetry policy was intact but had no transport, so free-tier reporting had silently stopped.
+
+### Added
+
+- **`TelemetryReportJob`** — daily `TimedJob`, `TIME_INSENSITIVE`, registered in `appinfo/info.xml`. Calls `TelemetryService::sendDailyReport()`, which gates on `isEnabled()` before opening any connection.
+
+### Fixed
+
+- **Unlicensed instances report again.** The behaviour now matches the documented policy in both directions:
+
+  | Instance state | Reports |
+  |---|---|
+  | No licence installed | Yes |
+  | Malformed / unreadable licence JWT | Yes (treated as unlicensed) |
+  | Active licence **or trial** | **Never** |
+  | Expired, within the 30-day grace window | **Never** |
+  | Expired beyond grace | Yes |
+
+- **Corrected three misleading docblocks** in `TelemetryService`. `sendDailyReport()` was marked deprecated and described `REPORT_URL` as a "retired endpoint" — it is live and was still receiving reports from pre-4.3.20 builds throughout. `sendInstallEvent()` and `sendUninstallEvent()` claimed callers in `Application::boot()` and `AppDisabledListener` that were removed in 4.3.20; both are now labelled as uncalled.
+- **Class docblock** no longer describes telemetry as an admin opt-out. It has been licence-derived since v4.2.4 and `setEnabled()` is a documented no-op. The now-unread `KEY_ENABLED` constant records why it is retained.
+
+### Deliberately not restored
+
+Install and uninstall pings stay removed, matching the explicit decision recorded in `Application::boot()`. The daily report gives the same population signal within 24 hours without adding an outbound call to the first page load.
+
+## [4.4.6] — 2026-07-27 — Translation backlog cleared + extraction check
+
+Clears the open issue logged during the 4.4.4 and 4.4.5 sessions.
+
+### Fixed
+
+- **128 translation keys added across all 7 locales** — every `t()` / `n()` literal in `src/` now resolves. These strings were correctly wrapped but had never been extracted, so they rendered in English for every user regardless of language. 24 are plural pairs (keyed by singular, two-form arrays); 104 are plain strings.
+- Affected surfaces included the create-team wizard (team-type descriptions, placeholders, the name-validation message), the Wiki/Collectives flows in Manage team, the Presence holiday and location managers, the licensing and telemetry panels in Admin settings, the folder-migration modal, and the Deck, Decisions and What's-new widgets.
+
+### Added
+
+- **`scripts/check-l10n.js`** (`npm run check:l10n`) — fails with a per-file list when any `src/` string lacks a key in `l10n/en.json`. Correctly treats `n()` pairs as keyed by their singular, so plural second forms aren't reported as false positives.
+
+### Root cause
+
+`.tx/config` points Transifex at `l10n/templates/teamhub.pot`, **which has never existed in the repository**. The extraction pipeline was therefore never able to run, and the locale files have been maintained by hand. Nothing was failing loudly, so nothing surfaced the gap: the session-end translation check verifies that strings are *wrapped*, and they always were.
+
+### Known scope limit
+
+The new check covers `src/` only. Backend strings are not included — `Notifier.php` in particular still emits English literals rather than routing through `IL10N`, which is tracked separately in `HANDOFF.md`.
+
+## [4.4.5] — 2026-07-27 — Onboarding phase 3.3: post-create hand-off
+
+Last of the three app changes in the onboarding plan (`docs/design/onboarding.md` § 3.3). All three phases are now shipped.
+
+### Added
+
+- **Success hand-off replaces the finished progress list** in the create-team wizard. Shows the new team's name, chips for everything that was actually provisioned (Talk room, Team folder, Calendar, Deck board, plus enabled modules), and a "What's next" row with three actions: **Invite people**, **Review team apps**, **Open team**.
+- **The recommended action adapts to what the wizard was told.** Step 3 (Members) is skippable, and a team with nobody in it is the one case where the next step isn't "open it" — so **Invite people** becomes the primary button and the hint changes accordingly. When members were invited, **Open team** is primary and the hint points at tab-bar rearranging instead.
+- **`created` now carries an intent** (`'invite'` / `'manage'` / `null`). `App.vue` routes on it: invite opens the team home with the invite modal queued via the existing one-shot pending-action flag, manage opens Manage team, null keeps the previous behaviour.
+
+### Changed
+
+- The wizard footer is hidden once creation completes. It previously held an "Open team" button; keeping it would duplicate the one in the hand-off panel.
+- Provisioned chips read the submitted form rather than the progress task list — tasks are batched ("Creating new app resources" covers all four apps), and the owner wants to see resources, not steps. Module labels reuse `moduleOptions`, so no duplicate translation keys.
+
+### Known gap (pre-existing, not introduced here)
+
+- **176 unique strings across 27 files in `src/` are wrapped in `t()`/`n()` but have no key in `en.json`** — they were never extracted, so they render in English in all seven locales regardless of the user's language. Worst affected: `CreateTeamView.vue` (24 remaining), `ManageTeamView.vue` (34), `AdminSettings.vue` (33). This is an extraction-pipeline gap, not an authoring one — the strings are correctly wrapped, which is why source-level translation checks have been passing. Logged in `HANDOFF.md`; needs its own session.
+
+## [4.4.4] — 2026-07-27 — Onboarding phase 3.2: admin first-run setup checklist
+
+Second of the three app changes in the onboarding plan (`docs/design/onboarding.md` § 3.2).
+
+### Added
+
+- **Setup checklist at the top of Admin Settings → Team creation.** Four rows derived from live configuration on every render — not a wizard with stored steps, so a row can never claim something is configured after an admin changes it back. Rows: who can create teams, license state, Presence module, Decisions module.
+- **The creation-permission row warns when unrestricted.** An empty creator group means every user on the instance can create teams, and each team provisions a Talk room, a Deck board, a calendar and a folder. Until now a fresh install was visually identical to a deliberate decision to leave it open.
+- **`onboardingChecklistDismissed`** on the admin-settings read/write contract, stored in appconfig as `onboarding_checklist_dismissed`. Instance-level rather than per-user: "this instance has been reviewed" is a fact about the instance.
+- **Dismissal is reversible** via a "Show setup checklist" button that replaces the card, so an admin cannot permanently lose the checklist.
+
+### Changed
+
+- Dismissal posts a **single-key** request rather than routing through `save()`, which would re-save the wizard text, creator groups and module toggles as a side effect of one click. `TeamService::saveAdminSettings()` already guards every key with `isset()` / `array_key_exists()`, so partial saves are safe by design.
+
+### Fixed
+
+- **`Community version` and `Copy failed`** were carried over from 4.4.3's translation sweep; no further app strings were missing in `App.vue`.
+
+### Accessibility
+
+- Status glyphs (`✓` / `⚠` / `•`) are `aria-hidden`; every row's meaning is carried in its text label, value and hint, so no information is conveyed by colour or icon alone (WCAG 1.4.1).
+- Warning text uses `--color-warning-text` per SKILLS.md § NC design guidelines, not `--color-warning`.
+
+### Known gap (pre-existing, not introduced here)
+
+- **23 strings in `AdminSettings.vue` are wrapped in `t()` but absent from every locale file, including `en`** — they were never extracted. Most came in with the 4.3.20–4.4.0 licensing work (`Licensing info`, `Request trial by email`, `Telemetry is ON` / `OFF`, the seat-cap banners) plus several plural forms (`{n} days`, `{n} teams selected`, `{n} altered files`). They render in English on every locale. Needs a dedicated translation-extraction pass; logged in `HANDOFF.md`.
+
+## [4.4.3] — 2026-07-27 — Onboarding phase 3.1: actionable, role-shaped empty states
+
+First of the three app changes in the onboarding plan (`docs/design/onboarding.md` § 3.1).
+
+### Added
+
+- **Actions on the no-teams empty state.** The content-area empty state now carries buttons instead of only text. A user who can create teams gets **New Team** (primary) and **Browse Teams** (secondary); a user who cannot gets **Browse Teams** as the primary and only action.
+
+### Changed
+
+- **Empty-state copy is now role-shaped.** The sidebar previously told every user with no teams to "Create your first team above" — advice a user without creation rights cannot act on, because the New Team item is hidden for them. It now reads "Browse teams to find one to join" in that case. Extends SKILLS.md § Permissions (hide restricted actions) to cover restricted *advice*.
+- **Split the "no team selected" state in two.** `!currentTeamId` fired for both "you have no teams at all" and "you have teams but haven't picked one", which shared a single message. The first is an onboarding moment and now carries the actions above; the second is a neutral "Select a team from the sidebar to get started". While the team list is loading the neutral branch renders, so the onboarding copy no longer flashes and then gets replaced.
+- Empty-state icons now use the `ICON_HERO` / `ICON_NAV` tokens from `src/constants/uiTokens.js` rather than hard-coded `64` / `20`, per SKILLS.md § Design tokens.
+
+### Fixed
+
+- **Two pre-existing untranslated strings in `App.vue`**, found while adding the strings above and not introduced by this change: `Community version` (the sidebar footer label on unlicensed instances) existed only in `en`, and `Copy failed` was missing from `en`. Both now present in all seven locales.
+
+### Removed
+
+- Retired string `Select a team from the sidebar or create a new one`, replaced by the two role-shaped variants. Dropped from all seven locales rather than left orphaned.
+
 ## [4.4.2] — 2026-07-25 — CSRF hardening: state-changing endpoints now verify the token
 
 ### Security
@@ -133,7 +428,7 @@ Major-version rollup of the 4.3.19 → 4.3.22 arc into one release. Nothing new 
 
 - **`LicenseExpiryNotificationJob`** now runs two checks per tick (expiry + seat overage) with independent debounce markers. Docblock rewritten to describe both axes.
 
-
+## [4.3.21] — 2026-07-24 — Nextcloud admin notifications 14/7 days before license/trial expiry
 
 ### Added
 

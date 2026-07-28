@@ -1096,6 +1096,12 @@ class TeamService {
             // overwrite it (write field) but can't read it back (read field).
             // This matches NC's pattern for SMTP passwords and other secrets.
             'roomvoxTokenConfigured' => $config->getAppValue(Application::APP_ID, 'roomvox_api_token', '') !== '',
+            // v4.4.4 — whether an admin has dismissed the first-run setup
+            // checklist on the Team creation tab. Instance-level, not
+            // per-user: "this instance has been reviewed" is a fact about
+            // the instance, so one admin settling it settles it for all.
+            // Default '0' — a fresh install shows the checklist.
+            'onboardingChecklistDismissed' => $config->getAppValue(Application::APP_ID, 'onboarding_checklist_dismissed', '0') === '1',
         ];
     }
 
@@ -1200,6 +1206,13 @@ class TeamService {
                 Application::APP_ID,
                 'decisions_module_enabled',
                 $settings['decisionsModuleEnabled'] ? '1' : '0'
+            );
+        }
+        if (isset($settings['onboardingChecklistDismissed'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                'onboarding_checklist_dismissed',
+                $settings['onboardingChecklistDismissed'] ? '1' : '0'
             );
         }
         if (array_key_exists('roomvoxApiToken', $settings)) {

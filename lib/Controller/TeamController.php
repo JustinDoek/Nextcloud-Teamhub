@@ -569,8 +569,14 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     public function leaveTeam(string $teamId): JSONResponse {
         try {
-            $this->memberService->leaveTeam($teamId);
-            return new JSONResponse(['success' => true]);
+            $result = $this->memberService->leaveTeam($teamId);
+            // stillMember (v4.4.8): the direct membership is gone, but a group
+            // or sub-team keeps granting access. The frontend uses it to avoid
+            // claiming the user left a team that is still in their sidebar.
+            return new JSONResponse([
+                'success'     => true,
+                'stillMember' => $result['stillMember'] ?? false,
+            ]);
         } catch (\Exception $e) {
             // indirect_member is a sentinel from MemberService — pass it through
             // so the frontend can show a tooltip rather than a generic error.

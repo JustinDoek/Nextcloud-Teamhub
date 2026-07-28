@@ -227,6 +227,21 @@ return [
         ['name' => 'feedback#submit', 'url' => '/api/v1/feedback', 'verb' => 'POST'],
 
         // ----------------------------------------------------------------
+        // Per-user UI preferences (v4.4.12) — oc_preferences, no team scope.
+        // ----------------------------------------------------------------
+        ['name' => 'preferences#getPreferences',  'url' => '/api/v1/preferences', 'verb' => 'GET'],
+        ['name' => 'preferences#savePreferences', 'url' => '/api/v1/preferences', 'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
+        // In-app announcements (v4.4.17) — unlicensed instances only.
+        // ----------------------------------------------------------------
+        // filename passed as ?filename= / body param — NC's Symfony routing
+        // treats a trailing .md as a request format on {filename} URL slots.
+        ['name' => 'announcement#list',    'url' => '/api/v1/announcements',         'verb' => 'GET'],
+        ['name' => 'announcement#get',     'url' => '/api/v1/announcements/body',    'verb' => 'GET'],
+        ['name' => 'announcement#dismiss', 'url' => '/api/v1/announcements/dismiss', 'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
         // Integration API — external-app registration (NC admin required)
         // ----------------------------------------------------------------
         ['name' => 'integration#listRegisteredIntegrations', 'url' => '/api/v1/ext/integrations',          'verb' => 'GET'],

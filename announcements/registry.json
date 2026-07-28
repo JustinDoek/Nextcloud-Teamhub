@@ -1,0 +1,17 @@
+{
+    "_schema": {
+        "description": "In-app announcements to unlicensed instances. Each entry surfaces the envelope in the sidebar footer for users whose role matches. Retire an announcement by deleting its entry.",
+        "fields": {
+            "filename": "Basename of a .md file in this folder. No path separators. Must resolve to a real file in announcements/.",
+            "role": "'admin' (only NC instance admins see it) | 'everyone' (all users on an unlicensed instance).",
+            "version": "Exact TeamHub version this announcement targets. Only shown when the running instance's version matches."
+        }
+    },
+    "announcements": [
+        {
+            "filename": "The_journey.md",
+            "role": "admin",
+            "version": "4.5.0"
+        }
+    ]
+}

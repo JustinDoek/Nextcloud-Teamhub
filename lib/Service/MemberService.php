@@ -1135,10 +1135,14 @@ class MemberService {
      * (added via a group or another team) so the frontend can show a tooltip
      * instead of a generic error.
      *
+     * @return array{stillMember: bool} stillMember is true when the caller can
+     *         still reach the team after the direct row is gone — i.e. a group
+     *         or sub-team also grants them access. The caller must not report
+     *         "you have left the team" in that case; the team stays visible.
      * @throws \Exception if owner tries to leave with members still in the team,
      *                    or if user is only an indirect member
      */
-    public function leaveTeam(string $teamId): void {
+    public function leaveTeam(string $teamId): array {
 
         $this->assertTeamNotPendingDeletion($teamId);
 
@@ -1181,6 +1185,24 @@ class MemberService {
                 ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->executeStatement();
 
+            // v4.4.8 — rebuild the circles_membership cache. A raw DELETE on
+            // circles_member does NOT touch it, and that cache is what
+            // TeamService::getUserTeams() and every share picker actually read.
+            // Skipping it left the departing user with a stale cache row: the
+            // team stayed in their sidebar with full access while their direct
+            // level dropped to 0 — which hides the Leave action, so they could
+            // not even retry. Same call, same reason, as removeMember() below.
+            $cacheRebuilt = true;
+            try {
+                $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
+                $membershipService->onUpdate($teamId);
+            } catch (\Throwable $e) {
+                $cacheRebuilt = false;
+                $this->logger->warning('[TeamHub][MemberService] leaveTeam: membership cache rebuild failed', [
+                    'teamId' => $teamId, 'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
             $this->logger->info('[TeamHub][MemberService] leaveTeam: member removed via direct DB delete', [
                 'uid'    => $uid,
                 'teamId' => $teamId,
@@ -1193,6 +1215,23 @@ class MemberService {
                 'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
             $this->talkService->removeUserFromTeamTalkRoom($teamId, $uid);
+
+            // Leaving drops the direct row only. A user who is ALSO in an
+            // attached group (or sub-team) legitimately keeps access, and the
+            // rebuild above re-creates their cache row through that path. Ask
+            // the (now-current) cache rather than assuming, so the caller can
+            // tell the user the truth about a team they can still open.
+            $stillMember = $this->isEffectiveMember($teamId, $uid, $db);
+
+            if ($stillMember && !$cacheRebuilt) {
+                // Distinguishable in the log from the legitimate group case:
+                // the user is stuck until an admin runs the membership repair.
+                $this->logger->error('[TeamHub][MemberService] leaveTeam: user still has access and the cache rebuild failed', [
+                    'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
+                ]);
+            }
+
+            return ['stillMember' => $stillMember];
         } catch (\Exception $e) {
             $this->logger->error('[TeamHub][MemberService] Error leaving team', [
                 'teamId'    => $teamId,

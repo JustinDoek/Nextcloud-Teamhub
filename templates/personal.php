@@ -1,6 +1,7 @@
 <?php
 /** @var \OCP\IL10N $l */
 /** @var bool $presenceModuleEnabled */
+/** @var bool $gettingStartedHint */
 \OCP\Util::addScript('teamhub', 'personal');
 // CSS extracted per-entry into the app css/ dir (see vite.config.mjs); load directly.
 \OCP\Util::addStyle('teamhub', 'vite-index.chunk');
@@ -8,5 +9,6 @@
 ?>
 <div
     id="teamhub-personal-settings"
-    data-presence-module-enabled="<?php echo $_['presenceModuleEnabled'] ? '1' : '0'; ?>">
+    data-presence-module-enabled="<?php echo $_['presenceModuleEnabled'] ? '1' : '0'; ?>"
+    data-getting-started-hint="<?php echo $_['gettingStartedHint'] ? '1' : '0'; ?>">
 </div>

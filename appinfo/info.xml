@@ -3,29 +3,32 @@
       xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
     <id>teamhub</id>
     <name>TeamHub</name>
-    <summary>Team collaboration hub — messaging, activity feed and app widgets for Nextcloud Teams</summary>
-    <description><![CDATA[TeamHub started as a visual mock up to discus team based working in Nextcloud and grew into a workspace built on top of Nextcloud Teams (Circles).
+    <summary>Team collaboration hub — Collaboration, projects, department work all build on top of Nextcloud Teams</summary>
+    <description><![CDATA[TeamHub is a workspace built on top of Nextcloud Teams (Circles).
 
-Each team gets a shared home with:
+***Each team gets a shared home
 - **Messages** — post announcements, questions and polls to your team
 - **Activity feed** — a single view of recent file, calendar, task and member changes across all shared resources
-- **App tabs** — quick-links to the team's shared Talk chat, Files folder, Calendar and Deck board
-- **Widgets** — upcoming calendar events, open Deck tasks, Pages, and the activity snapshot and others through integrations
-- **Team management** — invite members by user, group, email or federated account; manage roles and pending requests
+- **App tabs** — quick-links to the team's shared Talk chat, Files folder, Calendar, Collective and Deck board
+- **Widgets** — upcoming calendar events, open Deck tasks, Pages, the activity snapshot and others through integrations
+
+***Management
 - **Customizable view** — users can create their own layout per team
-- **Integrations** — developers can integrate their app with teamhub
+- **Team management** — team admins/owners are in control on their teams by managing the resources, members and permissions
+- **TeamHub management** - Nextcloud admins have their own controls to manage TeamHub under admin settings
+
+***Development
+- **Integrations** — developers can integrate their app with teamhub we are API driven
 - **Internal integrations** - Added TeamHub native integrations for Decisions, Precense, Timeline, Budget and Time  
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>4.4.2</version>
+    <version>4.5.0</version>
     <licence>agpl</licence>
     <author mail="teamhub@tldr.host" homepage="https://tldr.host/teamhub">Justin Doek</author>
     <namespace>TeamHub</namespace>
     <category>organization</category>
     <category>dashboard</category>
-	<author >Justin Doek</author>
     <website>https://tldr.host/teamhub</website>
-	<discussion>https://github.com/JustinDoek/Nextcloud-Teamhub/discussions</discussion>
     <bugs>https://github.com/JustinDoek/nextcloud-teamhub/issues</bugs>
     <repository>https://github.com/JustinDoek/Nextcloud-Teamhub</repository>
     <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-main.jpg</screenshot>
@@ -34,8 +37,6 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
         <nextcloud min-version="32" max-version="34"/>
         <php min-version="8.1" max-version="8.4"/>
     </dependencies>
-    
-    
     
     <navigations>
         <navigation>
@@ -61,6 +62,7 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
         <job>OCA\TeamHub\BackgroundJob\TalkMembershipReconcileJob</job>
         <job>OCA\TeamHub\BackgroundJob\MilestoneAutoPostJob</job>
         <job>OCA\TeamHub\BackgroundJob\LicenseExpiryNotificationJob</job>
+        <job>OCA\TeamHub\BackgroundJob\TelemetryReportJob</job>
     </background-jobs>
 
     <repair-steps>

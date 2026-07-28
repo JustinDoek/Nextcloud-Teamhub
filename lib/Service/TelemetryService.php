@@ -20,8 +20,9 @@ use Psr\Log\LoggerInterface;
  * Privacy design:
  *   - The identifier is a randomly generated UUID stored in NC app config.
  *     No NC instance URL, hostname, or user data is ever included.
- *   - Opt-out is respected: if 'telemetry_enabled' is set to '0' by an NC admin,
- *     nothing is sent.
+ *   - Reporting is licence-derived, not a toggle: an instance with an active
+ *     licence or trial never sends. See isEnabled() for the full rule and
+ *     setEnabled() for why the old admin switch is a no-op.
  *   - The full payload is logged at DEBUG level so admins can verify what is sent.
  *   - Custom link URLs are reduced to their bare hostname before aggregation —
  *     no paths, query strings, ports, fragments, or IP addresses are ever sent.
@@ -48,7 +49,13 @@ class TelemetryService {
     /** The remote endpoint that receives reports. */
     public const REPORT_URL = 'https://tldr.host/teamhub/report/'; // trailing slash required — Apache 301-redirects bare URL, flipping POST to GET
 
-    /** IConfig key: telemetry opt-out flag. '1' = enabled (default), '0' = disabled. */
+    /**
+     * IConfig key of the retired admin opt-out flag.
+     *
+     * Nothing reads it since v4.2.4, when reporting became licence-derived
+     * (isEnabled()). Retained only so an upgraded instance's stored value
+     * isn't mistaken for a free key name later; setEnabled() is a no-op.
+     */
     private const KEY_ENABLED = 'telemetry_enabled';
 
     /** IConfig key: the persistent anonymous UUID. Auto-generated on first use. */
@@ -139,11 +146,16 @@ class TelemetryService {
     /**
      * Collect stats and send the daily report if telemetry is enabled.
      *
-     * DEPRECATED (v4.3.20). The daily-report background job was removed
-     * with the air-gapped-only licensing model. This method now has no
-     * caller in-tree and stays only as a defensive no-op — the send()
-     * helper it delegates to would 404 anyway against the retired
-     * telemetry.php endpoint.
+     * Called from TelemetryReportJob (daily TimedJob, registered in
+     * appinfo/info.xml).
+     *
+     * History: v4.3.20 deleted the job that called this and marked the method
+     * deprecated, describing the endpoint as retired. Both parts were wrong in
+     * effect — REPORT_URL is live and still receiving reports from instances on
+     * pre-4.3.20 builds. What actually happened is that the policy in
+     * isEnabled() survived while its only transport was removed, so unlicensed
+     * instances stopped reporting without anything indicating so. Restored in
+     * v4.4.7.
      */
     public function sendDailyReport(): void {
         if (!$this->isEnabled()) {
@@ -153,8 +165,14 @@ class TelemetryService {
     }
 
     /**
-     * Send an 'installed' event. Called from Application::boot() on first run.
-     * Guarded by a flag so it only fires once per installation.
+     * Send an 'installed' event, once per installation.
+     *
+     * NOT CURRENTLY CALLED. The boot-time ping was removed in v4.3.20 for the
+     * air-gapped-only licensing model and deliberately not restored in v4.4.7
+     * — see the explicit comment in Application::boot(). Kept because the
+     * daily report gives the same population signal a day later without
+     * touching the request path on first load. Wire it up only if install-time
+     * timing genuinely matters; the isEnabled() gate already applies.
      */
     public function sendInstallEvent(): void {
         $fired = $this->config->getAppValue(Application::APP_ID, 'telemetry_install_sent', '0');
@@ -169,7 +187,12 @@ class TelemetryService {
     }
 
     /**
-     * Send an 'uninstalled' event. Called from AppDisabledListener.
+     * Send an 'uninstalled' event.
+     *
+     * NOT CURRENTLY CALLED. AppDisabledListener stopped invoking this in
+     * v4.3.20 and only suspends integrations now. Left in place alongside
+     * sendInstallEvent() for symmetry; an instance that disables the app
+     * simply stops appearing in the daily reports.
      */
     public function sendUninstallEvent(): void {
         if (!$this->isEnabled()) {
