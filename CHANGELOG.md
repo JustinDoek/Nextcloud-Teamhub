@@ -3,11 +3,25 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.5.1] — 2026-07-29 — Release pipeline shipped a stale frontend
+
+### Fixed
+
+- **Every App Store release after v4.30 — that is v4.4.2 and 4.5.0 — shipped v4.30's frontend.** The publish workflow ran `npm install && npm run build` on the release repository, compiling whatever `src/` was committed there. `src/` is not mirrored by `scripts/publish-to-release.js` — by design, since the release repo is supposed to carry pre-built output only — so it had been frozen since 2026-07-20 and CI silently overwrote the correct mirrored bundle with a v4.3.0-era rebuild. Installing 4.5.0 gave you current PHP against a v4.3.0 `js/`, which is why no frontend change since v4.3.0 was visible. **Reinstall or update to 4.5.1 to get the real bundle.**
+- **The integrity manifest was hiding it.** `npm run build` regenerates `appinfo/integrity.json`, so the CI rebuild also re-hashed its own stale output and stamped it `app_version: 4.3.0` (read from the release repo's equally stale `package.json`). Every hash matched, so the Compliance tab reported **Compliant** while blessing a three-week-old frontend.
+
+### Changed
+
+- **CI packages, it no longer compiles.** `.github/workflows/publish.yml` assembles the tarball from the committed release payload — the same allow-list as `PUBLISHABLE` in `scripts/publish-to-release.js` — so the published artifact is byte-for-byte the bundle that was built and tested locally. `src/`, `scripts/`, `screenshots/`, `.tx`, `package*.json`, `vite.config.mjs` and the developer docs no longer ship inside the app tarball.
+- **New CI gate: `.github/verify-package.js`.** Runs on the assembled folder before upload and aborts the release if `integrity.json`'s `app_version` disagrees with `appinfo/info.xml`, if any manifested file is missing or altered, or if a file inside a covered directory is absent from the manifest. Verified against the published 4.5.0 artifact — it fails with the exact mismatch.
+- **`scripts/publish-to-release.js` pre-flight.** Refuses to mirror, copying nothing, when `info.xml` and `package.json` disagree, when `integrity.json` was generated for a different version, or when `src/` is newer than `js/` (a stale build). Override with `TEAMHUB_SKIP_PREFLIGHT=1`.
+- **`scripts/generate-integrity.js` reads the app version from `appinfo/info.xml`** instead of `package.json`. `info.xml` is what Nextcloud reads, and it is mirrored to the release repo whereas `package.json` is not.
+
 ## [4.5.0] — 2026-07-28 — In-app announcements + create-wizard button crop
 
 ### Added
 
-- **In-app announcements from TeamHub HQ to unlicensed instances.** Envelope icon in the sidebar footer next to the help `?`; clicking it opens a popover with one "Click here to see it" link per unread message. Clicking the link renders the full markdown body in the main content area. Messages are `.md` files in `announcements/` registered via `announcements/registry.json`, each with a `role` (`admin` | `everyone`) and an exact `version` gate. The server filters by license state + version + role; per-user dismissal state lives in a new `teamhub_announce_read` table. Rendering is client-side via `marked` piped through `dompurify` with a strict tag/attribute allow-list (no `<script>`, `<iframe>`, `<style>`, and only `http(s)` / `mailto` URIs).
+- **In-app announcements from TeamHub HQ to unlicensed instances.** An auto-visible inline callout appears in the sidebar footer whenever there is an unread announcement matching the instance version and the user's role — stacked above the getting-started hint, reading *"A new message from TeamHub is waiting for you. / Click the [envelope] below"*. The envelope button in the brand row (next to the help `?`) opens the full markdown body in the main content area. The callout carries no close control by design: the only way to clear it is **"Got it, don't show again"** in that view, so the message has to be opened to be dismissed. Messages are `.md` files in `announcements/` registered via `announcements/registry.json`, each with a `role` (`admin` | `everyone`) and an exact `version` gate. The server filters by license state + version + role; per-user dismissal state lives in a new `teamhub_announce_read` table. Rendering is client-side via `marked` piped through `dompurify` with a strict tag/attribute allow-list (no `<script>`, `<iframe>`, `<style>`, and only `http(s)` / `mailto` URIs).
 - New endpoints under `/api/v1/announcements` — see `APIendpoints.md`. Filename travels as a query/body parameter, not a URL segment, so trailing `.md` on filenames does not confuse NC's Symfony routing.
 - Placeholder `announcements/welcome-4.5.0.md` (`role: admin`) so the affordance is visible on first install; replace with real release commentary or delete the registry entry to hide it.
 

@@ -10,32 +10,53 @@ jobs:
     # Geeft de workflow toestemming om bestanden te uploaden naar de release
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up PHP and Build JS
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-      
+      # Only needed to run the verification gate below — nothing is compiled here.
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          
-      - name: Build App
-        run: |
-          npm install
-          npm run build
-          # Verwijder ballast
-          rm -rf node_modules .git .github
 
-      - name: Create App Folder and Tarball
+      # NOTE: the frontend is deliberately NOT built here.
+      #
+      # js/ and css/ are compiled by the developer (`npm run build` in the
+      # working repo) and mirrored into this repo by scripts/publish-to-release.js.
+      # This workflow used to run `npm install && npm run build`, which compiled
+      # whatever src/ was committed here -- but src/ is not mirrored, so it had
+      # been frozen since 2026-07-20 and every release from v4.30 through v4.5.0
+      # shipped a v4.3.0-era frontend under a newer version number. Packaging the
+      # committed bundle means the artifact customers install is byte-for-byte
+      # the one that was tested locally.
+      - name: Assemble app folder
         run: |
+          set -euo pipefail
           mkdir teamhub
-          find . -maxdepth 1 ! -name 'teamhub' ! -name '.' ! -name '..' -exec mv {} teamhub/ \;
+          # Keep this list in sync with PUBLISHABLE in the working repo's
+          # scripts/publish-to-release.js.
+          for entry in appinfo lib js css img l10n sql templates announcements \
+                       composer.json CHANGELOG.md README.md LICENSE; do
+            if [ ! -e "$entry" ]; then
+              echo "::error::Release payload is missing '$entry' -- run publish-to-release.js before tagging."
+              exit 1
+            fi
+            cp -R "$entry" teamhub/
+          done
+          echo "Assembled:"
+          ls -la teamhub/
+
+      - name: Verify package against its integrity manifest
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node .github/verify-package.js teamhub
+
+      - name: Create tarball
+        run: |
+          set -euo pipefail
           tar -czf teamhub.tar.gz teamhub/
+          ls -l teamhub.tar.gz
 
       - name: Upload Tarball to GitHub Release
         uses: softprops/action-gh-release@v2
