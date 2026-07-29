@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "app_version": "4.5.2",
-  "generated_at": "2026-07-29T11:59:09.741Z",
+  "generated_at": "2026-07-29T13:34:54.812Z",
   "algorithm": "sha256",
   "files": {
     "appinfo/index.html": "747ea6bcb4b28bf2ec0629b7a0802c264d04d0c32243a9f437ae96b09e2cf5ec",
@@ -295,6 +295,8 @@
     "lib/Settings/PersonalSettings.php": "bbb5cdf164143ff672795f6ffbbfac8ff8cd29fc6c4e1fdbc683063aa331551c",
     "lib/Util/DebugLog.php": "0260783b7d0b2ca46abe0ea0aacda42ab1ecfffea398008aef8d553f41ce903a",
     "lib/Util/Jwt.php": "342b0fe0f81a35aeb791864c462eecfc8aeb706772cf6ca6c4dd82e9f0ca047c",
+    "package-lock.json": "7cae93ddb748260382f130d74507d4b235d2fe016961d07aa0dfb981424b559c",
+    "package.json": "bce11e4658677138d93bb7d1bbb1d3eda9547bb215ca7e79b0c4fb8757fd884c",
     "sql/dev-setup-mysql.sql": "def2a5fab4849a5096f0f41c258c40b8de4ea0215ba874d143b859d8c11df278",
     "sql/dev-setup-postgresql.sql": "66939cce81781053ead7905778e3ed311523fd39f49326ed05f3c9c5e326523f",
     "sql/install-postgresql.sql": "d8d94eefe02645c2c32ed303b66a13cd347e6b2d2848c6490816237e583c98ba",

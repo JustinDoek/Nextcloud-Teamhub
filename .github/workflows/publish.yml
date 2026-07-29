@@ -37,7 +37,8 @@ jobs:
           # Keep this list in sync with PUBLISHABLE in the working repo's
           # scripts/publish-to-release.js.
           for entry in appinfo lib js css img l10n sql templates announcements \
-                       composer.json CHANGELOG.md README.md LICENSE; do
+                       composer.json package.json package-lock.json \
+                       CHANGELOG.md README.md LICENSE; do
             if [ ! -e "$entry" ]; then
               echo "::error::Release payload is missing '$entry' -- run publish-to-release.js before tagging."
               exit 1

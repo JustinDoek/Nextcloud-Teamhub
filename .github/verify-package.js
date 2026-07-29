@@ -37,7 +37,7 @@ const ROOT = process.argv[2] || 'teamhub'
 
 // Mirrors scripts/generate-integrity.js in the working repo.
 const COVERED_DIRS = ['appinfo', 'lib', 'js', 'css', 'templates', 'img', 'l10n', 'sql']
-const COVERED_ROOT_FILES = ['composer.json']
+const COVERED_ROOT_FILES = ['composer.json', 'package.json', 'package-lock.json']
 const EXCLUDE_RELATIVE_PATHS = new Set(['appinfo/integrity.json'])
 const EXCLUDE_FILE_PATTERNS = [
     /^\./,
