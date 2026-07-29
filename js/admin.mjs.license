@@ -5,7 +5,7 @@ SPDX-FileCopyrightText: teamhub developers
 
 This file is generated from multiple sources. Included packages:
 - teamhub
-	- version: 4.5.1
+	- version: 4.5.2
 	- license: undefined
 - vue-material-design-icons
 	- version: 5.3.1
