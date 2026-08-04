@@ -66,15 +66,30 @@ trait ExceptionResponseTrait {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
 
+        // v4.5.46 — a correlation id on every unexpected 500.
+        //
+        // A 500 is the one response that deliberately tells the user nothing,
+        // which leaves "I get a server error" as the entire bug report. The id
+        // appears in the response AND in the log line, so a user can quote six
+        // characters and the exact stack trace is one grep away. It carries no
+        // information by itself, so surfacing it discloses nothing.
+        $ref = substr(bin2hex(random_bytes(4)), 0, 6);
+
         if (isset($this->logger)) {
             $this->logger->error(
-                '[TeamHub] Unexpected exception in ' . static::class,
+                '[TeamHub] Unexpected exception in ' . static::class . ' (ref ' . $ref . ')',
                 array_merge($context, [
+                    'ref'       => $ref,
                     'exception' => $e,
+                    'class'     => get_class($e),
                     'app'       => \OCA\TeamHub\AppInfo\Application::APP_ID,
                 ]),
             );
         }
-        return new JSONResponse(['error' => $fallbackMessage], Http::STATUS_INTERNAL_SERVER_ERROR);
+
+        return new JSONResponse(
+            ['error' => $fallbackMessage, 'ref' => $ref],
+            Http::STATUS_INTERNAL_SERVER_ERROR,
+        );
     }
 }

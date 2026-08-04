@@ -48,6 +48,21 @@ class MessageController extends Controller {
             $this->memberService->requireMemberLevel($teamId);
             $page  = max(1, (int)$this->request->getParam('page', 1));
             $limit = min(50, max(1, (int)$this->request->getParam('limit', 5)));
+
+            // v4.5.26 — deep link from "What's new". The caller knows which
+            // message it wants to land on, not which page that message is on;
+            // the stream's order and page size are this endpoint's business, so
+            // it answers rather than making the client walk pages looking.
+            // Overrides `page` when it resolves; an unknown or deleted id (or
+            // the pinned message, which has no page) falls back to the
+            // requested page rather than erroring.
+            $around = (int)$this->request->getParam('aroundMessageId', 0);
+            if ($around > 0) {
+                $position = $this->messageService->findMessageStreamPosition($teamId, $around);
+                if ($position >= 0) {
+                    $page = intdiv($position, $limit) + 1;
+                }
+            }
             $offset = ($page - 1) * $limit;
 
             $this->logger->debug('[TeamHub][MessageController] listMessages', [
@@ -98,10 +113,13 @@ class MessageController extends Controller {
         } catch (ValidationException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         } catch (\Throwable $e) {
-            $this->logger->error('Failed to create message', [
-                'exception' => $e, 'app' => Application::APP_ID,
+            // v4.5.47 — through the trait, so the response carries the same
+            // correlation id the log line gets. This block used to log and
+            // return a bare message, which is why the ref was missing from the
+            // one 500 that actually needed diagnosing.
+            return $this->exceptionResponse($e, 'Failed to create message', [
+                'teamId' => $teamId, 'messageType' => $messageType,
             ]);
-            return new JSONResponse(['error' => 'Failed to create message'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -234,6 +252,7 @@ class MessageController extends Controller {
                 $limit,
                 $offset,
                 $includeTalk,
+                $this->parseFeedFilters(),
             );
             return new JSONResponse($result);
         } catch (AccessDeniedException $e) {
@@ -252,6 +271,143 @@ class MessageController extends Controller {
         if (is_bool($raw)) return $raw;
         $s = strtolower((string)$raw);
         return $s === '1' || $s === 'true' || $s === 'yes' || $s === 'on';
+    }
+
+    /**
+     * v4.5.26 — the Feed control rail's PERIOD / TEAMS / TYPES sections and its
+     * System-messages and Mentions-only switches, validated into the shape
+     * `MessageService::getPersonalFeed` expects.
+     *
+     * Validation here is about keeping the query bounded and well-typed, not
+     * about access: the team list narrows a WHERE that is already scoped to the
+     * viewer's memberships plus public posts, so an unknown or foreign team id
+     * can only ever shrink the result (MessageMapper::buildFeedWhere says so at
+     * the point it is ANDed on). The type list is checked against the enum the
+     * schema actually stores so a hand-crafted value cannot turn into an
+     * unbounded IN clause.
+     *
+     * @return array<string,mixed>
+     */
+    private function parseFeedFilters(): array {
+        // Mirrors MessageMapper::create's $messageType values. An unknown type
+        // is dropped rather than rejected — a client one version ahead should
+        // degrade to a wider feed, not to an error.
+        $allowedTypes = ['normal', 'question', 'poll', 'decision'];
+
+        $from = max(0, (int)$this->request->getParam('from', 0));
+        $to   = max(0, (int)$this->request->getParam('to', 0));
+        // A reversed range would return nothing with no way to tell why.
+        if ($from > 0 && $to > 0 && $from > $to) {
+            [$from, $to] = [$to, $from];
+        }
+
+        return [
+            'from'          => $from,
+            'to'            => $to,
+            // 100 is the widest the rail can produce (it only offers teams that
+            // appear in the feed) and caps the IN clause on a hand-built call.
+            'teamIds'       => $this->parseListParam('teamIds', null, 100),
+            'messageTypes'  => $this->parseListParam('types', $allowedTypes, 10),
+            'includeSystem' => $this->parseBoolParam('includeSystem', true),
+            // v4.5.28 — an inclusion switch, defaulting on, like every other
+            // row in the rail's Show section. It replaced `mentionsOnly`, a
+            // lens that hid everything else; showing only mentions is the
+            // Mentions tab's job. Nothing outside TeamHub calls this endpoint,
+            // so the old parameter is simply gone rather than aliased.
+            'includeMentions' => $this->parseBoolParam('includeMentions', true),
+            // v4.5.29 — decisions get their own Show row, and only open ones
+            // are listed. See MessageService::applyDecisionFilter().
+            'includeDecisions' => $this->parseBoolParam('includeDecisions', true),
+        ];
+    }
+
+    /**
+     * Read a repeatable list parameter, accepting either `?x[]=a&x[]=b` or a
+     * comma-separated `?x=a,b`. Trims, drops empties, de-duplicates, optionally
+     * restricts to an allow-list, and caps the length.
+     *
+     * @param string[]|null $allowed null = any non-empty string
+     * @return string[]
+     */
+    private function parseListParam(string $name, ?array $allowed, int $cap): array {
+        $raw = $this->request->getParam($name, null);
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        $parts = is_array($raw) ? $raw : explode(',', (string)$raw);
+
+        $out = [];
+        foreach ($parts as $part) {
+            if (!is_scalar($part)) {
+                continue;
+            }
+            $value = trim((string)$part);
+            if ($value === '') {
+                continue;
+            }
+            if ($allowed !== null && !in_array($value, $allowed, true)) {
+                continue;
+            }
+            $out[$value] = true;
+            if (count($out) >= $cap) {
+                break;
+            }
+        }
+        return array_keys($out);
+    }
+
+    /**
+     * v4.5.26 — read the viewer's saved Feed control defaults.
+     *
+     * Personal preferences, so no licence gate and no team scope: this returns
+     * the caller's own stored view state and nothing else. Same storage shape
+     * as My Work's personal preferences (`oc_preferences` under the teamhub app
+     * id) rather than a table — it is one small JSON blob per user.
+     */
+    // No #[NoCSRFRequired]: @nextcloud/axios sends the request token on GETs
+    // too, so the framework's CSRF check passes on its own. SKILLS.md § CSRF
+    // asks for a documented reason before adding the exemption, and there
+    // isn't one here — LayoutController::getDefaultLayout is the same shape
+    // and does without it.
+    #[NoAdminRequired]
+    public function getFeedPreferences(): JSONResponse {
+        try {
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            return new JSONResponse($this->messageService->getFeedPreferences($user->getUID()));
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MessageController] getFeedPreferences failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to load feed preferences'], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * v4.5.26 — "Save as default" on the Feed control rail.
+     *
+     * Every field is re-validated in the service before it is stored, so a
+     * hand-crafted body cannot put a value in there that the read path would
+     * then hand back as trusted.
+     */
+    #[NoAdminRequired]
+    public function saveFeedPreferences(): JSONResponse {
+        try {
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            $body = $this->request->getParams();
+            unset($body['_route']);
+            return new JSONResponse($this->messageService->saveFeedPreferences($user->getUID(), $body));
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MessageController] saveFeedPreferences failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Failed to save feed preferences'], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
     }
 
     #[NoAdminRequired]
@@ -553,10 +709,16 @@ class MessageController extends Controller {
                 || $allowPublicRaw === 1
                 || $allowPublicRaw === '1'
                 || $allowPublicRaw === 'true';
-            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link, $allowPublic, $comment);
+            // v4.5.38 — per-message-type comment switches. Absent means "leave
+            // the stored value alone" (null), not "enable everything": a
+            // pre-4.5.38 client that PUTs the settings form it knows about must
+            // not wipe a policy it never rendered.
+            $commentsEnabled = $this->parseCommentsEnabled($body['commentsEnabled'] ?? null);
+            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link, $allowPublic, $comment, $commentsEnabled);
             $this->logger->debug('[TeamHub][MessageController] saveMessageSettings', [
                 'teamId' => $teamId, 'pin' => $pin, 'post' => $post, 'link' => $link, 'comment' => $comment,
                 'allowPublicMessages' => $allowPublic,
+                'commentsEnabled' => $commentsEnabled,
                 'app'    => Application::APP_ID,
             ]);
             return new JSONResponse(['success' => true]);
@@ -567,5 +729,44 @@ class MessageController extends Controller {
                 'teamId' => $teamId,
             ]);
         }
+    }
+
+    /**
+     * v4.5.38 — normalise the `commentsEnabled` body field into a type => bool
+     * map, or null when the caller did not send one.
+     *
+     * Accepts the same loose truthiness the `allowPublicMessages` toggle has
+     * accepted since 4.2.11, because the two arrive from the same form and a
+     * JSON `false` and a form-encoded `"0"` are the same intent. Keys that are
+     * not commentable types are dropped rather than rejected — the service
+     * filters again on read, and a 400 over a stray key would break a caller
+     * that merely sent one field too many.
+     *
+     * @return array<string,bool>|null
+     */
+    private function parseCommentsEnabled(mixed $raw): ?array {
+        if ($raw === null) {
+            return null;
+        }
+        if (is_string($raw)) {
+            // Form-encoded bodies arrive as a JSON string rather than an array.
+            $decoded = json_decode($raw, true);
+            if (!is_array($decoded)) {
+                return null;
+            }
+            $raw = $decoded;
+        }
+        if (!is_array($raw)) {
+            return null;
+        }
+        $out = [];
+        foreach (MessageService::COMMENTABLE_TYPES as $type) {
+            if (!array_key_exists($type, $raw)) {
+                continue;
+            }
+            $v = $raw[$type];
+            $out[$type] = !($v === false || $v === 0 || $v === '0' || $v === 'false' || $v === '');
+        }
+        return $out === [] ? null : $out;
     }
 }

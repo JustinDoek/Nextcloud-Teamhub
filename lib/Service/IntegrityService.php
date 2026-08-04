@@ -11,7 +11,7 @@ use OCP\App\IAppManager;
  *
  * At build time, scripts/generate-integrity.js writes appinfo/integrity.json
  * containing SHA-256 hashes for every shipped file under a curated set of
- * directories (appinfo, lib, js, css, templates, img, l10n, sql).
+ * directories (appinfo, lib, js, css, templates, img, l10n, sql, announcements).
  *
  * At runtime this service re-hashes each entry on disk and reports:
  *   - altered:    files whose current hash differs from the manifest
@@ -40,6 +40,7 @@ class IntegrityService {
         'img',
         'l10n',
         'sql',
+        'announcements',
     ];
 
     /** Manifest file itself is never included in the manifest. */
@@ -65,13 +66,24 @@ class IntegrityService {
      * as "unexpected" would report every install that was once an earlier
      * version as tampered.
      *
+     * The `announcements/` subtree is skipped for the same orphan reason:
+     * retiring an in-app announcement removes its registry.json entry but
+     * leaves the old `.md` on disk after an NC upgrade, so it would read as
+     * "unexpected" on every instance that had run the prior version. Skipping
+     * it is safe because nothing renders an announcement that is not listed in
+     * registry.json, and registry.json IS in the manifest and hash-checked —
+     * an attacker cannot surface an injected `.md` without editing a covered
+     * file (see AnnouncementService::loadRegistry / loadMarkdownBody).
+     *
      * Files listed IN the manifest under these prefixes are still hash-
      * checked normally (altered/missing paths still work), so intentional
-     * tampering with a currently-shipped bundle or chunk is caught. Only the
-     * "on disk but absent from manifest" path is short-circuited.
+     * tampering with a currently-shipped bundle, chunk, or announcement is
+     * caught. Only the "on disk but absent from manifest" path is short-
+     * circuited.
      */
     private const UNEXPECTED_SKIP_PREFIXES = [
         'js/',
+        'announcements/',
     ];
 
     /** Cap the returned lists so a wildly-mismatched install can't blow up

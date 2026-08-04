@@ -25,6 +25,107 @@ class DecisionMapper extends QBMapper {
     }
 
     /**
+     * Decisions across several teams that could belong in a personal work
+     * queue (v4.5.23, My Work Decisions provider).
+     *
+     * One query across all of a user's teams rather than one per team: a user
+     * in fifteen teams would otherwise pay fifteen round trips for a section
+     * that is usually empty.
+     *
+     * `withdrawn` is excluded — nobody owes anything on a withdrawn proposal —
+     * and terminal rows older than the Completed window are dropped in SQL so
+     * they never cross the wire. The *per-user* relevance test (am I the
+     * proposer, am I an approver) stays in the provider, because it depends on
+     * category approver sets this mapper has no business knowing about.
+     *
+     * **Two queries, not one, and each with its own cap (v4.5.25.)** The single
+     * query this replaced applied `$limit` to *candidates* and let the provider
+     * discard most of them afterwards, so a team's completed decisions — which
+     * are only ever relevant to two people — could fill the budget and push out
+     * live ones that needed somebody's attention. Splitting them means a busy
+     * Completed history cannot starve Action required, and it lets the terminal
+     * half be narrowed by `$userId` in SQL, which is the one per-user test this
+     * mapper *can* honestly make: `proposed_by` and `resolved_by` are columns.
+     *
+     * Active rows are ordered **oldest first**: if the cap ever does bite, the
+     * decision that has been waiting longest is the one to keep.
+     *
+     * @param string[]  $teamIds
+     * @param string    $userId         whose queue this is, for the terminal half
+     * @param int       $completedSince earliest `decided_at` still worth showing
+     * @param bool|null $truncated      set true when either half hit its cap.
+     *                                  Out-parameter because the caller cannot
+     *                                  infer it from a merged row count, and
+     *                                  guessing would put a "some items may be
+     *                                  missing" warning on a complete list.
+     * @return Decision[]
+     */
+    public function findForWorkQueue(
+        array $teamIds,
+        string $userId,
+        int $completedSince,
+        int $limit,
+        ?bool &$truncated = null,
+    ): array {
+        $truncated = false;
+        if ($teamIds === []) {
+            return [];
+        }
+        $cap = max(1, $limit);
+
+        // Live decisions. Every one is a candidate for somebody, and approver
+        // sets are not columns, so this half cannot be narrowed further here.
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->in('team_id',
+                $qb->createNamedParameter($teamIds, IQueryBuilder::PARAM_STR_ARRAY)))
+            ->andWhere($qb->expr()->in('status', $qb->createNamedParameter(
+                ['open', 'finalized'], IQueryBuilder::PARAM_STR_ARRAY)))
+            ->orderBy('created_at', 'ASC')
+            ->setMaxResults($cap);
+        $active = $this->findEntities($qb);
+
+        // Terminal decisions, which only ever concern the person who proposed
+        // one or the person who resolved it.
+        $tb = $this->db->getQueryBuilder();
+        $tb->select('*')
+            ->from($this->getTableName())
+            ->where($tb->expr()->in('team_id',
+                $tb->createNamedParameter($teamIds, IQueryBuilder::PARAM_STR_ARRAY)))
+            ->andWhere($tb->expr()->in('status', $tb->createNamedParameter(
+                ['approved', 'denied'], IQueryBuilder::PARAM_STR_ARRAY)))
+            // v4.5.25 — resolved_at is when it was approved or denied;
+            // decided_at is when it was *finalized* and is not overwritten by
+            // either. Rows written before 4.5.25 have no resolved_at, so fall
+            // back to decided_at for them — which is why this is an OR and not
+            // a COALESCE: a NULL comparison would silently drop every legacy
+            // row, and COALESCE on a nullable BIGINT is the sort of thing that
+            // behaves differently on MySQL and Postgres.
+            ->andWhere($tb->expr()->orX(
+                $tb->expr()->gte('resolved_at', $tb->createNamedParameter(
+                    $completedSince, IQueryBuilder::PARAM_INT)),
+                $tb->expr()->andX(
+                    $tb->expr()->isNull('resolved_at'),
+                    $tb->expr()->gte('decided_at', $tb->createNamedParameter(
+                        $completedSince, IQueryBuilder::PARAM_INT)),
+                ),
+            ))
+            ->andWhere($tb->expr()->orX(
+                $tb->expr()->eq('proposed_by', $tb->createNamedParameter($userId)),
+                $tb->expr()->eq('resolved_by', $tb->createNamedParameter($userId)),
+            ))
+            ->orderBy('decided_at', 'DESC')
+            ->setMaxResults($cap);
+        $terminal = $this->findEntities($tb);
+
+
+        $truncated = count($active) >= $cap || count($terminal) >= $cap;
+
+        return array_merge($active, $terminal);
+    }
+
+    /**
      * Find a single decision by id.
      * Returns null when not found (callers usually want a 404 not an exception).
      */
@@ -84,6 +185,43 @@ class DecisionMapper extends QBMapper {
             $out[$r->getMessageId()] = $r;
         }
         return $out;
+    }
+
+    /**
+     * Open proposals in these teams that have a Talk conversation attached
+     * (v4.5.45).
+     *
+     * Narrow by design: What's New calls this once per request to learn which
+     * proposal rooms it should also read, so it must not return the whole
+     * table. `talk_token IS NOT NULL` is the selective half — most decisions
+     * never get one.
+     *
+     * Both spellings of "open" are matched. HANDOFF's 4.5.30 note stands: if
+     * you touch decision status anywhere, grep for `proposed` too.
+     *
+     * @param string[] $teamIds
+     * @return Decision[]
+     */
+    public function findOpenSharedProposals(array $teamIds): array {
+        if (empty($teamIds)) {
+            return [];
+        }
+
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->in(
+                'team_id',
+                $qb->createNamedParameter($teamIds, IQueryBuilder::PARAM_STR_ARRAY)
+            ))
+            ->andWhere($qb->expr()->in(
+                'status',
+                $qb->createNamedParameter(['open', 'proposed'], IQueryBuilder::PARAM_STR_ARRAY)
+            ))
+            ->andWhere($qb->expr()->isNotNull('talk_token'))
+            ->andWhere($qb->expr()->neq('talk_token', $qb->createNamedParameter('')));
+
+        return $this->findEntities($qb);
     }
 
     /**

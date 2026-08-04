@@ -262,16 +262,37 @@ class CollectivesService {
                         // Collectives' CircleHelper::flagCircleAsAppManaged →
                         // CirclesManager::flagAsAppManaged, which writes a
                         // config flag on the Circle to lock it against
-                        // user tampering. NC 33's typed IConfig rejects
-                        // that write on some Circle bitmasks.
+                        // user tampering.
                         //
-                        // Crucially, `flagAsAppManaged` runs AFTER
-                        // Collectives has already inserted the Collective
-                        // row (see CollectiveService::createCollective:
-                        // create-then-flag). So a Collective row often
-                        // exists on disk even though createCollective
-                        // threw. Recover it via the DB mapper instead of
-                        // failing the toggle.
+                        // v4.5.35 — **the rest of the 4.3.13 note was wrong,
+                        // and the recovery below has therefore never fired on
+                        // a real TeamHub enable.** It claimed `flagAsAppManaged`
+                        // runs AFTER the row insert ("create-then-flag"), so a
+                        // partial row would be sitting there to adopt. Read
+                        // against upstream, `CollectiveService::createCollective`
+                        // goes: createCircle(name) → on CircleExistsException,
+                        // find the circle and flagCircleAsAppManaged() → THEN
+                        // collectiveMapper->insert(). Create-then-flag is the
+                        // *new-circle* path. TeamHub always takes the other
+                        // one, because the team circle already exists under
+                        // that name — so the flag throws before anything is
+                        // inserted and there is never a row to recover.
+                        //
+                        // The rejection is Circles', not NC's typed IConfig:
+                        // `FederatedItems\CircleConfig::verify()` throws
+                        // `FederatedItemBadRequestException('Configuration
+                        // value is not valid')` when `!$confirmed || $config >
+                        // Circle::$DEF_CFG_MAX`. $DEF_CFG_MAX is 262143, which
+                        // covers every bit through CFG_APP, so it is the
+                        // consistency check failing — on bits TeamHub itself
+                        // sets (CFG_OPEN / CFG_REQUEST / CFG_ROOT are all in
+                        // CirclesConfig::MANAGED_BITS). That is why it fails
+                        // for some teams and not others.
+                        //
+                        // Left in place rather than deleted: it is harmless,
+                        // and it is the correct handler if Collectives ever
+                        // reorders back. Diagnosing the bitmask is its own
+                        // session — see HANDOFF.md § Open issues.
                         $recoveryId = null;
                         try {
                             $recoveryMapper = $this->container->get(\OCA\Collectives\Db\CollectiveMapper::class);
@@ -300,17 +321,30 @@ class CollectivesService {
                             // affects whether users can manually tamper
                             // with the Circle from the Circles UI.
                         } else {
-                            $this->logger->warning('[TeamHub][CollectivesService] Collectives write rejected by NC typed IConfig (no recovery row)', [
-                                'teamId' => $teamId,
-                                'error'  => $msg,
-                                'trace'  => $e->getTraceAsString(),
-                                'file'   => $e->getFile(),
-                                'line'   => $e->getLine(),
-                                'app'    => Application::APP_ID,
+                            // v4.5.35 — name the cause instead of pointing at
+                            // the log. Circles rejects the whole config update
+                            // when the circle carries any core-filter bit
+                            // (CFG_SINGLE 1 / CFG_PERSONAL 2 / CFG_SYSTEM 4),
+                            // so read the circle back and say which one.
+                            $offending = $this->forbiddenConfigBitsOnTeam($teamId);
+                            $this->logger->warning('[TeamHub][CollectivesService] Collectives config write rejected by Circles CircleConfig::verify', [
+                                'teamId'         => $teamId,
+                                'error'          => $msg,
+                                'offendingBits'  => $offending,
+                                'trace'          => $e->getTraceAsString(),
+                                'file'           => $e->getFile(),
+                                'line'           => $e->getLine(),
+                                'app'            => Application::APP_ID,
                             ]);
+                            if ($offending !== []) {
+                                return [
+                                    'ok'    => false,
+                                    'error' => 'This team\'s Circle carries a configuration flag (' . implode(', ', $offending) . ') that Nextcloud Circles refuses to update, so Collectives cannot claim the team. Repair it in Admin settings → TeamHub → Maintenance → "Reset config" for this team, then enable the Wiki again. Nothing in the team is lost — the flag is meaningless on a multi-member team.',
+                                ];
+                            }
                             return [
                                 'ok'    => false,
-                                'error' => 'Collectives could not finish setting up this team\'s wiki because Nextcloud rejected one of its internal writes ("Configuration value is not valid") and no partial Collective row was left behind to recover. Try the toggle again; if it keeps failing, the NC log carries the full stack.',
+                                'error' => 'Collectives could not finish setting up this team\'s wiki because Nextcloud Circles rejected its configuration write ("Configuration value is not valid"), and no partial Collective row was left behind to recover. The team\'s Circle config looks clean, so this is not the known flag problem — the NC log carries the full stack.',
                             ];
                         }
                     } else {
@@ -443,6 +477,196 @@ class CollectivesService {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Resource-discovery surface (v4.5.36)
+    //
+    // ResourceDiscoveryService reconciles a team's registry rows against what
+    // Nextcloud's ACL tables actually say, per app. Collectives is the fifth
+    // app it asks about, and it asks through here rather than reading
+    // `collectives_collectives` itself — same arrangement GroupFolderService
+    // has for `gf:` resources, and it keeps every Collectives-shaped
+    // assumption in this one file.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * The collective bound to this team's circle, as resource ids for the
+     * registry. At most one — Collectives allows a single collective per
+     * circle — so this is `['<id>']` or `[]`.
+     *
+     * **The empty array is a claim, and it has to be an honest one.**
+     * `ResourceDiscoveryService::reconcileApp` deletes every local row whose
+     * resource id is absent from this list, so answering `[]` because the
+     * lookup broke would silently unbind the team's wiki. That is the same
+     * shape as the 4.5.35 bug — inferring "it is gone" from something that
+     * only said "I could not tell you" — one layer up. So this throws when it
+     * could not ask, which aborts the whole collectives reconcile pass and
+     * leaves the row exactly where it was.
+     *
+     * Trashed collectives are excluded: a collective in Collectives' trash is
+     * not connected to anything, and `disableForTeam` puts it there under the
+     * soft-delete archive modes.
+     *
+     * @return string[]
+     * @throws \RuntimeException when Collectives could not be reached
+     */
+    public function getRealCollectiveResourceIds(string $teamId): array {
+        if (!$this->isInstalled()) {
+            return [];
+        }
+
+        $row = $this->fetchCollectiveRow($teamId, /* includeTrash */ false);
+        if ($row === null) {
+            return [];
+        }
+
+        $id = 0;
+        try { $id = (int)$row->getId(); } catch (\Throwable) {}
+        if ($id <= 0) {
+            // A row we cannot read the id of is not a row we can register.
+            // Same guard as serializeCollective — an id of 0 poisons every
+            // downstream by-id lookup (v4.3.6).
+            throw new \RuntimeException('Collectives returned a collective row with no readable id');
+        }
+
+        return [(string)$id];
+    }
+
+    /**
+     * Human-readable name for a collective resource id, for the pending-review
+     * list. Falls back to the raw id, which is what every other
+     * resolve*Name in ResourceDiscoveryService does.
+     *
+     * Resolved via the team's circle rather than by id, because the circle is
+     * the lookup CollectiveMapper is indexed for and the one we know exists
+     * across Collectives versions. Includes trashed rows so a registry row
+     * that outlives its collective by a reconcile cycle still has a name.
+     */
+    public function resolveCollectiveDisplayName(string $teamId, string $resourceId): string {
+        try {
+            $row = $this->fetchCollectiveRow($teamId, /* includeTrash */ true);
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][CollectivesService] resolveCollectiveDisplayName failed: ' . $e->getMessage(), [
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+            return $resourceId;
+        }
+        if ($row === null) {
+            return $resourceId;
+        }
+
+        // The lookup is by circle, so it answers with whatever collective the
+        // team has *now*. If the row we are naming points somewhere else, that
+        // name is not its name — fall back rather than mislabel a row an admin
+        // is about to accept or ignore.
+        $rowId = 0;
+        try { $rowId = (int)$row->getId(); } catch (\Throwable) {}
+        if ($rowId <= 0 || (string)$rowId !== $resourceId) {
+            return $resourceId;
+        }
+
+        $name = '';
+        try { $name = (string)$row->getName(); } catch (\Throwable) {}
+        if ($name === '') {
+            return $resourceId;
+        }
+
+        $emoji = null;
+        try { $emoji = $row->getEmoji(); } catch (\Throwable) {}
+        $emoji = is_string($emoji) ? trim($emoji) : '';
+
+        return $emoji !== '' ? $emoji . ' ' . $name : $name;
+    }
+
+    /**
+     * Point the team at a collective and switch the Wiki on — the write half
+     * of accepting a discovered collective.
+     *
+     * This is what makes "Accept" mean something: the registry row alone is
+     * bookkeeping, and the tab does not appear until these two appconfig keys
+     * say so. Deliberately the same pair `enableForTeam` commits, so a wiki
+     * reached by accepting a discovery and one reached by the toggle are
+     * indistinguishable afterwards.
+     *
+     * Provisions nothing — the collective already exists, which is why it was
+     * discovered.
+     */
+    public function bindTeamCollective(string $teamId, int $collectiveId): void {
+        if ($collectiveId <= 0) {
+            // Never cache a zero — every findAll(0, uid) after it fails with
+            // "Collective not found: 0" and the widget goes quiet (v4.3.5/.6).
+            throw new \RuntimeException('Refusing to bind collective id ' . $collectiveId . ' — not a positive id');
+        }
+
+        $this->config->setAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId, (string)$collectiveId);
+        $this->config->setAppValue(Application::APP_ID, self::CFG_ENABLED       . $teamId, '1');
+        $this->invalidateCache($teamId);
+
+        $this->logger->info('[TeamHub][CollectivesService] bound team to collective', [
+            'teamId' => $teamId, 'collectiveId' => $collectiveId, 'app' => Application::APP_ID,
+        ]);
+    }
+
+    /**
+     * Turn the Wiki off without touching the collective — the write half of
+     * ignoring a discovered collective.
+     *
+     * Ignoring has always been reversible and has never touched the underlying
+     * resource (`ResourceDiscoveryService::ignoreResource`), so this must not
+     * borrow `disableForTeam`'s delete/trash dispatch: the admin declined to
+     * surface someone else's collective, which is not consent to destroy it.
+     * The id pointer stays for the same reason — un-ignore rebinds the same
+     * collective instead of rediscovering it.
+     */
+    public function unbindTeamCollective(string $teamId): void {
+        $this->config->setAppValue(Application::APP_ID, self::CFG_ENABLED . $teamId, '0');
+        $this->invalidateCache($teamId);
+
+        $this->logger->info('[TeamHub][CollectivesService] unbound team from collective (collective left intact)', [
+            'teamId' => $teamId, 'app' => Application::APP_ID,
+        ]);
+    }
+
+    /**
+     * The team's collective row straight from Collectives' own mapper.
+     *
+     * `CollectiveMapper::findByCircleId` is the surface 4.5.35 settled on as
+     * authoritative for "does this row exist": it is scoped by circle id with
+     * no user parameter, so unlike the ACL-enforced `getCollective()` its
+     * not-found genuinely means not-found and never "not yours to see". That
+     * is the whole reason the caller above can trust a `null` here.
+     *
+     * @return object|null the collective row, or null when there is none
+     * @throws \RuntimeException when the mapper could not be reached or asked
+     */
+    private function fetchCollectiveRow(string $teamId, bool $includeTrash): ?object {
+        try {
+            $mapper = $this->container->get(\OCA\Collectives\Db\CollectiveMapper::class);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException(
+                'Collectives CollectiveMapper is unavailable: ' . $e->getMessage(), 0, $e
+            );
+        }
+
+        try {
+            $row = $mapper->findByCircleId($teamId, $includeTrash);
+        } catch (\Throwable $e) {
+            // findByCircleId reports "no such row" by throwing on some
+            // Collectives versions and by returning null on others — the
+            // v4.3.10 path-3 comment records running into both. Treat only a
+            // genuine not-found as an answer; anything else is a failure to
+            // ask and must propagate.
+            if ($e instanceof \OCP\AppFramework\Db\DoesNotExistException
+                || str_contains($e->getMessage(), 'not found')) {
+                return null;
+            }
+            throw new \RuntimeException(
+                'Collectives findByCircleId failed: ' . $e->getMessage(), 0, $e
+            );
+        }
+
+        return $row;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Read paths (widget)
     // ─────────────────────────────────────────────────────────────────────
 
@@ -505,6 +729,24 @@ class CollectivesService {
         // Collectives rolled back). Clear the cached id so the next
         // lookup goes straight to paths 2/3 instead of paying the same
         // NotFound cost every time.
+        //
+        // v4.5.35 — **that message does not mean what 4.3.14 read it as.**
+        // Collectives' `getCollective()` resolves via
+        // `findByIdAndUser($id, $userId)` and throws the *identical*
+        // `NotFoundException('Collective not found: ' . $id)` whether the row
+        // is absent or merely invisible to this caller. So "stale" was being
+        // inferred from a message that says nothing about the row's existence,
+        // and the response was to delete an appconfig key **shared by the whole
+        // team** — one member without access to the collective unbound it for
+        // everybody, and the wiki tab started answering "collective not found"
+        // for people who could see it perfectly well a moment earlier.
+        //
+        // The id-scoped mapper is the only thing here that can actually answer
+        // "does this row exist", so ask it before touching the pointer. The
+        // asymmetry decides the fallback: keeping a genuinely stale id costs
+        // one failed lookup per request, while deleting a good one costs the
+        // team its binding — so anything short of a confident "the row is gone"
+        // leaves the key alone.
         if ($cachedId > 0) {
             try {
                 $svc = $this->container->get(\OCA\Collectives\Service\CollectiveService::class);
@@ -517,18 +759,38 @@ class CollectivesService {
                 }
             } catch (\Throwable $e) {
                 $emsg = $e->getMessage();
-                $isNotFound = str_contains($emsg, 'not found');
-                if ($isNotFound) {
-                    $this->logger->info('[TeamHub][CollectivesService] getTeamCollective: cached collective id is stale, clearing', [
-                        'teamId' => $teamId, 'staleId' => $cachedId, 'error' => $emsg,
-                        'app'    => Application::APP_ID,
-                    ]);
-                    $this->config->deleteAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId);
-                    $cachedId = 0;
+                if (str_contains($emsg, 'not found')) {
+                    $verdict = $this->classifyCachedId($teamId, $cachedId);
+                    if ($verdict === 'gone') {
+                        $this->logger->info('[TeamHub][CollectivesService] getTeamCollective: cached collective id is stale, clearing', [
+                            'teamId' => $teamId, 'staleId' => $cachedId, 'error' => $emsg,
+                            'app'    => Application::APP_ID,
+                        ]);
+                        $this->config->deleteAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId);
+                        $cachedId = 0;
+                    } elseif (is_int($verdict)) {
+                        // The team has a collective, but under a different id
+                        // than we cached — renumbered, or re-created outside
+                        // TeamHub. Repoint rather than delete: paths 2/3 would
+                        // have to rediscover this on every request otherwise.
+                        $this->logger->info('[TeamHub][CollectivesService] getTeamCollective: cached collective id repointed', [
+                            'teamId' => $teamId, 'was' => $cachedId, 'now' => $verdict,
+                            'app'    => Application::APP_ID,
+                        ]);
+                        $this->config->setAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId, (string)$verdict);
+                        $cachedId = $verdict;
+                    } else {
+                        // 'denied' (the row is there, this caller cannot see
+                        // it) or 'unknown' (the mapper could not be reached).
+                        // Either way the pointer is not ours to remove.
+                        $this->logger->debug('[TeamHub][CollectivesService] getTeamCollective path1: not-found is not staleness (' . $verdict . '), keeping cached id', [
+                            'teamId' => $teamId, 'cachedId' => $cachedId, 'app' => Application::APP_ID,
+                        ]);
+                    }
                 } else {
-                    // Not found for this user, or ACL denial — fall through
-                    // to the next path rather than caching null immediately;
-                    // another path might still resolve it.
+                    // Some other failure — fall through to the next path
+                    // rather than caching null immediately; another path
+                    // might still resolve it.
                     $this->logger->debug('[TeamHub][CollectivesService] getTeamCollective path1 (cached_id direct) failed: ' . $emsg, [
                         'teamId' => $teamId, 'cachedId' => $cachedId, 'app' => Application::APP_ID,
                     ]);
@@ -1224,6 +1486,116 @@ class CollectivesService {
      * visible member of the circle (fresh circle-add race). Returns null
      * on no match.
      */
+    /**
+     * v4.5.35 — which config bits on this team's Circle are the ones Circles
+     * refuses to carry through an update, as human-readable names.
+     *
+     * `FederatedItems\CircleConfig::verify()` builds its rejection list as
+     * `$DEF_CFG_CORE_FILTER` (CFG_SINGLE 1, CFG_PERSONAL 2, CFG_SYSTEM 4) plus,
+     * for any circle that is not itself CFG_SYSTEM, `$DEF_CFG_SYSTEM_FILTER`
+     * (CFG_NO_OWNER 512, CFG_HIDDEN 1024, CFG_BACKEND 2048). Any one of them
+     * present in the *proposed* config fails the whole update.
+     *
+     * Deliberately checked against those two lists rather than against
+     * `SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS`: our constant also carries CFG_APP,
+     * which `verify()` handles on a separate branch and which is not what
+     * causes this rejection. Naming it here would send the admin after the
+     * wrong flag.
+     *
+     * Read-only, and any failure returns `[]` so the caller falls back to the
+     * generic message rather than asserting something it could not check.
+     *
+     * @return string[] e.g. `['CFG_PERSONAL']`
+     */
+    private function forbiddenConfigBitsOnTeam(string $teamId): array {
+        $bits = [
+            1    => 'CFG_SINGLE',
+            2    => 'CFG_PERSONAL',
+            4    => 'CFG_SYSTEM',
+            512  => 'CFG_NO_OWNER',
+            1024 => 'CFG_HIDDEN',
+            2048 => 'CFG_BACKEND',
+        ];
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('config')
+                ->from('circles_circle')
+                ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][CollectivesService] forbiddenConfigBitsOnTeam: config read failed: ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+
+        if (!$row) {
+            return [];
+        }
+
+        $config = (int)$row['config'];
+        $found  = [];
+        foreach ($bits as $bit => $name) {
+            if (($config & $bit) === $bit) {
+                $found[] = $name;
+            }
+        }
+        return $found;
+    }
+
+    /**
+     * v4.5.35 — work out what a `NotFoundException` from the ACL-enforced
+     * by-id lookup actually meant.
+     *
+     * Collectives resolves `getCollective()` through
+     * `findByIdAndUser($id, $userId)` and throws the same
+     * `'Collective not found: ' . $id` for a missing row and for a row this
+     * caller may not see. The id-scoped mapper is the only surface here that
+     * can see a row regardless of who is asking, so it is what decides.
+     *
+     * @return string|int one of:
+     *   - `'gone'`    no collective is bound to this team's circle; the cached
+     *                 pointer is wrong and may be deleted.
+     *   - `'denied'`  the row is there under the cached id — the caller simply
+     *                 cannot see it. Leave the pointer alone.
+     *   - `'unknown'` the mapper could not answer. Leave the pointer alone.
+     *   - `int`       the team's real collective id, when one exists but under
+     *                 a different id than we cached.
+     */
+    private function classifyCachedId(string $teamId, int $cachedId): string|int {
+        try {
+            $mapper = $this->container->get(\OCA\Collectives\Db\CollectiveMapper::class);
+            $row    = $mapper->findByCircleId($teamId, /* includeTrash */ true);
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][CollectivesService] classifyCachedId: mapper unavailable: ' . $e->getMessage(), [
+                'app' => Application::APP_ID,
+            ]);
+            return 'unknown';
+        }
+
+        if ($row === null) {
+            return 'gone';
+        }
+
+        $realId = 0;
+        try {
+            $realId = (int)$row->getId();
+        } catch (\Throwable) {
+            // Collectives' getters go through __call; a shape change here
+            // means we cannot tell, which is not grounds to delete anything.
+        }
+        if ($realId <= 0) {
+            return 'unknown';
+        }
+
+        return $realId === $cachedId ? 'denied' : $realId;
+    }
+
     private function findExistingCollectiveByCircleId(string $teamId, string $userId): ?int {
         try {
             $svc = $this->container->get(\OCA\Collectives\Service\CollectiveService::class);

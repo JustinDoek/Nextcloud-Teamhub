@@ -665,6 +665,51 @@ class MemberService {
     }
 
     /**
+     * Whether the current user can compose a message in Nextcloud Mail.
+     *
+     * Two gates, both required:
+     *   1. The `mail` app is enabled for this user.
+     *   2. That user has at least one account row in `mail_accounts`.
+     *
+     * The second gate is not belt-and-braces. Mail's own `/mailto` route
+     * checks for an account before it opens the composer (`src/views/Home.vue`
+     * upstream) — sending someone there without one drops them on the setup
+     * screen and the address is silently discarded. Answering false here means
+     * they get the plain `mailto:` link instead, which is what a user with no
+     * Mail account actually wants.
+     *
+     * `mail_accounts` is read directly because Mail publishes no OCP API for
+     * this — same approach as the Deck and Talk reads elsewhere in the app.
+     * Every failure degrades to false, i.e. to the `mailto:` link the members
+     * widget shipped before this existed.
+     */
+    public function isMailAvailableForCurrentUser(): bool {
+        $user = $this->userSession->getUser();
+        if ($user === null) {
+            return false;
+        }
+        try {
+            if (!$this->appManager->isEnabledForUser('mail', $user)) {
+                return false;
+            }
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('id')
+                ->from('mail_accounts')
+                ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($user->getUID())))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+            return (bool)$row;
+        } catch (\Throwable $e) {
+            // Mail enabled but the table missing/renamed on this version —
+            // fall back rather than break the members widget.
+            return false;
+        }
+    }
+
+    /**
      * Get the full structured member breakdown for the Manage Team → Members tab.
      * Requires admin or owner level.
      *

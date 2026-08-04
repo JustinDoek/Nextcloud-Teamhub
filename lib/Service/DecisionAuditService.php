@@ -36,6 +36,11 @@ class DecisionAuditService {
         'approver_meeting_scheduled',
         // v3.75.2 — external decision links (outbound URLs)
         'external_link_added', 'external_link_removed',
+        // v4.5.42 — the discussion phase. The gate below *silently drops*
+        // unknown transitions (a warning, not a throw), so a transition added
+        // to DecisionService without being added here writes nothing and
+        // nobody finds out. Both of these were doing exactly that.
+        'proposal_updated', 'shared_for_discussion',
     ];
 
     private const MAX_COMMENT_EXCERPT_LEN = 200;

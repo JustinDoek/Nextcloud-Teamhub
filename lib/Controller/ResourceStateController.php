@@ -99,6 +99,40 @@ class ResourceStateController extends Controller {
     }
 
     // -------------------------------------------------------------------------
+    // POST /api/v1/teams/{teamId}/resources/{app}/{resourceId}/dismiss
+    // Drop a pending row whose resource is gone or no longer attached (v4.5.41).
+    // -------------------------------------------------------------------------
+
+    #[NoAdminRequired]
+    public function dismissResource(string $teamId, string $app, string $resourceId): JSONResponse {
+        $uid = $this->currentUid();
+        if ($uid === null) {
+            return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+        if (!$this->isTeamAdmin($teamId, $uid)) {
+            return new JSONResponse(['error' => 'Forbidden'], Http::STATUS_FORBIDDEN);
+        }
+
+        try {
+            $this->discoveryService->dismissResource($teamId, $app, $resourceId, $uid);
+            return new JSONResponse(['status' => 'ok']);
+        } catch (\RuntimeException $e) {
+            // Includes "available again" — the panel was stale, and the client
+            // is expected to refetch and show Accept/Ignore instead.
+            $this->logger->warning('[TeamHub][ResourceStateController] dismissResource error', [
+                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][ResourceStateController] dismissResource failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Internal error'], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // POST /api/v1/teams/{teamId}/resources/{app}/{resourceId}/ignore
     // -------------------------------------------------------------------------
 

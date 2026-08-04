@@ -132,10 +132,16 @@ class Version000339001Date20260518000000 extends SimpleMigrationStep {
             $oldConfig = $team['oldConfig'];
             $newConfig = CirclesConfig::migrateLegacyConfig($oldConfig);
 
-            // After translation, any forbidden system bit (CFG_SINGLE, CFG_SYSTEM,
-            // CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND, CFG_APP) should be cleared by
-            // migrateLegacyConfig — but defence in depth: strip them again here.
-            // Otherwise externally-set garbage would survive the migration.
+            // After translation, any forbidden system bit (CFG_SINGLE,
+            // CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND)
+            // should be cleared by migrateLegacyConfig — but defence in depth:
+            // strip them again here. Otherwise externally-set garbage would
+            // survive the migration.
+            //
+            // v4.5.37 — CFG_APP used to be in that mask and no longer is; it is
+            // another app's claim on the circle, not garbage. This migration is
+            // one-shot and long since run, so the change is documentation of
+            // what the constant means today rather than a behaviour change.
             $newConfig = $newConfig & ~CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS;
 
             $updQb = $this->db->getQueryBuilder();

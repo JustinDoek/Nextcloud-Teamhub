@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\TeamAppResourceMapper;
 use OCA\TeamHub\Db\TeamAppResource;
 use OCP\App\IAppManager;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use Psr\Log\LoggerInterface;
 
@@ -23,6 +24,12 @@ use Psr\Log\LoggerInterface;
  *   - In DB_LOCAL but not DB_REAL → delete row (ACL was withdrawn externally)
  *   - In both                     → re-evaluate risk_status from current owner state
  *
+ * Two apps have no personal owner to run that test against, because the
+ * resource belongs to a circle rather than a person: group-folder-backed
+ * files (`gf:` ids) and collectives. Both resolve owner=null, and a null
+ * owner is never a team admin, so both always land in pending review. See
+ * insertDiscoveredRow for the one signal that overrides this for collectives.
+ *
  * Called render-time from ResourceService::getTeamResources() for the viewed team,
  * and hourly from ResourceDiscoveryJob for all teams.
  */
@@ -35,6 +42,7 @@ class ResourceDiscoveryService {
         private readonly IAppManager           $appManager,
         private readonly LoggerInterface       $logger,
         private readonly GroupFolderService    $groupFolderService,
+        private readonly CollectivesService    $collectivesService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -62,6 +70,9 @@ class ResourceDiscoveryService {
         }
         if ($this->appManager->isInstalled('deck')) {
             $this->reconcileApp($teamId, 'deck');
+        }
+        if ($this->appManager->isInstalled('collectives')) {
+            $this->reconcileApp($teamId, 'collectives');
         }
     }
 
@@ -118,7 +129,19 @@ class ResourceDiscoveryService {
         $rows = $this->resourceMapper->findAllByTeam($teamId);
         $grouped = [];
         foreach ($rows as $row) {
-            $grouped[$row->getAppId()][] = $this->serializeRow($row);
+            $serialised = $this->serializeRow($row);
+
+            // v4.5.41 — pending rows carry an availability verdict. Only
+            // pending: those are the ones an admin is asked to act on, and a
+            // decision about something that is gone is the thing we are trying
+            // to stop asking for. Active rows are a known follow-up.
+            if ($row->getStatus() === 'pending') {
+                $serialised['availability'] = $this->resolveAvailability(
+                    $teamId, $row->getAppId(), $row->getResourceId(),
+                );
+            }
+
+            $grouped[$row->getAppId()][] = $serialised;
         }
 
         // ── Dual-folder detection ──────────────────────────────────────────
@@ -219,6 +242,18 @@ class ResourceDiscoveryService {
             }
         }
 
+        // ── Collectives: connect it before the row says it is connected ───
+        // For files/talk/calendar/deck the ACL already grants the team access
+        // and the row is just TeamHub's record of it. A collective is the
+        // other way round: the row on its own changes nothing on screen — the
+        // Wiki tab reads the appconfig pair, so binding it is what "Accept"
+        // actually means to the admin who clicked it. Done first so a failure
+        // leaves the row pending and the button still there, rather than an
+        // accepted row pointing at a wiki nobody can open.
+        if ($appId === 'collectives') {
+            $this->collectivesService->bindTeamCollective($teamId, (int)$resourceId);
+        }
+
         $this->resourceMapper->updateStatus($row->getId(), 'active', $actorUid, time());
 
         $this->auditService->log(
@@ -247,6 +282,13 @@ class ResourceDiscoveryService {
         }
         if (!in_array($row->getStatus(), ['pending', 'active'], true)) {
             throw new \RuntimeException("Resource cannot be ignored (status={$row->getStatus()})");
+        }
+
+        // Collectives: take the Wiki tab away, leave the collective alone.
+        // unbindTeamCollective only clears the enabled flag — ignoring has
+        // always been reversible and has never touched the resource itself.
+        if ($appId === 'collectives') {
+            $this->collectivesService->unbindTeamCollective($teamId);
         }
 
         $this->resourceMapper->updateStatus($row->getId(), 'ignored', $actorUid, time());
@@ -304,6 +346,12 @@ class ResourceDiscoveryService {
             }
         }
 
+        // Same reasoning as acceptResource — un-ignoring a collective has to
+        // rebind it or the row goes active while the Wiki tab stays absent.
+        if ($appId === 'collectives') {
+            $this->collectivesService->bindTeamCollective($teamId, (int)$resourceId);
+        }
+
         $this->resourceMapper->updateStatus($row->getId(), 'active', $actorUid, time());
 
         $this->auditService->log(
@@ -350,6 +398,9 @@ class ResourceDiscoveryService {
                 if (isset($localByResourceId[$resourceId])) {
                     // Already tracked — refresh risk_status.
                     $this->refreshRiskStatus($teamId, $appId, $resourceId, $localByResourceId[$resourceId]);
+                    if ($appId === 'collectives') {
+                        $this->realignCollectiveRowStatus($teamId, $localByResourceId[$resourceId]);
+                    }
                     continue;
                 }
 
@@ -380,18 +431,41 @@ class ResourceDiscoveryService {
                 if ($row->getStatus() === 'disconnected') {
                     continue;
                 }
+
+                // "Externally withdrawn" is a claim about who did it, and for
+                // collectives it is often wrong: disabling the Wiki deletes or
+                // trashes the collective itself, so the very next reconcile
+                // finds the row unbacked and would blame an outside actor for
+                // something an admin did in TeamHub seconds earlier.
+                //
+                // It takes both halves to tell them apart. A cleared flag on
+                // its own does not mean we deleted anything — ignoring a
+                // discovered collective clears it too, and a collective that
+                // someone then deletes in Collectives really was withdrawn
+                // externally. Only a row that was *active* and whose flag is
+                // now off can be our own toggle-off.
+                $selfInflicted = $appId === 'collectives'
+                    && $row->getStatus() === 'active'
+                    && !$this->collectivesService->isEnabledForTeam($teamId);
+
+                $auditMeta = ['app_id' => $appId, 'resource_id' => $row->getResourceId()];
+                if ($selfInflicted) {
+                    $auditMeta['reason'] = 'disabled_in_teamhub';
+                }
+
                 $this->resourceMapper->deleteById($row->getId());
                 $this->auditService->log(
                     $teamId,
-                    'resource.external_withdrawn',
+                    $selfInflicted ? 'resource.access_removed' : 'resource.external_withdrawn',
                     null, // system actor
                     'resource',
                     "{$appId}:{$row->getResourceId()}",
-                    ['app_id' => $appId, 'resource_id' => $row->getResourceId()],
+                    $auditMeta,
                 );
-                $this->logger->info('[TeamHub][ResourceDiscoveryService] resource externally withdrawn', [
+                $this->logger->info('[TeamHub][ResourceDiscoveryService] resource row removed — resource no longer reachable', [
                     'teamId' => $teamId, 'appId' => $appId,
-                    'resourceId' => $row->getResourceId(), 'app' => Application::APP_ID,
+                    'resourceId' => $row->getResourceId(),
+                    'selfInflicted' => $selfInflicted, 'app' => Application::APP_ID,
                 ]);
             }
         } catch (\Throwable $e) {
@@ -418,6 +492,32 @@ class ResourceDiscoveryService {
             $status = 'pending';
         }
 
+        // ── Collectives: the team's own opt-in stands in for the owner test ──
+        //
+        // A collective has no owner (see getResourceOwner), so the rule above
+        // would put every one of them in pending review — including the wikis
+        // teams have been running since 4.3.3, which would greet a few hundred
+        // admins with a review request for something they switched on
+        // themselves and have used ever since.
+        //
+        // `collectives_enabled_<teamId>` is the record of that decision:
+        // CollectivesService::enableForTeam is the only thing that writes it,
+        // and it only runs behind requireAdminLevel. So an enabled team has
+        // already accepted this collective and the row is backfilled active on
+        // the first reconcile after upgrade — no migration, nothing on screen
+        // changes. A collective that bound itself to a team circle from inside
+        // the Collectives app leaves the flag at 0 and goes to review, which
+        // is the case this whole path exists for.
+        //
+        // Kept as `discovered_auto_accepted` rather than `teamhub_create`:
+        // reconcile genuinely discovered this row and cannot tell whether
+        // TeamHub created the collective or adopted an existing one
+        // (enableForTeam does both), so claiming authorship would be a guess.
+        if ($appId === 'collectives' && $this->collectivesService->isEnabledForTeam($teamId)) {
+            $origin = 'discovered_auto_accepted';
+            $status = 'active';
+        }
+
         $row = $this->resourceMapper->insertResource(
             $teamId,
             $appId,
@@ -441,7 +541,9 @@ class ResourceDiscoveryService {
             ['app_id' => $appId, 'resource_id' => $resourceId, 'origin' => $origin],
         );
 
-        // Audit: auto_accepted (only when auto-accepted)
+        // Audit: auto_accepted (only when auto-accepted). The reason is
+        // recorded because there are now two of them, and "owner: null" on a
+        // collective would otherwise read as a bug in the audit trail.
         if ($status === 'active') {
             $this->auditService->log(
                 $teamId,
@@ -449,7 +551,12 @@ class ResourceDiscoveryService {
                 null,
                 'resource',
                 "{$appId}:{$resourceId}",
-                ['app_id' => $appId, 'resource_id' => $resourceId, 'owner' => $ownerUid],
+                [
+                    'app_id'      => $appId,
+                    'resource_id' => $resourceId,
+                    'owner'       => $ownerUid,
+                    'reason'      => $ownerIsAdmin ? 'owner_is_team_admin' : 'team_already_opted_in',
+                ],
             );
         }
 
@@ -549,6 +656,49 @@ class ResourceDiscoveryService {
             'activeResourceId' => $activeId,
             'reason'           => $reason,
             'app'              => Application::APP_ID,
+        ]);
+    }
+
+    /**
+     * Keep a collectives row's status in step with the team's Wiki flag.
+     *
+     * Two surfaces can turn a team's wiki on: accepting the discovered
+     * collective here, and the Wiki toggle in Manage Team → Integrations. Only
+     * the first writes the registry row, so an admin who ignores a discovered
+     * collective and then flips the toggle on ends up with a working Wiki tab
+     * listed under "ignored resources" with an Un-ignore button next to it —
+     * the two surfaces contradicting each other about the same collective.
+     *
+     * The flag wins, because it is the one both paths write and the one the
+     * tab reads. Deliberately one-directional: a cleared flag is not promoted
+     * into an ignore, since that is what disabling the Wiki looks like a
+     * moment before the collective disappears and the row with it.
+     */
+    private function realignCollectiveRowStatus(string $teamId, TeamAppResource $row): void {
+        if ($row->getStatus() === 'active') {
+            return;
+        }
+        if (!$this->collectivesService->isEnabledForTeam($teamId)) {
+            return;
+        }
+
+        $this->resourceMapper->updateStatus($row->getId(), 'active', null, time());
+        $this->auditService->log(
+            $teamId,
+            'resource.auto_accepted',
+            null, // system actor
+            'resource',
+            "collectives:{$row->getResourceId()}",
+            [
+                'app_id'      => 'collectives',
+                'resource_id' => $row->getResourceId(),
+                'was'         => $row->getStatus(),
+                'reason'      => 'wiki_enabled_for_team',
+            ],
+        );
+        $this->logger->info('[TeamHub][ResourceDiscoveryService] collectives row realigned to the team Wiki flag', [
+            'teamId' => $teamId, 'resourceId' => $row->getResourceId(),
+            'was' => $row->getStatus(), 'app' => Application::APP_ID,
         ]);
     }
 
@@ -662,6 +812,11 @@ class ResourceDiscoveryService {
             'talk'     => $this->getRealTalkTokens($teamId),
             'calendar' => $this->getRealCalendarIds($teamId),
             'deck'     => $this->getRealDeckBoardIds($teamId),
+            // Throws rather than degrading to [] when Collectives can't be
+            // reached — see the method's docblock. reconcileApp's own catch
+            // turns that into a skipped pass, which is what we want: the
+            // withdrawal branch below reads [] as "every row is gone".
+            'collectives' => $this->collectivesService->getRealCollectiveResourceIds($teamId),
             default    => [],
         };
     }
@@ -815,6 +970,12 @@ class ResourceDiscoveryService {
             'talk'     => $this->getTalkOwner($resourceId),
             'calendar' => $this->getCalendarOwner($resourceId),
             'deck'     => $this->getDeckOwner($resourceId),
+            // A collective's access set IS its circle's member set — there is
+            // no owner column to read and no personal owner to name. Stated
+            // explicitly rather than left to `default` because the null is
+            // load-bearing: it is what routes every discovered collective to
+            // pending review. Exactly the `gf:` case in getFilesOwner.
+            'collectives' => null,
             default    => null,
         };
     }
@@ -970,6 +1131,288 @@ class ResourceDiscoveryService {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Availability — is this row still worth asking about? (v4.5.41)
+    // -------------------------------------------------------------------------
+
+    /** The resource exists and the team is still attached to it. */
+    public const AVAILABILITY_OK        = 'available';
+    /** The resource itself is gone — deleted, or trashed by its app. */
+    public const AVAILABILITY_GONE      = 'resource_gone';
+    /** The resource exists, but nothing connects it to this team any more. */
+    public const AVAILABILITY_DETACHED  = 'team_detached';
+    /** Could not be determined: app not installed, or the lookup failed. */
+    public const AVAILABILITY_UNKNOWN   = 'unknown';
+
+    /**
+     * Per-request memo of getRealResourceIds() keyed "{teamId}:{appId}".
+     *
+     * Without it the panel runs one ACL query per pending row. With it, one
+     * per app that actually has a pending row.
+     *
+     * @var array<string, string[]|null>  null = the lookup failed
+     */
+    private array $realIdMemo = [];
+
+    /**
+     * Decide whether a pending row still describes something real.
+     *
+     * Reconciliation already deletes rows whose ACL entry is gone, so in the
+     * ordinary case this returns `available`. It exists for the two cases
+     * reconciliation structurally cannot see:
+     *
+     *  - **The resource was deleted but its ACL rows outlived it.** Deck
+     *    soft-deletes boards and keeps `deck_board_acl`; Calendar shares in
+     *    `dav_shares` can outlive the calendar row. `getRealDeckBoardIds` and
+     *    `getRealCalendarIds` both read the ACL table alone, so neither can
+     *    tell a live board from a trashed one.
+     *  - **The app is not installed.** `reconcileTeam` skips uninstalled apps
+     *    entirely, so a pending Deck row on an instance where Deck was
+     *    disabled is never reconciled again — and never removed.
+     *
+     * **`unknown` is not `gone`, and the asymmetry is deliberate.** A row we
+     * cannot verify keeps its Accept/Ignore buttons: the cost of being wrong
+     * about "unknown" is one confusing row, while the cost of calling a live
+     * resource dead is an admin dismissing a connection they wanted. Same
+     * argument as `classifyCachedId` in CollectivesService (v4.5.35).
+     */
+    /**
+     * Public read of the availability verdict (v4.5.45).
+     *
+     * `resolveAvailability()` stays private because it is the panel's and the
+     * dismiss guard's own reasoning. This is the same answer for callers
+     * outside the class — TeamAdminWorkProvider, which must not list a pending
+     * row whose resource is gone, since a queue row has no Dismiss button to
+     * offer and would be a decision nobody can make.
+     */
+    public function availabilityFor(string $teamId, string $appId, string $resourceId): string {
+        return $this->resolveAvailability($teamId, $appId, $resourceId);
+    }
+
+    private function resolveAvailability(string $teamId, string $appId, string $resourceId): string {
+        // An app that is not installed cannot answer either question. Files is
+        // always present; the other four are optional.
+        $requiredApp = match ($appId) {
+            'talk'        => 'spreed',
+            'calendar'    => 'calendar',
+            'deck'        => 'deck',
+            'collectives' => 'collectives',
+            default       => null,
+        };
+        if ($requiredApp !== null && !$this->appManager->isInstalled($requiredApp)) {
+            return self::AVAILABILITY_UNKNOWN;
+        }
+
+        try {
+            // Collectives answer both questions at once:
+            // getRealCollectiveResourceIds resolves through the circle, so a
+            // deleted collective is simply absent from the list. There is no
+            // separate existence probe to run, and no way to tell the two
+            // apart — `detached` is the honest verdict for both.
+            if ($appId === 'collectives') {
+                $realIds = $this->realResourceIdsMemoised($teamId, $appId);
+                if ($realIds === null) {
+                    return self::AVAILABILITY_UNKNOWN;
+                }
+                return in_array($resourceId, $realIds, true)
+                    ? self::AVAILABILITY_OK
+                    : self::AVAILABILITY_DETACHED;
+            }
+
+            // Existence first, attachment second — that order decides which of
+            // the two verdicts a deleted resource gets. Deleting a Deck board
+            // outright takes its ACL rows with it, so asking about attachment
+            // first would report "no longer connected" for something that is
+            // simply gone. Both are dismissible, but the admin is told the
+            // truth about which happened.
+            if (!$this->resourceStillExists($appId, $resourceId)) {
+                return self::AVAILABILITY_GONE;
+            }
+
+            $realIds = $this->realResourceIdsMemoised($teamId, $appId);
+            if ($realIds === null) {
+                return self::AVAILABILITY_UNKNOWN;
+            }
+
+            return in_array($resourceId, $realIds, true)
+                ? self::AVAILABILITY_OK
+                : self::AVAILABILITY_DETACHED;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][ResourceDiscoveryService] resolveAvailability failed', [
+                'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return self::AVAILABILITY_UNKNOWN;
+        }
+    }
+
+    /**
+     * getRealResourceIds() with a per-request memo. Returns null when the
+     * lookup threw — distinct from `[]`, which legitimately means "the team is
+     * attached to nothing of this kind".
+     *
+     * @return string[]|null
+     */
+    private function realResourceIdsMemoised(string $teamId, string $appId): ?array {
+        $key = $teamId . ':' . $appId;
+        if (array_key_exists($key, $this->realIdMemo)) {
+            return $this->realIdMemo[$key];
+        }
+
+        try {
+            $ids = $this->getRealResourceIds($teamId, $appId);
+        } catch (\Throwable $e) {
+            // getRealCollectiveResourceIds throws by design when Collectives
+            // cannot be reached (see getRealResourceIds). Everything else
+            // already degrades to [] internally, so this is mostly that case.
+            $this->logger->debug('[TeamHub][ResourceDiscoveryService] real-id lookup failed', [
+                'teamId' => $teamId, 'appId' => $appId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            $ids = null;
+        }
+
+        $this->realIdMemo[$key] = $ids;
+        return $ids;
+    }
+
+    /**
+     * Does the resource still exist in its own app's tables?
+     *
+     * Deliberately separate from the ACL lookups: those answer "is this team
+     * attached", which is a different question and the one that has been
+     * silently standing in for this one.
+     */
+    private function resourceStillExists(string $appId, string $resourceId): bool {
+        return match ($appId) {
+            'files'    => $this->fileResourceExists($resourceId),
+            'talk'     => $this->rowExists('talk_rooms', 'token', $resourceId),
+            'calendar' => $this->rowExists('calendars', 'id', (int)$resourceId),
+            'deck'     => $this->deckBoardExists($resourceId),
+            // Anything we have no probe for is not claimed to be missing.
+            default    => true,
+        };
+    }
+
+    /**
+     * Files: a group-folder-backed row resolves through GroupFolderService; a
+     * share-based one is a filecache id. A file removed from filecache is gone
+     * from Nextcloud entirely, trash included — the trash keeps its own rows.
+     */
+    private function fileResourceExists(string $resourceId): bool {
+        if (str_starts_with($resourceId, 'gf:')) {
+            return $this->groupFolderService->resolveGroupFolderResourceId($resourceId) !== null;
+        }
+        return $this->rowExists('filecache', 'fileid', (int)$resourceId);
+    }
+
+    /**
+     * Deck: a board in the Deck trash still has its ACL rows, which is exactly
+     * why reconciliation cannot see it. `deleted_at` is 0 for a live board and
+     * a timestamp once trashed.
+     *
+     * The column is read defensively: older Deck versions predate it, and an
+     * absent column must read as "exists", never as "deleted".
+     */
+    private function deckBoardExists(string $resourceId): bool {
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('id', 'deleted_at')
+                ->from('deck_boards')
+                ->where($qb->expr()->eq(
+                    'id',
+                    $qb->createNamedParameter((int)$resourceId, IQueryBuilder::PARAM_INT),
+                ))
+                ->setMaxResults(1);
+
+            $result = $qb->executeQuery();
+            $row    = $result->fetch();
+            $result->closeCursor();
+
+            if (!$row) {
+                return false;
+            }
+            return (int)($row['deleted_at'] ?? 0) <= 0;
+        } catch (\Throwable) {
+            // No deleted_at column on this Deck version — fall back to plain
+            // existence rather than declaring the board gone.
+            return $this->rowExists('deck_boards', 'id', (int)$resourceId);
+        }
+    }
+
+    /** Single-row existence probe. Throws are the caller's to interpret. */
+    private function rowExists(string $table, string $column, string|int $value): bool {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select($column)
+            ->from($table)
+            ->where($qb->expr()->eq(
+                $column,
+                is_int($value)
+                    ? $qb->createNamedParameter($value, IQueryBuilder::PARAM_INT)
+                    : $qb->createNamedParameter($value),
+            ))
+            ->setMaxResults(1);
+
+        $result = $qb->executeQuery();
+        $row    = $result->fetch();
+        $result->closeCursor();
+
+        return $row !== false && $row !== null;
+    }
+
+    /**
+     * Refusal code for a dismiss of a row that turned out to be live.
+     *
+     * A bare code rather than a sentence: the controller passes
+     * `$e->getMessage()` straight into the JSON response, and neither layer
+     * has an IL10N to translate with. The client owns the wording, like every
+     * other string in this feature.
+     */
+    public const ERROR_AVAILABLE_AGAIN = 'resource_available_again';
+
+    /**
+     * Remove a pending row whose resource is gone or detached.
+     *
+     * Deleting rather than marking ignored: the row points at nothing, so
+     * there is no state left worth carrying, and if the resource ever comes
+     * back reconciliation rediscovers it from scratch.
+     *
+     * **The verdict is recomputed here, not trusted from the request.** The
+     * panel the admin is looking at may be a minute old, and a row that has
+     * become available again must not be silently deleted — the caller gets
+     * ERROR_AVAILABLE_AGAIN and the refreshed panel shows Accept/Ignore.
+     *
+     * @throws \RuntimeException when the row is missing, not pending, or still available
+     */
+    public function dismissResource(string $teamId, string $appId, string $resourceId, string $actorUid): void {
+        $row = $this->resourceMapper->findByTeamAppResource($teamId, $appId, $resourceId);
+        if ($row === null) {
+            throw new \RuntimeException("Resource row not found: {$teamId}/{$appId}/{$resourceId}");
+        }
+        if ($row->getStatus() !== 'pending') {
+            throw new \RuntimeException("Resource is not pending (status={$row->getStatus()})");
+        }
+
+        $availability = $this->resolveAvailability($teamId, $appId, $resourceId);
+        if ($availability === self::AVAILABILITY_OK) {
+            throw new \RuntimeException(self::ERROR_AVAILABLE_AGAIN);
+        }
+
+        $this->resourceMapper->deleteById($row->getId());
+        $this->auditService->log(
+            $teamId,
+            'resource.dismissed',
+            $actorUid,
+            'resource',
+            "{$appId}:{$resourceId}",
+            ['app_id' => $appId, 'resource_id' => $resourceId, 'availability' => $availability],
+        );
+        $this->logger->info('[TeamHub][ResourceDiscoveryService] pending resource dismissed', [
+            'teamId' => $teamId, 'appId' => $appId, 'resourceId' => $resourceId,
+            'availability' => $availability, 'app' => Application::APP_ID,
+        ]);
+    }
+
     /**
      * Serialize a TeamAppResource entity to an array for API responses.
      * Includes a resolved displayName for the resource (human-readable).
@@ -980,7 +1423,7 @@ class ResourceDiscoveryService {
             'teamId'       => $row->getTeamId(),
             'appId'        => $row->getAppId(),
             'resourceId'   => $row->getResourceId(),
-            'displayName'  => $this->resolveDisplayName($row->getAppId(), $row->getResourceId()),
+            'displayName'  => $this->resolveDisplayName($row->getTeamId(), $row->getAppId(), $row->getResourceId()),
             'ownerUid'     => $row->getOwnerUid(),
             'origin'       => $row->getOrigin(),
             'status'       => $row->getStatus(),
@@ -999,17 +1442,20 @@ class ResourceDiscoveryService {
      * Falls back to the raw resourceId string if the lookup fails or the
      * underlying app table is absent (app not installed).
      *
-     * @param string $appId      One of: files, talk, calendar, deck
+     * @param string $teamId     Owning team — only Collectives needs it, because
+     *                           CollectiveMapper is indexed by circle, not by id
+     * @param string $appId      One of: files, talk, calendar, deck, collectives
      * @param string $resourceId The NC resource identifier stored in our table
      * @return string            Display name, never empty — falls back to resourceId
      */
-    private function resolveDisplayName(string $appId, string $resourceId): string {
+    private function resolveDisplayName(string $teamId, string $appId, string $resourceId): string {
         try {
             return match ($appId) {
                 'files'    => $this->resolveFileName($resourceId),
                 'talk'     => $this->resolveTalkName($resourceId),
                 'calendar' => $this->resolveCalendarName($resourceId),
                 'deck'     => $this->resolveDeckName($resourceId),
+                'collectives' => $this->collectivesService->resolveCollectiveDisplayName($teamId, $resourceId),
                 default    => $resourceId,
             };
         } catch (\Throwable $e) {

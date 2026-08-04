@@ -221,7 +221,8 @@ class DecisionController extends Controller {
                 ? (int)$params['before'] : null;
             $limit  = isset($params['limit']) ? (int)$params['limit'] : 25;
 
-            $out = $this->decisionService->list($teamId, $filters, $sort, $before, $limit);
+            // v4.5.42 — viewer passed for the audience gate on open proposals.
+            $out = $this->decisionService->list($teamId, $filters, $sort, $before, $limit, $this->requireUser());
             return new JSONResponse($out);
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -240,7 +241,11 @@ class DecisionController extends Controller {
     #[NoCSRFRequired]
     public function show(string $teamId, int $decisionId): JSONResponse {
         try {
-            return new JSONResponse($this->decisionService->get($teamId, $decisionId));
+            // v4.5.42 — the viewer is passed explicitly so the service can
+            // apply the audience gate on a restricted open proposal.
+            return new JSONResponse(
+                $this->decisionService->get($teamId, $decisionId, $this->requireUser())
+            );
         } catch (\InvalidArgumentException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         } catch (\RuntimeException $e) {
@@ -377,6 +382,113 @@ class DecisionController extends Controller {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
         } catch (\Throwable $e) {
             return $this->mapError($e, 'finalize');
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/decisions/{decisionId}/proposal
+     * Body: { question?: string, body?: string }
+     *
+     * v4.5.42 — edit an open proposal after feedback. Proposer only, open
+     * only. Both fields are optional; omitting one leaves it unchanged.
+     */
+    #[NoAdminRequired]
+    public function updateProposal(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid  = $this->requireUser();
+            $body = $this->request->getParams();
+
+            // Distinguished from empty string: null means "leave alone",
+            // '' means "the client sent a blank", which updateProposal
+            // refuses for the question and accepts for the body.
+            $question = array_key_exists('question', $body) ? (string)$body['question'] : null;
+            $text     = array_key_exists('body', $body)     ? (string)$body['body']     : null;
+
+            if ($question === null && $text === null) {
+                return new JSONResponse(
+                    ['error' => 'Nothing to update — send question, body, or both'],
+                    Http::STATUS_BAD_REQUEST,
+                );
+            }
+
+            $out = $this->decisionService->updateProposal($teamId, $decisionId, $question, $text, $uid);
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'updateProposal');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/finalize-proposal
+     *
+     * v4.5.42 — finalize an open proposal using its own body as the final
+     * wording. The Talk-discussion counterpart to finalize(), which requires
+     * a TeamHub comment id that a Talk discussion never produces.
+     */
+    #[NoAdminRequired]
+    public function finalizeProposal(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid = $this->requireUser();
+            $out = $this->decisionService->finalizeProposal($teamId, $decisionId, $uid);
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'finalizeProposal');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/share
+     * Body: { mode: 'selected'|'team', userIds?: string[] }
+     *
+     * v4.5.42 — open a proposal for discussion on a Talk surface. `selected`
+     * creates a group conversation with the named people and restricts who can
+     * see the proposal while it is open; `team` posts into the team's own
+     * conversation and restricts nothing.
+     *
+     * Returns { decision, share } — `share.ok` is false when Talk could not be
+     * reached, which is not a failure of the share itself: the proposal is
+     * still open and still editable, it just has no conversation attached.
+     */
+    #[NoAdminRequired]
+    public function share(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid  = $this->requireUser();
+            $body = $this->request->getParams();
+
+            $mode = (string)($body['mode'] ?? '');
+            $raw  = $body['userIds'] ?? [];
+            if (!is_array($raw)) {
+                return new JSONResponse(['error' => 'userIds must be an array'], Http::STATUS_BAD_REQUEST);
+            }
+            // Cast here so the service sees strings; it does the membership
+            // filtering, which is the check that actually matters.
+            $userIds = array_values(array_map(static fn ($u): string => (string)$u, $raw));
+
+            $out = $this->decisionService->shareProposal($teamId, $decisionId, $mode, $userIds, $uid);
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            // Logged here as well as mapped: `mapError` records the exception
+            // but not what was being attempted, and the share path has three
+            // failure surfaces (Talk, audience write, message read) that are
+            // indistinguishable from the response alone.
+            $this->logger->error('[TeamHub][DecisionController] share failed', [
+                'teamId' => $teamId, 'decisionId' => $decisionId,
+                'mode' => (string)($this->request->getParams()['mode'] ?? ''),
+                'exception' => $e, 'app' => \OCA\TeamHub\AppInfo\Application::APP_ID,
+            ]);
+            return $this->mapError($e, 'share');
         }
     }
 

@@ -13,6 +13,7 @@ use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\MilestoneService;
+use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TaskService;
 use OCA\TeamHub\Service\TeamService;
@@ -38,6 +39,10 @@ class TeamController extends Controller {
         private TeamService $teamService,
         private MemberService $memberService,
         private ResourceService $resourceService,
+        // v4.5.36 — Collectives is a discovered resource now, so the Wiki
+        // toggle has a registry row to keep in step. See
+        // reconcileCollectivesRegistry().
+        private ResourceDiscoveryService $resourceDiscoveryService,
         private ActivityService $activityService,
         private MessageService $messageService,
         private IntravoxService $intravoxService,
@@ -189,12 +194,15 @@ class TeamController extends Controller {
      * available, email/phone/ncStatus for the widget rendering.
      *
      * Response envelope:
-     *   { members: [ ... ], talkAvailable: bool }
+     *   { members: [ ... ], talkAvailable: bool, mailAvailable: bool }
      *
-     * `talkAvailable` is a per-request fact (Spreed enabled for the current
-     * user) — surfaced here so the widget can decide whether to show the
-     * Talk contact icon at all. Legacy consumers that read only `members`
-     * continue to work unchanged.
+     * Both flags are per-request facts about the **current user**, not about
+     * any member in the list — they decide which contact affordances the
+     * widget renders. `talkAvailable` is Spreed enabled for the viewer;
+     * `mailAvailable` is Mail enabled for the viewer AND the viewer having an
+     * account configured, which is what decides whether an email link can go
+     * to Nextcloud Mail instead of the OS handler. Legacy consumers that read
+     * only `members` continue to work unchanged.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
@@ -202,9 +210,11 @@ class TeamController extends Controller {
         try {
             $data = $this->memberService->getAllEffectiveMembers($teamId);
             $talkAvailable = $this->memberService->isTalkAvailableForCurrentUser();
+            $mailAvailable = $this->memberService->isMailAvailableForCurrentUser();
             return new JSONResponse([
                 'members'        => $data,
                 'talkAvailable'  => $talkAvailable,
+                'mailAvailable'  => $mailAvailable,
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][TeamController] Failed to get all effective members', [
@@ -479,6 +489,7 @@ class TeamController extends Controller {
                 if (empty($result['ok'])) {
                     return new JSONResponse(['error' => $result['error'] ?? 'enable failed'], Http::STATUS_BAD_REQUEST);
                 }
+                $this->reconcileCollectivesRegistry($teamId);
                 return new JSONResponse([
                     'collectives_enabled'   => true,
                     'collectives_installed' => $this->collectivesService->isInstalled(),
@@ -488,6 +499,7 @@ class TeamController extends Controller {
             }
 
             $result = $this->collectivesService->disableForTeam($teamId, $user->getUID());
+            $this->reconcileCollectivesRegistry($teamId);
             return new JSONResponse([
                 'collectives_enabled'   => false,
                 'collectives_installed' => $this->collectivesService->isInstalled(),
@@ -499,6 +511,30 @@ class TeamController extends Controller {
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * Bring the resource registry in step with the Wiki toggle (v4.5.36).
+     *
+     * Collectives joined the discovered-resource registry this version, so a
+     * toggle leaves the two surfaces briefly disagreeing: the wiki is on but
+     * the Integrations tab has no row for it, or it is off and the row is
+     * still there. Reconcile closes that in the same request instead of on
+     * whichever page load happens to run it first — the admin is looking at
+     * that tab right now.
+     *
+     * Deliberately best-effort: the toggle already succeeded and its response
+     * is already decided, so a reconcile failure must not turn a working
+     * enable into an error. The hourly job picks it up regardless.
+     */
+    private function reconcileCollectivesRegistry(string $teamId): void {
+        try {
+            $this->resourceDiscoveryService->reconcileTeam($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TeamController] post-toggle resource reconcile failed (non-fatal)', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
         }
     }
 

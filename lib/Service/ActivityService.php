@@ -554,7 +554,14 @@ class ActivityService {
                         $editUrl = null;
                         if ($calOwner !== '' && $calSlug !== '') {
                             $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
-                            $objectId = rtrim(strtr(base64_encode($davPath), '+/', '-_'), '=');
+                            // Standard base64 WITH padding — the Calendar app derives this id as
+                            // btoa(davUrl) and decodes it with atob(), which throws on the
+                            // base64url alphabet. Emitting '-'/'_' here made the event fail
+                            // to resolve ('event does not exist') whenever the encoding
+                            // happened to produce a '+' or '/'. Percent-encoded because standard
+                            // base64 can contain '/', which would otherwise split the URL
+                            // path segment the id sits in.
+                            $objectId = rawurlencode(base64_encode($davPath));
                             $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTimestamp;
                         }
 

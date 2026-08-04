@@ -3,6 +3,714 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.6.0] — 2026-08-04 — Session close
+
+Rolls up 4.5.48–4.5.51. No new migration since `Version000405042`; a rebuild is required.
+
+### Known issue
+
+- **A Nextcloud Office document opened from the Files tab still arrives without its conversation.** Diagnosed but not fixed: the Files sidebar never opens for it (`sidebarFound: true, sidebarOpen: false`), so the chat tab is never reached. 4.5.50 removed a genuine timing flaw one step further along, which is why it does not resolve this. Every other file type is unaffected.
+
+---
+
+## [4.5.51] — 2026-08-04 — One less switch for something you can no longer create
+
+> Rebuild only — no new migration.
+
+### Removed
+
+- **The "Allow comments on → Decisions" checkbox** in Manage team → Integration settings → Messages. A decision has not been a type you can pick in the message composer since 4.5.42 — every proposal starts from the Decisions page — so the switch governed something that could no longer be created there.
+
+### Fixed
+
+- **Decision comments are on again for any team that had unticked that box.** Decisions now sit alongside questions as a type whose comments cannot be switched off, and that rule is applied when the setting is *read* as well as when it is written — so a stored "off" from before this release stops having an effect, rather than being stranded with no control left to clear it.
+
+---
+
+## [4.5.50] — 2026-08-04 — Office documents opened from the Files tab keep their conversation
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **A Nextcloud Office document opened by clicking it in the Files tab arrived without its conversation.** Every other way of opening a file waits for the document to actually appear before telling it the sidebar is there; clicking a row in the file list did not — it waited a fixed two and a half seconds and then gave up silently. Nextcloud Office loads an entire document server before its editor appears, so on anything but a warm start it mounted after that window had closed, never learned the sidebar was open, and rendered over it. TeamHub now watches for the document instead of timing it, and notices the Office editor appearing inside the viewer as a separate moment from the viewer itself.
+
+---
+
+## [4.5.49] — 2026-08-04 — A proposal shows what it says
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **The context you wrote was missing from your own open proposal.** The panel only ever loaded it when you pressed **Edit proposal**, so up to that point the proposal showed a subject and three buttons with nothing to read between them. It now loads with the proposal and sits under the subject.
+
+### Changed
+
+- **The subject moved into the "Your proposal" block**, above the context and the buttons that act on both, instead of sitting outside it. Every other kind of decision keeps the subject where it was.
+- Both are hidden while the editor is open — the editor holds the same two fields, and showing the saved copy beside the box you are changing it in invites editing the wrong one.
+
+---
+
+## [4.5.48] — 2026-08-04 — The thread title goes where Talk actually takes it
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **A proposal shared with the whole team may not have been opening a thread at all.** The title that turns the post into a thread was passed under a name TeamHub had only ever assumed, and anything the installed Talk does not recognise is dropped without a word — so the proposal could arrive as an ordinary chat message with nothing reporting the difference. TeamHub now reads what this Talk actually accepts and puts the title there, including inside a metadata array where that is the shape it wants.
+- **Whether a thread exists is now checked rather than assumed.** Previously the proposal recorded a thread id on the strength of having posted a message; it now looks the thread up before claiming one.
+- If a Talk version accepts a thread title in neither form, the proposal still posts and the discussion still works — and the log now records the exact method the instance offers, so supporting it is a one-line change instead of another guess.
+
+### Added
+
+- **A "Talk threading" panel** at the bottom of Admin → TeamHub → My Work, reporting what this instance's Talk offers and where a thread title would land on it. The server has been able to answer this since 4.5.45; nothing displayed it.
+
+---
+
+## [4.5.47] — 2026-08-04 — Indirect members can post again
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **Members who belong to a team through a group or another team were treated as non-members by every posting permission.** TeamHub read the member level from the team's direct membership list, where such a person has no entry at all — so they scored zero, which does not mean "ordinary member", it means "not in this team". On any team whose posting is restricted above member level they could not post a message, pin, link or propose a decision; proposing surfaced as a server error. They now count as ordinary members, which is what they are. Moderator and admin powers are unaffected — those still require being added to the team directly.
+- **Proposals discussed with the whole team now post as a Talk thread**, using the thread title Talk's chat API accepts. On a Talk version without that parameter the proposal posts as a normal message, exactly as before.
+
+### Changed
+
+- The handling options on the proposal form are no longer 44px tall — the radio and label are pinned so the pill is as tall as its text.
+- The reference code on unexpected server errors now also appears when posting a message fails, which is where it was needed first.
+
+---
+
+## [4.5.46] — 2026-08-04 — A compact proposal form, and threads that were never broken
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **"This version of Talk does not support threads" was wrong on every instance.** A Talk thread is a message somebody has replied to — the thread appears on the first reply, which is exactly how "Ask team for agenda items" has always worked. TeamHub was trying to force a thread through an API it had never verified, then reporting failure when nothing happened. It now posts the message and says nothing false; replies thread as they always would.
+
+### Changed
+
+- **The Propose a decision form is substantially shorter.** Impact, Level and Category are one two-row grid instead of three stacked blocks; the context editor opens at four lines and grows with what you type; the handling options are one row of choices with the explanation shown only for the one you picked. Nothing was removed — the same guidance appears when it applies.
+- **Impact and Category now start with a value selected** (Low, and the first category) rather than empty. A required field that silently blocks Submit is a worse default than the least consequential real value.
+- **The workflow timeline moved to the right** of the subject and context fields, and again on the proposal detail panel, where the proposal's own controls now take the left side.
+- **Timeline steps are single words** — Create, Discuss, Finalize, Decision.
+- **Submit and Cancel stay visible** at the bottom of the form while it scrolls.
+- **A "Discussion" button** on your open proposals opens the Talk conversation or thread directly, replacing the sentence that described where the discussion was happening.
+
+### Added
+
+- **Unexpected server errors now carry a short reference code**, shown with the error and written to the log alongside the full details. Quoting it locates the exact failure instead of leaving "I got a server error" as the whole report.
+
+---
+
+## [4.5.45] — 2026-08-04 — Team admin work, and proposals in the feed
+
+> Rebuild only — no new migration.
+
+### Added
+
+- **A "Team admin" category in My Work**, for the housekeeping you owe a team because you administer it rather than because it was assigned to you. It starts with **resources pending review** — someone connected a board, calendar, folder or conversation to a team and it needs accepting or ignoring. You can accept or ignore straight from the row, or open the full review panel. It filters like any other category, and carries no due dates, because nothing about an unreviewed resource expires.
+- The category sits **below Waiting for others** on purpose: this is real work, but it is never more urgent than a deadline.
+- **Proposals being discussed privately now appear in What's New** for the people invited to them, under both Open proposals and Talk polls & threads, and can be replied to from there. Their conversation belongs to no team, so the feed could not previously see it — which hid the discussion from exactly the people asked to take part.
+
+### Changed
+
+- **"Open decisions" is now "Open proposals"**, in the What's New tab bar and in the Feed control panel. What is listed there is still open, and it is not a decision until an approver has acted on it.
+
+### Fixed
+
+- **Members who belong to a team indirectly can post to the team conversation again** — the remaining half of the 4.5.43 fix, now also applied when a proposal is posted for discussion.
+
+---
+
+## [4.5.44] — 2026-08-04 — A proposal shows where it is
+
+> Rebuild only — no new migration.
+
+### Added
+
+- **A progress rail on proposals**, showing the four steps a proposal goes through — Create proposal, Discuss proposal, Finalize proposal, Decision — and which of them you are at. It appears beside the subject and context fields while you are writing a proposal, and again on your own open proposals, where both Discuss and Finalize are highlighted because either can be your next move.
+
+### Changed
+
+- **The Talk message now opens with "Requesting feedback on a new proposal:"** before the proposal itself. Landing in a conversation among other chat messages, a bold line of text did not say what was being asked of the reader.
+- **"Decision question" is now "Proposal subject"** on the proposal form. What you write there is a proposal; it only becomes a decision once an approver has acted on it.
+
+---
+
+## [4.5.43] — 2026-08-04 — Proposal form layout, and Talk for indirect members
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **Members who belong to a team through another team or a group could not post to the team conversation from TeamHub.** TeamHub asked Talk for their personal participant record, and someone whose membership is indirect does not have one — they reach the conversation through the team itself. Talk's own interface has always worked for them; TeamHub's did not. It now resolves the conversation the way Talk does before posting, so sharing a proposal for discussion works for every member.
+- **The two new discussion options record their history again.** "Edited proposal" and "Opened for discussion" were being dropped from the decision's audit trail instead of written, because the audit log only accepts events it knows about and these two were never added to its list.
+
+### Changed
+
+- **The proposal-handling choice moved to the bottom of the Propose a decision form**, directly above the buttons — you decide how a proposal should be handled after writing it, not before.
+- **The proposal form's button now reads "Submit"** instead of "Propose Decision". What the button does depends on the option chosen above it, so naming one of the three outcomes would have been wrong two times out of three.
+
+---
+
+## [4.5.42] — 2026-08-04 — Decisions: one way in, and room to discuss first
+
+> Rebuild **and** upgrade — `Version000405042` adds the discussion columns and the audience table.
+
+### Added
+
+- **A proposal can now be discussed before it is finalized.** When you propose a decision you choose how it should be handled: finalize it now, discuss it with people you pick, or discuss it with the whole team. The last two leave the proposal **open** so you can change it after feedback and finalize it when the discussion is done.
+- **Discuss with selected people** opens a Talk conversation with just those people. **Only they and you can see the proposal while it is open** — it stays out of everyone else's What's New, message stream and Decisions list until you finalize it, at which point it becomes a normal team record.
+- **Discuss with the whole team** posts the proposal in the team conversation, as a thread where your version of Talk supports one, so any member can respond.
+- **Proposals can be edited.** Until now a proposal could not be changed after it was created — the only way to act on feedback was to withdraw it and start again, losing the discussion. The proposer now gets an **Edit proposal** box on any open proposal, next to a link to wherever it is being discussed.
+- **Finalize from My Work.** An open proposal you own already appeared under Action required; it now carries a **Finalize** button, so you can close drafting without opening the team first.
+
+### Changed
+
+- **Decisions are proposed in one place.** The Decision option has been removed from the message composer. It started a different process from the button on the Decisions page — one left the proposal open for discussion, the other finalized it immediately — so the same feature behaved differently depending on which button you happened to press. Every proposal now starts from **Propose decision** on the Decisions page or the widget `+`, which is where the three options above live.
+- Existing decisions are unaffected. Anything proposed before this release is treated as "finalized on creation", which is what it was.
+
+### Security
+
+- An open proposal shared with selected people is checked on every surface that can show it — the feed, the team message stream, the Decisions list, and a direct link — rather than being filtered out of lists alone. Opening a link to a proposal you were not included in reports that it does not exist, rather than that you are not allowed to see it.
+
+---
+
+## [4.5.41] — 2026-08-04 — Resources pending review: one look, and no dead entries
+
+> Rebuild only — no new migration.
+
+### Changed
+
+- **The "Resources pending review" block now has a single background and a single text colour.** It was painting itself with three different backgrounds and four different text colours depending on which part you were reading, including muted grey text on a saturated blue panel. The block keeps its blue accent on the left edge and its ℹ icon, so it still reads as informational, but nothing inside it changes colour any more.
+- **Following "N resources need review" from Team info now visibly marks where it landed.** The highlight that the at-risk block has always had was never defined for the pending block, so the page jumped and nothing confirmed why.
+
+### Fixed
+
+- **A review request for a resource that is already gone can now be cleared.** If the team was disconnected from the resource, or the resource itself was deleted, the request could sit in the list permanently: TeamHub only ever checked whether a permission entry still named the team, never whether the thing it pointed at still existed. A deleted Deck board keeps its permission entries, so the request survived — and its Accept button pointed at nothing. Such requests now say why they can no longer be reviewed, and offer **Dismiss**, which removes them and clears the counter on Team info.
+- **A pending request for an app that has since been disabled no longer counts forever.** These were skipped by every reconciliation pass, so nothing could ever remove them.
+- Requests that TeamHub cannot verify — because the owning app is not installed, or a lookup failed — deliberately keep their Accept and Ignore buttons rather than being reported as gone.
+
+---
+
+## [4.5.40] — 2026-08-04 — Follow is gone from My Work
+
+> Rebuild **and** upgrade — `Version000405040` drops the `follow_state` column from `teamhub_mywork_state`.
+
+### Removed
+
+- **The Follow option in My Work has been removed**, together with the "Hide from My Work" option it turned into. Nothing else about My Work changes: your queue is decided by where the work actually lives — Deck, approvals, decisions, meetings — and Snooze remains the one way to set something aside yourself.
+
+### Fixed
+
+- **Items you stopped following are back.** The two options shared one slot in the menu, so what looked like "undo Follow" was in fact "never show me this again" — and there was no filter, no unhide, and no expiry that could bring the item back, even when it was still unfinished and overdue. Anything hidden this way returns on upgrade; you do not have to do anything to recover it.
+
+---
+
+## [4.5.35] — 2026-08-03 — The team wiki stops disappearing
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **A wiki the team owns could vanish for everyone because one member couldn't see it.** Nextcloud Collectives answers "collective not found" both when a wiki genuinely isn't there and when the person asking simply has no access to it — the two are indistinguishable from the outside. TeamHub read every such answer as "gone" and threw away the team's link to its wiki, so a single member opening the tab could unbind it for all their colleagues. TeamHub now checks whether the wiki actually exists before touching that link, and repairs the link instead of discarding it when a wiki has merely been renumbered.
+- **The Collective switch said "Not installed" when it only meant "don't know yet".** Whether the Collectives app is installed is a fact about the whole server, so it cannot be true for one team and false for the next — but the switch was reset to "not installed" every time you opened a different team, and stayed that way if the team's settings failed to load. It now says **Checking…** until it has an answer, and only claims "Not installed" when that is what the server actually reported.
+
+- **"Configuration value is not valid" when enabling the wiki.** A team could carry a leftover Nextcloud flag marking its group as personal — meaningless once the team has more than one member, and harmless until Collectives tried to claim the team, at which point Nextcloud refused the whole operation. The flag is now recognised as invalid on a team, so **Admin settings → TeamHub → Maintenance → Reset config** clears it, and the error you get names the flag and points at that button instead of asking you to read the server log.
+
+---
+
+## [4.5.34] — 2026-08-03 — Emailing a team member opens Nextcloud Mail
+
+> Rebuild only — no new migration.
+
+### Changed
+
+- **The email icon in the members widget now opens Nextcloud Mail**, with the address already filled in, for anyone who has Mail set up. It used to hand off to whatever email program the computer had registered, which was the wrong answer for everyone who reads their mail in Nextcloud.
+- **Anyone without Mail sees no change at all.** If the Mail app isn't installed, or it is but you haven't added an account yet, the icon keeps opening your usual email program exactly as before. The choice is made per person, not per instance, so both kinds of user get what works for them — and it is your own setup that decides, not the setup of the person you're writing to.
+
+### Fixed
+
+- **An email address containing a `?` could quietly add hidden recipients.** Because everything after a `?` in an email link is read as instructions rather than address, someone could have set their own profile address so that colleagues writing to them silently copied a third party. Addresses are now checked before they become a link, and anything malformed shows no email icon instead.
+
+### Removed
+
+- The temporary `debugMentions` option added in 4.5.31. It did its job — mentions are confirmed working end to end — and diagnostics don't outstay their welcome.
+
+---
+
+## [4.5.33] — 2026-08-02 — Talk mentions reach What's New
+
+> Rebuild only — no new migration.
+
+### Added
+
+- **A Talk chat message that names you now appears in What's New.** Until now the feed carried Talk polls and thread starters only, so someone writing "@you, look at this" in a conversation reached you nowhere except Talk itself. Only messages that mention you are pulled in — the rest of a conversation is the conversation's business.
+- **You can answer one without leaving the page**, the same way you answer a thread. The reply lands in the conversation as a reply to the message that named you.
+- Talk mentions and mentions in team messages share **one Mentions tab and one count**, so "who wanted me" is one place. The Mentions switch in the control panel covers both — and it is not tied to the Talk switch, because a message that says your name is a mention first and a chat message second.
+
+---
+
+## [4.5.32] — 2026-08-02 — Mention parsing adopts Nextcloud's own grammar
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **Links containing an `@` were read as mentions.** The parser ran to the next space, so a URL like `.../@example.org/Folder/file.md)` became a mention candidate. It now uses the exact pattern Nextcloud's own editor writes mentions with, which stops at `/`, `)` and the rest — and which also means a plain e-mail address written in a sentence is no longer mistaken for a mention of its domain.
+
+---
+
+## [4.5.31] — 2026-08-02 — My Work's Today lens, and decisions on their own switch
+
+> Rebuild only — no new migration.
+
+### Changed
+
+- **Today now means today's work, including what is overdue.** Selecting Today used to hide everything with a date before this morning, which is exactly the work that needs doing. Action required — the card and the section — shows overdue items alongside today's.
+- **The Completed card follows the Today lens too.** It reads "Completed today" with that day's number, matching the side panel beside it, instead of quietly still counting the week.
+- **Open decisions are governed only by their own switch.** They used to need Team messages on as well, so turning that off hid every decision — two switches for one row, and the wrong one winning.
+
+### Removed
+
+- **The System messages switch** on the What's New control panel. It filtered one thing — milestone announcements — that nobody was looking to hide, and cost a row in a list where everything else answers a real question. Those posts always show now.
+
+### Added
+
+- A temporary `debugMentions` option on the feed endpoint, so a single request shows exactly what the server reads as a mention. Diagnostic only, and it will be removed once the cause is settled.
+
+---
+
+## [4.5.30] — 2026-08-02 — What's new: fourth smoke test
+
+> Rebuild only — no new migration.
+
+### Added
+
+- **An Open decisions tab** in What's New, beside All, Team messages, Public messages, Talk and Mentions, with its own count.
+
+### Fixed
+
+- **Open decisions never appeared in the feed.** Two names for the same state are in use — proposals written by earlier versions are stored as `proposed` rather than `open` — and only one of them was being looked for. Both count now, which is what the Decisions tab has always done.
+- **"Completed this week" did not become "Completed today" under the Today lens.** The lens's name never reached the server; only the dates it resolves to did, and those cannot be told apart from the other date presets. It is sent explicitly now, and the day it narrows to is *your* day, not the server's.
+
+### Changed
+
+- My Work row icons carry their team's pill — the same soft fill and ink as that team's chip in the row — and are a size larger.
+
+---
+
+## [4.5.29] — 2026-08-02 — What's new: third smoke test
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **Replying to a Talk thread threw a type error.** The argument matcher paired the message text with a Talk parameter whose name merely ends in "message", so a string went where a true/false value belongs. It now checks that the type fits before accepting a name match.
+
+### Added
+
+- **Open decisions are their own row in the What's New control panel.** A team's open proposals appear in the feed alongside its messages; resolved ones don't — those are records, and the Decisions tab is where records live. Replying to a decision from the feed is deliberately shown but disabled until Decisions is reworked.
+
+### Removed
+
+- **The Types section of the What's New control panel.** Message type and the Show switches were two controls for the same decision, and a feed could be narrowed twice with nothing to say which filter had emptied it. Any type selection saved as a default is dropped rather than left with no control to clear it.
+
+### Changed
+
+- **"Mentions only" became "Mentions".** It is an on/off switch like the rest of the Show list now — turn it off to hide messages that mention you. Seeing *only* your mentions is what the Mentions tab above the feed is for, and having two controls claim that job made one of them behave unlike its neighbours.
+- **Completed follows the Today lens.** Selecting Today changes the side panel from "Completed this week" to "Completed today", with that day's count and rows, and its View all keeps the lens.
+- Panel headings on the What's New control panel and the My Work side panels now use the app's heading colour rather than plain black, and their icons drop the grey circle behind them.
+- My Work row icons lose their grey square and take their team's own colour — the same colour that team's pill uses in the row.
+
+---
+
+## [4.5.28] — 2026-08-02 — What's new: second smoke test
+
+> Rebuild only — no new migration.
+
+### Fixed
+
+- **Reply did nothing, silently.** The submit button was declared with a prop name that `@nextcloud/vue` renamed in version 9, so it was ignored and the button never submitted its form. No error, because nothing was ever sent.
+- **@mentions of usernames that are e-mail addresses.** Two remaining causes: the message renderer still drew a broken half-mention, and the username written into the message need not match the case of the one being compared against. Mentions now match regardless of case, and a mention renders as one name instead of two fragments. **This applies to mention notifications too.**
+- **Talk poll dates.** Talk records nothing on the poll itself, but the chat message announcing it carries a real timestamp — polls now take their date from there instead of showing none.
+- **My Work needed a second click on a summary card.** A filter changed while the previous fetch was still in flight was applied to the screen and then never fetched for, so the rows and the selected card disagreed until you clicked again.
+- Console errors on every page load for teams with no picture, or teams you can see but aren't a member of. Both are ordinary answers, not faults.
+
+### Changed
+
+- **My Work and What's New now match the team pages.** Same canvas colour behind the cards, same heading size, weight and colour, and section icons in the same accent as a team widget's — so the three pages read as one product.
+- My Work summary cards put the number beside its label instead of on a line of its own.
+- The type icon on a My Work row lines up with the item's title instead of floating between its two lines.
+
+---
+
+## [4.5.27] — 2026-08-02 — What's new: first smoke test
+
+> Rebuild only — no new migration. `Version000405026` from 4.5.26 still applies if you have not upgraded past it.
+
+### Fixed
+
+- **Open now opens the item, not just its team.** A decision goes to the team's Decisions tab with the proposal selected, a Talk poll or thread goes to the Talk tab, and any other message lands on the page of the stream that holds it, scrolled to and briefly highlighted. If you had collapsed the message widget it opens itself first, so the button can't appear to do nothing.
+- **Talk polls all claimed to be from today.** Where Talk's schema has no creation timestamp, the feed had been inventing one a few minutes in the past — so every poll read as new, and "Period → Today" returned polls from weeks back. Polls with no recorded date now say so, sort into their own "No date" section, and are left out of date-filtered results rather than pretending to fall inside the window.
+- **@mentions never matched anyone whose username contains an `@`.** On instances where usernames are e-mail addresses that is everyone. This also means **mention notifications have never been sent on those instances** — the same faulty pattern was behind both, and both are fixed.
+- **Messages from deleted and archived teams stayed visible.** A public post survived its team: the feed's public branch had no team condition at all, so it kept appearing indefinitely. Posts from teams that are archived, queued for deletion, or already gone are now excluded.
+- **The My Work badge went stale.** It only refreshed when you left the page, so completing something while staying there — or new work arriving while the tab sat open — left the old number until a reload. It now updates as the queue changes and when you return to the tab.
+- Two messages posted in the same second could repeat or vanish between pages of a team's message stream — the same missing tie-break already fixed in the feed.
+- A PHP warning was logged on every feed load once any team in the results had been deleted.
+- App-level teardown used a Vue 2 lifecycle hook that Vue 3 never calls, so a polling timer and a media-query listener were never cleaned up.
+
+---
+
+## [4.5.26] — 2026-08-02 — What's new: filters that mean something, and you can answer without leaving
+
+> Requires an upgrade as well as a rebuild — one new column on the messages table.
+
+### Added
+
+- **Comments and replies, right on the card.** Every message in the feed now shows its conversation, collapsed. Open it and the comments are there; a reply box sits underneath. Talk threads work the same way — the replies come from the conversation itself, and what you write goes back into it. Nothing is fetched until you open a thread, so the page stays a page you can scan.
+- **Voting on a Talk poll from the feed.** Tick an option and the bars move; tick it again to take your vote back. Your own choices are marked.
+- **A Feed control panel that actually filters.** Period (all time, today, this week, this month, or a date range you pick), specific teams, specific message types, and switches for system messages and mentions-only — on top of the three source switches that were already there.
+- **Save as default.** The panel's state follows you to another browser instead of living only in the one you set it in.
+- **A source bar with counts.** All, team messages, public messages, Talk, mentions — each with a number, and each number stays put when you pick another one, so "nothing has mentioned me" is visible without clicking anything.
+- **Items grouped by day.** Today, Yesterday, Earlier — computed against *your* clock, not the server's.
+
+### Changed
+
+- **The feed looks like the rest of TeamHub now.** Cards carry a tinted icon for what kind of thing they are, the kind in words beside the title, the team they came from, and a status pill where there is something worth promoting — a solved question, a closed poll, an urgent post. Colour is never the only signal.
+- **Prev/Next became Load more.** A feed is read downwards; page numbers over a merged, multi-source list were never quite honest about how many pages there were.
+
+### Fixed
+
+- **The comment count on every feed card was always zero.** The query behind the feed never counted them.
+- **"Next" could offer an empty page.** The page total added an exact message count to two fetched-list lengths, so it over-reported whenever Talk had more items than one page could hold. Whether there is more is now derived from the result itself.
+- **Two messages posted in the same second could repeat or vanish between pages.** The feed ordered by timestamp alone, which is not a stable sort; loading more now cannot show you the same message twice.
+
+### Security
+
+- Each feed row now states what the viewer may do with it, resolved per team and per message on the server — the frontend can no longer offer a comment box on a public post from a team you are not in, or on a decision whose thread is frozen. The write endpoints re-check regardless; this only stops the UI promising something that would be refused.
+- The new Talk endpoints resolve the conversation back to a team you are a member of, using the same mapping that put the row in your feed, before Talk's own participant rules are applied on top.
+
+---
+
+## [4.5.25] — 2026-08-02 — My Work: meetings join, open proposals stop hiding, and the page gets a rail
+
+> Requires an upgrade as well as a rebuild — one new column on the decisions table.
+
+### Added
+
+- **Meetings are now a My Work source.** Team calendar events you have been invited to or organised appear alongside your cards, files and decisions — including Talk meetings, because TeamHub puts the call link on the calendar event rather than keeping meetings somewhere separate. An invitation you have not answered is Action required whenever it is; a meeting you have accepted is Upcoming, and moves up as the day approaches like anything else with a deadline. Meetings you declined never appear, and one that has finished does not linger. Opening a meeting takes you to that team's Calendar tab.
+- **A source bar above the queue.** One click to see only your Deck cards, only your decisions, only your meetings — with a count on each, so "nothing is waiting on me in Files" is visible without clicking anything. Every source keeps its count when you select one, so the bar stays useful as navigation.
+- **Sort control.** Deadline (the default), priority, team, or recently updated. Sorting reorders items within a section; it never reorders the sections themselves, so Action required cannot end up below Completed.
+- **A side panel for what is merely happening.** Today's schedule, what you are waiting on other people for, and what you finished this week now sit beside the queue instead of inside it — so the main list is the things you actually have to do. Each panel links through to the full list.
+
+### Fixed
+
+- **Open proposals you made were filed as "waiting for others" — the opposite of the truth.** Only the person who proposed a decision can finalize it, so an open proposal was waiting for *you*, not for anyone else. It now appears under Action required, and says so.
+- **Approvers could not see decisions coming.** A proposal still open for discussion never appeared for the people who will have to approve it — it materialised only at the moment it was finalized. It now shows under Waiting for others, naming the person expected to finalize it.
+- **A busy Completed history could push live decisions out of the queue.** Decisions were fetched newest-first up to a limit and filtered for relevance afterwards, so on an active instance the oldest pending approvals — the ones that had been waiting longest — were the first to fall off the list.
+- Two places disagreed about what makes someone a team administrator, so a decision with no category could be offered to someone who would then have been refused when they acted on it.
+- **Your grouping, sorting and filters really do follow you now.** They had been saved to the server since My Work shipped and never read back, so every new browser started from the defaults.
+- **A decision approved after being finalized never reached Completed.** The date being read was the moment the proposal was *finalized*, not the moment it was approved — so anything finalized more than a week before someone approved it was already outside the "completed this week" window when it got there. Approving and denying now record their own timestamp.
+- **Team calendar events did not appear at all.** Only meetings with a named attendee list showed up, and an ordinary team event has none — the calendar is shared with the team, so being in the team *is* the invitation. Team events now appear under Today and Upcoming, and they stay there: something merely happening is never promoted to Action required as the hour approaches.
+- **The side panels said "nothing" above a number.** Their contents were read from the visible list, so selecting a summary card emptied every panel while its count kept showing the real total — "Nothing finished yet this week" printed directly under a 5.
+- **Comfortable and compact rows were identical.** Compact used to remove the action buttons' labels, and once rows dropped to a single icon button there was nothing left for it to change. It now does what the name implies: about 40% shorter rows.
+
+### Changed
+
+- **Rows are quieter.** Up to three action buttons per row have become a single Open button and a menu. Nothing was removed — Approve, Reject and Complete are one click further away, where deliberate actions belong — and the width they were taking goes back to the item's name.
+- **Icons are no longer coloured**, at Justin's request. Each summary card keeps a hairline in its category's colour, so the categories are still told apart at a glance without five competing colours above the numbers.
+- **A meeting row now offers something to do.** An invitation sitting in Action required with no button on it was a complaint, not a queue — meetings carrying a Talk link offer **Join call**, and ones with TeamHub meeting notes offer **Open agenda**.
+- **The summary cards say it with icons.** Each source under a card's number is now its icon and its count rather than its name spelled out, so three sources take one line instead of three. The urgent sub-count is gone: the deadline column says it per row and the section says it per group.
+
+## [4.5.24] — 2026-08-01 — My Work: snoozing in your own timezone
+
+### Fixed
+
+- **"Tomorrow" now means your tomorrow.** Snooze presets were worked out on the server, so "Tomorrow 09:00" was 09:00 wherever the server happens to live — for anyone in a different timezone that was the wrong morning, and sometimes the wrong day. Your browser now works out the moment and tells the server exactly when to bring the item back. Already-snoozed items are unaffected: they were stored as an exact moment all along, which is why nothing had to be migrated.
+- **Two My Work messages appeared in English on translated instances** — the licence notice shown when My Work is opened without a licence, and the warning shown when an item can only be opened in its own app. Both are now available in Dutch, German, French, Danish, Spanish and Italian.
+
+### Changed
+
+- **A source now says how its items open, instead of TeamHub guessing.** Internally, opening a row was worked out from what kind of thing it was — a card, a file, a decision — which meant every new source that lived inside TeamHub needed a change to the app shell as well as its own code. A source now names one of four ways to open, and the shell knows how to do each. Nothing changes on screen; it means the next source is genuinely just one class, which is what My Work promised.
+
+## [4.5.23] — 2026-08-01 — My Work: Decisions joins in, and the table lines up
+
+### Added
+
+- **Decisions is now a My Work source.** Proposals waiting on your approval appear under Action required; proposals you made that are waiting on someone else appear under Waiting for others; recently approved or denied ones show under Completed. You can approve or deny straight from the row — TeamHub asks for the rationale it always requires, so nothing is recorded without one. Opening a decision jumps to that team's Decisions tab with the proposal selected.
+- **Summary cards now break down by source.** Instead of one line under the number, each card lists where the work is coming from — "Deck 5, 2 critical", "File approval 2" — so you can see at a glance whether a total of seven is one board or three different apps.
+
+### Changed
+
+- **Item icons now match the team tab bar.** A Deck card carries the Deck tab's icon, a file the Files icon, a decision the Decisions icon, so a row tells you which tab it opens before you read a word. The icons are deliberately uncoloured — the section already carries the colour.
+- **The source is now a proper labelled chip** rather than trailing grey text, which matters more now that there are three sources.
+- **URGENT no longer shouts on every overdue row.** The deadline column already says "Overdue by 16 days", in red, with an icon; the badge now only appears when the deadline is not already saying it.
+- The reason column no longer repeats the deadline — an overdue card reads "Assigned to you" and lets the deadline column do its job.
+
+### Fixed
+
+- **Approve and reject on files now work.** The Approval app requires the file's revision tag as a third argument and TeamHub was not sending it. It now passes the file's current ETag, which is also the correct meaning: you approved the file as it is right now.
+- **Column headings line up with their columns.** The section header and the rows were computing their last column differently, so TEAM, REASON and DEADLINE floated right of the cells they labelled. Both now share one definition, and the deadline column is wide enough for a long overdue label in every language.
+- **Selecting a category no longer leaves Today stuck on.** The two used different filters, so picking Upcoming after Today left both active and showed their intersection.
+
+## [4.5.22] — 2026-07-31 — My Work: acts sooner, looks like TeamHub
+
+### Changed
+
+- **Action required now starts *before* the deadline, not after it.** A card due tomorrow was sitting under Upcoming, which is too late to be useful — work is meant to be finished before its due date, not after. Items become Action required two days ahead of their deadline by default, and administrators can change that (or set it to 0 for the old overdue-only behaviour).
+- **Today is now a lens rather than a section.** Because actionable work due today correctly belongs under Action required, the Today card counts everything due today wherever it sits, and clicking it filters by date. The number stays meaningful instead of reading 0 on a busy day.
+- **My Work looks like the rest of TeamHub.** Each section is now a card with its own colour, icon and column headings, and items are aligned rows rather than stacked blocks — twenty items scan in one pass. Teams get a coloured badge that is always the same colour for the same team, so you recognise them without reading. Filters moved behind a button with a count, and a density toggle switches between comfortable and compact rows.
+- Sections show the first five items with a **Show all** link, so a long Action-required list no longer pushes everything else off the screen.
+- More breathing room between the sidebar and the content, and the admin settings put each input beside its label instead of underneath it.
+
+### Fixed
+
+- **Refresh now actually refreshes.** A change made in Deck could take minutes to appear because the browser and the server were each caching for a minute and the Refresh button went through both. Refresh — and any action you take — now bypasses the cache.
+- **Approve and reject on files failed with a generic error.** TeamHub was calling the Approval app with a fixed argument list; it now matches the method's real signature, and when something still goes wrong the actual reason is shown instead of "could not complete this action".
+- **Approval requesters saw an empty Waiting for others.** Resolving "who asked for this" depended entirely on the Approval app's activity log; when that is unreadable, TeamHub now falls back to the approval rule's own requester list.
+- **A followed item could show the team's internal id instead of its name.** Team names are now resolved centrally, so every path through My Work shows the same thing.
+- **Complete no longer sits next to "Blocked by …".** Deck allows completing a blocked card and TeamHub does not override that, but the button has moved into the row menu so it is not the obvious next click on a card that is explicitly waiting on something else.
+
+### Added
+
+- Administrators get an **Integration details** panel per source. The File approval provider reports exactly which tables and columns it found and the real signature of the approve/reject methods — so a mismatch is diagnosable from the settings page instead of the server log.
+
+## [4.5.21] — 2026-07-31 — My Work: one personal queue across every team
+
+### Added
+
+- **My Work** — a new sidebar entry under What's New that answers a question no other view did: what do my teams need from me, what is coming up, and what am I still waiting on? It gathers work from every team you belong to into one task-focused list, grouped by Action required, Today, Upcoming, Waiting for others and Completed, with counts along the top that double as filters.
+- **Every row explains itself.** Each item shows its team, the document or card behind it, the due date, the priority, where it came from, who is waiting on whom — and, always, why it is on your list: "Assigned to you", "You have been designated as an approver", "Blocked by …".
+- **Act without leaving.** Up to three buttons per row — Open, Approve, Reject, Complete — with the rest in a menu. Opening an item keeps you inside TeamHub: the team stays visible, the card or file opens in that team's own tab, and coming back restores your search, filters, grouping and scroll position exactly as you left them.
+- **Deck source** — cards assigned to you on a board linked to one of your teams: overdue ones under Action required, dated ones under Today and Upcoming, and cards blocked by unfinished work under Waiting for others, naming who you are waiting on. Complete a card straight from the list where you have permission to.
+- **File approval source** — files waiting on your approval under Action required, and approvals you requested from someone else under Waiting for others. Approve, reject or comment from the row. Requests that have been waiting a long time are flagged as expiring, using a threshold administrators set.
+- **Snoozing** — later today, tomorrow, next week, or a date and time you pick. Snoozing is personal to TeamHub and never touches the source app, and snoozing something overdue says so plainly.
+- **Filtering and grouping** — search, plus filters for team, source, type, priority, status and due date, and grouping by category, date, team or resource type. Your choices follow you to another browser.
+- **Administration** — a new My Work tab in Admin settings: turn sources on or off, see whether each is available and when it last synced, restrict which actions members may perform per source, set the Upcoming window and how long Completed items are kept, tune caching and the request budget, and remap a source's statuses to different categories.
+- **One source failing never blocks the rest.** If a source cannot be reached the others still load, and the page says which one is stale rather than showing an empty list that looks like you are all caught up.
+
+### Security
+
+- Every My Work endpoint resolves the caller's team membership server-side; no route takes a team id. Actions re-read the item from its source and re-check team access, the source app's own permissions, and the administrator's per-source allow-list before executing, and source-changing actions are written to the audit log.
+
+## [4.5.20] — 2026-07-30 — Nextcloud Office fills the frame and shares it with the conversation
+
+### Fixed
+
+- **An Office document now fills the frame and sits beside the conversation instead of over it.** Both symptoms came from one thing: the Office app lifts its editor out of the page layout and sizes it against the whole window. That made it reserve space for a top bar TeamHub hides — the missing strip at the bottom — and span the full width regardless of anything else on screen, which is why the chat sidebar ended up behind it. Putting the editor back into the normal layout fixes both, and without assuming how wide the sidebar is: Nextcloud already reserves that space, so the editor simply takes what is left.
+
+## [4.5.19] — 2026-07-30 — The conversation stays beside a Nextcloud Office document
+
+### Fixed
+
+- **The chat sidebar no longer ends up behind an Office document.** TeamHub tells the document viewer that the sidebar is open so it makes room, but it was doing so on a fixed delay after joining the conversation — and Nextcloud Office loads an entire document server before its editor appears, so it routinely arrived after that window had closed and never got the message. TeamHub now waits until the document is actually on screen and tells it then.
+- **Office documents no longer sit behind TeamHub's loading indicator for several seconds.** The check for "the file is showing" only recognised the standard viewer, which Office does not use, so an Office file was never seen to have finished and waited out the full timeout instead.
+
+## [4.5.18] — 2026-07-30 — Nextcloud Office fills the frame; fewer toolbars
+
+### Fixed
+
+- **Nextcloud Office documents now reach the bottom of the frame.** The editor sits in an iframe of its own, sized to leave room for Nextcloud's top bar — which TeamHub hides in embedded views, so the reserved space was pure loss and the document was cut short. TeamHub now overrides that sizing for the editor specifically.
+
+### Changed
+
+- **The TeamHub toolbar is gone from the Files, Chat, Deck and Wiki tabs.** It carried only Reload and Open in new tab there, while the embedded app brought its own toolbar — two stacked bars cost more room than they gave. It stays on Calendar and Timeline, where it carries the view switcher, date navigation and source filters, and it can still be collapsed to a thin strip there.
+
+### Removed
+
+- A speculative rule added in 4.5.17 that repositioned the file viewer. It was a guess at the Office problem before the real cause was known, and unverified CSS aimed at a component we do not own is exactly what caused the text-editor regression the release before.
+
+## [4.5.17] — 2026-07-30 — Text editor fixed; the embed toolbar collapses
+
+### Fixed
+
+- **Markdown and other text files render correctly again.** 4.5.16 removed the height Nextcloud reserves for its top bar, to close a gap under Office documents. The text editor positions its filename against that same measurement, so removing it dropped the filename on top of the formatting toolbar. Reverted, and the gap under Office documents is now closed by targeting the document viewer alone.
+
+### Added
+
+- **The TeamHub toolbar above an embedded app can be collapsed** to a thin strip showing just the app's name, hiding Reload, Open in new tab and any app-specific buttons. Embedded apps bring their own toolbars, and on a short screen two stacked toolbars cost more than they give. The choice is remembered across tabs, teams and sessions.
+
+## [4.5.16] — 2026-07-30 — Files open straight into the document; Office fills the frame
+
+### Fixed
+
+- **Opening a file no longer flashes the file browser first.** Nextcloud has to load the Files app and list the folder before it can put the document on screen, and all of that was visible on the way past. TeamHub now keeps its own loading state up until the document is actually showing, so you go from clicking the file to reading it.
+- **Nextcloud Office now fills the frame to the bottom.** TeamHub hides Nextcloud's top bar in embedded views but was still leaving its height reserved, and the document viewer positions itself against that — insetting itself by the header's height at the top *and* the bottom. Office documents were cut short by about 50 pixels; other viewers were nudged down by the same amount.
+
+## [4.5.15] — 2026-07-30 — Calendar back to working, and it returns to the right agenda
+
+### Fixed
+
+- **Clicking an event from the widget opens the event again.** Two releases were spent trying to open it inside the team's shared calendar view; that cannot work, because Nextcloud derives an event's address from the calendar copy it loaded, and a shared view loads a different one. The event now opens where its address is valid, as it did before.
+- **Switching between a team's calendars works again.** Nextcloud Calendar decides which calendar it is showing when it starts up, so moving between them has to restart it — TeamHub was moving without restarting, leaving the first calendar on screen whichever one you picked.
+- **After closing or saving an event, the tab returns to the agenda that event belonged to** rather than your personal calendar. Previously the only way back was to leave the tab and come back.
+
+### Notes
+
+- Opening a Deck card, or moving around within one calendar, is still instant — only the transitions that genuinely need a restart do one.
+- Links that TeamHub does not recognise as internal are now logged at debug level with their address, so a link that still escapes can be identified rather than guessed at.
+
+## [4.5.14] — 2026-07-30 — Files open without reloading the Files app
+
+### Fixed
+
+- **Opening a file from a widget, chat or the activity feed no longer reloads the whole Files app.** It was the last place still paying a several-second app boot. A `/f/{id}` link deliberately carries no folder — the server works that out and redirects — and the Files app cannot show a file that is not in the folder it has loaded. TeamHub now follows that redirect once with a small request, then routes the already-running Files app to the resolved address in place. If the redirect cannot be resolved, it falls back to the previous full reload.
+- **A file opened this way still arrives with its conversation.** Routing in place produces no page load, so the collaboration-first hooks had nothing to react to and the second and later files would have opened without the chat sidebar.
+
+## [4.5.13] — 2026-07-30 — Calendar events resolve again; Deck links from the smart picker
+
+### Fixed
+
+- **"Event does not exist" when opening an event from the widget.** Two independent breaks. Nextcloud Calendar derives an event's route id as `btoa(davUrl)` and decodes it with `atob()`, which rejects the base64url alphabet TeamHub was emitting — so the id failed to decode whenever the encoding happened to produce a `+` or `/`. The id is now standard base64, percent-encoded so it survives as a single URL path segment.
+- **On a published team calendar, events no longer deep-link at all.** The public calendar view loads its calendars from a different DAV root, so an id built from the owner's path — the only one the backend can produce — matches nothing there. Clicking an event now lands the team agenda on that event's own day, with the event visible and one click away, instead of an error.
+- **Deck cards posted through the smart picker, or shared from Deck into a chat, now open in the Deck tab.** Talk renders those as reference widgets that open their target with `window.open()`, which a click handler cannot see, so they still escaped into a new window. TeamHub now also intercepts `window.open` inside an embed — only for links it can open itself; everything else is passed straight through untouched.
+
+### Known limitations
+
+- **Opening a file from a widget or chat still reloads the Files app** (a few seconds). The in-place routing added in 4.5.12 needs the target's folder, and the `/f/{id}` short link deliberately hides it behind a server redirect. Fixing it properly needs the parent folder to travel with the file id.
+- **A team calendar that is not published cannot be shown on its own.** Nextcloud can only scope the calendar view through a published calendar's token, so with several unpublished calendars connected, selecting any of them shows the same personal calendar view. Publishing them is the fix, and creates a public link — a sharing decision rather than something TeamHub should do silently.
+
+## [4.5.12] — 2026-07-30 — Opening an event or card is instant; calendar switching fixed
+
+### Fixed
+
+- **Opening an event or a Deck card from its widget no longer reloads the whole app first.** Pinning an item changed the iframe's URL, and changing a `src` is a full document load — so the Calendar or Deck app booted again from scratch, 4–6 seconds, throwing away everything preloading had bought. Both apps run their router in history mode, so TeamHub now routes the already-loaded app in place and the item appears immediately. If the app does not respond, a watchdog falls back to a real reload, so the worst case is the old behaviour rather than a view that silently does not change.
+- **Switching to another team calendar did nothing the first time.** Picking a calendar while an event was pinned rebuilt the URL around an event belonging to the calendar you had just left, so Nextcloud quietly showed nothing. Going Home and back appeared to fix it only because leaving the tab cleared the pin. Both pickers now clear the pinned item. The same bug applied to the Deck board picker.
+- **The Calendar tab could show your personal calendar rather than the team's.** Only a *published* calendar can be shown through Nextcloud's team-scoped route; with several calendars connected, TeamHub picked the first one even when it was unpublished and another was not. It now prefers a calendar it can actually scope the view to.
+
+### Notes
+
+- A pinned Deck card is now linked by its history-mode path rather than the legacy `#/board/…` hash form, which cannot be navigated to in place.
+- **If none of a team's calendars is published, the Calendar tab is still the personal Calendar app** — Nextcloud has no team-scoped URL for an unpublished calendar. Publishing one is the fix, and is a sharing decision rather than something TeamHub should do silently.
+
+## [4.5.11] — 2026-07-30 — Every internal link stays in the team
+
+### Changed
+
+- **Links to files, Deck cards, calendar events and wiki pages now open in the tab that owns them, wherever you click them** — the activity feed and activity widget, the message stream, decision links, and links inside the embedded Talk, Files, Calendar, Deck and Wiki tabs. Previously each of those threw you into a separate browser window.
+- **Activity entries for Deck and Calendar** are covered now; 4.5.8 handled files only.
+- **A link is only taken over if the team actually has that tab.** A Deck card link in a team with no board, or a wiki link with Collectives disabled, opens normally rather than switching you to a tab that isn't there.
+- Ctrl/Cmd/Shift/middle-click still opens a real new tab everywhere.
+
+### Notes
+
+- One matcher (`resolveInternalTarget`) now defines what counts as an internal link, replacing a files-only matcher and three bespoke per-widget handlers. New link types are added in one place. Covered by 17 unit cases.
+- **Links that navigate within the embed you are already in are left alone** — clicking a card inside the Deck tab stays a fast in-app route change instead of reloading the whole iframe.
+- Cross-origin URLs never match, so a page inside an embed cannot make TeamHub navigate somewhere of its choosing.
+- No new dependencies, no schema changes, no endpoint changes. One new string, translated into all six project languages.
+
+## [4.5.10] — 2026-07-30 — Events stay in the team calendar; app tabs preload again
+
+### Fixed
+
+- **Clicking an upcoming event no longer drops you into your personal calendar.** The event opened through Nextcloud Calendar's *personal* route, so saving left you looking at all your own calendars instead of the team's. A shared team calendar is served read-only through NC's public route family, whose event sub-route is `view`, not `edit` — TeamHub now composes the link against whichever route family the team's calendar tab actually uses. The calendar also lands on the event's own date rather than today.
+- **App tabs preload again after the first team switch.** The preload schedule ran only once, on mount, while the set of preloaded tabs was cleared on every team change — so from the first switch onwards every Talk / Files / Calendar / Deck / Wiki / Timeline tab was a cold Nextcloud app boot. The schedule now re-arms per team, and starts sooner (first tab at 0.8 s instead of 1.5 s, all six armed by 2.8 s instead of 5.5 s).
+- **`TeamView` cleaned up nothing on unmount** — its teardown hook was `beforeDestroy()`, which Vue 3 does not call, leaking two media-query listeners and a `message` listener. Renamed to `beforeUnmount()`.
+
+### Added
+
+- **Hovering or focusing a tab starts loading it**, so the click lands on an iframe that is already on its way. Delegated from the tab bar, so it covers built-in, project and integration tabs alike.
+- Clicking an already-active Calendar or Deck tab clears a pinned event/card, matching the Files tab's existing behaviour.
+
+## [4.5.9] — 2026-07-30 — Events and tasks open in TeamHub, and refresh on returning home
+
+### Changed
+
+- **Clicking an upcoming event opens it in TeamHub's Calendar tab** instead of navigating away to the Calendar app. Changing the view, or stepping with prev/next/today, releases the pinned event so the tab behaves normally again.
+- **Clicking an upcoming task opens the card in TeamHub's Deck tab**, with the right board pre-selected. NC Tasks entries in the same widget keep their external link — there is no Tasks tab to embed them in.
+- Ctrl/Cmd/Shift/middle-click still opens a real new tab for both.
+- **The upcoming-events and upcoming-tasks widgets now refresh when you return to the home view** — a Home tab click or picking a team. They sit behind `v-show` and stay mounted, so previously they kept showing whatever they had fetched when the team was first opened.
+
+### Fixed
+
+- **Event links were built from a root-relative path** (`/apps/calendar/…`) used directly in `href`, which resolves against the domain root and so pointed at the wrong place on a Nextcloud installed under a sub-directory. Now goes through `generateUrl()`.
+
+### Notes
+
+- Both widgets key their reload on team and home-visit together, so switching team results in one load rather than two. `DeckWidget` additionally defers a team change to `fetchResources`, which already refetches both of its sources.
+- Other home-view widgets can opt into the same refresh by watching `widgetRefreshNonce`; only these two do today.
+
+## [4.5.8] — 2026-07-30 — Clickable activity entries; no conversation sidebar on phones
+
+### Changed
+
+- **Activity feed entries for files are now clickable on the filename itself.** Previously the only way in was an 11 px "open externally" icon on the second line — too small to find, and it left TeamHub. The subject line ("*Justin edited convo.docx*") is now the affordance and opens the file in the team's Files view with its conversation. Non-file entries (Deck, Calendar, Talk) are unchanged. Rendered as a link, so ctrl/middle-click still gives a real new tab.
+- **On phones and portrait tablets the conversation sidebar no longer opens with the file.** Below its own breakpoint Nextcloud renders the Files sidebar full-width, so on a small screen it covered the file the user had just asked to open. Narrow viewports now open the file and stop. Uses the same breakpoint as the rest of TeamHub's mobile layout.
+
+### Fixed
+
+- **The activity feed's file id resolution is no longer dependent on a single field.** It now reads `oc_activity`'s object reference (accepting either `object_type` or `app` of `files`) and falls back to parsing the row's link, which Nextcloud builds as `/f/{id}`.
+
+### Notes
+
+- A file link posted from a phone still carries the conversation for whoever opens it on a desktop — the sidebar request is stripped when a URL is *used*, never when one is stored.
+- One new string, translated into all six project languages.
+
+## [4.5.7] — 2026-07-30 — No file opened from TeamHub escapes to a new tab
+
+### Changed
+
+- **Files linked from the Chat, Deck, Calendar and Wiki tabs now open in TeamHub.** Talk posts a shared file as a `/f/{id}` link with `target="_blank"`, so clicking one threw you into a separate browser window and out of the team context; Deck and Calendar attachments did the same. Those clicks now land in the team's Files view with the conversation open. Ctrl/Cmd/Shift/middle-click still gives you a real new tab.
+- **Activity feed file entries** open the same way, instead of a new tab.
+- **Chat attachments** open the same way. Non-image attachments are now also *posted* as `/f/{id}` links rather than share-landing or DAV URLs — a DAV URL under the uploader's own path did not resolve for other team members, so this fixes those links for everyone, not just the poster. Attachments posted before 4.5.7 keep their old links and still open externally.
+
+### Notes
+
+- One matcher (`fileIdFromUrl`) decides what counts as a file link, shared by all three surfaces. It only matches same-origin `/f/{id}` and `/apps/files/…?fileid=` URLs — external links, `javascript:` URLs, share-landing pages and DAV paths are all left alone. Covered by 18 unit cases.
+- No new dependencies, no new user-facing strings, no schema changes, no endpoint changes.
+
+## [4.5.6] — 2026-07-30 — Two fixes to collaboration-first file opening
+
+### Fixed
+
+- **Nextcloud Office documents now show the conversation too.** The sidebar was opening, but the Viewer was covering it. Nextcloud's Viewer learns the sidebar is open by subscribing to `files:sidebar:opened` in its `mounted()` hook and shrinking to make room — and Office's Viewer component is an async chunk, so it finishes mounting *after* that event has already fired and renders full-width on top of the sidebar. TeamHub now re-emits the event once the conversation is up, so a late-mounting Viewer re-measures. Only fired when a Viewer is actually on screen (its handler makes an HTTP call).
+- **Closing the sidebar no longer breaks the next file's conversation.** *Join conversation* came back greyed out and the chat was unreachable. Talk guards against duplicate chat instances with `window.OCA.Talk`, and only clears it from a watcher on its tab's `active` prop — which never fires when the sidebar *closes*, because closing destroys the tab outright. The stale global then disabled the button on every subsequent file. TeamHub now calls Talk's own `unmountInstance()` on `files:sidebar:closed`, which is exactly what Talk does on a tab switch. Upstream bug; auto-joining every file meant we hit it constantly.
+
+## [4.5.5] — 2026-07-30 — Files open with their conversation already showing
+
+### Changed
+
+- **Opening a file from TeamHub now shows the team's conversation about it straight away.** Click a file in the Files widget — or in the Files tab — and it opens with the Nextcloud sidebar on Talk's **Chat** tab, already joined. Previously this took six interactions (Files app → select → `…` → Details → Chat → **Join conversation**, and only then open the file, because opening it first left the sidebar closed). "Join conversation" was never a permissions check — it is Talk's lazy-load gate for its chat bundle, and every team member already had access.
+- **Ctrl-click still opens a real new tab** — and that tab is collaboration-first too.
+- **Folders are unaffected**, and `…` → **Details** still opens on Sharing as Nextcloud intends.
+
+### Fixed
+
+- **`AppEmbed` cleaned up nothing on unmount.** Its teardown hook was named `beforeDestroy()`, which Vue 3 does not call, so the iframe's `MutationObserver` and pending timers leaked every time an embed was destroyed. Renamed to `beforeUnmount()`.
+
+### Notes
+
+- **No backend change**: no new endpoint, no migration, no new authorisation surface. Talk creates and joins the per-file room itself.
+- Works on NC 32, 33 and 34 (the Files sidebar API differs across them; both paths are handled). No new dependencies, no new user-facing strings, no schema changes.
+- The conversation is skipped — and the file just opens, as before — when Talk is not installed, when an admin has disabled `conversations_files`, or when **fewer than two users can reach the file**, which is Talk's own requirement and affects single-member teams.
+
+## [4.5.4] — 2026-07-30 — Team pictures use the Nextcloud Teams avatar (NC 34+)
+
+### Added
+
+- **On Nextcloud 34+, a team's picture is its Nextcloud Teams (Circles) avatar** — the same image the Teams UI shows, so the two never diverge. TeamHub reads it from the Circles avatar OCS API (`GET /ocs/v2.php/apps/circles/circles/{id}/avatar`) and displays it everywhere the old `image_url` was shown, gated by a per-team `nc_avatar_supported` flag (true when the installed Circles app is version ≥ 34). Browser-side only — no loopback HTTP, no dependency on Circles' internal services.
+- **Silent one-way migration.** The first time a circle **admin** opens the team list on NC 34, any team that still has a legacy TeamHub picture but no NC avatar has its picture pushed into Teams and the TeamHub copy deleted — no user action.
+
+### Changed
+
+- **Setting or removing a team picture on NC 34 requires circle admin (level ≥ 8)** — matching Circles' own permission for the avatar — and the controls are hidden below that level. On NC 32/33 (where the Circles avatar API does not exist) TeamHub keeps its own app-data storage and the prior moderator-level (≥ 4) behaviour, unchanged.
+
+### Notes
+
+- No new dependencies, no new user-facing strings, no schema changes. `GET /teams` responses gain an `nc_avatar_supported` boolean.
+
+## [4.5.3] — 2026-07-30 — Announcement content is tamper-evident
+
+### Security
+
+- **`announcements/` is now covered by the code-integrity manifest.** The announcement `.md` bodies and `registry.json` are hashed into `appinfo/integrity.json`, so the Compliance tab flags any on-instance edit as **altered** — closing the gap where a modified announcement went undetected (`dompurify` blocks script execution, but altered text or links an admin reads were not tamper-evident). Follows the existing `js/` pattern: the files are hashed (altered/missing still caught), and `announcements/` is added to `UNEXPECTED_SKIP_PREFIXES` so a retired announcement left on disk after an NC upgrade does not false-positive as an unexpected file. Requires a rebuild to regenerate the manifest.
+
 ## [4.5.1] — 2026-07-29 — Release pipeline shipped a stale frontend
 
 ### Fixed

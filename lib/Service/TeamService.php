@@ -45,6 +45,9 @@ class TeamService {
     /** @var \OCA\Circles\CirclesManager|null */
     private $circlesManager = null;
 
+    /** Memoised result of the Circles-avatar capability probe (per request). */
+    private ?bool $teamsAvatarSupported = null;
+
     public function __construct(
         private MemberService        $memberService,
         private ResourceService      $resourceService,
@@ -76,6 +79,38 @@ class TeamService {
             }
         }
         return $this->circlesManager;
+    }
+
+    /**
+     * Whether this instance's Circles app exposes the per-team avatar OCS API
+     * (GET/POST/DELETE /ocs/v2.php/apps/circles/circles/{id}/avatar), which
+     * first shipped in Circles/Nextcloud 34.
+     *
+     * On Circles < 34 (Nextcloud 32/33) there is no NC-side team picture, so
+     * TeamHub keeps serving its own app-data image via {@see TeamImageService}
+     * and this returns false. The value is instance-global; it is surfaced
+     * per team as `nc_avatar_supported` in the team payload purely so the
+     * frontend can decide whether to try the Teams-native avatar (falling back
+     * to the legacy `image_url`) without a separate mount-time round-trip.
+     *
+     * Fails closed: any error determining the version returns false, so we
+     * never point the frontend at an endpoint that may not exist.
+     */
+    private function isTeamsAvatarSupported(): bool {
+        if ($this->teamsAvatarSupported !== null) {
+            return $this->teamsAvatarSupported;
+        }
+        $supported = false;
+        try {
+            if ($this->appManager->isInstalled('circles')) {
+                $version = $this->appManager->getAppVersion('circles');
+                $major = (int)explode('.', $version)[0];
+                $supported = $major >= 34;
+            }
+        } catch (\Throwable $e) {
+            $supported = false;
+        }
+        return $this->teamsAvatarSupported = $supported;
     }
 
     // =========================================================================
@@ -298,6 +333,9 @@ class TeamService {
                     'members'     => $memberCounts[$id] ?? 0,
                     'unread'      => $unread,
                     'image_url'   => $this->teamImageService->getImageUrl($id),
+                    // NC 34+ only: signals the frontend to prefer the Teams-native
+                    // avatar (with image_url as fallback). See isTeamsAvatarSupported().
+                    'nc_avatar_supported' => $this->isTeamsAvatarSupported(),
                     // Circles config bitmask — exposed so the frontend can render
                     // human-readable "team type" labels (open/invite/public/etc).
                     'config'      => (int)($row['config'] ?? 0),
@@ -406,6 +444,7 @@ class TeamService {
             'description' => $description,
             'members'     => $memberCount,
             'image_url'   => $this->teamImageService->getImageUrl($teamId),
+            'nc_avatar_supported' => $this->isTeamsAvatarSupported(),
             // Circles config bitmask — exposed so the frontend can render
             // human-readable "team type" labels (open/invite/public/etc).
             'config'      => $config,
@@ -757,10 +796,22 @@ class TeamService {
      * Writes via raw SQL (preserving unmanaged bits), then forces Circles to reload
      * the circle from DB to flush its in-process object cache.
      *
-     * Bits managed by TeamHub:
-     *   1=CFG_OPEN, 2=CFG_INVITE, 4=CFG_REQUEST, 16=CFG_PROTECTED,
-     *   512=CFG_VISIBLE, 1024=CFG_SINGLE
-     * All other bits (e.g. 256=CFG_PERSONAL, 32768=CFG_ROOT) are preserved.
+     * Bits managed by TeamHub (`CirclesConfig::MANAGED_BITS`):
+     *   8=CFG_VISIBLE, 16=CFG_OPEN, 32=CFG_INVITE, 64=CFG_REQUEST,
+     *   256=CFG_PROTECTED, 8192=CFG_ROOT
+     * All other bits (e.g. 2=CFG_PERSONAL, 32768=CFG_FEDERATED) are preserved.
+     *
+     * v4.5.35 — the list above previously read "1=CFG_OPEN, 2=CFG_INVITE,
+     * 4=CFG_REQUEST, 16=CFG_PROTECTED, 512=CFG_VISIBLE, 1024=CFG_SINGLE",
+     * which are the **pre-3.39.1 legacy numbers** this method was fixed to
+     * stop writing (see `CirclesConfig::LEGACY_MANAGED_BITS_PRE_3_39_1` and
+     * `Version000339001`). The code was already correct — it reads
+     * `CirclesConfig::MANAGED_BITS` — but the comment described the bug.
+     *
+     * Note on the raw-SQL write below: it is why a Circle carrying a
+     * core-filter bit (CFG_SINGLE 1 / CFG_PERSONAL 2 / CFG_SYSTEM 4) still
+     * accepts TeamHub's own config changes while rejecting Collectives'. See
+     * `CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS`.
      */
     public function updateTeamConfig(string $teamId, int $config): void {
 
@@ -971,6 +1022,7 @@ class TeamService {
                     'isDirectMember'   => $isDirectMember,
                     'requiresApproval' => !$isOpen,
                     'image_url'        => $this->teamImageService->getImageUrl($row['unique_id']),
+                    'nc_avatar_supported' => $this->isTeamsAvatarSupported(),
                     // v4.0.2 — filled in below via a single batch lookup so
                     // BrowseTeamsView can render the template badge. Absent
                     // for legacy teams => frontend shows no template label.
@@ -1256,6 +1308,7 @@ class TeamService {
             'description' => method_exists($circle, 'getDescription') ? ($circle->getDescription() ?? '') : '',
             'members'     => $memberCount,
             'image_url'   => $this->teamImageService->getImageUrl(method_exists($circle, 'getSingleId') ? $circle->getSingleId() : $circle->getId()),
+            'nc_avatar_supported' => $this->isTeamsAvatarSupported(),
         ];
     }
 

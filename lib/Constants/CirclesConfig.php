@@ -74,7 +74,13 @@ final class CirclesConfig {
     /** Used as a mountpoint. */
     public const CFG_MOUNTPOINT = 65536;
 
-    /** App-managed circle. DO NOT SET on user teams. */
+    /**
+     * Circle is claimed by a Nextcloud app.
+     *
+     * v4.5.37 — the old note here read "DO NOT SET on user teams", which was
+     * only ever half true: TeamHub must not set it, but other apps legitimately
+     * do, on teams that are otherwise perfectly ordinary. See APP_OWNED_BITS.
+     */
     public const CFG_APP = 131072;
 
     // -------------------------------------------------------------------------
@@ -104,15 +110,87 @@ final class CirclesConfig {
     /**
      * System bits that must never appear on a source=16 user team.
      * Used by the integrity check and the migration to identify corruption.
+     *
+     * v4.5.35 — **CFG_PERSONAL joined this set, and it is the reason the Wiki
+     * could not be enabled on one of Justin's teams.**
+     *
+     * Circles' `FederatedItems\CircleConfig::verify()` builds a rejection list
+     * from `Circle::$DEF_CFG_CORE_FILTER = [1, 2, 4]` and refuses the *entire*
+     * update when any of those bits appears in the proposed config:
+     *
+     *     $confirmed = true;
+     *     foreach ($listing as $item) {
+     *         if ($circle->isConfig($item, $config)) { $confirmed = false; }
+     *     }
+     *     if (!$confirmed || $config > Circle::$DEF_CFG_MAX) {
+     *         throw new FederatedItemBadRequestException('Configuration value is not valid');
+     *     }
+     *
+     * They are not masked out — their presence is fatal. So a circle carrying
+     * bit 1, 2 or 4 can never have its config written through Circles' own API
+     * again. TeamHub does not notice, because `updateTeamConfig` writes
+     * `circles_circle` by raw SQL; Collectives does, because
+     * `flagCircleAsAppManaged` goes through `CirclesManager::flagAsAppManaged`
+     * → `updateConfig`.
+     *
+     * Two of the three core-filter bits were already listed here. CFG_PERSONAL
+     * was left out because the 3.39.1 migration read it as "Circles' own
+     * default, preserve verbatim" — true, and harmless right up until an app
+     * tries to update that circle. It is also meaningless on a multi-member
+     * team: it means owner-visibility-only.
+     *
+     * v4.5.37 — **CFG_APP left this set. It was never corruption.**
+     *
+     * The integrity check reported twelve of Justin's teams as corrupt, all of
+     * them for bit 131072 alone, on an instance where nothing was misbehaving.
+     * Eleven had a collective; the twelfth had had one deleted. That is exactly
+     * the footprint of Collectives' `flagCircleAsAppManaged` →
+     * `CirclesManager::flagAsAppManaged`, which sets CFG_APP on purpose to lock
+     * the circle against user tampering — and which never clears it on
+     * `deleteCollective(…, deleteCircle: false)`, which is why the twelfth team
+     * still carried it. Nothing in TeamHub can set the bit: every write to
+     * `circles_circle.config` either zeroes it, clears bits, or masks through
+     * MANAGED_BITS, and 131072 is in none of those.
+     *
+     * The decisive argument was already written down one file away.
+     * `CollectivesService::forbiddenConfigBitsOnTeam()` (v4.5.35) deliberately
+     * omits CFG_APP, because Circles' `CircleConfig::verify()` rejects on
+     * `$DEF_CFG_CORE_FILTER` (1/2/4) and `$DEF_CFG_SYSTEM_FILTER`
+     * (512/1024/2048) and CFG_APP is in neither. So the six bits below break
+     * Circles' own config API and CFG_APP does not — two lists in one codebase
+     * disagreeing about one bit, with the reason recorded next to the one that
+     * had it right.
+     *
+     * The cost of the disagreement was not just a noisy report: `resetTeamConfig`
+     * clears this whole mask, so Repair was **stripping another app's claim on
+     * the circle** — and v4.5.35's enable-failure message points admins straight
+     * at that button.
      */
     public const SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS =
           self::CFG_SINGLE      //    1
+        | self::CFG_PERSONAL    //    2 — see the v4.5.35 note above
         | self::CFG_SYSTEM      //    4
         | self::CFG_NO_OWNER    //  512
         | self::CFG_HIDDEN      // 1024
-        | self::CFG_BACKEND     // 2048
-        | self::CFG_APP;        // 131072
-    // = 134669
+        | self::CFG_BACKEND;    // 2048
+    // = 3591. (The pre-4.5.35 comment here read "134669"; the value it
+    // described was actually 134661, so the note was already wrong by 8.
+    // Nothing consumed it — every caller uses the constant — but it is the
+    // third stale comment found in this subsystem, so: verified by arithmetic.)
+
+    /**
+     * Bits that mark a circle as claimed by another Nextcloud app.
+     *
+     * Not corruption and not ours to clear. Reported by the integrity check as
+     * information — an admin seeing an app-claimed team should know why, and
+     * "which app" is a question only the claiming app can answer — but never
+     * counted as an issue and never touched by reset or repair.
+     *
+     * Known setter: Collectives, via `CircleHelper::flagCircleAsAppManaged`
+     * when a collective binds to the circle. Talk and Deck do not flag the
+     * circles they attach to; they hold ACL rows instead.
+     */
+    public const APP_OWNED_BITS = self::CFG_APP; // = 131072
 
     /**
      * Legacy bit mask used by TeamHub <= 3.39.0 for `updateTeamConfig`.

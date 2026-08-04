@@ -13,9 +13,16 @@ use OCP\App\Events\AppDisabledEvent;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
+use OCA\TeamHub\MyWork\Provider\ApprovalWorkProvider;
+use OCA\TeamHub\MyWork\Provider\DeckWorkProvider;
+use OCA\TeamHub\MyWork\Provider\DecisionWorkProvider;
+use OCA\TeamHub\MyWork\Provider\MeetingWorkProvider;
+use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
+use OCA\TeamHub\MyWork\ProviderRegistry;
 use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
 use OCA\TeamHub\Search\TeamSearchProvider;
+use OCA\TeamHub\Service\MyWorkConfigService;
 use OCA\TeamHub\Service\Suggestion\MeetingSuggestionService;
 use OCA\TeamHub\Service\Suggestion\PersonalAndTeamBusyProvider;
 use OCA\TeamHub\Service\Suggestion\TeamCalendarBusyProvider;
@@ -102,6 +109,59 @@ class Application extends App implements IBootstrap {
                 $c->get(\Psr\Log\LoggerInterface::class),
                 [],
             );
+        });
+
+        // ── My Work provider registry (v4.5.21) ──────────────────────────
+        //
+        // This is the extension point. Adding a source to My Work is one line
+        // in the loop below plus a class implementing IWorkProvider — nothing
+        // in the service, the controllers or the frontend changes.
+        //
+        // Each provider is constructed inside its own try/catch: a provider
+        // whose constructor throws (a missing optional dependency on some
+        // install, say) must not take the whole registry — and therefore the
+        // whole My Work view — down with it. That is the same fault-isolation
+        // contract ProviderRegistry::fetchAll() applies at fetch time, applied
+        // one stage earlier.
+        $context->registerService(ProviderRegistry::class, function (IContainer $c): ProviderRegistry {
+            $registry = new ProviderRegistry(
+                $c->get(MyWorkConfigService::class),
+                $c->get(\Psr\Log\LoggerInterface::class),
+            );
+
+            $builtIn = [
+                DeckWorkProvider::class,
+                ApprovalWorkProvider::class,
+                // v4.5.23 — TeamHub's own Decisions module. Added as a third
+                // provider with no change to the service, the controllers or
+                // the frontend, which is the extensibility claim in DESIGN.md
+                // §2.69 exercised rather than asserted.
+                DecisionWorkProvider::class,
+                // v4.5.25 — team calendar events you are invited to or
+                // organised, Talk meetings included: TeamHub writes the call
+                // link into the event's LOCATION, so a Talk meeting is a
+                // calendar event that carries one rather than a source of
+                // its own.
+                MeetingWorkProvider::class,
+                // v4.5.45 — team-administration housekeeping, currently
+                // resources awaiting an admin's accept/ignore. The first
+                // provider whose items are not the viewer's own work but
+                // their team's; it owns Category::TEAM_ADMIN.
+                TeamAdminWorkProvider::class,
+            ];
+
+            foreach ($builtIn as $providerClass) {
+                try {
+                    $registry->register($c->get($providerClass));
+                } catch (\Throwable $e) {
+                    $c->get(\Psr\Log\LoggerInterface::class)->error(
+                        '[TeamHub][MyWork] Provider could not be constructed',
+                        ['provider' => $providerClass, 'exception' => $e, 'app' => self::APP_ID],
+                    );
+                }
+            }
+
+            return $registry;
         });
 
         // Note: Background jobs are registered via appinfo/info.xml <background-jobs> block.

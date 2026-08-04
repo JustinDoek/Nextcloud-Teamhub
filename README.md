@@ -28,9 +28,12 @@ It started as a visual mock-up to discuss what team-based working could look lik
 
 ## Features
 
+- **My Work** — one personal queue of what every team needs from you, across sources. Deck cards assigned to you, file approvals waiting on you, and decisions awaiting your approval land in the same list, grouped into Action required, Today, Upcoming, Waiting for others and Completed. Every row says why it is there, which team it belongs to, and who is waiting on whom — and you can approve, complete, snooze or open it without leaving TeamHub. New sources plug in behind one provider contract.
+- **What's new** — one feed of everything happening across the teams you're in, plus public posts from teams you're not. Comments and Talk replies show on each item and you can answer, or vote in a Talk poll, without leaving the page. Filter by source, period, team, message type, or just what mentions you — and save that as your default.
 - **Message stream** — post announcements, questions, and polls to the team. Pin important messages; reply in threads.
 - **Activity feed** — one view of recent file, calendar, task, and member changes across everything the team has access to.
 - **App tabs** — quick links to the team's shared Talk chat, Files folder, Calendar, and Deck board, opened inline.
+- **Collaboration-first file opening** — open a file from TeamHub and the team's conversation about it opens with it, already joined. No hunting through Details → Chat → Join conversation first.
 - **Timeline** — a visual, zoomable timeline aggregating Deck cards, Calendar events, Decisions, and Messages on one canvas, with admin-defined milestones and connector lines showing how items relate to each other.
 - **Decisions** — propose, discuss, and formally approve team decisions, with categories, approvers, linked tasks, and a full audit trail.
 - **Sidebar widgets** — upcoming calendar events, open Deck tasks, pages, presence/schedule, and an activity snapshot. Layout is per-user and drag-to-rearrange.

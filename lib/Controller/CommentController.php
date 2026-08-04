@@ -107,6 +107,15 @@ class CommentController extends Controller {
             }
             $this->memberService->requireMemberLevel((string)$message['team_id']);
 
+            // v4.5.38 — an edit is a comment write. If the team has switched
+            // this type's thread off, the row stays (readable, deletable) but
+            // its text is frozen — otherwise "no commenting here" would still
+            // let someone rewrite what a thread says.
+            $this->messageService->enforceCommentsEnabledForType(
+                (string)$message['team_id'],
+                (string)($message['messageType'] ?? ''),
+            );
+
             $lockError = $this->checkDecisionLockForMessage(
                 (int)$existing['message_id'],
                 $user->getUID(),
@@ -179,6 +188,14 @@ class CommentController extends Controller {
                 return new JSONResponse(['error' => 'Message not found'], Http::STATUS_NOT_FOUND);
             }
             $this->memberService->requireMemberLevel((string)$message['team_id']);
+
+            // v4.5.38 — per-message-type switch, checked before the role floor
+            // because it is the broader gate: when the team takes no comments
+            // on this type at all, the caller's level is not the reason.
+            $this->messageService->enforceCommentsEnabledForType(
+                (string)$message['team_id'],
+                (string)($message['messageType'] ?? ''),
+            );
 
             // v4.3.1 — per-team commentMinLevel floor. Membership was
             // already verified above; this only refuses when the caller

@@ -78,6 +78,27 @@ class TeamAppResourceMapper extends QBMapper {
     }
 
     /**
+     * Resources awaiting an admin's accept/ignore decision (v4.5.45).
+     *
+     * Its own query rather than a filter over findAllByTeam(): My Work asks
+     * this per team on every render, and pending rows are a small minority of
+     * the table on a settled instance.
+     *
+     * @return TeamAppResource[]
+     */
+    public function findPendingByTeam(string $teamId): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('pending')))
+            ->orderBy('app_id', 'ASC')
+            ->addOrderBy('display_order', 'ASC');
+
+        return $this->findEntities($qb);
+    }
+
+    /**
      * All resources for a team + app regardless of status.
      * Used by discovery reconciliation to compare against live ACL state.
      *

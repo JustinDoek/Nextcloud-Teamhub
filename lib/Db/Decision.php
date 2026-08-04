@@ -21,6 +21,15 @@ use OCP\AppFramework\Db\Entity;
  * source_type: 'message' | 'document' | 'external' | null.
  * participants: JSON-encoded array of user-id strings, captured at decision
  *   time. Not maintained live.
+ * share_mode (v4.5.42): 'immediate' | 'selected' | 'team' — how the proposal
+ *   was opened. 'immediate' finalizes on creation (and is what every
+ *   pre-4.5.42 row carries); the other two open a discussion phase.
+ *   `selected` restricts visibility to teamhub_decision_audience while the
+ *   proposal is open; `team` is visible to the whole team, which is what an
+ *   open decision has always been.
+ * talk_token / talk_thread_id (v4.5.42): where the discussion lives. Both
+ *   nullable — an 'immediate' proposal has no discussion, and Talk sharing is
+ *   best-effort, so a proposal whose Talk post failed is still valid.
  *
  * @method int     getId()
  * @method void    setId(int $id)
@@ -62,10 +71,18 @@ use OCP\AppFramework\Db\Entity;
  * @method void    setCreatedAt(int $createdAt)
  * @method ?int    getDecidedAt()
  * @method void    setDecidedAt(?int $decidedAt)
+ * @method ?int    getResolvedAt()
+ * @method void    setResolvedAt(?int $resolvedAt)
  * @method ?int    getWithdrawnAt()
  * @method void    setWithdrawnAt(?int $withdrawnAt)
  * @method ?int    getMilestoneId()
  * @method void    setMilestoneId(?int $milestoneId)
+ * @method string  getShareMode()
+ * @method void    setShareMode(string $shareMode)
+ * @method ?string getTalkToken()
+ * @method void    setTalkToken(?string $talkToken)
+ * @method ?int    getTalkThreadId()
+ * @method void    setTalkThreadId(?int $talkThreadId)
  */
 class Decision extends Entity {
 
@@ -88,6 +105,11 @@ class Decision extends Entity {
     protected ?string $sourceRef         = null;
     protected int     $createdAt         = 0;
     protected ?int    $decidedAt         = null;
+    // v4.5.25 — when the decision was approved or denied. `decidedAt` is the
+    // finalize moment and is deliberately not overwritten, so this is the only
+    // record of when it was actually resolved. Null on every row written
+    // before 4.5.25; readers fall back to `decidedAt`.
+    protected ?int    $resolvedAt        = null;
     protected ?int    $withdrawnAt       = null;
     // v3.97.5 — optional linkage to a teamhub_milestones row. Null on
     // every existing decision + every decision proposed on a non-project
@@ -95,6 +117,12 @@ class Decision extends Entity {
     // the serialiser resolves the label to null and the frontend hides
     // the chip.
     protected ?int    $milestoneId       = null;
+    // v4.5.42 — the discussion phase. Defaults to 'immediate' so an entity
+    // constructed in code (rather than hydrated from a row) carries the same
+    // value the migration backfilled, and no caller has to remember to set it.
+    protected string  $shareMode         = 'immediate';
+    protected ?string $talkToken         = null;
+    protected ?int    $talkThreadId      = null;
 
     public function __construct() {
         $this->addType('messageId',         'integer');
@@ -102,7 +130,9 @@ class Decision extends Entity {
         $this->addType('supersedesId',      'integer');
         $this->addType('createdAt',         'integer');
         $this->addType('decidedAt',         'integer');
+        $this->addType('resolvedAt',        'integer');
         $this->addType('withdrawnAt',       'integer');
         $this->addType('milestoneId',       'integer');
+        $this->addType('talkThreadId',      'integer');
     }
 }

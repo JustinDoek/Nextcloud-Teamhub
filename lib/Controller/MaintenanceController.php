@@ -406,8 +406,10 @@ class MaintenanceController extends Controller {
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     public function checkConfigIntegrity(): JSONResponse {
         try {
-            $issues = $this->maintenanceService->checkConfigIntegrity();
-            return new JSONResponse(['issues' => $issues]);
+            // v4.5.37 — the service now returns {issues, appClaimed} rather than
+            // a bare issues list. Spread it so `issues` keeps its shape and
+            // `appClaimed` rides alongside; an older frontend simply ignores it.
+            return new JSONResponse($this->maintenanceService->checkConfigIntegrity());
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][MaintenanceController] checkConfigIntegrity failed', [
                 'error' => $e->getMessage(),

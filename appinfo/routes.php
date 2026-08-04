@@ -71,6 +71,7 @@ return [
         ['name' => 'resource_state#acceptResource',  'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/accept',       'verb' => 'POST'],
         ['name' => 'resource_state#ignoreResource',  'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/ignore',       'verb' => 'POST'],
         ['name' => 'resource_state#unignoreResource','url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/unignore',     'verb' => 'POST'],
+        ['name' => 'resource_state#dismissResource', 'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/dismiss',     'verb' => 'POST'],
         ['name' => 'resource_state#removeAccess',    'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/remove',       'verb' => 'DELETE'],
         ['name' => 'resource_state#deleteResource',  'url' => '/api/v1/teams/{teamId}/resources/{app}/{resourceId}/delete',       'verb' => 'DELETE'],
 
@@ -142,6 +143,12 @@ return [
         // one paginated call. Same routing rule as `public` above — this
         // fixed segment must stay above the `{messageId}` catchalls.
         ['name' => 'message#getPersonalFeed',     'url' => '/api/v1/messages/feed',                          'verb' => 'GET'],
+        // v4.5.26 — the Feed control rail's "Save as default". Personal, no
+        // team scope, stored in oc_preferences. Same fixed-segment rule as
+        // `feed` and `public` above: it must stay ahead of the {messageId}
+        // catch-alls, otherwise `feed` is read as a message id.
+        ['name' => 'message#getFeedPreferences',  'url' => '/api/v1/messages/feed/preferences',              'verb' => 'GET'],
+        ['name' => 'message#saveFeedPreferences', 'url' => '/api/v1/messages/feed/preferences',              'verb' => 'PUT'],
         ['name' => 'message#votePoll',            'url' => '/api/v1/messages/{messageId}/vote',              'verb' => 'POST'],
         ['name' => 'message#getPollResults',      'url' => '/api/v1/messages/{messageId}/poll-results',      'verb' => 'GET'],
         ['name' => 'message#closePoll',           'url' => '/api/v1/messages/{messageId}/close-poll',        'verb' => 'POST'],
@@ -150,6 +157,29 @@ return [
         ['name' => 'message#registerAttachment',  'url' => '/api/v1/messages/{messageId}/attachments',       'verb' => 'POST'],
         ['name' => 'message#cacheImage',          'url' => '/api/v1/teams/{teamId}/messages/cache-image',   'verb' => 'POST'],
         ['name' => 'message#clearImageCache',     'url' => '/api/v1/teams/{teamId}/messages/image-cache',   'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
+        // My Work (v4.5.21) — personal, cross-team work queue.
+        //
+        // No route carries a {teamId}: My Work is cross-team by definition and
+        // the team boundary is resolved server-side from the session user's own
+        // memberships. Actions POST their target in the body rather than the
+        // path, because provider item ids are opaque strings and NC's routing
+        // strips trailing suffixes from path segments as format hints.
+        // ----------------------------------------------------------------
+        ['name' => 'myWork#getWork',          'url' => '/api/v1/mywork',             'verb' => 'GET'],
+        ['name' => 'myWork#getCounts',        'url' => '/api/v1/mywork/counts',      'verb' => 'GET'],
+        ['name' => 'myWork#getProviders',     'url' => '/api/v1/mywork/providers',   'verb' => 'GET'],
+        ['name' => 'myWork#getPreferences',   'url' => '/api/v1/mywork/preferences', 'verb' => 'GET'],
+        ['name' => 'myWork#savePreferences',  'url' => '/api/v1/mywork/preferences', 'verb' => 'PUT'],
+        ['name' => 'myWork#executeAction',    'url' => '/api/v1/mywork/action',      'verb' => 'POST'],
+
+        // My Work administration — instance-admin only, enforced by the
+        // absence of #[NoAdminRequired] on every method of the controller.
+        ['name' => 'myWorkAdmin#getConfig',    'url' => '/api/v1/admin/mywork/config',                'verb' => 'GET'],
+        ['name' => 'myWorkAdmin#saveConfig',   'url' => '/api/v1/admin/mywork/config',                'verb' => 'PUT'],
+        ['name' => 'myWorkAdmin#getStatus',    'url' => '/api/v1/admin/mywork/status',                'verb' => 'GET'],
+        ['name' => 'myWorkAdmin#saveProvider', 'url' => '/api/v1/admin/mywork/providers/{providerId}', 'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
         // Team image — upload, remove, serve
@@ -204,6 +234,20 @@ return [
         ['name' => 'comment#createComment',       'url' => '/api/v1/messages/{messageId}/comments',          'verb' => 'POST'],
         ['name' => 'comment#updateComment',       'url' => '/api/v1/comments/{commentId}',                   'verb' => 'PUT'],
         ['name' => 'comment#deleteComment',       'url' => '/api/v1/comments/{commentId}',                   'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
+        // v4.5.26 — "What's new" Talk interaction. Reply inside a thread and
+        // vote on a poll without leaving the feed.
+        //
+        // Every one of these resolves {token} back to a team the caller is a
+        // member of before doing anything — the same room→team mapping the
+        // feed used to decide the row was theirs to see. Talk then applies its
+        // own participant and read-only rules on top. Two independent gates:
+        // neither one alone is the boundary.
+        // ----------------------------------------------------------------
+        ['name' => 'feedTalk#listThreadReplies', 'url' => '/api/v1/feed/talk/{token}/threads/{threadId}/replies', 'verb' => 'GET'],
+        ['name' => 'feedTalk#replyToThread',     'url' => '/api/v1/feed/talk/{token}/threads/{threadId}/replies', 'verb' => 'POST'],
+        ['name' => 'feedTalk#votePoll',          'url' => '/api/v1/feed/talk/{token}/polls/{pollId}/vote',        'verb' => 'POST'],
 
         // ----------------------------------------------------------------
         // Layout — per-user, per-team Home-view grid + tab order
@@ -444,6 +488,11 @@ return [
         // before upgrade get a 404; intended — we wipe test data per Session G plan.
         ['name' => 'decision#finalize',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/finalize',    'verb' => 'POST'],
         ['name' => 'decision#refreshProposal', 'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/refresh-proposal', 'verb' => 'POST'],
+        // v4.5.42 — the discussion phase: edit an open proposal, finalize it
+        // from its own body, and record where it is being discussed.
+        ['name' => 'decision#updateProposal',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/proposal',          'verb' => 'PUT'],
+        ['name' => 'decision#finalizeProposal', 'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/finalize-proposal', 'verb' => 'POST'],
+        ['name' => 'decision#share',            'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/share',             'verb' => 'POST'],
         ['name' => 'decision#withdraw',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/withdraw',    'verb' => 'POST'],
         ['name' => 'decision#approve',    'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/approve',     'verb' => 'POST'],
         ['name' => 'decision#deny',       'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/deny',        'verb' => 'POST'],

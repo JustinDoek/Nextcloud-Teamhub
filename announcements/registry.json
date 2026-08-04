@@ -9,9 +9,9 @@
     },
     "announcements": [
         {
-            "filename": "The_journey.md",
+            "filename": "personal_layer.md",
             "role": "admin",
-            "version": "4.5.2"
+            "version": "4.6.0"
         }
     ]
 }

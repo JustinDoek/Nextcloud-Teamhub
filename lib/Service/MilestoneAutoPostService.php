@@ -163,6 +163,12 @@ class MilestoneAutoPostService {
             'normal',
             'normal',
             null,
+            false,  // isPublic — a milestone announcement stays inside the team
+            // v4.5.26 — isSystem. The author is still the milestone's creator
+            // (DESIGN §2.47 Decision 5); this flag is the only thing that tells
+            // "What's new" a post was written by the hourly job rather than by
+            // that person, so its System-messages switch can filter it.
+            true,
         );
     }
 

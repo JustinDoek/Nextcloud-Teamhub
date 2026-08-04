@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Mentions\MentionParser;
 use OCP\App\IAppManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
@@ -841,9 +842,17 @@ class TalkService {
                 return false;
             }
 
-            $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-            // getParticipant(Room $room, ?string $userId) — pass UID string, not User object
-            $participant = $participantService->getParticipant($room, $uid);
+            // v4.5.42 — was a bare getParticipant(), which fails for a member
+            // whose team membership is indirect: they reach the room through
+            // the circle attendee row and have none of their own. See
+            // resolveParticipant().
+            $participant = $this->resolveParticipant($room, $token, $uid);
+            if ($participant === null) {
+                $this->logger->warning('[TeamHub][TalkService] postChatMessage — no participant record', [
+                    'token' => $token, 'uid' => $uid, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
 
             $chatManager = $this->container->get(\OCA\Talk\Chat\ChatManager::class);
             $chatManager->sendMessage(
@@ -1874,6 +1883,59 @@ class TalkService {
     }
 
     /**
+     * Resolve Talk rooms by token, in the same row shape as
+     * listRoomsForTeams() (v4.5.45).
+     *
+     * Used for rooms the feed cannot reach through team membership: a decision
+     * proposal shared with a selected audience gets its own conversation,
+     * which is deliberately **not** registered as a team resource — doing that
+     * would put every proposal room into the team's own resource-review queue.
+     * So the feed is told about them by token instead, and the caller is
+     * responsible for having decided the viewer may see each one.
+     *
+     * @param string[] $tokens
+     * @return array<int, array{id:int, token:string, name:string}>
+     */
+    public function listRoomsByTokens(array $tokens): array {
+        $tokens = array_values(array_unique(array_filter(
+            $tokens,
+            static fn ($t): bool => is_string($t) && $t !== '',
+        )));
+        if ($tokens === [] || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $qb->select('id', 'token', 'name')
+                ->from('talk_rooms')
+                ->where($qb->expr()->in(
+                    'token',
+                    $qb->createNamedParameter($tokens, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                ));
+
+            $res  = $qb->executeQuery();
+            $rows = [];
+            while ($row = $res->fetch()) {
+                $rows[] = [
+                    'id'    => (int)$row['id'],
+                    'token' => (string)($row['token'] ?? ''),
+                    'name'  => (string)($row['name'] ?? ''),
+                ];
+            }
+            $res->closeCursor();
+            return $rows;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] listRoomsByTokens failed', [
+                'count' => count($tokens), 'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
      * Recent polls from a set of Talk room ids. Each row is shaped for the
      * "What’s new" feed (source='talk-poll', team-mapping applied by the
      * caller since a poll's room may serve multiple teams).
@@ -1910,38 +1972,90 @@ class TalkService {
                 ->setMaxResults($limit)
                 ->setFirstResult($offset);
 
+            // v4.5.27 — the announcement message is where the date lives on
+            // this schema. One query for the whole room set, before the loop.
+            $announcedAt = $this->findPollCreationTimes($roomIds);
+
             $res  = $qb->executeQuery();
             $rows = [];
-            $now  = time();
-            $rank = 0;
+            $seenColumns = null;
             while ($r = $res->fetch()) {
+                if ($seenColumns === null) {
+                    $seenColumns = array_keys($r);
+                }
                 $options = json_decode((string)($r['options'] ?? '[]'), true) ?: [];
                 $votes   = json_decode((string)($r['votes']   ?? '{}'), true) ?: [];
-                // Prefer a real column if present; else synthesise a
-                // decreasing sequence so polls sort near the top of the
-                // merged feed rather than collapsing to created_at=0.
+
+                // v4.5.26 — **no more synthesised timestamps.**
+                //
+                // This used to fall back to `time() - $rank * 60` so polls
+                // would sort near the top of the merged feed instead of
+                // collapsing to 0. That is a lie with consequences: every poll
+                // rendered as "created a few minutes ago", and once the feed
+                // grew a Period filter, "Today" returned polls from weeks back
+                // because the fabricated date really was today. Justin found
+                // both symptoms at once.
+                //
+                // A date we do not have is now absent, and the row says so with
+                // `date_unknown`. Callers exclude such rows from date-bounded
+                // queries rather than guessing whether they fall in the window.
                 $ts = 0;
-                if (!empty($r['created_at']))     $ts = (int)$r['created_at'];
-                elseif (!empty($r['created']))    $ts = (int)$r['created'];
-                elseif (!empty($r['timestamp']))  $ts = (int)$r['timestamp'];
-                if ($ts <= 0) {
-                    $ts = $now - $rank * 60;
+                foreach (['created_at', 'created', 'timestamp', 'creation_timestamp', 'time', 'last_activity'] as $col) {
+                    if (empty($r[$col])) {
+                        continue;
+                    }
+                    $raw = $r[$col];
+                    if (is_numeric($raw)) {
+                        $ts = (int)$raw;
+                    } elseif (is_string($raw)) {
+                        // Talk stores some of its timestamps as datetime
+                        // strings ("2026-07-20 12:12:14") — talk_threads does.
+                        $parsed = strtotime($raw);
+                        if ($parsed !== false) {
+                            $ts = $parsed;
+                        }
+                    }
+                    if ($ts > 0) {
+                        break;
+                    }
                 }
+
+                // No column on the poll itself — fall back to when it was
+                // announced in the chat. That is the poll's creation moment on
+                // every Talk version we have seen, and it is a real recorded
+                // timestamp rather than a guess.
+                if ($ts <= 0) {
+                    $ts = $announcedAt[(int)$r['id']] ?? 0;
+                }
+
                 $rows[] = [
-                    'source'     => 'talk-poll',
-                    'id'         => (int)$r['id'],
-                    'room_id'    => (int)$r['room_id'],
-                    'question'   => (string)($r['question'] ?? ''),
-                    'options'    => $options,
-                    'votes'      => $votes,
-                    'num_voters' => (int)($r['num_voters'] ?? 0),
-                    'status'     => (int)($r['status'] ?? 0),
-                    'actor_id'   => (string)($r['actor_id'] ?? ''),
-                    'created_at' => $ts,
+                    'source'       => 'talk-poll',
+                    'id'           => (int)$r['id'],
+                    'room_id'      => (int)$r['room_id'],
+                    'question'     => (string)($r['question'] ?? ''),
+                    'options'      => $options,
+                    'votes'        => $votes,
+                    'num_voters'   => (int)($r['num_voters'] ?? 0),
+                    'status'       => (int)($r['status'] ?? 0),
+                    'actor_id'     => (string)($r['actor_id'] ?? ''),
+                    'created_at'   => $ts,
+                    'date_unknown' => $ts <= 0,
                 ];
-                $rank++;
             }
             $res->closeCursor();
+
+            // Warning, not debug, and only when it actually happened: this is
+            // the one diagnostic that turns "polls have no date" into a
+            // one-line fix, and it is no use to anyone sitting behind a log
+            // level nobody runs in production. Column *names* only — no
+            // question text, no votes, no actor ids.
+            if ($seenColumns !== null && !empty($rows) && ($rows[0]['date_unknown'] ?? false)) {
+                $this->logger->warning('[TeamHub][TalkService] a poll has no date from either talk_polls or its chat announcement — it will show without one and is excluded from period filters. talk_polls columns: {cols}', [
+                    'cols' => implode(', ', $seenColumns),
+                    'app'  => Application::APP_ID,
+                ]);
+            }
+
             return $rows;
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][TalkService] findRecentPolls failed', [
@@ -2096,6 +2210,1279 @@ class TalkService {
             ]);
             return [];
         }
+    }
+
+    // =========================================================================
+    // v4.5.26 — "What's new" interaction: thread replies and poll votes
+    //
+    // Reads come from Talk's tables directly, which is the pattern the feed
+    // already established (DESIGN §2.68 — read what's actually there, because
+    // the schema shifts between Talk versions).
+    //
+    // Writes never do. Every write below goes through Talk's own service
+    // objects so its participant checks, activity, notifications and read
+    // markers all fire; SKILLS.md § "If a TeamHub or NC API does not work,
+    // report it" rules out reaching around them. Because those signatures move
+    // between Talk versions, arguments are matched by **reflection against the
+    // real method**, exactly as ApprovalWorkProvider does for Approval's
+    // approve/reject after v4.5.22 shipped a guessed argument list and failed
+    // in Justin's install. A parameter we cannot fill throws by name rather
+    // than failing somewhere downstream with a mystery.
+    // =========================================================================
+
+    /**
+     * Replies inside a Talk thread, oldest first.
+     *
+     * Thread identity follows the convention `findRecentThreads` documents and
+     * the v4.2.20 debug log confirmed: `talk_threads.id` **is** the id of the
+     * thread's first `comments` row. Replies therefore point back at it —
+     * through `topmost_parent_id` on schemas that have it, `parent_id` on those
+     * that don't. Both are tried rather than one being assumed.
+     *
+     * System messages (joins, calls, shares) are dropped: the feed shows a
+     * conversation, and Talk's own UI renders those as chrome rather than as
+     * replies.
+     *
+     * @return array<int, array{id:int, actor_id:string, message:string, created_at:int}>
+     */
+    public function findThreadReplies(int $roomId, int $threadId, int $limit = 50): array {
+        if ($threadId <= 0 || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        $limit = max(1, min(200, $limit));
+
+        // Ordered: the modern column first. A schema without it throws on the
+        // first query and the second shape answers instead.
+        //
+        // $parentColumn reaches the QueryBuilder as an identifier rather than a
+        // bound value, so it is worth being explicit: both values are literals
+        // in this foreach and nothing here is reachable from a request. Every
+        // *value* below is bound with createNamedParameter.
+        foreach (['topmost_parent_id', 'parent_id'] as $parentColumn) {
+            try {
+                $db = $this->container->get(\OCP\IDBConnection::class);
+                $qb = $db->getQueryBuilder();
+                $qb->select('id', 'actor_id', 'actor_type', 'message', 'verb', 'creation_timestamp')
+                    ->from('comments')
+                    ->where($qb->expr()->eq('object_type', $qb->createNamedParameter('chat')))
+                    // object_id is a string column in core comments even though
+                    // it holds a room id.
+                    ->andWhere($qb->expr()->eq('object_id', $qb->createNamedParameter((string)$roomId)))
+                    ->andWhere($qb->expr()->eq($parentColumn, $qb->createNamedParameter($threadId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    // The thread starter is already the card's body.
+                    ->andWhere($qb->expr()->neq('id', $qb->createNamedParameter($threadId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->orderBy('creation_timestamp', 'ASC')
+                    ->addOrderBy('id', 'ASC')
+                    ->setMaxResults($limit);
+
+                $res = $qb->executeQuery();
+                $out = [];
+                while ($r = $res->fetch()) {
+                    if ((string)($r['verb'] ?? '') === 'system') {
+                        continue;
+                    }
+                    $ts = 0;
+                    $raw = $r['creation_timestamp'] ?? null;
+                    if (is_numeric($raw)) {
+                        $ts = (int)$raw;
+                    } elseif (is_string($raw) && $raw !== '') {
+                        $parsed = strtotime($raw);
+                        if ($parsed !== false) {
+                            $ts = $parsed;
+                        }
+                    }
+                    $out[] = [
+                        'id'         => (int)$r['id'],
+                        // Federated actors are 'federated_users'; keeping the raw
+                        // actor_id means the frontend renders the id rather than
+                        // silently attributing the reply to a local user of the
+                        // same name.
+                        'actor_id'   => (string)($r['actor_id'] ?? ''),
+                        'actor_type' => (string)($r['actor_type'] ?? ''),
+                        'message'    => $this->decodeTalkMessage((string)($r['message'] ?? '')),
+                        'created_at' => $ts,
+                    ];
+                }
+                $res->closeCursor();
+                return $out;
+            } catch (\Throwable $e) {
+                $this->logger->debug('[TeamHub][TalkService] findThreadReplies — {col} shape did not answer', [
+                    'col' => $parentColumn, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        $this->logger->warning('[TeamHub][TalkService] findThreadReplies — no known thread-parent column', [
+            'app' => Application::APP_ID,
+        ]);
+        return [];
+    }
+
+    /**
+     * Numeric room id for a Talk token, or 0 when there is no such room.
+     *
+     * Read through Talk's own manager rather than a `talk_rooms` SELECT: this
+     * feeds an authorisation decision (MessageService::resolveFeedRoomTeam),
+     * and Talk's manager is the thing that knows what a valid, non-deleted room
+     * is on this version.
+     */
+    public function findRoomIdByToken(string $token): int {
+        if (trim($token) === '' || !$this->appManager->isInstalled('spreed')) {
+            return 0;
+        }
+        try {
+            $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomByToken($token);
+            return $room ? (int)$room->getId() : 0;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] findRoomIdByToken — no room', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return 0;
+        }
+    }
+
+    /**
+     * Whether $uid can post into the room behind $token right now.
+     *
+     * Asked before the feed offers a reply box or a vote control, so a member
+     * of a read-only room is not invited to write into it. This is a
+     * presentation gate — the write paths below re-derive the participant
+     * through Talk regardless, and Talk refuses on its own terms.
+     */
+    public function canPostToRoom(string $token, string $uid): bool {
+        if ($token === '' || !$this->appManager->isInstalled('spreed')) {
+            return false;
+        }
+        try {
+            $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomByToken($token);
+            if (!$room) {
+                return false;
+            }
+            // Throws when $uid is not a participant, which is the answer.
+            $this->container->get(\OCA\Talk\Service\ParticipantService::class)->getParticipant($room, $uid);
+
+            if (method_exists($room, 'getReadOnly') && (int)$room->getReadOnly() !== 0) {
+                return false;
+            }
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] canPostToRoom — refused', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Post a reply into a Talk thread on behalf of $uid.
+     *
+     * @return array{ok:bool, error:string}
+     */
+    public function replyToThread(string $token, int $threadId, string $uid, string $message, bool $asThread = true): array {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return ['ok' => false, 'error' => 'Talk is not installed'];
+        }
+        try {
+            $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomByToken($token);
+            if (!$room) {
+                return ['ok' => false, 'error' => 'Conversation not found'];
+            }
+            $participant = $this->container->get(\OCA\Talk\Service\ParticipantService::class)
+                ->getParticipant($room, $uid);
+
+            // The thread's first message, which is what Talk threads a reply
+            // onto. Resolved through core's comments API rather than by hand —
+            // ChatManager wants the IComment, not its id.
+            $replyTo = null;
+            try {
+                $replyTo = $this->container->get(\OCP\Comments\ICommentsManager::class)->get((string)$threadId);
+            } catch (\Throwable $e) {
+                return ['ok' => false, 'error' => 'The message being replied to no longer exists'];
+            }
+            if ($replyTo === null || (string)$replyTo->getObjectId() !== (string)$room->getId()) {
+                // Refuses a threadId from another room — without this, a
+                // caller could thread a reply into a conversation they can
+                // reach by naming a token they can.
+                return ['ok' => false, 'error' => 'That message is not in this conversation'];
+            }
+
+            $chatManager = $this->container->get(\OCA\Talk\Chat\ChatManager::class);
+            $candidates = [
+                'room'        => $room,
+                'participant' => $participant,
+                'actortype'   => 'users',
+                'actorid'     => $uid,
+                'message'     => $message,
+                'datetime'    => new \DateTime(),
+                'replyto'     => $replyTo,
+                'referenceid' => '',
+                'silent'      => false,
+            ];
+            // v4.5.33 — `threadId` is offered only when the target really is a
+            // thread. A Talk *mention* is an ordinary chat message that has no
+            // thread yet, and handing its comment id to a `$threadId` parameter
+            // would assert an association that does not exist. Without the
+            // candidate the parameter takes its own default and Talk derives
+            // whatever threading it wants from `replyTo`, which is the
+            // mechanism replies have always used.
+            if ($asThread) {
+                $candidates['threadid'] = $threadId;
+            }
+            $chatManager->sendMessage(...$this->matchTalkArguments($chatManager, 'sendMessage', $candidates));
+
+            return ['ok' => true, 'error' => ''];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] replyToThread failed', [
+                'threadId' => $threadId, 'error' => $e->getMessage(),
+                'class' => get_class($e), 'app' => Application::APP_ID,
+            ]);
+            // The underlying message is surfaced rather than swallowed — that
+            // is what turned finding 22 in 4.5.22 from a mystery into a
+            // one-line fix.
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    // =========================================================================
+    // Decision proposals — discussion surfaces (v4.5.42)
+    // =========================================================================
+
+    /**
+     * Create a group conversation for a decision proposal and invite people.
+     *
+     * Used by share mode `selected`: the proposer names a set of colleagues and
+     * the proposal gets its own room to be argued in. The room is a plain Talk
+     * group conversation owned by the proposer — TeamHub records the token on
+     * the decision row and otherwise does not manage it. Deleting the room
+     * later is Talk's business; the decision keeps a dead token, which reads
+     * as "the discussion is gone", not as an error.
+     *
+     * Participants are added Talk's way first and by direct attendee insert
+     * only if that fails — the same two-strategy shape `createTalkRoom()` uses
+     * for the circle, and for the same reason: when Talk's own API runs, Talk's
+     * event system runs with it and the room appears in each person's list
+     * natively.
+     *
+     * @param string[] $userIds people to invite; the proposer is already the owner
+     * @return array{ok:bool, token:?string, invited:int, error:string}
+     */
+    public function createProposalRoom(
+        string $roomName,
+        array  $userIds,
+        string $uid,
+        string $openingMessage,
+    ): array {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return ['ok' => false, 'token' => null, 'invited' => 0, 'error' => 'Talk is not installed'];
+        }
+
+        try {
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+            $owner       = $userManager->get($uid);
+            if ($owner === null) {
+                return ['ok' => false, 'token' => null, 'invited' => 0, 'error' => 'Proposer not found'];
+            }
+
+            // Type 2 = TYPE_GROUP, same constant createTalkRoom() uses.
+            $roomService = $this->container->get(\OCA\Talk\Service\RoomService::class);
+            $room        = $roomService->createConversation(2, $roomName, $owner);
+            $token       = $room->getToken();
+
+            $invited = $this->addUsersToRoom($room, $userIds, $owner);
+
+            // Best-effort: a room with the right people in it and no opening
+            // post is still a usable discussion, so a failed post does not
+            // fail the share.
+            if ($openingMessage !== '') {
+                $this->postChatMessage($token, $uid, $openingMessage);
+            }
+
+            $this->logger->info('[TeamHub][TalkService] createProposalRoom', [
+                'token' => $token, 'invited' => $invited,
+                'requested' => count($userIds), 'app' => Application::APP_ID,
+            ]);
+
+            return ['ok' => true, 'token' => $token, 'invited' => $invited, 'error' => ''];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] createProposalRoom failed', [
+                'error' => $e->getMessage(), 'class' => get_class($e),
+                'app' => Application::APP_ID,
+            ]);
+            return ['ok' => false, 'token' => null, 'invited' => 0, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Add users to a room, Talk's API first and a direct attendee insert after.
+     *
+     * `ParticipantService::addUsers()` takes an array of participant
+     * descriptors whose exact keys have moved between Talk versions, so the
+     * call is attempted and its failure treated as ordinary. The fallback is
+     * the row shape `expandCircleMembersToTalk()` has been writing since
+     * v3.x — proven on this codebase's supported Talk range.
+     *
+     * @param string[] $userIds
+     * @return int how many were added
+     */
+    private function addUsersToRoom(object $room, array $userIds, object $addedBy): int {
+        $userIds = array_values(array_unique(array_filter(
+            $userIds,
+            static fn ($u): bool => is_string($u) && $u !== '',
+        )));
+        if ($userIds === []) {
+            return 0;
+        }
+
+        $userManager = $this->container->get(\OCP\IUserManager::class);
+
+        // ── Strategy 1: Talk's own ParticipantService ─────────────────────
+        try {
+            $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+            $descriptors = [];
+            foreach ($userIds as $memberUid) {
+                $user = $userManager->get($memberUid);
+                if ($user === null) {
+                    continue;
+                }
+                $descriptors[] = [
+                    'actorType'   => 'users',
+                    'actorId'     => $memberUid,
+                    'displayName' => $user->getDisplayName(),
+                ];
+            }
+            if ($descriptors === []) {
+                return 0;
+            }
+
+            $participantService->addUsers(...$this->matchTalkArguments(
+                $participantService,
+                'addUsers',
+                [
+                    'room'         => $room,
+                    'participants' => $descriptors,
+                    'addedby'      => $addedBy,
+                ],
+            ));
+
+            $this->logger->debug('[TeamHub][TalkService] addUsersToRoom — Talk API path', [
+                'count' => count($descriptors), 'app' => Application::APP_ID,
+            ]);
+            return count($descriptors);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] addUsersToRoom — Talk API failed, falling back to direct insert', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // ── Strategy 2: direct attendee rows ──────────────────────────────
+        $db     = $this->container->get(\OCP\IDBConnection::class);
+        $roomId = (int)$room->getId();
+        $cols   = $this->dbIntrospection->getTableColumns('talk_attendees');
+        $added  = 0;
+
+        foreach ($userIds as $memberUid) {
+            if ($userManager->get($memberUid) === null) {
+                continue;
+            }
+            try {
+                $qb = $db->getQueryBuilder();
+                $qb->insert('talk_attendees')
+                    ->setValue('room_id',          $qb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                    ->setValue('actor_type',       $qb->createNamedParameter('users'))
+                    ->setValue('actor_id',         $qb->createNamedParameter($memberUid))
+                    ->setValue('display_name',     $qb->createNamedParameter(''))
+                    ->setValue('participant_type', $qb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+
+                foreach ([
+                    'favorite' => 0, 'notification_level' => 0, 'notification_calls' => 0,
+                    'last_joined_call' => 0, 'last_read_message' => 0,
+                    'last_mention_message' => 0, 'last_mention_direct' => 0,
+                    'in_call' => 0, 'permissions' => 0, 'publishing_permissions' => 0,
+                    'access_token' => '', 'remote_id' => '', 'phone_number' => '', 'phone_states' => '',
+                ] as $col => $val) {
+                    if (in_array($col, $cols, true)) {
+                        $qb->setValue($col, $qb->createNamedParameter($val));
+                    }
+                }
+
+                $qb->executeStatement();
+                $added++;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][TalkService] addUsersToRoom — attendee insert failed', [
+                    'uid' => $memberUid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        return $added;
+    }
+
+    /**
+     * Post a proposal into a room and make it a thread if this Talk can.
+     *
+     * Used by share mode `team`: the proposal goes into the team conversation
+     * so every member can respond in one place.
+     *
+     * **The title is what makes it a thread — but not in the shape v4.5.47
+     * assumed.** That version passed a flat `threadtitle` string candidate, on
+     * the strength of the field name in Talk's *HTTP* chat API, and
+     * `matchTalkArguments` silently drops any candidate the method does not
+     * declare. So on a `sendMessage()` without that parameter the title went
+     * nowhere and nothing said so — v4.5.44's silence with only the false
+     * error message taken out.
+     *
+     * This version reads the real parameter list instead of assuming either
+     * shape (`placeThreadTitle()`) and reports which one it found. The two
+     * candidates are a **metadata array** (`['threadTitle' => …]`) and a
+     * dedicated **`$threadTitle` string**.
+     *
+     * When the method declares neither, the post still succeeds as a plain
+     * message and the full signature is logged at **warning** — so the next
+     * version is a one-line change rather than a fourth guess. That
+     * degradation is sound on its own terms: a thread is a message somebody
+     * replied to, and `talk_threads.id` is the root message's id either way
+     * (verified in v4.2.20, relied on by `findRecentThreads`), so the
+     * discussion works regardless.
+     *
+     * v4.5.44 got this worse: it tried to force a thread through an
+     * unverified `ThreadService`, and when nothing happened it told the user
+     * "this version of Talk does not support threads" — false on every
+     * instance, including ones where threads work perfectly.
+     *
+     * `threadId` is the posted message's own id — the id the thread has, or
+     * takes on the first reply. Recording it is what lets the proposal link
+     * straight to the discussion. `threaded` is **checked, not inferred**: a
+     * `talk_threads` row under that id either exists or it does not.
+     *
+     * @param string $threadTitle thread subject; empty posts a plain message
+     * @return array{ok:bool, threadId:?int, messageId:?int, threaded:bool, titlePlacement:string, error:string}
+     */
+    public function startProposalThread(string $token, string $uid, string $message, string $threadTitle = ''): array {
+        $failed = ['ok' => false, 'threadId' => null, 'messageId' => null, 'threaded' => false, 'titlePlacement' => 'none'];
+
+        if (!$this->appManager->isInstalled('spreed')) {
+            return $failed + ['error' => 'Talk is not installed'];
+        }
+
+        try {
+            $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomByToken($token);
+            if (!$room) {
+                return $failed + ['error' => 'Conversation not found'];
+            }
+
+            // Circle-only members have no direct attendee row — see
+            // resolveParticipant(). A bare getParticipant() here is what made
+            // "discuss with the whole team" fail for every indirect member.
+            $participant = $this->resolveParticipant($room, $token, $uid);
+            if ($participant === null) {
+                return $failed + ['error' => 'You are not a participant in this conversation'];
+            }
+
+            $candidates = [
+                'room'        => $room,
+                'participant' => $participant,
+                'actortype'   => 'users',
+                'actorid'     => $uid,
+                'message'     => $message,
+                'datetime'    => new \DateTime(),
+                'replyto'     => null,
+                'referenceid' => '',
+                'silent'      => false,
+            ];
+            $chatManager = $this->container->get(\OCA\Talk\Chat\ChatManager::class);
+
+            // Placed only when there is a title. An empty one on a Talk that
+            // *does* accept it would create a nameless thread, which is worse
+            // than a plain message.
+            $placement = $threadTitle !== ''
+                ? $this->placeThreadTitle($chatManager, $threadTitle, $candidates)
+                : 'none';
+
+            // Warning, not debug: a title that had nowhere to go is the
+            // difference between a discussion thread and a chat message lost
+            // in the day's scroll, and this line is the only place that can
+            // say so. It carries the signature because *which* parameters
+            // exist is the fact three versions have now guessed at.
+            if ($placement === 'none' && $threadTitle !== '') {
+                $this->logger->warning('[TeamHub][TalkService] startProposalThread — this Talk declares no place for a thread title', [
+                    'signature' => $this->describeMethodSignature($chatManager, 'sendMessage'),
+                    'app' => Application::APP_ID,
+                ]);
+            }
+
+            $comment = $chatManager->sendMessage(...$this->matchTalkArguments($chatManager, 'sendMessage', $candidates));
+
+            // sendMessage returns the IComment on every Talk version we have
+            // seen, but the return type has not always been declared, so this
+            // reads defensively rather than assuming.
+            $messageId = null;
+            if (is_object($comment) && method_exists($comment, 'getId')) {
+                $messageId = (int)$comment->getId();
+            }
+
+            // Asked, not assumed. The whole reason this method has been
+            // rewritten three times is that nobody checked whether the thread
+            // it claimed to create existed.
+            $threaded = $this->threadRowExists($messageId);
+
+            $this->logger->info('[TeamHub][TalkService] startProposalThread', [
+                'token' => $token, 'messageId' => $messageId,
+                'titlePlacement' => $placement, 'threaded' => $threaded,
+                'app' => Application::APP_ID,
+            ]);
+
+            return [
+                'ok'        => true,
+                // The message id IS the id the thread takes once anyone
+                // replies, so storing it now is not a claim that a thread
+                // already exists — it is the handle for the one that will.
+                'threadId'  => $messageId,
+                'messageId' => $messageId,
+                'threaded'  => $threaded,
+                'titlePlacement' => $placement,
+                'error'     => '',
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] startProposalThread failed', [
+                'token' => $token, 'error' => $e->getMessage(),
+                'class' => get_class($e), 'app' => Application::APP_ID,
+            ]);
+            return $failed + ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Put the thread title where this Talk's `sendMessage()` will accept it.
+     *
+     * Two shapes exist and neither can be tested from the dev environment, so
+     * neither is assumed — the declared parameter list decides:
+     *
+     * 1. **Inside a metadata array** — `['threadTitle' => …]` on an array
+     *    parameter whose name contains `metadata` (`$metaData`,
+     *    `$talkMetaData`). Justin's reading of Talk's chat API, and the shape
+     *    v4.5.47 did not implement.
+     * 2. **As its own string parameter** — `$threadTitle`, which is the field
+     *    name the HTTP API documents and what v4.5.47 assumed the internal
+     *    method took as well.
+     *
+     * **The dedicated parameter wins when both exist.** A method that names a
+     * parameter after exactly this value is telling you where the value goes;
+     * a metadata bag is a general-purpose container, so putting it there while
+     * leaving the specific parameter empty would be choosing the vaguer of two
+     * declared answers.
+     *
+     * An existing metadata candidate is merged rather than replaced, so this
+     * can never quietly discard something a caller set.
+     *
+     * @param array<string,mixed> $candidates keyed by lower-case parameter name; modified in place
+     * @return string 'metadata' | 'parameter' | 'none'
+     */
+    private function placeThreadTitle(object $chatManager, string $threadTitle, array &$candidates): string {
+        try {
+            $params = (new \ReflectionMethod($chatManager, 'sendMessage'))->getParameters();
+        } catch (\Throwable $e) {
+            // sendMessage() not being reflectable is not this method's problem
+            // to report — matchTalkArguments throws on it a few lines later,
+            // with a message about the method rather than about the title.
+            return 'none';
+        }
+
+        $metadataKey = null;
+
+        foreach ($params as $param) {
+            $name = strtolower($param->getName());
+            $type = $param->getType();
+            $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : '';
+
+            if (str_contains($name, 'threadtitle') && ($typeName === 'string' || $typeName === '')) {
+                $candidates[$name] = $threadTitle;
+                return 'parameter';
+            }
+            // Remembered, not used yet — the loop has to finish before we know
+            // whether a dedicated parameter also exists further along the list.
+            if ($metadataKey === null && str_contains($name, 'metadata') && ($typeName === 'array' || $typeName === '')) {
+                $metadataKey = $name;
+            }
+        }
+
+        if ($metadataKey !== null) {
+            $existing = is_array($candidates[$metadataKey] ?? null) ? $candidates[$metadataKey] : [];
+            $candidates[$metadataKey] = array_merge($existing, ['threadTitle' => $threadTitle]);
+            return 'metadata';
+        }
+
+        return 'none';
+    }
+
+    /**
+     * Does Talk hold a thread rooted at this message?
+     *
+     * `talk_threads.id` is the root message's id (verified in v4.2.20 and
+     * relied on by `findRecentThreads`), so this is a primary-key lookup.
+     *
+     * False on any failure, including a Talk too old to have the table. The
+     * caller reports it as "no thread", which is the truth in every one of
+     * those cases — the message was still posted.
+     */
+    private function threadRowExists(?int $messageId): bool {
+        if ($messageId === null) {
+            return false;
+        }
+        try {
+            $qb = $this->container->get(\OCP\IDBConnection::class)->getQueryBuilder();
+            $res = $qb->select('id')
+                ->from('talk_threads')
+                ->where($qb->expr()->eq(
+                    'id',
+                    $qb->createNamedParameter($messageId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
+                ))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+            return $row !== false;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] threadRowExists — lookup failed', [
+                'messageId' => $messageId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * A method's real parameter list, as a readable string.
+     *
+     * Exists so a log line and the admin diagnostic can both say what this
+     * Talk actually declares instead of what TeamHub hoped it would.
+     *
+     * @param object|class-string $service an instance, or a class name for a
+     *                                     service we have no reason to build
+     */
+    private function describeMethodSignature(object|string $service, string $method): string {
+        try {
+            $params = array_map(
+                static fn (\ReflectionParameter $p): string =>
+                    ($p->getType() instanceof \ReflectionNamedType ? $p->getType()->getName() . ' ' : '')
+                    . '$' . $p->getName()
+                    . ($p->isDefaultValueAvailable() ? ' = …' : ''),
+                (new \ReflectionMethod($service, $method))->getParameters(),
+            );
+            return $method . '(' . implode(', ', $params) . ')';
+        } catch (\Throwable $e) {
+            return $method . '(— not reflectable: ' . $e->getMessage() . ')';
+        }
+    }
+
+    /**
+     * Resolve $uid's participant record in a room, including circle-only members.
+     *
+     * **`ParticipantService::getParticipant()` is a direct attendee lookup.**
+     * It reads a `talk_attendees` row with `actor_type = 'users'`, and a member
+     * who reaches the team conversation through the *circle* attendee row —
+     * anyone whose team membership is indirect, via a group or a nested team —
+     * does not have one. They can read and write the conversation in Talk's own
+     * UI, because Talk resolves circle membership when it opens a room for a
+     * user; they simply have no row for a bare lookup to find.
+     *
+     * So: ask Talk to open the room *for that user* first, which is the call
+     * that performs the circle resolution, and only then ask for the
+     * participant. Guarded by `method_exists` because the room-for-user
+     * accessor has been renamed upstream more than once.
+     *
+     * Returns null when the user genuinely has no access — the caller decides
+     * whether that is an error or an answer.
+     *
+     * @return object|null the Talk Participant
+     */
+    private function resolveParticipant(object $room, string $token, string $uid): ?object {
+        $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+
+        // 1. Direct attendee row — the common case, and unchanged behaviour.
+        try {
+            return $participantService->getParticipant($room, $uid);
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] resolveParticipant — no direct attendee row, trying circle resolution', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // 2. Let Talk open the room for this user, which resolves circles, then
+        //    look again. On versions that materialise an attendee row at that
+        //    point the second lookup succeeds; on versions that return a room
+        //    carrying the participant, we read it off the room.
+        try {
+            $manager = $this->container->get(\OCA\Talk\Manager::class);
+            foreach (['getRoomForUserByToken', 'getRoomByToken'] as $method) {
+                if (!method_exists($manager, $method)) {
+                    continue;
+                }
+                try {
+                    $userRoom = $manager->$method($token, $uid);
+                } catch (\Throwable) {
+                    continue;
+                }
+                if (!is_object($userRoom)) {
+                    continue;
+                }
+                try {
+                    return $participantService->getParticipant($userRoom, $uid);
+                } catch (\Throwable) {
+                    // Keep trying the next accessor rather than giving up on
+                    // the first one that does not resolve.
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] resolveParticipant — circle resolution failed', [
+                'uid' => $uid, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * What TeamHub can tell about this Talk's threading support.
+     *
+     * Ships with the integration because the integration was written against
+     * an API that could not be tested here — the principle recorded in
+     * DESIGN.md for ApprovalWorkProvider: when you integrate against something
+     * you cannot verify, ship the means to diagnose it.
+     *
+     * @return array<string,mixed>
+     */
+    public function getThreadingDiagnostics(): array {
+        $out = [
+            'talkInstalled'        => $this->appManager->isInstalled('spreed'),
+            'sendMessageSignature' => '',
+            'threadTitlePlacement' => 'none',
+            'threadServiceExists'  => false,
+            'threadServiceMethods' => [],
+            'talkThreadsTable'     => false,
+        ];
+
+        if (!$out['talkInstalled']) {
+            return $out;
+        }
+
+        // **The line worth reading.** `startProposalThread()` has been written
+        // three times against an assumed `ChatManager::sendMessage()`; this
+        // reports the one that is actually installed, and where a thread title
+        // would land on it. Reflection only — nothing is sent.
+        try {
+            $chatManager = $this->container->get(\OCA\Talk\Chat\ChatManager::class);
+            $out['sendMessageSignature'] = $this->describeMethodSignature($chatManager, 'sendMessage');
+
+            $probe = [];
+            $out['threadTitlePlacement'] = $this->placeThreadTitle($chatManager, 'probe', $probe);
+        } catch (\Throwable $e) {
+            $out['sendMessageError'] = $e->getMessage();
+        }
+
+        try {
+            if (class_exists(\OCA\Talk\Service\ThreadService::class)) {
+                $out['threadServiceExists'] = true;
+                foreach ((new \ReflectionClass(\OCA\Talk\Service\ThreadService::class))->getMethods(\ReflectionMethod::IS_PUBLIC) as $m) {
+                    $out['threadServiceMethods'][] = $this->describeMethodSignature(
+                        \OCA\Talk\Service\ThreadService::class, $m->getName(),
+                    );
+                }
+            }
+        } catch (\Throwable $e) {
+            $out['threadServiceError'] = $e->getMessage();
+        }
+
+        try {
+            $out['talkThreadsTable'] = $this->dbIntrospection->getTableColumns('talk_threads') !== [];
+        } catch (\Throwable $e) {
+            $out['talkThreadsError'] = $e->getMessage();
+        }
+
+        return $out;
+    }
+
+    /**
+     * Cast $uid's vote on a Talk poll.
+     *
+     * @param int[] $optionIds indices into the poll's option list
+     * @return array{ok:bool, error:string}
+     */
+    public function votePoll(string $token, int $pollId, array $optionIds, string $uid): array {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return ['ok' => false, 'error' => 'Talk is not installed'];
+        }
+        try {
+            $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomByToken($token);
+            if (!$room) {
+                return ['ok' => false, 'error' => 'Conversation not found'];
+            }
+            $participant = $this->container->get(\OCA\Talk\Service\ParticipantService::class)
+                ->getParticipant($room, $uid);
+
+            $pollService = $this->container->get(\OCA\Talk\Service\PollService::class);
+
+            // The poll must belong to this room. Talk's own service enforces
+            // this too, but doing it here means a mismatch reads as a refusal
+            // rather than as whatever exception Talk happens to throw.
+            $poll = null;
+            foreach (['getPoll', 'getPollById'] as $getter) {
+                if (!method_exists($pollService, $getter)) {
+                    continue;
+                }
+                try {
+                    // Reflection here too — `(roomId, pollId)` is the obvious
+                    // order and obvious is not the same as verified.
+                    $poll = $pollService->$getter(...$this->matchTalkArguments($pollService, $getter, [
+                        'roomid' => $room->getId(),
+                        'pollid' => $pollId,
+                        'room'   => $room,
+                    ]));
+                    break;
+                } catch (\Throwable) {
+                    // Try the next shape; a genuine mismatch falls through to
+                    // the null check below.
+                }
+            }
+            if ($poll === null) {
+                return ['ok' => false, 'error' => 'Poll not found in this conversation'];
+            }
+
+            $args = $this->matchTalkArguments($pollService, 'votePoll', [
+                'participant' => $participant,
+                'poll'        => $poll,
+                'pollid'      => $pollId,
+                'option'      => array_values($optionIds),
+                'room'        => $room,
+            ]);
+            $pollService->votePoll(...$args);
+
+            return ['ok' => true, 'error' => ''];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] votePoll failed', [
+                'pollId' => $pollId, 'error' => $e->getMessage(),
+                'class' => get_class($e), 'app' => Application::APP_ID,
+            ]);
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * v4.5.33 — Talk chat messages that mention $uid.
+     *
+     * **Why this exists.** The feed carried Talk polls and thread starters, so
+     * a plain chat message saying "@you check over here" reached nobody — and
+     * Justin's diagnostic showed that on his instance every real mention was
+     * exactly that. Mentions of you are the one slice of chat history a feed
+     * can usefully carry: everything else in a room is the room's business.
+     *
+     * Scoped to rooms already resolved from the caller's team memberships, so
+     * this cannot reach a conversation the feed would not otherwise show. The
+     * `LIKE` narrows to plausible rows and `MentionParser` decides — the same
+     * two-stage arrangement the message side uses, and for the same reason:
+     * SQL has no word boundary.
+     *
+     * @param int[] $roomIds
+     * @return array<int, array{source:string,id:int,room_id:int,message:string,actor_id:string,created_at:int}>
+     */
+    public function findRecentMentions(array $roomIds, string $uid, int $limit): array {
+        if (empty($roomIds) || $uid === '' || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+
+            // LOWER() on both sides: MySQL's collation makes LIKE
+            // case-insensitive and Postgres's does not, and the PHP check that
+            // follows is case-insensitive — so a case-sensitive pre-filter
+            // would drop rows PHP would have accepted.
+            $escaped = mb_strtolower($db->escapeLikeParameter($uid));
+            $bare   = $qb->createNamedParameter('%@' . $escaped . '%');
+            $quoted = $qb->createNamedParameter('%@"' . $escaped . '"%');
+
+            $qb->select('id', 'actor_id', 'actor_type', 'message', 'creation_timestamp', 'object_id')
+                ->from('comments')
+                ->where($qb->expr()->eq('object_type', $qb->createNamedParameter('chat')))
+                // object_id is a string column in core comments, even though
+                // Talk stores a room id in it.
+                ->andWhere($qb->expr()->in(
+                    'object_id',
+                    $qb->createNamedParameter(
+                        array_map('strval', $roomIds),
+                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY,
+                    ),
+                ))
+                // Real messages only — system rows (joins, calls, shares) carry
+                // their own verbs and are chrome, not conversation.
+                ->andWhere($qb->expr()->eq('verb', $qb->createNamedParameter('comment')))
+                ->andWhere('(LOWER(message) LIKE ' . $bare . ' OR LOWER(message) LIKE ' . $quoted . ')')
+                ->orderBy('creation_timestamp', 'DESC')
+                ->addOrderBy('id', 'DESC')
+                ->setMaxResults(max(1, min(200, $limit)));
+
+            $res = $qb->executeQuery();
+            $out = [];
+            while ($r = $res->fetch()) {
+                $body = $this->decodeTalkMessage((string)($r['message'] ?? ''));
+                if (!MentionParser::mentions($body, $uid)) {
+                    continue;
+                }
+
+                $ts  = 0;
+                $raw = $r['creation_timestamp'] ?? null;
+                if (is_numeric($raw)) {
+                    $ts = (int)$raw;
+                } elseif (is_string($raw) && $raw !== '') {
+                    // Core comments store this as a UTC datetime string.
+                    $parsed = strtotime($raw . ' UTC');
+                    if ($parsed !== false) {
+                        $ts = $parsed;
+                    }
+                }
+
+                $out[] = [
+                    'source'     => 'talk-mention',
+                    'id'         => (int)$r['id'],
+                    'room_id'    => (int)$r['object_id'],
+                    'message'    => $body,
+                    // Federated and guest actors keep their raw id rather than
+                    // being resolved as a local user of the same name.
+                    'actor_id'   => (string)($r['actor_id'] ?? ''),
+                    'actor_type' => (string)($r['actor_type'] ?? ''),
+                    'created_at' => $ts,
+                ];
+            }
+            $res->closeCursor();
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] findRecentMentions failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * v4.5.27 — creation times for Talk polls, read from the chat message that
+     * announced each one.
+     *
+     * `talk_polls` carries no timestamp on this Talk version (4.5.26 stopped
+     * fabricating one and logged the column list; Justin sent it back). The
+     * date does exist, one table over: creating a poll posts a chat message
+     * into `oc_comments` with `verb = 'object_shared'` and a JSON body naming
+     * the poll —
+     *
+     *   {"message":"object_shared","parameters":{"objectType":"talk-poll",
+     *    "objectId":1,"metaData":{"type":"talk-poll","id":1,"name":"…"}}}
+     *
+     * — and that row has a real `creation_timestamp`. `metaData.id` is the
+     * link, with `parameters.objectId` read as a fallback because the two say
+     * the same thing and neither is documented.
+     *
+     * Scoped by room and verb so the scan stays narrow: this reads only the
+     * share announcements of rooms already in the caller's feed, not chat
+     * history. Best-effort — anything unexpected leaves the poll undated,
+     * which is the state it was already in.
+     *
+     * @param int[] $roomIds
+     * @return array<int,int> poll id → unix creation time
+     */
+    public function findPollCreationTimes(array $roomIds): array {
+        if (empty($roomIds) || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $qb->select('message', 'creation_timestamp')
+                ->from('comments')
+                ->where($qb->expr()->eq('object_type', $qb->createNamedParameter('chat')))
+                // object_id is a string column in core comments, even though
+                // Talk stores a room id in it.
+                ->andWhere($qb->expr()->in(
+                    'object_id',
+                    $qb->createNamedParameter(
+                        array_map('strval', $roomIds),
+                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY,
+                    ),
+                ))
+                ->andWhere($qb->expr()->eq('verb', $qb->createNamedParameter('object_shared')))
+                // Narrows the JSON decoding to rows that can possibly be a
+                // poll. escapeLikeParameter is unnecessary — the needle is a
+                // literal with no wildcards — but the value is still bound.
+                ->andWhere($qb->expr()->like('message', $qb->createNamedParameter('%talk-poll%')));
+
+            $res = $qb->executeQuery();
+            $out = [];
+            while ($r = $res->fetch()) {
+                $decoded = json_decode((string)($r['message'] ?? ''), true);
+                if (!is_array($decoded)) {
+                    continue;
+                }
+                $params = $decoded['parameters'] ?? [];
+                if (!is_array($params)) {
+                    continue;
+                }
+                $pollId = 0;
+                if (isset($params['metaData']['id'])) {
+                    $pollId = (int)$params['metaData']['id'];
+                } elseif (isset($params['objectId'])) {
+                    $pollId = (int)$params['objectId'];
+                }
+                if ($pollId <= 0) {
+                    continue;
+                }
+
+                $raw = $r['creation_timestamp'] ?? null;
+                $ts = 0;
+                if (is_numeric($raw)) {
+                    $ts = (int)$raw;
+                } elseif (is_string($raw) && $raw !== '') {
+                    // A datetime string on this schema ("2026-01-08 13:43:46"),
+                    // stored in UTC as core comments always are.
+                    $parsed = strtotime($raw . ' UTC');
+                    if ($parsed !== false) {
+                        $ts = $parsed;
+                    }
+                }
+                if ($ts <= 0) {
+                    continue;
+                }
+
+                // A poll can be shared more than once; the earliest mention is
+                // when it was created.
+                if (!isset($out[$pollId]) || $ts < $out[$pollId]) {
+                    $out[$pollId] = $ts;
+                }
+            }
+            $res->closeCursor();
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] findPollCreationTimes failed — polls stay undated', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Current tallies for one poll, so a vote cast from the feed can update
+     * the bars in place instead of forcing a whole-page refetch (which would
+     * collapse every expanded thread on the page to move one percentage).
+     *
+     * Read-only and best-effort — a shape we don't recognise returns null and
+     * the caller leaves the tallies as they were.
+     *
+     * @return array{votes:array,num_voters:int,status:int}|null
+     */
+    public function findPollTallies(int $roomId, int $pollId): ?array {
+        if ($pollId <= 0 || !$this->appManager->isInstalled('spreed')) {
+            return null;
+        }
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $qb->select('*')
+                ->from('talk_polls')
+                ->where($qb->expr()->eq('id', $qb->createNamedParameter($pollId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                // Scoped to the room the caller was already authorised for, so
+                // this cannot be used to read a poll from another conversation.
+                ->andWhere($qb->expr()->eq('room_id', $qb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->setMaxResults(1);
+
+            $res = $qb->executeQuery();
+            $r = $res->fetch();
+            $res->closeCursor();
+            if (!$r) {
+                return null;
+            }
+            return [
+                'votes'      => json_decode((string)($r['votes'] ?? '{}'), true) ?: [],
+                'num_voters' => (int)($r['num_voters'] ?? 0),
+                'status'     => (int)($r['status'] ?? 0),
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] findPollTallies — schema did not answer', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Which options $uid has already picked, per poll.
+     *
+     * Read-only and best-effort: a schema that does not answer means the feed
+     * renders the poll without a "you voted for this" marker, which is a
+     * missing hint rather than a wrong one.
+     *
+     * @param int[] $pollIds
+     * @return array<int, int[]> poll id → option ids
+     */
+    public function findOwnPollVotes(array $pollIds, string $uid): array {
+        if (empty($pollIds) || $uid === '' || !$this->appManager->isInstalled('spreed')) {
+            return [];
+        }
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $qb->select('poll_id', 'option_id')
+                ->from('talk_poll_votes')
+                ->where($qb->expr()->in(
+                    'poll_id',
+                    $qb->createNamedParameter($pollIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY),
+                ))
+                ->andWhere($qb->expr()->eq('actor_type', $qb->createNamedParameter('users')))
+                ->andWhere($qb->expr()->eq('actor_id', $qb->createNamedParameter($uid)));
+
+            $res = $qb->executeQuery();
+            $out = [];
+            while ($r = $res->fetch()) {
+                $out[(int)$r['poll_id']][] = (int)$r['option_id'];
+            }
+            $res->closeCursor();
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TalkService] findOwnPollVotes — schema did not answer', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Positional arguments for a Talk service method, matched by reflection
+     * against its declared parameters.
+     *
+     * Talk's chat and poll signatures have gained parameters across versions
+     * (threads, silent sends, proxy caches). Guessing an argument list is how
+     * v4.5.21's Approval integration broke twice; this reads the real
+     * parameter list and fills it by name, then by type, then by default.
+     *
+     * A required parameter we have no candidate for **throws with its name**,
+     * because that message is what makes the next Talk version's change a
+     * one-line fix instead of an investigation.
+     *
+     * @param array<string,mixed> $candidates lower-case parameter name → value
+     * @return array<int,mixed>
+     */
+    /**
+     * Would PHP accept $value for a parameter declared as $type?
+     *
+     * Deliberately conservative — an untyped or union-typed parameter returns
+     * true (we cannot reason about it, and the old behaviour was to pass
+     * anything), but a mismatch on a plain declared type returns false so the
+     * caller keeps looking instead of handing over something that will
+     * TypeError two frames down.
+     */
+    private function valueFitsType($value, ?\ReflectionType $type): bool {
+        if (!$type instanceof \ReflectionNamedType) {
+            return true;
+        }
+        if ($value === null) {
+            return $type->allowsNull();
+        }
+
+        $name = $type->getName();
+        if (!$type->isBuiltin()) {
+            return $value instanceof $name;
+        }
+
+        return match ($name) {
+            'bool'   => is_bool($value),
+            'int'    => is_int($value),
+            'float'  => is_float($value) || is_int($value),
+            'string' => is_string($value),
+            'array'  => is_array($value),
+            // 'mixed', 'iterable', 'object', 'callable' — not worth reasoning
+            // about here; let them through and let PHP decide.
+            default  => true,
+        };
+    }
+
+    private function matchTalkArguments(object $service, string $method, array $candidates): array {
+        if (!method_exists($service, $method)) {
+            throw new \RuntimeException(sprintf(
+                'Talk\'s %s has no %s() — this Talk version is not supported by TeamHub\'s feed.',
+                get_class($service),
+                $method,
+            ));
+        }
+
+        $args = [];
+        foreach ((new \ReflectionMethod($service, $method))->getParameters() as $param) {
+            $name = strtolower($param->getName());
+            $type = $param->getType();
+            $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : '';
+
+            // 1. Exact name — still type-checked, and falls through rather
+            //    than aborting if the type has changed under the same name.
+            if (array_key_exists($name, $candidates) && $this->valueFitsType($candidates[$name], $type)) {
+                $args[] = $candidates[$name];
+                continue;
+            }
+
+            // 2. Name contains a candidate key, or vice versa — covers
+            //    $replyTo vs $replyToId, $creationDateTime vs $dateTime.
+            //
+            //    **The type must also fit.** v4.5.26 matched on the name alone
+            //    with a four-character guard, and Talk 21's
+            //    `bool $fromScheduledMessage` matched the 'message' candidate
+            //    because the name *ends with* it — so a string went into a bool
+            //    parameter and every reply died with a TypeError. A name
+            //    coincidence is not evidence; a name coincidence plus a
+            //    compatible type is.
+            $matched = false;
+            foreach ($candidates as $key => $value) {
+                if (strlen($name) < 4 || strlen((string)$key) < 4) {
+                    continue;
+                }
+                if (!str_contains($name, (string)$key) && !str_contains((string)$key, $name)) {
+                    continue;
+                }
+                if (!$this->valueFitsType($value, $type)) {
+                    continue;
+                }
+                $args[] = $value;
+                $matched = true;
+                break;
+            }
+            if ($matched) {
+                continue;
+            }
+
+            // 3. Type match against an object candidate.
+            if ($typeName !== '' && !$type?->isBuiltin()) {
+                foreach ($candidates as $value) {
+                    if ($value instanceof $typeName) {
+                        $args[] = $value;
+                        $matched = true;
+                        break;
+                    }
+                }
+                if ($matched) {
+                    continue;
+                }
+            }
+
+            // 4. Anything the method is happy to default.
+            if ($param->isDefaultValueAvailable()) {
+                $args[] = $param->getDefaultValue();
+                continue;
+            }
+            if ($param->allowsNull()) {
+                $args[] = null;
+                continue;
+            }
+
+            throw new \RuntimeException(sprintf(
+                '%s::%s() expects a parameter "$%s" that TeamHub cannot supply.',
+                get_class($service),
+                $method,
+                $param->getName(),
+            ));
+        }
+
+        return $args;
     }
 
 }

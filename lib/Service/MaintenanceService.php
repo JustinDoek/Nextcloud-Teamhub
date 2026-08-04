@@ -1589,14 +1589,21 @@ class MaintenanceService {
      * Reset a single team's user-managed config bits to clean defaults.
      *
      * Clears every TeamHub-managed bit (CFG_VISIBLE, CFG_OPEN, CFG_INVITE,
-     * CFG_REQUEST, CFG_PROTECTED) AND every system bit forbidden on user
-     * teams (CFG_SINGLE, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND,
-     * CFG_APP). Preserves federation/personal bits set by Circles itself.
+     * CFG_REQUEST, CFG_PROTECTED, CFG_ROOT) AND every system bit forbidden on
+     * user teams (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER,
+     * CFG_HIDDEN, CFG_BACKEND). Preserves federation bits set by Circles itself.
+     *
+     * v4.5.37 — **CFG_APP is no longer cleared.** It left
+     * SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS, so this mask no longer reaches it,
+     * and that is deliberate: the bit is another app's claim on the circle
+     * (Collectives sets it), and Repair had been quietly removing it. A reset
+     * on a wiki-enabled team now leaves the wiki's claim intact.
      *
      * Use cases:
      *   - Admin sees a team with corrupted config and wants a clean slate.
      *   - Integrity check flagged forbidden bits set externally.
      *   - The 3.39.1 one-shot migration's repair fallback.
+     *   - Recovering a team whose CFG_PERSONAL bit blocks the Wiki (v4.5.35).
      *
      * @return array{oldConfig: int, newConfig: int}
      */
@@ -1669,49 +1676,75 @@ class MaintenanceService {
     }
 
     /**
-     * Scan every source=16 user team for config corruption — any system bit
-     * that must not appear on a user team.
+     * Scan every source=16 user team for config corruption.
      *
-     * Returns one row per affected team:
-     *   { id, name, config, badBits }
+     * Two separate findings, and keeping them separate is the point (v4.5.37):
      *
-     * Admin can then call resetTeamConfig() per-team to repair.
+     *   issues     — a system bit that breaks Circles' own config API is set.
+     *                Real corruption. Repairable with resetTeamConfig().
+     *   appClaimed — another Nextcloud app has flagged the circle as its own
+     *                (CFG_APP). Informational. Not a fault, not repairable
+     *                here, and deliberately NOT counted as an issue.
+     *
+     * They used to be one list, which reported twelve healthy teams as corrupt
+     * and offered a Repair button that would have stripped Collectives' claim
+     * on each of them. See `CirclesConfig::APP_OWNED_BITS`.
+     *
+     * @return array{issues: array[], appClaimed: array[]}
      */
     public function checkConfigIntegrity(): array {
         $this->requireNcAdmin();
 
         $forbidden = CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS;
+        $appOwned  = CirclesConfig::APP_OWNED_BITS;
 
+        // One pass over both masks — a team can be corrupt *and* app-claimed,
+        // and those are independent facts about it.
         $qb  = $this->db->getQueryBuilder();
         $res = $qb->select('unique_id', 'name', 'config')
             ->from('circles_circle')
             ->where($qb->expr()->eq('source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->andWhere(
                 $qb->expr()->gt(
-                    $qb->createFunction('(config & ' . $forbidden . ')'),
+                    $qb->createFunction('(config & ' . ($forbidden | $appOwned) . ')'),
                     $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                 )
             )
             ->executeQuery();
 
-        $issues = [];
+        $issues     = [];
+        $appClaimed = [];
         while ($row = $res->fetch()) {
             $config  = (int)$row['config'];
             $badBits = $config & $forbidden;
-            $issues[] = [
-                'id'      => (string)$row['unique_id'],
-                'name'    => (string)($row['name'] ?? ''),
-                'config'  => $config,
-                'badBits' => $badBits,
-            ];
+            $appBits = $config & $appOwned;
+
+            if ($badBits > 0) {
+                $issues[] = [
+                    'id'      => (string)$row['unique_id'],
+                    'name'    => (string)($row['name'] ?? ''),
+                    'config'  => $config,
+                    'badBits' => $badBits,
+                ];
+            }
+            if ($appBits > 0) {
+                $appClaimed[] = [
+                    'id'      => (string)$row['unique_id'],
+                    'name'    => (string)($row['name'] ?? ''),
+                    'config'  => $config,
+                    'appBits' => $appBits,
+                ];
+            }
         }
         $res->closeCursor();
 
         $this->logger->info('[TeamHub][MaintenanceService] checkConfigIntegrity: scan complete', [
-            'issuesFound' => count($issues), 'app' => Application::APP_ID,
+            'issuesFound' => count($issues),
+            'appClaimed'  => count($appClaimed),
+            'app'         => Application::APP_ID,
         ]);
 
-        return $issues;
+        return ['issues' => $issues, 'appClaimed' => $appClaimed];
     }
 
     // -------------------------------------------------------------------------

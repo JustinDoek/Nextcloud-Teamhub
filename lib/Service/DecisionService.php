@@ -69,6 +69,13 @@ class DecisionService {
     // Hidden subfolder in the team folder where finalized proposal documents are written
     private const PROPOSALS_FOLDER = '.proposals';
     private const ALLOWED_SOURCE_TYPES = ['message', 'document', 'external', 'direct'];
+
+    // v4.5.42 — how a proposal was opened. See Decision's docblock and
+    // Version000405042 for why 'immediate' is the backfill value.
+    public const SHARE_IMMEDIATE = 'immediate';
+    public const SHARE_SELECTED  = 'selected';
+    public const SHARE_TEAM      = 'team';
+    public const SHARE_MODES     = [self::SHARE_IMMEDIATE, self::SHARE_SELECTED, self::SHARE_TEAM];
     private const MAX_QUESTION_LEN = 4000;
     private const MAX_ANSWER_LEN = 4000;
     private const MAX_WITHDRAWN_REASON_LEN = 1000;
@@ -93,6 +100,17 @@ class DecisionService {
         // v3.97.5 — optional milestone linkage on proposals (Advanced projects).
         private \OCA\TeamHub\Db\MilestoneMapper $milestoneMapper,
         private \OCA\TeamHub\Db\ProjectMapper   $projectMapper,
+        // v4.5.42 — who may see a `selected` proposal while it is open.
+        private \OCA\TeamHub\Db\DecisionAudienceMapper $audienceMapper,
+        // v4.5.42 — the discussion surfaces. TalkService does not depend on
+        // this service, so there is no cycle.
+        private TalkService $talkService,
+        private \OCP\IURLGenerator $urlGenerator,
+        // v4.5.44 — the Talk post's lead-in is user-facing text written by the
+        // server. One chat message is read by everyone in the room, so there
+        // is no per-recipient language to resolve; it is written in the
+        // **proposer's** language, because they are its author.
+        private \OCP\L10N\IFactory $l10nFactory,
     ) {}
 
     // =========================================================================
@@ -578,6 +596,635 @@ class DecisionService {
     }
 
     // =========================================================================
+    // Discussion phase (v4.5.42)
+    // =========================================================================
+
+    /**
+     * Edit an open proposal's question and body.
+     *
+     * **This is what makes `open` a working state rather than a waiting room.**
+     * Before 4.5.42 a proposal could not be changed after creation at all —
+     * `refreshProposalDocument()` only rewrote the markdown from the row it
+     * already had. A proposer who got feedback had no way to act on it except
+     * to withdraw and re-propose, which loses the discussion.
+     *
+     * **Both halves live on the message.** `propose()` captures the decision's
+     * question from `message.subject` (see the comment there — "subject is the
+     * canonical decision question"), and the body has always been
+     * `message.message`. So an edit writes the message row and mirrors the
+     * subject into `decision.question`, which is a cache of it. Writing only
+     * the decision row would leave the stream showing the old text.
+     *
+     * Authorisation: proposer only, and only while `open`. An admin override
+     * is deliberately absent for the same reason `finalize()` has none — the
+     * proposal is the proposer's statement, and an admin rewriting someone
+     * else's proposal under their name is not a power this feature should
+     * have. Admins can still `withdraw()`.
+     *
+     * @param ?string $question null leaves it unchanged
+     * @param ?string $body     null leaves it unchanged
+     * @return array Serialised decision
+     */
+    public function updateProposal(
+        string  $teamId,
+        int     $decisionId,
+        ?string $question,
+        ?string $body,
+        string  $actingUserId,
+    ): array {
+        $this->assertModuleEnabledForTeam($teamId);
+        $this->memberService->requireMemberLevel($teamId);
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+        $this->assertNotTerminal($decision);
+
+        if ($decision->getStatus() !== 'open') {
+            throw new \RuntimeException(
+                'Only open proposals can be edited (current status: ' . $decision->getStatus() . ')'
+            );
+        }
+        if ($decision->getProposedBy() !== $actingUserId) {
+            throw new \RuntimeException('Only the proposer can edit this proposal');
+        }
+
+        $message = $this->messageMapper->find($decision->getMessageId());
+
+        $newSubject = (string)($message['subject'] ?? '');
+        $newBody    = (string)($message['message'] ?? '');
+        $changed    = [];
+
+        if ($question !== null) {
+            $question = trim($question);
+            if ($question === '') {
+                throw new \InvalidArgumentException('Question cannot be empty');
+            }
+            if (mb_strlen($question) > self::MAX_QUESTION_LEN) {
+                throw new \InvalidArgumentException('Question exceeds maximum length');
+            }
+            if ($question !== $newSubject) {
+                $newSubject = $question;
+                $changed[]  = 'question';
+            }
+        }
+
+        if ($body !== null) {
+            if (mb_strlen($body) > self::MAX_ANSWER_LEN) {
+                throw new \InvalidArgumentException('Proposal body exceeds maximum length');
+            }
+            if ($body !== $newBody) {
+                $newBody   = $body;
+                $changed[] = 'body';
+            }
+        }
+
+        if ($changed === []) {
+            // Nothing to do, but still a successful call — the client sent
+            // what it had and the server agreed it matched.
+            return $this->serialize($decision);
+        }
+
+        // One write for both halves: MessageMapper::update takes subject and
+        // body together, so there is no window where the stream shows a new
+        // title over an old body.
+        $this->messageMapper->update($decision->getMessageId(), $newSubject, $newBody);
+        $decision->setQuestion($newSubject);
+
+        /** @var Decision $saved */
+        $saved = $this->decisionMapper->update($decision);
+
+        // The proposal document is regenerated only when one already exists.
+        // An open proposal normally has none — writeProposalDocument runs at
+        // finalize — so this is a no-op in the common case and a correction in
+        // the case where a proposal was finalized, reopened by a future
+        // version, and edited.
+        try {
+            $this->writeProposalDocument($saved, $actingUserId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] updateProposal — document rewrite failed (non-fatal)', [
+                'decision_id' => $decisionId, 'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->auditService->log($saved, 'proposal_updated', $actingUserId, [
+            'fields' => $changed,
+        ]);
+
+        $this->logger->info('[TeamHub][DecisionService] updateProposal', [
+            'team_id' => $teamId, 'decision_id' => $decisionId, 'fields' => $changed,
+        ]);
+
+        return $this->serialize($saved);
+    }
+
+    /**
+     * Finalize an open proposal using its own body as the final wording.
+     *
+     * **A second finalize path, and it is not a duplicate of `finalize()`.**
+     * That one takes a *comment id*: the proposer clicks the gavel on their
+     * own most recent comment and that comment becomes the final wording. It
+     * is the right shape for a proposal discussed in TeamHub comments, and the
+     * wrong shape for one discussed in Talk — where there is no TeamHub
+     * comment to select, and demanding one would force the proposer to
+     * re-type their conclusion into a comment box purely to satisfy the API.
+     *
+     * Here the *proposal body* is the final wording, exactly as it already is
+     * for a proposal created with `autoFinalize`. The difference between the
+     * two is only when the proposer says "this is my final text".
+     *
+     * Same authorisation as `finalize()`: proposer only, no admin override.
+     *
+     * @return array Serialised decision
+     */
+    public function finalizeProposal(
+        string $teamId,
+        int    $decisionId,
+        string $actingUserId,
+    ): array {
+        $this->assertModuleEnabledForTeam($teamId);
+        $this->memberService->requireMemberLevel($teamId);
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+        $this->assertNotTerminal($decision);
+
+        if ($decision->getStatus() !== 'open') {
+            throw new \RuntimeException(
+                'Only open proposals can be finalized (current status: ' . $decision->getStatus() . ')'
+            );
+        }
+        if ($decision->getProposedBy() !== $actingUserId) {
+            throw new \RuntimeException('Only the proposer can finalize this proposal');
+        }
+
+        $message = $this->messageMapper->find($decision->getMessageId());
+        $answer  = trim((string)($message['message'] ?? ''));
+        if ($answer === '') {
+            throw new \InvalidArgumentException(
+                'The proposal has no text to finalize. Edit it first.'
+            );
+        }
+        if (mb_strlen($answer) > self::MAX_ANSWER_LEN) {
+            $answer = mb_substr($answer, 0, self::MAX_ANSWER_LEN);
+        }
+
+        $now = time();
+
+        // Participants are the team's effective members at finalize time —
+        // identical to finalize(). Deliberately NOT the discussion audience:
+        // participants records who the decision applies to, which is the whole
+        // team, while the audience records who was invited to draft it.
+        $participantUids = [];
+        foreach ($this->memberService->getAllEffectiveMembers($teamId) as $m) {
+            if (!empty($m['userId'])) {
+                $participantUids[] = (string)$m['userId'];
+            }
+        }
+        $participantUids = array_values(array_unique($participantUids));
+        sort($participantUids);
+
+        $decision->setStatus('finalized');
+        $decision->setAnsweredBy($actingUserId);
+        $decision->setSelectedAnswer($answer);
+        $decision->setParticipants(json_encode($participantUids, JSON_THROW_ON_ERROR));
+        $decision->setResolvedBy($actingUserId);
+        $decision->setDecidedAt($now);
+        // selectedCommentId stays null: no comment was chosen, and writing one
+        // would claim a provenance this path does not have.
+
+        /** @var Decision $saved */
+        $saved = $this->decisionMapper->update($decision);
+
+        try {
+            $this->writeProposalDocument($saved, $actingUserId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] finalizeProposal — document write failed (non-fatal)', [
+                'decision_id' => $decisionId, 'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->auditService->log($saved, 'finalized', $actingUserId, [
+            'from'    => 'proposal_body',
+            'excerpt' => $answer,
+        ]);
+
+        $this->logger->info('[TeamHub][DecisionService] finalizeProposal', [
+            'team_id' => $teamId, 'decision_id' => $decisionId,
+            'share_mode' => $saved->getShareMode(),
+        ]);
+
+        return $this->serialize($saved);
+    }
+
+    /**
+     * May this user see this decision?
+     *
+     * Team membership is the baseline and every other path already enforces
+     * it. This adds the one restriction 4.5.42 introduces: an **open**
+     * proposal shared with a **selected** audience is visible only to the
+     * proposer and that audience.
+     *
+     * Three deliberate narrowings:
+     *  - Only `open`. Once finalized the decision is a team record — it goes
+     *    to the category's approvers and into the team's history, so
+     *    restricting it would hide a decision the team is subject to.
+     *  - Only `selected`. `team` and `immediate` restrict nothing.
+     *  - Approvers are **not** admitted. Justin's call: "only those that have
+     *    been selected". The consequence is real and worth stating — an
+     *    approver loses the early sight of an open proposal they get in the
+     *    other modes (DecisionWorkProvider's WAITING_FOR_OTHERS row), and
+     *    first sees it at finalize.
+     *
+     * **Fails closed.** A lookup that throws denies rather than allows: this
+     * is the gate, not a display detail.
+     */
+    public function canViewDecision(Decision $decision, string $userId): bool {
+        if ($decision->getStatus() !== 'open') {
+            return true;
+        }
+        if ($decision->getShareMode() !== self::SHARE_SELECTED) {
+            return true;
+        }
+        if ($decision->getProposedBy() === $userId) {
+            return true;
+        }
+
+        try {
+            return $this->audienceMapper->isInAudience($decision->getId(), $userId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] audience check failed — denying', [
+                'decision_id' => $decision->getId(), 'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Open a proposal for discussion on a Talk surface.
+     *
+     * Two modes, and the split is the whole point of 4.5.42:
+     *  - `selected` — a new Talk group conversation named after the proposal,
+     *    with the chosen people in it. Only they and the proposer see the
+     *    proposal while it is open.
+     *  - `team` — a post in the team's own conversation, promoted to a thread
+     *    where Talk supports it. Visible to the whole team, which is what an
+     *    open proposal has always been.
+     *
+     * **Talk failure does not fail the share.** The proposal is already open
+     * and editable; what a failed Talk call costs is the discussion venue, not
+     * the proposal. The result carries the Talk outcome so the client can say
+     * "shared, but the conversation could not be created" rather than pretend
+     * either way. Same reasoning as the best-effort document write in
+     * `finalize()`.
+     *
+     * @param string[] $userIds  people to invite; ignored unless mode is 'selected'
+     * @return array{decision: array<string,mixed>, share: array<string,mixed>}
+     */
+    public function shareProposal(
+        string $teamId,
+        int    $decisionId,
+        string $mode,
+        array  $userIds,
+        string $actingUserId,
+    ): array {
+        $this->assertModuleEnabledForTeam($teamId);
+        $this->memberService->requireMemberLevel($teamId);
+
+        if ($mode !== self::SHARE_SELECTED && $mode !== self::SHARE_TEAM) {
+            throw new \InvalidArgumentException(
+                'Share mode must be "' . self::SHARE_SELECTED . '" or "' . self::SHARE_TEAM . '"'
+            );
+        }
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+        if ($decision->getProposedBy() !== $actingUserId) {
+            throw new \RuntimeException('Only the proposer can share this proposal');
+        }
+        if ($decision->getStatus() !== 'open') {
+            throw new \RuntimeException('Only open proposals can be shared for discussion');
+        }
+
+        // MessageMapper::find() throws a bare \Exception when the row is gone,
+        // which nothing maps — it would surface as a 500 with no message. A
+        // decision always has a message, so this is a data-integrity failure,
+        // but it deserves to say so rather than to be an opaque error.
+        try {
+            $message = $this->messageMapper->find($decision->getMessageId());
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][DecisionService] shareProposal — backing message missing', [
+                'team_id' => $teamId, 'decision_id' => $decisionId,
+                'message_id' => $decision->getMessageId(), 'exception' => $e,
+            ]);
+            throw new \RuntimeException('The message behind this proposal could not be read');
+        }
+
+        $title = trim((string)($message['subject'] ?? $decision->getQuestion()));
+        $body  = trim((string)($message['message'] ?? ''));
+
+        $post = $this->buildProposalPost($teamId, $decisionId, $title, $body, $actingUserId);
+
+        $talkToken    = null;
+        $talkThreadId = null;
+        $share        = ['ok' => false, 'error' => ''];
+
+        if ($mode === self::SHARE_SELECTED) {
+            // Only real team members may be invited: the audience is a
+            // visibility grant, so accepting an arbitrary uid here would let a
+            // proposer show a team proposal to someone outside the team.
+            $userIds = $this->filterToTeamMembers($teamId, $userIds, $actingUserId);
+            if ($userIds === []) {
+                throw new \InvalidArgumentException(
+                    'Select at least one team member to discuss this with'
+                );
+            }
+
+            $result = $this->talkService->createProposalRoom(
+                $this->proposalRoomName($title),
+                $userIds,
+                $actingUserId,
+                $post,
+            );
+            $talkToken = $result['token'];
+            $share = [
+                'ok'      => $result['ok'],
+                'invited' => $result['invited'] ?? 0,
+                'error'   => $result['error'],
+            ];
+        } else {
+            $token = $this->teamTalkToken($teamId);
+            if ($token === null) {
+                throw new \RuntimeException(
+                    'This team has no Talk conversation to post the proposal in'
+                );
+            }
+            // The proposal's own title becomes the thread's subject, clipped
+            // the same way a Talk room name is.
+            $result = $this->talkService->startProposalThread(
+                $token,
+                $actingUserId,
+                $post,
+                $this->proposalRoomName($title),
+            );
+            $talkToken    = $result['ok'] ? $token : null;
+            // The posted message's id — the id its thread takes as soon as
+            // anyone replies. See startProposalThread().
+            $talkThreadId = $result['threadId'];
+            $share = [
+                'ok'    => $result['ok'],
+                // Restores the `share.threaded` fact of §2.77, which v4.5.46
+                // dropped along with the false "threads unsupported" error.
+                // It is now a checked `talk_threads` row rather than an
+                // assumption, so it is safe for a caller to believe.
+                'threaded' => $result['threaded'] ?? false,
+                'error' => $result['error'],
+            ];
+        }
+
+        // The persistence step is the one that must not fail silently: the
+        // Talk surface may already exist, and a proposal whose share_mode was
+        // not recorded would still be visible to the whole team while its
+        // conversation is private to a few. Typed and logged with the full
+        // exception so the cause is in the log rather than guessed at.
+        try {
+            $serialised = $this->recordDiscussion(
+                $teamId, $decisionId, $mode, $talkToken, $talkThreadId, $userIds, $actingUserId,
+            );
+        } catch (\InvalidArgumentException | \RuntimeException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][DecisionService] shareProposal — could not record the discussion', [
+                'team_id' => $teamId, 'decision_id' => $decisionId, 'mode' => $mode,
+                'audience_size' => count($userIds), 'exception' => $e,
+            ]);
+            throw new \RuntimeException('The proposal was created but its sharing settings could not be saved');
+        }
+
+        $this->auditService->log(
+            $this->loadDecisionInTeam($decisionId, $teamId),
+            'shared_for_discussion',
+            $actingUserId,
+            ['mode' => $mode, 'talk_ok' => $share['ok']],
+        );
+
+        return ['decision' => $serialised, 'share' => $share];
+    }
+
+    /**
+     * The text posted into Talk: a lead-in, the title, the body, and a way
+     * back to the proposal.
+     *
+     * The lead-in exists because the post lands in a conversation among other
+     * chat messages, where a bold line of text does not say what is being
+     * asked of the reader. "Requesting feedback on a new proposal" does.
+     *
+     * Written in the **proposer's** language: a chat message is one message
+     * for every reader, so there is no per-recipient language to resolve the
+     * way a notification has. Falling back to the instance default when the
+     * proposer's language cannot be read is fine — it is one sentence, and an
+     * untranslated lead-in still reads.
+     */
+    private function buildProposalPost(
+        string $teamId,
+        int    $decisionId,
+        string $title,
+        string $body,
+        string $actingUserId,
+    ): string {
+        $l = $this->l10nFactory->get(
+            Application::APP_ID,
+            $this->l10nFactory->getUserLanguage($this->userManager->get($actingUserId)),
+        );
+
+        // TRANSLATORS: lead-in of the Talk message posted when a decision
+        // proposal is shared for discussion. The proposal title follows.
+        $lines = [$l->t('Requesting feedback on a new proposal:')];
+        $lines[] = '';
+        $lines[] = '**' . $title . '**';
+        if ($body !== '') {
+            $lines[] = '';
+            $lines[] = $body;
+        }
+        $lines[] = '';
+        // Same shape MessageService and MemberService already use for team
+        // deep links, plus the decision target the Decisions tab reads.
+        $lines[] = $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index')
+            . '?team=' . urlencode($teamId)
+            . '&tab=decisions&decision=' . $decisionId;
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Talk conversation names are shown in a list; a full proposal question
+     * would be unreadable there. Clipped on a word boundary where one is
+     * available.
+     */
+    private function proposalRoomName(string $title): string {
+        $name = trim($title) !== '' ? trim($title) : 'Decision proposal';
+        if (mb_strlen($name) <= 64) {
+            return $name;
+        }
+        $clipped = mb_substr($name, 0, 61);
+        $space   = mb_strrpos($clipped, ' ');
+        if ($space !== false && $space > 30) {
+            $clipped = mb_substr($clipped, 0, $space);
+        }
+        return $clipped . '…';
+    }
+
+    /**
+     * Keep only uids that are effective members of this team, minus the actor.
+     *
+     * The audience is a visibility grant, so this is a security check and not
+     * a convenience: without it a proposer could name any uid on the instance
+     * and hand them a team proposal.
+     *
+     * @param string[] $userIds
+     * @return string[]
+     */
+    private function filterToTeamMembers(string $teamId, array $userIds, string $actingUserId): array {
+        $allowed = [];
+        foreach ($this->memberService->getAllEffectiveMembers($teamId) as $m) {
+            if (!empty($m['userId'])) {
+                $allowed[(string)$m['userId']] = true;
+            }
+        }
+
+        return array_values(array_unique(array_filter(
+            $userIds,
+            static fn ($u): bool => is_string($u)
+                && $u !== ''
+                && $u !== $actingUserId
+                && isset($allowed[$u]),
+        )));
+    }
+
+    /** The team's Talk room token, or null when the team has no conversation. */
+    private function teamTalkToken(string $teamId): ?string {
+        try {
+            $resources = $this->resourceService->getTeamResources($teamId);
+            $token     = $resources['talk']['token'] ?? null;
+            return is_string($token) && $token !== '' ? $token : null;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] teamTalkToken lookup failed', [
+                'team_id' => $teamId, 'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Talk rooms belonging to open proposals this viewer may see (v4.5.45).
+     *
+     * What's New reaches Talk rooms through team membership, and a proposal
+     * shared with a *selected* audience gets a conversation of its own that no
+     * team owns — deliberately, since registering it as a team resource would
+     * drop every proposal room into that team's resource-review queue. Without
+     * this the discussion would be invisible in the feed to the very people
+     * who were invited to it.
+     *
+     * `team`-mode proposals are **not** included: they are posted in the team's
+     * own conversation, which the feed already resolves. Returning them would
+     * hand back a token the caller already has.
+     *
+     * Visibility is applied here, not by the caller: same rule as
+     * `canViewDecision()` — proposer or named audience.
+     *
+     * @param string[] $teamIds teams the viewer belongs to
+     * @return array<int, array{token:string, teamId:string}>
+     */
+    public function openProposalTalkRooms(array $teamIds, string $viewerUid): array {
+        if ($teamIds === [] || $viewerUid === '') {
+            return [];
+        }
+
+        try {
+            $rows = $this->decisionMapper->findOpenSharedProposals($teamIds);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] openProposalTalkRooms failed', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $decision) {
+            $token = $decision->getTalkToken();
+            if (!is_string($token) || $token === '') {
+                continue;
+            }
+            if ($decision->getShareMode() !== self::SHARE_SELECTED) {
+                continue;
+            }
+            if (!$this->canViewDecision($decision, $viewerUid)) {
+                continue;
+            }
+            $out[] = ['token' => $token, 'teamId' => $decision->getTeamId()];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Record how an open proposal is being discussed.
+     *
+     * Called by DecisionController after the Talk surface has been created, so
+     * a Talk failure leaves the proposal open with no discussion link rather
+     * than failing the whole creation. The audience is written here too,
+     * because it is meaningless without the mode.
+     *
+     * @param string[] $audienceUserIds ignored unless $shareMode is 'selected'
+     */
+    public function recordDiscussion(
+        string  $teamId,
+        int     $decisionId,
+        string  $shareMode,
+        ?string $talkToken,
+        ?int    $talkThreadId,
+        array   $audienceUserIds,
+        string  $actingUserId,
+    ): array {
+        $this->assertModuleEnabledForTeam($teamId);
+        $this->memberService->requireMemberLevel($teamId);
+
+        if (!in_array($shareMode, self::SHARE_MODES, true)) {
+            throw new \InvalidArgumentException('Unknown share mode: ' . $shareMode);
+        }
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+        if ($decision->getProposedBy() !== $actingUserId) {
+            throw new \RuntimeException('Only the proposer can change how this proposal is shared');
+        }
+        if ($decision->getStatus() !== 'open') {
+            throw new \RuntimeException('Only open proposals have a discussion phase');
+        }
+
+        $decision->setShareMode($shareMode);
+        $decision->setTalkToken($talkToken);
+        $decision->setTalkThreadId($talkThreadId);
+
+        /** @var Decision $saved */
+        $saved = $this->decisionMapper->update($decision);
+
+        if ($shareMode === self::SHARE_SELECTED) {
+            // The proposer is implicit — canViewDecision() admits them by
+            // proposed_by, so storing them would be a second source of truth
+            // for the same fact.
+            $this->audienceMapper->replaceAudience(
+                $decisionId,
+                array_values(array_filter(
+                    $audienceUserIds,
+                    static fn ($u): bool => is_string($u) && $u !== '' && $u !== $actingUserId,
+                )),
+            );
+        } else {
+            // Switching away from `selected` drops the restriction, so the
+            // rows would be a stale claim about who can see it.
+            $this->audienceMapper->deleteForDecision($decisionId);
+        }
+
+        return $this->serialize($saved);
+    }
+
+    // =========================================================================
     // Withdraw (proposer cancels before finalizing, or admin acts on a stuck row)
     // =========================================================================
 
@@ -698,8 +1345,11 @@ class DecisionService {
         $decision->setStatus('approved');
         $decision->setResolvedBy($actingUserId);
         // decidedAt was set at finalize-time. We don't overwrite it here so
-        // the timeline retains both moments. Session J will add explicit
-        // per-transition timestamps.
+        // the timeline retains both moments — v4.5.25 records the second one
+        // in its own column instead, because My Work's Completed section needs
+        // to know when this was *resolved*, and a decision finalized weeks ago
+        // but approved today was falling outside the retention window.
+        $decision->setResolvedAt(time());
 
         /** @var Decision $saved */
         $saved = $this->decisionMapper->update($decision);
@@ -761,6 +1411,9 @@ class DecisionService {
         $decision->setWithdrawnReason($reason);
         $decision->setResolvedBy($actingUserId);
         $decision->setWithdrawnAt($now);
+        // v4.5.25 — same reason as approve(): the moment it was resolved, which
+        // decidedAt (the finalize moment) does not record.
+        $decision->setResolvedAt($now);
 
         /** @var Decision $saved */
         $saved = $this->decisionMapper->update($decision);
@@ -1260,6 +1913,7 @@ class DecisionService {
         string $sort,
         ?int   $before,
         int    $limit,
+        string $viewerUid = '',
     ): array {
         $this->assertModuleEnabledForTeam($teamId);
         $this->memberService->requireMemberLevel($teamId);
@@ -1309,8 +1963,22 @@ class DecisionService {
 
         $rows = $this->decisionMapper->list($teamId, $normalised, $sort, $before, $limit);
 
+        // v4.5.42 — the Decisions tab is the third surface a restricted open
+        // proposal could appear on, after the feed and the stream. Filtered
+        // after the query rather than in it: the audience lives in its own
+        // table and the mapper's cursor pagination is built around a plain id
+        // ordering that a join would complicate for one page's worth of rows.
+        //
+        // The consequence is worth stating: a page can come back short when
+        // restricted proposals are filtered out of it, and `nextBefore` is
+        // still computed from the **unfiltered** row count so pagination does
+        // not stall. A viewer excluded from several proposals sees a slightly
+        // smaller page, never a truncated list.
         $items = [];
         foreach ($rows as $r) {
+            if (!$this->canViewDecision($r, $viewerUid)) {
+                continue;
+            }
             $items[] = $this->serialize($r);
         }
 
@@ -1330,12 +1998,47 @@ class DecisionService {
      * DeckService::getCardsByIds — so the response carries titles/board info
      * suitable for direct render).
      */
-    public function get(string $teamId, int $decisionId): array {
+    public function get(string $teamId, int $decisionId, string $viewerUid = ''): array {
         $this->assertModuleEnabledForTeam($teamId);
         $this->memberService->requireMemberLevel($teamId);
 
         $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+
+        // v4.5.42 — the authoritative audience gate. The feed and the stream
+        // filter lists; this is the one that stops a direct fetch by id, and
+        // without it the other two would be decoration.
+        //
+        // "Decision not found" rather than "forbidden" on purpose: the caller
+        // is a team member who has no way to know the proposal exists, and a
+        // 403 would confirm that it does.
+        //
+        // The viewer is passed in rather than read from the session, matching
+        // every mutating method on this service. An empty uid therefore fails
+        // the audience test rather than passing it — a caller that forgets to
+        // identify itself gets nothing.
+        if (!$this->canViewDecision($decision, $viewerUid)) {
+            throw new \RuntimeException('Decision not found');
+        }
+
         $serialised = $this->serialize($decision);
+
+        // v4.5.42 — the current proposal text, for the proposer's editor.
+        //
+        // Deliberately here and not in serialize(): the body lives on the
+        // backing message, so including it there would cost one extra query
+        // per row in list() and in every feed hydration, for a field only the
+        // detail panel reads. `selectedAnswer` is not a substitute — it is
+        // null until finalize, which is exactly the window the editor is for.
+        try {
+            $message = $this->messageMapper->find($decision->getMessageId());
+            $serialised['proposalBody'] = (string)($message['message'] ?? '');
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] proposal body lookup failed', [
+                'decision_id' => $decisionId, 'error' => $e->getMessage(),
+            ]);
+            $serialised['proposalBody'] = null;
+        }
+
         // Task links are fetched via the separate GET /decisions/{id}/tasks
         // endpoint (Session B). No longer embedded in the show() response.
         return $serialised;
@@ -1503,11 +2206,43 @@ class DecisionService {
             'sourceRef'           => $d->getSourceRef(),
             'createdAt'           => $d->getCreatedAt(),
             'decidedAt'           => $d->getDecidedAt(),
+            // v4.5.25 — when it was approved/denied, as opposed to finalized.
+            'resolvedAt'          => $d->getResolvedAt(),
             'withdrawnAt'         => $d->getWithdrawnAt(),
             'milestoneId'         => $milestoneId,
             'milestoneLabel'      => $milestoneLabel,
             'milestoneDate'       => $milestoneDate,
+            // v4.5.42 — the discussion phase. `audience` is resolved only for
+            // `selected` proposals: for the other two modes there are no rows,
+            // and returning [] would read as "shared with nobody" rather than
+            // "visibility is not restricted".
+            'shareMode'           => $d->getShareMode(),
+            'talkToken'           => $d->getTalkToken(),
+            'talkThreadId'        => $d->getTalkThreadId(),
+            'audience'            => $d->getShareMode() === self::SHARE_SELECTED
+                ? $this->safeAudience($d->getId())
+                : null,
         ];
+    }
+
+    /**
+     * Audience user ids, or [] if the lookup fails.
+     *
+     * Serialisation must not throw: a decision whose audience cannot be read
+     * still needs to render. The *visibility* decision never comes from here —
+     * `canViewDecision()` does its own lookup and fails closed.
+     *
+     * @return string[]
+     */
+    private function safeAudience(int $decisionId): array {
+        try {
+            return $this->audienceMapper->findUserIds($decisionId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] audience lookup failed', [
+                'decision_id' => $decisionId, 'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
     }
 
     /**

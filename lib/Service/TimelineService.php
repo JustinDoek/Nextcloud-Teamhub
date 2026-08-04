@@ -339,7 +339,8 @@ class TimelineService {
                     $editUrl = null;
                     if ($calOwner !== '' && $calSlug !== '') {
                         $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
-                        $objectId = rtrim(strtr(base64_encode($davPath), '+/', '-_'), '=');
+                        // Standard base64 WITH padding — see ActivityService for why.
+                        $objectId = rawurlencode(base64_encode($davPath));
                         $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTs;
                     }
 

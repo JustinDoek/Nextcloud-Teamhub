@@ -64,7 +64,12 @@ class CommentMapper {
             ])
             ->executeStatement();
 
-        $id = $this->db->lastInsertId('oc_teamhub_comments');
+        // '*PREFIX*' — not a hard-coded 'oc_'. NC expands the placeholder to the
+        // instance's configured `dbtableprefix`; a literal prefix is wrong on any
+        // install that changed it, and Postgres resolves a *sequence* from this
+        // name, so it returns 0 there rather than failing loudly. Every other
+        // mapper in this app already uses the placeholder form.
+        $id = (int)$this->db->lastInsertId('*PREFIX*teamhub_comments');
 
         return [
             'id'         => $id,
