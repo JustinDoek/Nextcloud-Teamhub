@@ -3,6 +3,117 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.6.11] — 2026-08-07 — `team:` in a member list accepts a name
+
+> **Rebuild required. No new migration.**
+
+### Fixed
+
+- **`team:Marketing` was dropped as "Unknown team".** The `members` column resolved `group:` tokens by name but matched `team:` tokens only against a raw Circles `unique_id` — a 31-character hash nobody hand-writes into a spreadsheet — so naming a sub-team the way the column reference implied could never work. `team:` now resolves by display name, case-insensitively, and still accepts an ID (tried first, since it is unambiguous).
+- Two teams sharing a display name is refused rather than guessed, with a message pointing at the ID. Circles does not enforce unique display names, so silently picking one would attach the wrong team to somebody's import.
+- The row's matched-names note now reports the team's **own spelling** (`"marketing" → Marketing`) instead of its id, which was accurate and told the admin nothing.
+
+### Changed
+
+- `team:` resolution and the duplicate-name check now read one memoised lookup instead of two queries with two copies of the display-name derivation. That duplication is why a name could count as "already exists" for the collision check while being unresolvable as a sub-team. `teamExists()` is gone, replaced by `resolveTeamId()`.
+
+---
+
+## [4.6.10] — 2026-08-07 — Import gets its own tab, and more than one admin
+
+> **Rebuild required. No new migration.** **Breaking for CSV files written against 4.6.6–4.6.9** — see the column rename below. None of those versions shipped.
+
+### Added
+
+- **Admin → TeamHub → Import/Export**, a tab of its own for bulk team import. It was a section on Team creation (4.6.6), which was the right grouping — bulk creation obeys the team-creation policy configured above it — and lost to volume: an upload control, a format reference, a preview grid, a progress pump and a results download made an unreadable fifth section.
+- **A team can be imported with more than one admin.** The `admin` column is multi-value and position carries meaning: the **first** name becomes the level-9 owner, every later name becomes a level-8 team admin. Circles allows exactly one owner per circle, so a source system that permits several — a Microsoft Teams export routinely carries two or three — has to collapse to one plus a set of admins, and document order is the only rule that survives a re-import unchanged and needs no extra column.
+- `MaintenanceService::adminSetMemberLevel()` — admin-context level write, sibling of `adminRemoveUserFromTeam()` and there for the same reason (DESIGN §2.25). `MemberService::updateMemberLevel()` gates on the *caller's* team level, refuses the caller's own row, and filters on `status = 'Member'`; all three are right for the Manage Team UI and wrong for an import, where the caller is a transient owner about to be removed and a just-invited member may not have accepted yet.
+- The preview grid and the results CSV both gained a **Team admins** column, kept separate from Owner. The point of the preview is to show what the position rule resolved to, which a cell echoing the input cannot do.
+
+### Changed
+
+- **The CSV column `owner` is now `admin`.** Not accepted as an alias — 4.6.6 through 4.6.9 were never published, so there are no files in the wild to protect and a silent fallback would only teach the old name. A file still saying `owner` fails validation with `Missing required column: admin`.
+- The sample CSV's first row now shows a multi-value `admin` cell, because the collapse rule is not guessable from a single-value example.
+- Row outcomes for the new column: the **first** name matching no account (or matching several) fails the row, as `owner` always did. A **later** name in the same cell is dropped with a warning and the team is still created — the same bargain the `members` column already strikes. The owner slot is the first *position*, not the first name that happens to resolve: a typo in position 0 fails the row rather than quietly handing the team to whoever was listed second.
+
+### Fixed
+
+- Nothing — this is a feature change. But note that extra admins are invited through `MemberService::inviteMembers()`, the same path HANDOFF §0's open dropped-member bug lives on, so a team whose second admin does not arrive is that bug and not a new one. Step 8b reports an admin with no member row explicitly rather than letting the promotion silently do nothing, so it will now be visible in the results CSV.
+
+---
+
+## [4.6.9] — 2026-08-07 — Underscores in team names, and Collectives by its own name
+
+> **Rebuild required. No new migration.**
+
+### Added
+
+- **Underscores are allowed in new team names.** `TeamService::assertValidTeamName()` now accepts `A–Z a–z 0–9`, space, `-` and `_`. Underscore clears every bar the rule exists to hold: legal in a filename on all three host platforms (so `Folder::newFolder()` and Group Folder mount paths are unaffected), unreserved in a URL path, and harmless in a Deck board title or Talk room name. Collectives is safe for a different reason — it slugifies with its own `NodeHelper::sanitiseFilename` and TeamHub reads `getSlug()` back rather than deriving one. The rule is enforced in three places (the PHP validator and the two wizards' live guards); all three moved together, and the CSV importer inherits it because it calls the validator rather than restating it.
+
+### Changed
+
+- **The Collectives surface uses the Nextcloud app's own name throughout.** The tab was labelled "Wiki" from 4.3.5; v4.4.14 renamed the Manage Team toggle and the create-team wizard to "Collective" but left the tab alone, so the app answered to three names at once depending on where you stood. Everything is now "Collectives": the tab, "Create Collectives page" (desktop, tablet and mobile), the enable/disable toasts, the disable-confirm dialog, the Manage Team toggle, and the wizard card. Running prose that needs a singular common noun says "the collective" — the app is Collectives, the thing a team has is a collective.
+- 22 strings changed across 7 locale files (en, nl, de, fr, da, es, it), with the two dead keys (`Wiki`, `Collective`) removed rather than left behind.
+
+### Not changed, deliberately
+
+- The `wiki` module key in `TeamTemplateProfiles::MODULES` and the CSV `modules` column keep their name — they are stored values, and renaming them would invalidate import files admins have already written. The admin panel's column reference still documents `wiki` for that reason.
+- `ManageLinksModal`'s "e.g. Project Wiki" placeholder is an example web-link title, unrelated to the Collectives app.
+
+---
+
+## [4.6.8] — 2026-08-07 — The Files tab asks for the canonical URL
+
+> **Rebuild required. No new migration.**
+
+### Fixed
+
+- **The Files tab could not open the team folder on some installs** — the iframe showed "This content is blocked. Contact the site owner to fix the issue" while the same URL opened fine in a new tab ([#74](https://github.com/JustinDoek/Nextcloud-Teamhub/issues/74), reported on NC 34.0.2 / TeamHub 4.6.0). The tab requested `/apps/files?dir=…`, which is not the canonical route: the server answers it with a 301 to `/apps/files/?dir=…`, and Chromium blocks the *redirected* document in an iframe even though `X-Frame-Options: SAMEORIGIN` and `frame-ancestors 'self'` both permit it and no CSP violation is raised. The URL now carries the trailing slash, so there is no redirect to block. `TeamWidgetGrid`'s "Open team folder in Files" button already had it, which is why that path worked.
+- **The Talk tab's no-token fallback** (`/apps/spreed`) carried the same missing slash and would fail the same way on the same installs. Reachable only when the team has a Talk resource without a token, so it had not been reported.
+
+---
+
+## [4.6.7] — 2026-08-07 — Account names are resolved, not assumed
+
+> **Rebuild required. No new migration** — 4.6.6's `Version000406006` still applies.
+
+### Fixed
+
+- **Bulk import matched accounts case-insensitively but stored what you typed.** Nextcloud resolves uids through `uid_lower`, so `IUserManager::userExists('lieke adm')` confirms an account whose uid is `Lieke Adm` — and the importer then used the typed string as an identity. Three consequences, all observed on a live import: the real owner's member row was deleted (`adminIsNamed()` compared `'lieke adm'` to `'Lieke Adm'` and concluded the admin was not meant to stay); `assignOwner()`'s `resolveSingleIdOrFail()` reached `getLocalFederatedUser($uid, create: true)` and **minted a phantom Circles principal** (`user:lieke adm:…`) alongside the real one; and the resulting owner row was unfindable, because `MemberService::getMemberLevelFromDb()` compares `user_id` with `=` (case-sensitive on Postgres) and Circles resolves an initiator by `single_id`. The team showed its owner in the header and told that owner "You are not a member".
+- **Every owner and member name is now resolved to the account's own spelling before anything is persisted.** `resolveUid()` tries `IUserManager::get()` first, then a `search()` pass filtered to exact case-insensitive uid equality for backends without a folded column (LDAP, SSO). A name matching no account fails the row (owner) or drops the member (member); a name matching more than one account across backends is refused rather than guessed. Groups get the same treatment via `resolveGid()`.
+- **Account names with capitals, spaces, accents and non-Latin scripts import correctly.** Nothing rewrites a uid — `mb_strtolower()` is only ever applied to a throwaway comparison copy, and the `group:` / `team:` prefix check reads a lower-cased copy while `substr()` runs on the original.
+- **The preview reports which account each name resolved to** whenever the spelling differs from what was typed, so a mismatch is visible before anything is created.
+- **A failed member invite now carries Circles' reason into the row message and the results CSV**, instead of only the member's name. A member the CSV asked for that produces no result at all is reported too — `MemberService::inviteMembers()` reads any `FederatedItemBadRequestException` as "already invited" and returns success, so a genuine refusal could arrive as silence.
+
+### Changed
+
+- The generated sample CSV uses account names that look like real ones (`Jane Doe`, `Alice Smith`, `Renée Muñoz`) rather than lowercase single-word tokens, which had quietly taught the shape that caused the bug above.
+
+---
+
+## [4.6.6] — 2026-08-06 — Bulk team import
+
+> **Rebuild required. Migration required** (`Version000406006` — two new tables).
+
+### Added
+
+- **Bulk team import from CSV** (Admin → TeamHub → Team creation). One row per team; TeamHub validates the whole file, shows a dry-run preview with a reason on every skipped or failed row, and provisions on confirmation. Durable and resumable: the parsed run is persisted at upload, so confirming is a state flip and closing the tab does not lose it.
+- **Imported teams get the owner the CSV names**, which the wizard cannot do — its creator is always the owner. The importing admin is removed from the team afterwards unless the row names them as its owner or a member, so importing 200 teams no longer makes an admin a member of 200 teams.
+- `lib/Constants/TeamTemplateProfiles.php` — server-side mirror of `CreateTeamView.vue`'s `templateProfile()` (apps, privacy bitmask, modules per template), so imported teams match wizard-created ones. Both files name the other as the mirror to keep in sync.
+- `TeamImportJob` — 5-minute `TimedJob` that finishes a run whose browser tab went away (detected by a stale `heartbeat_at`) and prunes runs finished more than 30 days ago.
+- Seven admin endpoints under `/api/v1/admin/import/teams` — see `APIendpoints.md`.
+- Sample CSV generated in PHP by `TeamImportService::sampleCsv()` and served from the template endpoint, so it can never drift from the parser and needs no new shippable directory.
+
+### Changed
+
+- `MaintenanceService::assignOwner()` takes a fourth parameter, `bool $removePreviousOwner = false`. When true the outgoing owner's member row is deleted rather than demoted to moderator. Default is unchanged, so the Maintenance tab's repair path behaves exactly as before.
+
+### Fixed
+
+- The privacy bitmask is re-applied after ownership transfer during an import. `assignOwner()` resets `circles_circle.config` to 0 — correct for the repair path it was written for, but it lands after the template's privacy settings are written and would otherwise take them with it.
+
+---
+
 ## [4.6.0] — 2026-08-04 — Session close
 
 Rolls up 4.5.48–4.5.51. No new migration since `Version000405042`; a rebuild is required.

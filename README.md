@@ -39,6 +39,7 @@ It started as a visual mock-up to discuss what team-based working could look lik
 - **Sidebar widgets** — upcoming calendar events, open Deck tasks, pages, presence/schedule, and an activity snapshot. Layout is per-user and drag-to-rearrange.
 - **Team management** — invite by user, group, email, or federated account; manage roles and pending requests.
 - **Open integration layer** — other Nextcloud apps can register their own sidebar widgets or sandboxed iframe tabs into a team's home. See [`developers.md`](developers.md).
+- **Bulk team import** — admins can roll out many teams at once from a CSV, one row per team. Each row names its template, its apps and modules, its members, and its owner — so imported teams come out identical to wizard-created ones, and each one lands with the right owner rather than the admin who ran the import. Upload gives you a dry run first: every row is checked, conflicts and errors are shown with reasons, and nothing is created until you confirm.
 - **Admin controls** — org-wide rollout settings, creation permissions, optional modules (Presence, IntraVox), audit and archive tooling.
 
 ## Requirements

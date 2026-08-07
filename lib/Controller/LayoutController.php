@@ -165,6 +165,11 @@ class LayoutController extends Controller {
     // Maximum allowed JSON payload size in bytes (64 KB).
     private const MAX_PAYLOAD_BYTES = 65536;
 
+    // v4.6.1 — any saved y at or above this is a leftover parking position from
+    // the removed TeamView.applySnap(), which parked inactive widgets at
+    // y=9999. Kept in sync with PARK_Y_THRESHOLD in TeamWidgetGrid.vue.
+    private const PARK_Y_THRESHOLD = 1000;
+
     // IConfig preference keys for user default layout.
     private const PREF_DEFAULT_LAYOUT    = 'default_layout_json';
     private const PREF_DEFAULT_TAB_ORDER = 'default_tab_order_json';
@@ -655,6 +660,12 @@ class LayoutController extends Controller {
      * x-column as specified in DEFAULT_LAYOUT, so they do not overlap anything.
      */
     private function mergeNewWidgets(array $layout): array {
+        // v4.6.1 — heal parked rows before anything else reads a y coordinate.
+        // Every placement calculation below (and in healProjectHealthPosition)
+        // takes the max bottom edge of a column; a single item left at y=9999
+        // by the old applySnap() would put the next new widget at y≈10002.
+        $layout = $this->unparkWidgets($layout);
+
         // Prune legacy widget IDs that have been consolidated into new ones.
         // widget-files-{favorites,recent,shared} → widget-files-center (v3.62).
         // widget-collectives → widget-pages (v4.3.7 — Wiki content now renders
@@ -751,6 +762,58 @@ class LayoutController extends Controller {
         // intentionally moved the widget somewhere non-bottom keep their
         // placement.
         $layout = $this->healProjectHealthPosition($layout);
+
+        return $layout;
+    }
+
+    /**
+     * v4.6.1 — pull parked widgets back into the grid.
+     *
+     * Until 4.6.0, TeamView.applySnap() parked every inactive widget at
+     * y=9999 so it would not occupy space, and that value was persisted. The
+     * snap is gone (grid-layout-plus compacts on its own now), but saved rows
+     * still carry the sentinel, and it poisons every "bottom of this column"
+     * calculation that decides where a newly-added widget goes.
+     *
+     * Each parked item is stacked at the bottom of its own x-column, below the
+     * real content. The grid compacts it upward on render, so the exact value
+     * only has to be sane, not perfect. Idempotent: once healed, no item is at
+     * or above the threshold and this is a no-op.
+     */
+    private function unparkWidgets(array $layout): array {
+        // Bottom edge per x-column, counting only unparked items.
+        $columnBottom = [];
+        foreach ($layout as $item) {
+            $y = (int)($item['y'] ?? 0);
+            if ($y >= self::PARK_Y_THRESHOLD) {
+                continue;
+            }
+            $x      = (int)($item['x'] ?? 0);
+            $bottom = $y + (int)($item['h'] ?? 3);
+            if (!isset($columnBottom[$x]) || $bottom > $columnBottom[$x]) {
+                $columnBottom[$x] = $bottom;
+            }
+        }
+
+        $unparked = 0;
+        foreach ($layout as &$item) {
+            if ((int)($item['y'] ?? 0) < self::PARK_Y_THRESHOLD) {
+                continue;
+            }
+            $x = (int)($item['x'] ?? 0);
+            // Stack rather than pile: two parked widgets in one column must not
+            // land on the same y.
+            $item['y']        = $columnBottom[$x] ?? 0;
+            $columnBottom[$x] = (int)$item['y'] + (int)($item['h'] ?? 3);
+            $unparked++;
+        }
+        unset($item);
+
+        if ($unparked > 0) {
+            $this->logger->debug('[TeamHub][LayoutController] unparkWidgets — healed parked widgets', [
+                'count' => $unparked,
+            ]);
+        }
 
         return $layout;
     }

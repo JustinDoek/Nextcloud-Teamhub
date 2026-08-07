@@ -1677,7 +1677,16 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function canCreateTeam(): JSONResponse {
-        return new JSONResponse(['canCreate' => $this->memberService->canCurrentUserCreateTeam()]);
+        // v4.6.2 — isAdmin rides this call rather than getting an endpoint of
+        // its own: App.vue already fetches it once on mount, and the landing
+        // page's setup-checklist pointer needs exactly one extra boolean.
+        // Presentational only — it gates a link, never an action, and every
+        // admin surface it points at enforces its own admin check server-side.
+        $uid = $this->userSession->getUser()?->getUID();
+        return new JSONResponse([
+            'canCreate' => $this->memberService->canCurrentUserCreateTeam(),
+            'isAdmin'   => $uid !== null && $this->groupManager->isAdmin($uid),
+        ]);
     }
 
     #[NoAdminRequired]

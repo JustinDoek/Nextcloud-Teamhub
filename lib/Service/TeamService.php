@@ -470,7 +470,16 @@ class TeamService {
      * Rules:
      *   - Non-empty after trim.
      *   - ≤ 255 chars.
-     *   - Only ASCII letters (A–Z, a–z), digits (0–9), spaces, and `-`.
+     *   - Only ASCII letters (A–Z, a–z), digits (0–9), spaces, `-`, and `_`.
+     *
+     * v4.6.9 — underscore admitted. It clears every bar the rule exists to
+     * hold: legal in a filename on all three host platforms, so
+     * `Folder::newFolder()` and Group Folder mount paths are unaffected;
+     * unreserved in a URL path; and harmless in a Deck board title or Talk
+     * room name. Collectives is safe for a different reason — it slugifies
+     * with its own `NodeHelper::sanitiseFilename` and we read `getSlug()`
+     * back rather than deriving one, so whatever it does with `_` is what we
+     * link to.
      *
      * @throws \InvalidArgumentException with a message safe to surface to the user.
      */
@@ -482,8 +491,8 @@ class TeamService {
         if (mb_strlen($trimmed) > 255) {
             throw new \InvalidArgumentException('Team name is too long (max 255 characters).');
         }
-        if (preg_match('/^[A-Za-z0-9 -]+$/', $trimmed) !== 1) {
-            throw new \InvalidArgumentException('Team name may only contain letters (A–Z, a–z), digits (0–9), spaces, and hyphens (-). Punctuation and non-ASCII characters are not allowed.');
+        if (preg_match('/^[A-Za-z0-9 _-]+$/', $trimmed) !== 1) {
+            throw new \InvalidArgumentException('Team name may only contain letters (A–Z, a–z), digits (0–9), spaces, hyphens (-), and underscores (_). Punctuation and non-ASCII characters are not allowed.');
         }
     }
 
@@ -1230,18 +1239,38 @@ class TeamService {
         if (array_key_exists('createTeamGroup', $settings)) {
             $raw = $settings['createTeamGroup'];
 
-            // Accept JSON array sent from the multi-picker (e.g. '["admins","managers"]')
+            // Accept a JSON array from the multi-picker (e.g. '["admins","Team Leads"]')
+            // or a legacy comma-separated string. The decoded array is kept as
+            // an array rather than immediately imploded, so the filter below
+            // sees each group ID whole.
             if (is_string($raw) && str_starts_with(trim($raw), '[')) {
                 $decoded = json_decode($raw, true);
-                if (is_array($decoded)) {
-                    $raw = implode(',', array_filter(array_map('trim', $decoded)));
-                }
+                $gids    = is_array($decoded) ? $decoded : [];
+            } else {
+                $gids = explode(',', (string)$raw);
             }
 
-            // Sanitise: only printable, non-comma chars per group ID
+            // Sanitise: drop empty IDs, and drop any ID containing a comma —
+            // the stored format is comma-separated, so an embedded comma would
+            // split one group into two on read.
+            //
+            // v4.6.2 — whitespace is NO LONGER rejected. The previous filter was
+            // preg_match('/^[^\s,]+$/', $g), which also dropped every group ID
+            // containing a space, and NC group IDs may legally contain one (a
+            // group created as "Team Leads" has exactly that GID). The failure
+            // was silent and looked like a broken picker: the admin selected a
+            // group, the POST succeeded, the server stored an empty list, and
+            // the reload that follows every save wiped the chip that had just
+            // appeared. Both readers of this value — getAdminSettings() and
+            // MemberService::canCurrentUserCreateTeam() — already explode on
+            // ',' and trim, so they handle spaces correctly; only the write
+            // path was losing them.
             $gids = array_filter(
-                array_map('trim', explode(',', (string)$raw)),
-                fn($g) => $g !== '' && preg_match('/^[^\s,]+$/', $g)
+                array_map(
+                    static fn($g) => is_scalar($g) ? trim((string)$g) : '',
+                    $gids
+                ),
+                static fn($g) => $g !== '' && !str_contains($g, ',')
             );
 
             $config->setAppValue(Application::APP_ID, 'createTeamGroup', implode(',', $gids));

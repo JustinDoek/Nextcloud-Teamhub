@@ -509,8 +509,32 @@ class MaintenanceService {
      * This approach works for both existing members and non-members, and avoids
      * the addMember() API which fails when the user already has a row (even a
      * stale one) and cannot create a consistent membership object.
+     *
+     * v4.6.6 — `$removePreviousOwner` makes step 1 a DELETE instead of a demote.
+     *
+     * The demote is right for the Maintenance tab, where an admin is repairing
+     * one team and the outgoing owner is a real member who should stay. It is
+     * wrong for the bulk importer: the admin is the owner of every team it
+     * creates only because Circles makes the creator the owner, and demoting
+     * leaves them moderator of all 200 teams they imported. The importer passes
+     * true unless its own uid appears as that row's `owner` or in its `members`.
+     *
+     * `MemberService::removeMember()` cannot do this — by the time it would be
+     * called the admin is level 4, and its `requireAdminLevel()` would reject
+     * them from the team they just created.
+     *
+     * Cache: the DELETE lands before step 4b's `MembershipService::onUpdate()`,
+     * which is the same delete-then-rebuild sequence
+     * {@see self::adminRemoveUserFromTeam()} uses — the app's proven path for
+     * removing a member. Without it the removed admin keeps seeing the team in
+     * share pickers and Contacts → Teams.
      */
-    public function assignOwner(string $teamId, string $userId, bool $enforceNcAdmin = true): void {
+    public function assignOwner(
+        string $teamId,
+        string $userId,
+        bool   $enforceNcAdmin = true,
+        bool   $removePreviousOwner = false,
+    ): void {
 
         if ($enforceNcAdmin) {
             $this->requireNcAdmin();
@@ -549,17 +573,56 @@ class MaintenanceService {
             throw new \Exception('User not found: ' . $userId);
         }
 
-        // ── Step 1: Demote any current owners to moderator (level 4) ─────────
-        $demoteQb = $this->db->getQueryBuilder();
-        $demoted  = $demoteQb->update('circles_member')
-            ->set('level', $demoteQb->createNamedParameter(4, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-            ->where($demoteQb->expr()->eq('circle_id', $demoteQb->createNamedParameter($teamId)))
-            ->andWhere($demoteQb->expr()->eq('level',   $demoteQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-            ->executeStatement();
+        // ── Step 0: resolve the target's REAL Circles identity ───────────────
+        // Circles keys everything on single_id, not on the NC uid: the Teams UI,
+        // share resolution for the team's Deck board and calendar, and the
+        // circles_membership cache all start from the user's own single_id and
+        // look for rows carrying it.
+        //
+        // v4.6.3 — this used to be `substr(md5($teamId . $userId . uniqid()), 0, 31)`,
+        // which invented a fresh identity per team instead of resolving the
+        // user's. The row passed every check this method makes (it is a valid
+        // level-9 row for the right uid) while belonging to nobody, so:
+        // TeamHub listed the team for the new owner (it matches on uid), while
+        // Contacts → Teams did not, the team's Deck board and calendar stayed
+        // invisible to them, and the log filled with CircleNotFoundException
+        // from the dangling id. Only the INSERT branch was affected, which is
+        // why promoting an existing member has always worked and promoting an
+        // outsider — the whole point of the admin path — did not.
+        //
+        // Resolve or fail. Never fabricate: a wrong single_id is silent, and a
+        // thrown exception here costs one legible error message.
+        $singleId = $this->resolveSingleIdOrFail($userId);
+
+        // ── Step 1: Clear the current owner ──────────────────────────────────
+        // Default: demote to moderator (level 4) so there is never more than
+        // one owner and the outgoing owner keeps their place on the team.
+        // v4.6.6, $removePreviousOwner: delete the row instead — see the note
+        // on this method for why the bulk importer needs that.
+        //
+        // Both branches exclude $userId. Re-assigning ownership to the person
+        // who already holds it is a legitimate no-op call, and it must not
+        // delete them (or churn their row) on the way through.
+        if ($removePreviousOwner) {
+            $clearQb = $this->db->getQueryBuilder();
+            $clearQb->delete('circles_member')
+                ->where($clearQb->expr()->eq('circle_id',  $clearQb->createNamedParameter($teamId)))
+                ->andWhere($clearQb->expr()->eq('level',     $clearQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($clearQb->expr()->neq('user_id',  $clearQb->createNamedParameter($userId)))
+                ->executeStatement();
+        } else {
+            $demoteQb = $this->db->getQueryBuilder();
+            $demoteQb->update('circles_member')
+                ->set('level', $demoteQb->createNamedParameter(4, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->where($demoteQb->expr()->eq('circle_id', $demoteQb->createNamedParameter($teamId)))
+                ->andWhere($demoteQb->expr()->eq('level',   $demoteQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($demoteQb->expr()->neq('user_id', $demoteQb->createNamedParameter($userId)))
+                ->executeStatement();
+        }
 
         // ── Step 2: Does the target user already have a member row? ──────────
         $checkQb  = $this->db->getQueryBuilder();
-        $checkRes = $checkQb->select('id')
+        $checkRes = $checkQb->select('id', 'single_id')
             ->from('circles_member')
             ->where($checkQb->expr()->eq('circle_id',  $checkQb->createNamedParameter($teamId)))
             ->andWhere($checkQb->expr()->eq('user_id',   $checkQb->createNamedParameter($userId)))
@@ -569,12 +632,39 @@ class MaintenanceService {
         $existingRow = $checkRes->fetch();
         $checkRes->closeCursor();
 
+        // Set when we correct a row written by the pre-4.6.3 INSERT above, so
+        // step 4c can ask Circles to drop the membership rows it cached under
+        // the bogus id. Stays null on a healthy row.
+        $staleSingleId = null;
+
         if ($existingRow) {
-            // UPDATE existing row
+            // UPDATE existing row.
+            //
+            // v4.6.3 — single_id is now written here too, not just level. A row
+            // created by the old code carries an invented id, and without this
+            // the existence check above would find it, bump it to level 9, and
+            // leave the identity broken — so re-assigning a user who was made
+            // owner by the buggy version would appear to change nothing. Rows
+            // Circles created already hold the correct value, making this a
+            // no-op for them; a user's single_id is their identity everywhere,
+            // so there is no case where a differing value is legitimate.
+            $existingSingleId = (string)($existingRow['single_id'] ?? '');
+            if ($existingSingleId !== '' && $existingSingleId !== $singleId) {
+                $staleSingleId = $existingSingleId;
+                $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: healing member row with a stale single_id', [
+                    'teamId' => $teamId,
+                    'userId' => $userId,
+                    'was'    => $existingSingleId,
+                    'now'    => $singleId,
+                    'app'    => Application::APP_ID,
+                ]);
+            }
+
             $updateQb = $this->db->getQueryBuilder();
             $affected = $updateQb->update('circles_member')
-                ->set('level',  $updateQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                ->set('status', $updateQb->createNamedParameter('Member'))
+                ->set('level',     $updateQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->set('status',    $updateQb->createNamedParameter('Member'))
+                ->set('single_id', $updateQb->createNamedParameter($singleId))
                 ->where($updateQb->expr()->eq('circle_id',  $updateQb->createNamedParameter($teamId)))
                 ->andWhere($updateQb->expr()->eq('user_id',   $updateQb->createNamedParameter($userId)))
                 ->andWhere($updateQb->expr()->eq('user_type', $updateQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
@@ -587,8 +677,7 @@ class MaintenanceService {
             //   - member_id = userId for local users
             //   - optional columns (display_name, cached_name, note, contact_id, contact_meta)
             //     are probed via getTableColumns() and included only if the column exists.
-            $singleId = substr(md5($teamId . $userId . uniqid('', true)), 0, 31);
-
+            // single_id comes from step 0 — the user's real Circles identity.
             $insertQb     = $this->db->getQueryBuilder();
             $existingCols = array_flip($this->resourceService->getTableColumns('circles_member'));
 
@@ -622,7 +711,7 @@ class MaintenanceService {
 
         // ── Step 3: Verify the promotion actually landed ──────────────────────
         $verifyQb  = $this->db->getQueryBuilder();
-        $verifyRes = $verifyQb->select('level', 'status')
+        $verifyRes = $verifyQb->select('level', 'status', 'single_id')
             ->from('circles_member')
             ->where($verifyQb->expr()->eq('circle_id',  $verifyQb->createNamedParameter($teamId)))
             ->andWhere($verifyQb->expr()->eq('user_id',   $verifyQb->createNamedParameter($userId)))
@@ -634,6 +723,12 @@ class MaintenanceService {
 
         if (!$verifyRow || (int)$verifyRow['level'] !== 9) {
             throw new \Exception('Owner assignment failed — could not verify level=9 row in circles_member.');
+        }
+        // v4.6.3 — verify the identity too. level=9 alone was the check that let
+        // the invented-single_id rows through: correct level, correct uid, wrong
+        // person as far as Circles is concerned.
+        if ((string)($verifyRow['single_id'] ?? '') !== $singleId) {
+            throw new \Exception('Owner assignment failed — circles_member.single_id does not match the resolved Circles identity for ' . $userId . '.');
         }
 
         // ── Step 4: Reset the circle config to 0 so probeCircles() shows it ──
@@ -662,6 +757,25 @@ class MaintenanceService {
             ]);
         }
 
+        // ── Step 4c: drop membership rows cached under a healed stale id ──────
+        // onUpdate($teamId) above rebuilds from the circle's current members, so
+        // it never revisits an id that is no longer one — the rows it cached for
+        // the old invented single_id would simply be orphaned. Calling onUpdate
+        // with that id hits its own first branch: no federated user resolves for
+        // it, so Circles removes its membership rows itself. No raw DELETE, and
+        // nothing to do on a healthy assignment.
+        if ($staleSingleId !== null) {
+            try {
+                $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
+                $membershipService->onUpdate($staleSingleId);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: stale membership cleanup failed', [
+                    'teamId' => $teamId, 'staleSingleId' => $staleSingleId,
+                    'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
         // ── Step 5: Send NC notification to the new owner ────────────────────
         $this->sendOwnerAssignedNotification($teamId, $userId, $adminUser);
 
@@ -675,11 +789,70 @@ class MaintenanceService {
             'team',
             $teamId,
             [
-                'previous_owner' => $previousOwnerUid,
-                'new_owner'      => $userId,
-                'enforced_admin' => $enforceNcAdmin,
+                'previous_owner'         => $previousOwnerUid,
+                'new_owner'              => $userId,
+                'enforced_admin'         => $enforceNcAdmin,
+                // v4.6.6 — distinguishes "demoted to moderator" from "removed
+                // from the team", which is the whole difference between the
+                // Maintenance repair path and the bulk importer.
+                'removed_previous_owner' => $removePreviousOwner,
             ],
         );
+    }
+
+    /**
+     * v4.6.3 — the target user's real Circles single_id, or throw.
+     *
+     * Two strategies, in the same order MemberService::requestJoinTeam() uses
+     * them, because that path is the one confirmed to produce rows Circles
+     * agrees with:
+     *   1. MemberService::resolveUserSingleId() — reads the identity Circles
+     *      already knows for this user.
+     *   2. FederatedUserService::getLocalFederatedUser($uid, true, true) —
+     *      creates the personal circle for a user who has never interacted
+     *      with Circles, and returns its id.
+     *
+     * Deliberately throws rather than falling back to a generated value. The
+     * generated value is what broke this method: it satisfies every structural
+     * check while being an identity no other part of Nextcloud can resolve, so
+     * the failure surfaces later, somewhere else, as missing teams and shares.
+     */
+    private function resolveSingleIdOrFail(string $userId): string {
+        $singleId = null;
+
+        try {
+            $memberService = $this->container->get(MemberService::class);
+            $singleId = $memberService->resolveUserSingleId($userId, $this->db);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MaintenanceService] resolveSingleIdOrFail: lookup failed', [
+                'userId' => $userId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        if (!$singleId) {
+            // No personal circle yet — brand-new account that has never touched
+            // Circles. Let Circles create it rather than inventing one.
+            try {
+                $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+                $singleId = $federatedUserService->getLocalFederatedUser($userId, true, true)->getSingleId();
+                $this->logger->info('[TeamHub][MaintenanceService] resolveSingleIdOrFail: personal circle generated', [
+                    'userId' => $userId, 'singleId' => $singleId, 'app' => Application::APP_ID,
+                ]);
+            } catch (\Throwable $e) {
+                $this->logger->error('[TeamHub][MaintenanceService] resolveSingleIdOrFail: could not generate personal circle', [
+                    'userId' => $userId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        if (!$singleId) {
+            throw new \Exception(
+                'Cannot assign ownership to ' . $userId . ': their Nextcloud Teams identity could not be resolved. '
+                . 'The account may not be fully initialised — have them sign in once, then retry.'
+            );
+        }
+
+        return $singleId;
     }
 
     /**
@@ -2091,5 +2264,107 @@ class MaintenanceService {
         $this->logger->info('[TeamHub][MaintenanceService] adminRemoveUserFromTeam: removed', [
             'teamId' => $teamId, 'userId' => $userId, 'app' => Application::APP_ID,
         ]);
+    }
+
+    /**
+     * Set a direct member's level from NC admin context (v4.6.10).
+     *
+     * Sibling of {@see self::adminRemoveUserFromTeam()}, and the same reason
+     * for existing: `MemberService::updateMemberLevel()` gates on the *caller's*
+     * team level, refuses to touch the caller's own row, and filters on
+     * `status = 'Member'`. All three are right for the Manage Team UI it was
+     * written for and wrong for a bulk import, where the caller is a transient
+     * owner about to be removed and a just-invited member may not have accepted
+     * yet. See DESIGN §2.25 for the pattern.
+     *
+     * Two differences from `updateMemberLevel()` worth stating plainly:
+     *
+     *  - **Status is not filtered.** On a team carrying `CFG_INVITE` an invited
+     *    member sits at status `Invited`, level 0, until they accept. Writing
+     *    the level anyway records the intent, so accepting lands them as an
+     *    admin rather than silently as a plain member. `updateMemberLevel()`'s
+     *    `status = 'Member'` clause would match no row and report success —
+     *    the one outcome an admin cannot act on (HANDOFF §0).
+     *  - **The owner is still off-limits.** A level-9 row belongs to
+     *    `assignOwner()`; changing it here would leave a circle with no owner.
+     *
+     * @param int  $level          1 (member), 4 (moderator) or 8 (admin)
+     * @param bool $enforceNcAdmin false when the caller has already gated
+     * @return bool true when a row was updated; false when the user has no
+     *              direct row on this team (inherited access, or the invite
+     *              never landed) — the caller decides whether that is worth
+     *              reporting
+     * @throws \InvalidArgumentException on a bad level or empty argument
+     * @throws \Exception when the target is the team owner
+     */
+    public function adminSetMemberLevel(
+        string $teamId,
+        string $userId,
+        int    $level,
+        bool   $enforceNcAdmin = true,
+    ): bool {
+
+        if ($enforceNcAdmin) {
+            $this->requireNcAdmin();
+        }
+
+        if ($teamId === '' || $userId === '') {
+            throw new \InvalidArgumentException('teamId and userId are required');
+        }
+        if (!in_array($level, [1, 4, 8], true)) {
+            throw new \InvalidArgumentException('Invalid level. Must be 1 (Member), 4 (Moderator) or 8 (Admin)');
+        }
+
+        // Read the direct row first — both to confirm it exists and to refuse
+        // the owner before writing anything.
+        $mQb  = $this->db->getQueryBuilder();
+        $mRes = $mQb->select('level')
+            ->from('circles_member')
+            ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
+            ->andWhere($mQb->expr()->eq('user_id',  $mQb->createNamedParameter($userId)))
+            ->andWhere($mQb->expr()->eq('user_type', $mQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $mRow = $mRes->fetch();
+        $mRes->closeCursor();
+
+        if (!$mRow) {
+            return false;
+        }
+        if ((int)$mRow['level'] >= 9) {
+            throw new \Exception('Cannot change the level of the team owner — use assignOwner instead');
+        }
+        if ((int)$mRow['level'] === $level) {
+            return true;    // already there; no write, no audit row
+        }
+
+        $upQb = $this->db->getQueryBuilder();
+        $upQb->update('circles_member')
+            ->set('level', $upQb->createNamedParameter($level, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->where($upQb->expr()->eq('circle_id', $upQb->createNamedParameter($teamId)))
+            ->andWhere($upQb->expr()->eq('user_id',  $upQb->createNamedParameter($userId)))
+            ->andWhere($upQb->expr()->eq('user_type', $upQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeStatement();
+
+        // Level does not change the membership set, so the circles_membership
+        // cache does not need rebuilding here — unlike the remove path above.
+
+        $actor = $this->userSession->getUser();
+        $this->auditService->log(
+            $teamId,
+            'member.level_changed_by_admin',
+            $actor !== null ? $actor->getUID() : null,
+            'user',
+            $userId,
+            ['source' => 'admin', 'from' => (int)$mRow['level'], 'to' => $level],
+        );
+
+        $this->logger->info('[TeamHub][MaintenanceService] adminSetMemberLevel: level set', [
+            'teamId' => $teamId, 'userId' => $userId,
+            'from' => (int)$mRow['level'], 'to' => $level,
+            'app' => Application::APP_ID,
+        ]);
+
+        return true;
     }
 }

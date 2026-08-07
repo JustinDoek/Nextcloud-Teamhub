@@ -34,16 +34,27 @@ use Psr\Log\LoggerInterface;
  * Collectives call:
  *
  *   archive mode | disable action
- *   hard         | deleteCollective(id, uid, deleteCircle=FALSE)
+ *   hard         | purgeCollective()  = trashCollective(id, uid)
+ *                                     + deleteCollective(id, uid, FALSE)
  *   soft30/60    | trashCollective(id, uid)  (restorable from Collectives'
  *                                             own trash within its retention;
  *                                             hard-delete-after-grace
  *                                             scheduling is deferred)
  *
+ * ⚠ deleteCollective() is the PURGE half of a two-step delete, not the whole
+ * operation — it opens with getCollectiveFromTrash() and throws "Collective
+ * not found in trash: {id}" if the collective is still live. Always go through
+ * purgeCollective(), which trashes first. (v4.6.5 — both call sites used to
+ * invoke it directly, so hard-disable and the team-delete cascade both threw
+ * every time.)
+ *
  * ⚠ deleteCircle MUST be false on every hard-delete — TeamHub owns the
  * Circle (it IS the team), so passing true would take the whole team
  * down as a side effect of the admin flipping one toggle. There is no
- * scenario where we want that.
+ * scenario where we want that. That argument does double duty: the FALSE
+ * branch is what calls unflagCircleAsAppManaged(), releasing Collectives'
+ * claim on the circle. Without that release Circles rejects the team delete
+ * with status 120, "Team is managed from an other app".
  *
  * ⚠ Deferred (documented in CHANGELOG 4.3.3 known limitations):
  *   1. Archive-bundle export. When archiveBeforeDelete=true the collective
@@ -435,7 +446,10 @@ class CollectivesService {
             if ($archiveMode === 'hard') {
                 // deleteCircle MUST be false — the Circle IS the team.
                 // See class docblock's warning block.
-                $svc->deleteCollective($collectiveId, $adminUid, /* deleteCircle */ false);
+                // v4.6.5 — via purgeCollective: deleteCollective() alone throws
+                // on a live collective, so this branch had the same defect as
+                // the team cascade.
+                $this->purgeCollective($svc, $collectiveId, $adminUid);
                 $action = 'hard';
                 // Clear the cached collective id — the row is gone.
                 $this->config->deleteAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId);
@@ -961,7 +975,13 @@ class CollectivesService {
         // widget click lands on the specific page in the iframe instead
         // of the collective's landing (same fix as createPage in 4.3.12).
         $baseUrl = $collective['url'];
-        $collectiveSlug = ltrim(str_replace('/apps/collectives/', '', $baseUrl), '/');
+        // v4.6.4 — read the raw segment from the payload instead of recovering
+        // it by string surgery on the URL. getPageLink() rawurlencodes what it
+        // is given, so handing it an already-encoded segment double-encoded it.
+        // The ?? keeps the old extraction as a fallback for any caller that
+        // builds this array without serializeCollective.
+        $collectiveSlug = $collective['urlSegment']
+            ?? rawurldecode(ltrim(str_replace('/apps/collectives/', '', $baseUrl), '/'));
         $pageSvc = $this->container->get(\OCA\Collectives\Service\PageService::class);
 
         $out = [];
@@ -1110,8 +1130,11 @@ class CollectivesService {
             // path segments first, treating fileId only as a
             // slug-resolution fallback. Canonical link builder handles
             // this correctly across every collective/page variant.
-            $baseUrl = $collective['url']; // '/apps/collectives/{slug}'
-            $collectiveSlug = ltrim(str_replace('/apps/collectives/', '', $baseUrl), '/');
+            $baseUrl = $collective['url']; // '/apps/collectives/{slug}-{id}'
+            // v4.6.4 — see the matching note in listSubpages: raw segment from
+            // the payload, because getPageLink() encodes it itself.
+            $collectiveSlug = $collective['urlSegment']
+                ?? rawurldecode(ltrim(str_replace('/apps/collectives/', '', $baseUrl), '/'));
             $pageLink = '';
             try {
                 $pageLink = (string)$pageSvc->getPageLink($collectiveSlug, $created, true);
@@ -1384,6 +1407,70 @@ class CollectivesService {
         return null;
     }
 
+    /**
+     * v4.6.5 — permanently remove a collective through Collectives' own
+     * two-step delete.
+     *
+     * `CollectiveService::deleteCollective()` is the PURGE half, not the whole
+     * operation: its first line is `getCollectiveFromTrash($id, $userId)`, so
+     * called on a live collective it throws
+     *
+     *     Collective not found in trash: {id}
+     *
+     * and nothing else in it runs. We were calling it directly in two places,
+     * so it always threw and never did anything. Trash first, then purge.
+     *
+     * The trash step tolerates failure: "already in the trash" is the ordinary
+     * reason (a collective disabled under soft30/soft60 is sitting there), and
+     * any other cause resurfaces immediately from the purge below with a
+     * clearer message. The purge is deliberately NOT swallowed — callers decide
+     * what a failure means for them.
+     */
+    private function purgeCollective(object $svc, int $collectiveId, string $adminUid): void {
+        try {
+            $svc->trashCollective($collectiveId, $adminUid);
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][CollectivesService] purgeCollective: trash step skipped: ' . $e->getMessage(), [
+                'collectiveId' => $collectiveId, 'app' => Application::APP_ID,
+            ]);
+        }
+        // deleteCircle=false — the Circle IS the team; Collectives must never
+        // destroy it. This argument is also what makes Collectives call
+        // unflagCircleAsAppManaged(), releasing its claim on the circle.
+        $svc->deleteCollective($collectiveId, $adminUid, /* deleteCircle */ false);
+    }
+
+    /**
+     * v4.6.5 — clear Collectives' app-managed claim on a team's circle.
+     *
+     * Normally Collectives does this itself, inside
+     * `deleteCollective(deleteCircle: false)`. This is the fallback for when
+     * that call could not complete: while the flag is set, Circles rejects
+     * `destroyCircle` with status 120, "Team is managed from an other app", so
+     * leaving it would make the team permanently undeletable.
+     *
+     * Only for the team-deletion cascade. Do NOT call it when the collective
+     * survives — the flag is correct in that case.
+     *
+     * Best-effort and never throws: the caller is already on a failure path.
+     */
+    private function releaseAppManagedFlag(string $teamId, int $collectiveId): void {
+        try {
+            $circleHelper = $this->container->get(\OCA\Collectives\Service\CircleHelper::class);
+            $circleHelper->unflagCircleAsAppManaged($teamId);
+            $this->logger->warning('[TeamHub][CollectivesService] released the app-managed flag for a collective that could not be purged — it is now orphaned and needs manual cleanup in Collectives', [
+                'teamId' => $teamId, 'collectiveId' => $collectiveId,
+                'app'    => Application::APP_ID,
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][CollectivesService] could not release the app-managed flag — the team delete will fail with "Team is managed from an other app"', [
+                'teamId' => $teamId, 'collectiveId' => $collectiveId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Cascade-delete — called from TeamService::deleteTeam
     // ─────────────────────────────────────────────────────────────────────
@@ -1410,17 +1497,26 @@ class CollectivesService {
             $svc = $this->container->get(\OCA\Collectives\Service\CollectiveService::class);
             // deleteCircle=false — the team's own cascade handles the
             // Circle itself; passing true here would race with that.
-            $svc->deleteCollective($collectiveId, $adminUid, /* deleteCircle */ false);
+            $this->purgeCollective($svc, $collectiveId, $adminUid);
             $this->logger->info('[TeamHub][CollectivesService] cascade-deleted collective for team', [
                 'teamId' => $teamId, 'collectiveId' => $collectiveId,
                 'app'    => Application::APP_ID,
             ]);
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][CollectivesService] cascade delete failed (non-fatal)', [
+            // v4.6.5 — this was labelled non-fatal, and for the collective it
+            // is. For the TEAM it was not: deleteCollective(deleteCircle:false)
+            // is also what calls unflagCircleAsAppManaged(), so a throw here
+            // left the circle flagged and Circles then refused the team delete
+            // with status 120, "Team is managed from an other app". The user
+            // saw that message; the real cause was this line, logged as
+            // harmless. Release the flag explicitly so a collective we could
+            // not purge cannot hold the team hostage.
+            $this->logger->warning('[TeamHub][CollectivesService] cascade delete failed — releasing the app-managed flag so the team delete can proceed', [
                 'teamId' => $teamId, 'collectiveId' => $collectiveId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
             ]);
+            $this->releaseAppManagedFlag($teamId, $collectiveId);
         }
         $this->config->deleteAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId);
         $this->config->deleteAppValue(Application::APP_ID, self::CFG_ENABLED       . $teamId);
@@ -1458,17 +1554,41 @@ class CollectivesService {
         try { $name = (string)$c->getName(); } catch (\Throwable) {}
         $emoji = null;
         try { $emoji = $c->getEmoji(); } catch (\Throwable) {}
-        // Prefer the slug where present — Collectives' own URL layer
-        // does the same. Falls back to the sanitised name.
         $slug = '';
         try { $slug = (string)$c->getSlug(); } catch (\Throwable) {}
-        $urlSegment = $slug !== '' ? $slug : rawurlencode($name);
-        $url = '/apps/collectives/' . $urlSegment;
+
+        // v4.6.4 — the URL segment is `{slug}-{id}`, NOT the bare slug.
+        // Collectives builds it that way itself (RecentPagesService, 4.4.2):
+        //
+        //     $collectiveUrlPart = $collective->getSlug()
+        //         ? $collective->getSlug() . '-' . $collective->getId()
+        //         : $collective->getName();
+        //
+        // We emitted the slug alone, and the bug hid behind Collectives'
+        // name-resolution fallback: a segment that fails to parse as
+        // `{slug}-{id}` is retried as a collective *name*. For a one-word team
+        // the slug and the name are the same string ("DeleteMe"), so the
+        // fallback matched and the link worked. Add a space and they diverge —
+        // slug "Design-lab" against name "Design lab" — the fallback misses and
+        // the link 404s. That is why this only ever reproduced with a space in
+        // the team name.
+        //
+        // Two forms, deliberately: urlSegment is RAW because
+        // PageService::getPageLink() rawurlencodes its first argument itself,
+        // and url is encoded because it goes straight into an href. With a slug
+        // present the two are identical (hyphens and alphanumerics are
+        // unreserved); they only diverge on the no-slug fallback, where the raw
+        // name can contain spaces — and double-encoding that produced
+        // "Test%2520Team".
+        $urlSegment = $slug !== '' ? $slug . '-' . $id : $name;
         return [
             'id'    => $id,
             'name'  => $name,
             'emoji' => $emoji !== null ? (string)$emoji : null,
-            'url'   => $url,
+            'url'   => '/apps/collectives/' . rawurlencode($urlSegment),
+            // Raw path component, for callers that pass it back into
+            // Collectives' own link builder rather than into an href.
+            'urlSegment' => $urlSegment,
         ];
     }
 

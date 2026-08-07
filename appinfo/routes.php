@@ -213,6 +213,23 @@ return [
         ['name' => 'maintenance#removeUserFromTeams',       'url' => '/api/v1/admin/maintenance/users/{userId}/remove-from-teams', 'verb' => 'POST'],
 
         // ----------------------------------------------------------------
+        // Bulk team import (v4.6.6) — NC admin only. Every method in
+        // TeamImportController carries #[AuthorizedAdminSetting] and the
+        // service re-checks; there is no #[NoAdminRequired] in that file.
+        //
+        // Order matters: /template and /validate are registered before
+        // /{id}, otherwise the literal segments would be captured as an id.
+        // Same trap as the messages/config note further down this file.
+        // ----------------------------------------------------------------
+        ['name' => 'teamImport#template', 'url' => '/api/v1/admin/import/teams/template',      'verb' => 'GET'],
+        ['name' => 'teamImport#validate', 'url' => '/api/v1/admin/import/teams/validate',      'verb' => 'POST'],
+        ['name' => 'teamImport#start',    'url' => '/api/v1/admin/import/teams/{id}/start',    'verb' => 'POST'],
+        ['name' => 'teamImport#process',  'url' => '/api/v1/admin/import/teams/{id}/process',  'verb' => 'POST'],
+        ['name' => 'teamImport#show',     'url' => '/api/v1/admin/import/teams/{id}',          'verb' => 'GET'],
+        ['name' => 'teamImport#destroy',  'url' => '/api/v1/admin/import/teams/{id}',          'verb' => 'DELETE'],
+        ['name' => 'teamImport#index',    'url' => '/api/v1/admin/import/teams',               'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver
         // ----------------------------------------------------------------
         ['name' => 'linkPreview#resolve',    'url' => '/api/v1/preview',       'verb' => 'GET'],
