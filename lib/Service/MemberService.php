@@ -52,6 +52,8 @@ class MemberService {
         private LoggerInterface      $logger,
         private AuditService         $auditService,
         private PendingDeletionMapper $pendingMapper,
+        // v4.6.26 — owns the "Mail or mailto:" question for the whole app.
+        private MailClientService    $mailClientService,
     ) {
     }
 
@@ -387,6 +389,52 @@ class MemberService {
 
         $this->requireMemberLevel($teamId);
 
+        $list = $this->resolveEffectiveMembers($teamId);
+
+        // Step 4: enrich each row with email, phone, and live NC status.
+        //
+        // Used by the members widget (Members + Tomorrow + Search tabs). The
+        // @mention autocomplete consumer reads only userId/displayName and is
+        // unaffected by the extra fields.
+        //
+        // - Email: IUser::getEMailAddress() returns the stored address, no
+        //   visibility check applies. Empty/null if not set.
+        // - Phone: read via IAccountManager respecting account visibility.
+        //   Only returned when scope is LOCAL/FEDERATED/PUBLISHED — never
+        //   for PRIVATE.
+        // - ncStatus: live status from IUserStatusManager, batched in one
+        //   call. Status is one of 'online' | 'away' | 'dnd' | 'busy' |
+        //   'invisible' | 'offline'. Message may be null. Icon may be null.
+        $list = $this->enrichMembersForWidget($list);
+
+        // Sort by display name, case-insensitive
+        usort($list, fn ($a, $b) => strcasecmp($a['displayName'], $b['displayName']));
+
+        $this->logger->info('[TeamHub][MemberService] getAllEffectiveMembers: resolved', [
+            'teamId' => $teamId, 'count' => count($list), 'app' => Application::APP_ID,
+        ]);
+
+        return $list;
+    }
+
+    /**
+     * The effective member set of a team, as `[{ userId, displayName }]`.
+     *
+     * v4.6.26 — extracted verbatim from `getAllEffectiveMembers()` so a caller
+     * that only needs *who is in the team* can have it without paying for the
+     * widget enrichment pass, which does a per-user `IAccountManager` read for
+     * the phone number and a live user-status fetch. Building a mailto: link
+     * needs neither.
+     *
+     * **No authorisation happens here.** It is a private helper and every
+     * caller gates first — `getAllEffectiveMembers()` and
+     * `getTeamMemberEmailAddresses()` both call `requireMemberLevel()` before
+     * reaching this. Any future caller owes the same.
+     *
+     * @return list<array{userId: string, displayName: string}>
+     */
+    private function resolveEffectiveMembers(string $teamId): array {
+
         $db = $this->container->get(\OCP\IDBConnection::class);
 
         $seen = [];
@@ -495,30 +543,54 @@ class MemberService {
         }
         $dRes->closeCursor();
 
-        // Step 4: enrich each row with email, phone, and live NC status.
-        //
-        // Used by the members widget (Members + Tomorrow + Search tabs). The
-        // @mention autocomplete consumer reads only userId/displayName and is
-        // unaffected by the extra fields.
-        //
-        // - Email: IUser::getEMailAddress() returns the stored address, no
-        //   visibility check applies. Empty/null if not set.
-        // - Phone: read via IAccountManager respecting account visibility.
-        //   Only returned when scope is LOCAL/FEDERATED/PUBLISHED — never
-        //   for PRIVATE.
-        // - ncStatus: live status from IUserStatusManager, batched in one
-        //   call. Status is one of 'online' | 'away' | 'dnd' | 'busy' |
-        //   'invisible' | 'offline'. Message may be null. Icon may be null.
-        $list = $this->enrichMembersForWidget($list);
-
-        // Sort by display name, case-insensitive
-        usort($list, fn ($a, $b) => strcasecmp($a['displayName'], $b['displayName']));
-
-        $this->logger->info('[TeamHub][MemberService] getAllEffectiveMembers: resolved', [
-            'teamId' => $teamId, 'count' => count($list), 'app' => Application::APP_ID,
-        ]);
-
         return $list;
+    }
+
+    /**
+     * Every email address in a team's effective member set (v4.6.26).
+     *
+     * Backs the sidebar's "Email all members". Members with no address on
+     * their account are skipped rather than represented by an empty slot —
+     * `oc_accounts_data` holds an empty string for a user who never set one,
+     * and an empty recipient is worse than a missing one.
+     *
+     * The count of *all* effective members comes back alongside, because the
+     * difference between the two numbers is the thing worth telling the user:
+     * "9 of 14 members have an email address" is actionable, "9 recipients" on
+     * its own hides that five people will not receive it.
+     *
+     * Member-gated, like every team-scoped read here: a team's roster of email
+     * addresses is member-visible information, which is the same boundary the
+     * members widget already applies to the same data.
+     *
+     * @return array{addresses: list<string>, memberCount: int}
+     * @throws \Exception if the user is not authenticated or not a member
+     */
+    public function getTeamMemberEmailAddresses(string $teamId): array {
+
+        $this->requireMemberLevel($teamId);
+
+        $members   = $this->resolveEffectiveMembers($teamId);
+        $addresses = [];
+
+        foreach ($members as $row) {
+            try {
+                $email = $this->userManager->get($row['userId'])?->getEMailAddress();
+            } catch (\Throwable $e) {
+                // A backend that cannot resolve one account must not cost the
+                // whole team its mail action.
+                $email = null;
+            }
+            $email = trim((string)$email);
+            if ($email !== '') {
+                $addresses[] = $email;
+            }
+        }
+
+        return [
+            'addresses'   => $addresses,
+            'memberCount' => count($members),
+        ];
     }
 
     /**
@@ -682,31 +754,14 @@ class MemberService {
      * this — same approach as the Deck and Talk reads elsewhere in the app.
      * Every failure degrades to false, i.e. to the `mailto:` link the members
      * widget shipped before this existed.
+     *
+     * v4.6.26 — the lookup itself moved to `MailClientService`, which is now
+     * the single answer to this question for the whole app. This method stays
+     * as the members widget's way in; the payload key it feeds
+     * (`mailAvailable`, documented in APIendpoints.md) is unchanged.
      */
     public function isMailAvailableForCurrentUser(): bool {
-        $user = $this->userSession->getUser();
-        if ($user === null) {
-            return false;
-        }
-        try {
-            if (!$this->appManager->isEnabledForUser('mail', $user)) {
-                return false;
-            }
-            $db = $this->container->get(\OCP\IDBConnection::class);
-            $qb = $db->getQueryBuilder();
-            $result = $qb->select('id')
-                ->from('mail_accounts')
-                ->where($qb->expr()->eq('user_id', $qb->createNamedParameter($user->getUID())))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $result->fetch();
-            $result->closeCursor();
-            return (bool)$row;
-        } catch (\Throwable $e) {
-            // Mail enabled but the table missing/renamed on this version —
-            // fall back rather than break the members widget.
-            return false;
-        }
+        return $this->mailClientService->isAvailableForCurrentUser();
     }
 
     /**
@@ -967,6 +1022,26 @@ class MemberService {
         $row = $result->fetch();
         $result->closeCursor();
         return $row ? (int)$row['level'] : 0;
+    }
+
+    /**
+     * Read a team's raw Circles config bitmask.
+     *
+     * Returns 0 for a team that does not exist, which `CirclesConfig::joinPolicy()`
+     * reads as JOIN_CLOSED — the safe answer either way, since a join against a
+     * missing circle has nothing to succeed at.
+     */
+    private function fetchTeamConfig(\OCP\IDBConnection $db, string $teamId): int {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('config')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        return $row ? (int)$row['config'] : 0;
     }
 
     /**
@@ -1577,10 +1652,22 @@ class MemberService {
                 }
 
                 // Circles' addMember() creates an 'Invited' status row for non-user
-                // types (groups, circles). For user_type=1, it goes straight to
-                // 'Member'. For groups and circles added by a team admin, we treat
-                // the invite as immediately confirmed — the admin is explicitly
-                // choosing to include this group; no secondary acceptance is needed.
+                // types (groups, circles). For groups and circles added by a team
+                // admin, we treat the invite as immediately confirmed — the admin
+                // is explicitly choosing to include this group; no secondary
+                // acceptance is needed.
+                //
+                // v4.6.12 — this block used to claim that "for user_type=1, it
+                // goes straight to 'Member'". That is only true on a team whose
+                // config lacks CFG_INVITE (32). With CFG_INVITE set, a user lands
+                // 'Invited' at level 0 with no circles_membership row, exactly
+                // like a group does, and stays there until they accept. The claim
+                // is why a bulk-imported team admin could be promoted to level 8
+                // and still have no access to anything (observed on a team with
+                // config 40). Users are deliberately still NOT auto-confirmed
+                // here — a pending invite is the team's privacy config doing its
+                // job. The import bypasses it only for accounts named in the
+                // `admin` column, in MaintenanceService::adminSetMemberLevel().
                 //
                 // We update the row directly: status → 'Member', level → 1.
                 // Then rebuild the Circles membership cache so the group's users
@@ -1709,6 +1796,28 @@ class MemberService {
             throw new \Exception('User not authenticated');
         }
 
+        // v4.6.17 — refuse an invite-only team before either path runs.
+        //
+        // Circles already refuses one (CircleJoin::manageMemberStatus throws
+        // when CFG_OPEN is absent), but that refusal was being caught by the
+        // try/catch below and answered with the DB fallback, which inserts a
+        // Requesting row unconditionally. So an invite-only team could be
+        // joined-by-request from any crafted POST, and its admins got a
+        // notification asking them to approve somebody the team's own
+        // configuration says may not ask.
+        //
+        // The sentinel is passed to the frontend verbatim, in the shape
+        // leaveTeam's `indirect_member` established, so the controller can
+        // answer 403 rather than a generic 400.
+        $db     = $this->container->get(\OCP\IDBConnection::class);
+        $policy = CirclesConfig::joinPolicy($this->fetchTeamConfig($db, $teamId));
+        if ($policy === CirclesConfig::JOIN_CLOSED) {
+            $this->logger->info('[TeamHub][MemberService] requestJoinTeam: refused — team is invite only', [
+                'uid' => $user->getUID(), 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+            throw new \Exception('invite_only');
+        }
+
         // First try via Circles CircleService::circleJoin() — this is the same
         // path the Circles UI uses (LocalController::circleJoin). It calls
         // setCurrentFederatedUser() internally and does not require a manual
@@ -1735,7 +1844,6 @@ class MemberService {
 
         // Fallback: insert a pending member row directly.
         // status=Requesting, level=1 (member), user_type=1 (local user)
-        $db  = $this->container->get(\OCP\IDBConnection::class);
         $uid = $user->getUID();
 
         // Check not already a member or requesting
@@ -1839,29 +1947,24 @@ class MemberService {
             throw new \Exception('Failed to request team membership: ' . $e->getMessage());
         }
 
-        // Check if the circle is open-join (CFG_OPEN bit set = no approval needed).
-        // This must happen BEFORE sending a notification so admins are only notified
-        // when the join actually requires their approval.
+        // Does this join complete now, or wait for a moderator? Decided from the
+        // policy resolved at the top of the method — before the insert, and
+        // before any notification, so admins are only told about a request that
+        // actually needs them.
+        //
+        // v4.6.17 — this branch used to test CFG_OPEN alone, which is the gate
+        // on *whether* you may join, not on whether approval is needed. On a
+        // team configured "anyone can join, but a moderator approves" the
+        // fallback therefore flipped the row straight to Member and skipped the
+        // notification entirely: the moderator gate existed in the settings and
+        // nowhere else. CFG_REQUEST is what distinguishes the two, and
+        // joinPolicy() is where that reading lives now.
         try {
-            $cfgQb  = $db->getQueryBuilder();
-            $cfgRes = $cfgQb->select('config')
-                ->from('circles_circle')
-                ->where($cfgQb->expr()->eq('unique_id', $cfgQb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $cfgRow = $cfgRes->fetch();
-            $cfgRes->closeCursor();
-
-            $circleConfig = $cfgRow ? (int)$cfgRow['config'] : 0;
-            $isOpen = ($circleConfig & CirclesConfig::CFG_OPEN) > 0;
-
-
-            $this->logger->info('[TeamHub][MemberService] requestJoinTeam: circle config check', [
-                'teamId' => $teamId, 'config' => $circleConfig, 'isOpen' => $isOpen,
-                'app'    => Application::APP_ID,
+            $this->logger->info('[TeamHub][MemberService] requestJoinTeam: join policy check', [
+                'teamId' => $teamId, 'policy' => $policy, 'app' => Application::APP_ID,
             ]);
 
-            if ($isOpen) {
+            if ($policy === CirclesConfig::JOIN_OPEN) {
                 // Open circle: auto-approve by flipping status straight to Member.
                 // Do NOT send a notification — no admin action is required.
                 //
@@ -1923,9 +2026,11 @@ class MemberService {
                 // approves pending request, (c) here — open-circle self-join.
                 $this->talkService->syncUserToTeamTalkRoom($teamId, $uid);
             } else {
-                // Closed circle: notify admins that approval is needed.
+                // JOIN_REQUEST — the row stays `Requesting` and a moderator
+                // decides. (JOIN_CLOSED never reaches here: it is refused at
+                // the top of the method, before any row is written.)
                 $this->sendJoinRequestNotification($teamId, $uid, $db);
-                $this->logger->info('[TeamHub][MemberService] requestJoinTeam: closed circle — notification sent to admins', [
+                $this->logger->info('[TeamHub][MemberService] requestJoinTeam: approval required — notification sent to admins', [
                     'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
 
@@ -1941,7 +2046,7 @@ class MemberService {
             }
         } catch (\Throwable $e) {
             // Non-fatal — user is Requesting and an admin can approve manually
-            $this->logger->warning('[TeamHub][MemberService] requestJoinTeam: open/closed check failed, skipping notification', [
+            $this->logger->warning('[TeamHub][MemberService] requestJoinTeam: join-policy handling failed, skipping notification', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }

@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
 use OCP\IDBConnection;
+use OCP\IL10N;
 use OCP\IUserManager;
 use OCP\IUserSession;
 use OCP\Notification\IManager as INotificationManager;
@@ -29,7 +30,21 @@ class MaintenanceService {
         private ContainerInterface $container,
         private LoggerInterface    $logger,
         private ResourceService    $resourceService,
+        // v4.6.20 — the team calendar follows team ownership; see step 4d in
+        // assignOwner().
+        private CalendarService    $calendarService,
+        // v4.6.23 — and so do the team's Deck boards and conversations; steps
+        // 4e and 4f. Neither service depends back on this one, so injecting
+        // them directly does not reintroduce the ResourceService → DeckService
+        // cycle DeckService's own docblock warns about.
+        private DeckService        $deckService,
+        private TalkService        $talkService,
         private AuditService       $auditService,
+        // v4.6.17 — for the Email owner subject and opening line. The viewer's
+        // own language is the right one here: unlike a notification, this text
+        // is drafted for the person clicking to read and edit in their own
+        // compose window, not sent to somebody else.
+        private IL10N              $l,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -202,11 +217,39 @@ class MaintenanceService {
             $cRes->closeCursor();
 
             // ── Step 5: owner display names ───────────────────────────────────
+            // v4.6.17 — and their email addresses, for the Email owner button.
+            // Same loop, same `IUserManager::get()` call: the address is a
+            // property of the user object already being hydrated for its name,
+            // so this costs nothing beyond the array.
             $ownerUids = array_filter(array_unique(array_column($page_rows, '_owner_uid')));
-            $ownerNames = [];
+            $ownerNames  = [];
+            $ownerEmails = [];
             foreach ($ownerUids as $uid) {
                 $u = $this->userManager->get($uid);
                 $ownerNames[$uid] = $u ? ($u->getDisplayName() ?: $uid) : $uid;
+                $email = $u?->getEMailAddress();
+                $ownerEmails[$uid] = ($email !== null && $email !== '') ? $email : null;
+            }
+
+            // ── Step 5b: expiration dates (v4.6.13) ──────────────────────────
+            // Three batch lookups for the whole page rather than three per row.
+            // All three degrade to "no expiry information" rather than failing
+            // the grid: this column is governance metadata, and an admin who
+            // came here to reassign an owner should still get their table.
+            $expiry          = [];
+            $expiryEligible  = [];
+            $pendingRequests = [];
+            try {
+                $expiryService   = $this->container->get(\OCA\TeamHub\Service\TeamExpiryService::class);
+                $expiry          = $expiryService->getExpiryForTeams($pageIds);
+                $expiryEligible  = $expiryService->eligibilityForTeams($pageIds);
+                $pendingRequests = $this->container
+                    ->get(\OCA\TeamHub\Db\TeamExpiryRequestMapper::class)
+                    ->findPendingByTeams($pageIds);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MaintenanceService] Expiry lookup failed for teams grid', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
             }
 
             // ── Step 6: assemble ──────────────────────────────────────────────
@@ -221,6 +264,25 @@ class MaintenanceService {
                     'owner'              => $uid,
                     'owner_display_name' => $uid !== null ? ($ownerNames[$uid] ?? $uid) : null,
                     'creation'           => $r['_creation'],
+                    // null when the team has no expiry; the decorated shape
+                    // (expiresOn, daysRemaining, expired, warning) otherwise.
+                    'expiry'             => $expiry[$r['_id']] ?? null,
+                    // Whether this team's template may have one at all —
+                    // Collaboration and Project yes, Department and legacy no.
+                    'expiry_eligible'    => $expiryEligible[$r['_id']] ?? false,
+                    'expiry_request_pending' => isset($pendingRequests[$r['_id']]),
+                    // v4.6.17 — where the Email owner button goes, or null when
+                    // the team has no owner or the owner has no address. The
+                    // frontend hides the button on null rather than offering one
+                    // that opens an empty compose window (SKILLS.md § Permissions
+                    // applied to an affordance rather than a role — the same rule
+                    // the My Work row follows).
+                    'owner_mailto'       => $this->ownerMailtoFor(
+                        $r['_id'],
+                        (string)$r['_name'],
+                        $uid !== null ? ($ownerEmails[$uid] ?? null) : null,
+                        $expiry[$r['_id']] ?? null,
+                    ),
                 ];
             }
 
@@ -235,6 +297,57 @@ class MaintenanceService {
             $this->logger->error('[TeamHub] MaintenanceService::getAllTeams failed', ['exception' => $e]);
             throw new \Exception('Failed to load teams: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Compose URL for the All teams table's Email owner button (v4.6.17).
+     *
+     * Null when there is nobody to write to — no owner, or an owner with no
+     * address on their account. The button is hidden in that case rather than
+     * disabled, so an administrator is never offered a control that opens an
+     * empty compose window.
+     *
+     * The opening line follows the team's expiry state, because that is what
+     * this table is for and it is the question an administrator writing to an
+     * owner from here is almost always asking. A team with no expiration date
+     * gets a neutral line rather than an invented deadline.
+     *
+     * Which client opens is `TeamExpiryService::mailComposeUrl()`'s decision,
+     * shared with the My Work row so the two cannot disagree — Nextcloud Mail
+     * only when the viewer actually has an account configured in it.
+     *
+     * @param array{expiresOn: string, expired: bool}|null $expiry decorated row, or null
+     */
+    private function ownerMailtoFor(string $teamId, string $teamName, ?string $ownerEmail, ?array $expiry): ?string {
+        if ($ownerEmail === null) {
+            return null;
+        }
+
+        try {
+            $expiryService = $this->container->get(\OCA\TeamHub\Service\TeamExpiryService::class);
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][MaintenanceService] expiry service unavailable for compose URL', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
+        }
+
+        if (is_array($expiry) && isset($expiry['expiresOn'])) {
+            $on      = (string)$expiry['expiresOn'];
+            $expired = (bool)($expiry['expired'] ?? false);
+
+            $subject = $expired
+                ? $this->l->t('%1$s passed its expiration date on %2$s', [$teamName, $on])
+                : $this->l->t('%1$s expires on %2$s', [$teamName, $on]);
+            $body = $expired
+                ? $this->l->t("The team \"%1\$s\" passed its expiration date on %2\$s. Nothing has been deleted and the team still works, but could you let me know whether it is still needed?", [$teamName, $on])
+                : $this->l->t("The team \"%1\$s\" is set to expire on %2\$s. Nothing is deleted when it does and the team keeps working, but could you let me know whether it is still needed?", [$teamName, $on]);
+        } else {
+            $subject = $this->l->t('About the team %s', [$teamName]);
+            $body    = $this->l->t("I am writing about the team \"%s\" on our Nextcloud.", [$teamName]);
+        }
+
+        return $expiryService->mailComposeUrl($ownerEmail, $subject, $body);
     }
 
     // -------------------------------------------------------------------------
@@ -776,6 +889,87 @@ class MaintenanceService {
             }
         }
 
+        // ── Step 4d: move the team's calendars to the new owner (v4.6.20) ─────
+        // A CalDAV calendar belongs to a person — there is no calendar home for
+        // a circle principal — so a team calendar always sits in somebody's
+        // account. Before this step it stayed with whoever ran the create
+        // wizard, however many times the team changed hands, and NC deletes a
+        // user's own calendars when the account is deleted. A team that had
+        // properly transferred ownership years earlier could still lose its
+        // calendar to the departure of a person no longer involved.
+        //
+        // Best-effort on purpose. Ownership of the *team* has already been
+        // transferred by the steps above and that is the operation the caller
+        // asked for; failing the whole assignment because a calendar could not
+        // be moved would leave the team in a worse state than a calendar on the
+        // wrong principal. Failures are logged and audited, not thrown.
+        $calendarTransfer = ['moved' => [], 'failed' => [], 'sharedUrlsChanged' => false];
+        try {
+            $calendarTransfer = $this->calendarService->transferTeamCalendars($teamId, $userId);
+            if ($calendarTransfer['failed'] !== []) {
+                $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: some calendars did not move', [
+                    'teamId' => $teamId, 'newOwner' => $userId,
+                    'failed' => $calendarTransfer['failed'], 'app' => Application::APP_ID,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: calendar transfer failed', [
+                'teamId' => $teamId, 'newOwner' => $userId,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // ── Step 4e: move the team's Deck boards to the new owner (v4.6.23) ──
+        // Same failure as the calendar, in a different app. `deck_boards.owner`
+        // is a single uid, and Deck's ParticipantCleanupListener answers
+        // UserDeletedEvent by calling findAllByOwner() and deleting every board
+        // that account owns — ACL participants do not save it. A board left on
+        // a departed creator is destroyed for the whole team.
+        //
+        // Best-effort for the same reason as 4d: the team has already changed
+        // hands, and a board that could not move is a smaller problem than an
+        // ownership transfer that half-happened.
+        $deckTransfer = ['moved' => [], 'failed' => []];
+        try {
+            $deckTransfer = $this->deckService->transferTeamBoards($teamId, $userId);
+            if ($deckTransfer['failed'] !== []) {
+                $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: some Deck boards did not move', [
+                    'teamId' => $teamId, 'newOwner' => $userId,
+                    'failed' => $deckTransfer['failed'], 'app' => Application::APP_ID,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: Deck transfer failed', [
+                'teamId' => $teamId, 'newOwner' => $userId,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // ── Step 4f: hand the team's conversations over (v4.6.23) ────────────
+        // **Not the same kind of fix.** Talk does not destroy a room when its
+        // owner is deleted — Manager::removeUserFromAllRooms() only deletes one
+        // whose last participant left. Nothing is at risk here; what is wrong
+        // is that the conversation's OWNER stays with whoever ran the create
+        // wizard, so a former owner keeps the highest rights over the team's
+        // conversation and the real owner does not. The previous owner is
+        // demoted to moderator rather than removed, because they are usually
+        // still in the team. See TalkService::transferTeamRoomOwnership().
+        $talkTransfer = ['moved' => [], 'failed' => []];
+        try {
+            $talkTransfer = $this->talkService->transferTeamRoomOwnership($teamId, $userId);
+            if ($talkTransfer['failed'] !== []) {
+                $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: some conversations did not change hands', [
+                    'teamId' => $teamId, 'newOwner' => $userId,
+                    'failed' => $talkTransfer['failed'], 'app' => Application::APP_ID,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MaintenanceService] assignOwner: Talk transfer failed', [
+                'teamId' => $teamId, 'newOwner' => $userId,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
         // ── Step 5: Send NC notification to the new owner ────────────────────
         $this->sendOwnerAssignedNotification($teamId, $userId, $adminUser);
 
@@ -796,6 +990,19 @@ class MaintenanceService {
                 // from the team", which is the whole difference between the
                 // Maintenance repair path and the bulk importer.
                 'removed_previous_owner' => $removePreviousOwner,
+                // v4.6.20 — which calendars followed the team, and which did
+                // not. Recorded because a calendar left on the old owner is a
+                // deletion risk somebody has to know about, and because a moved
+                // calendar changes the CalDAV URL its sharees sync from.
+                'calendars_moved'        => count($calendarTransfer['moved']),
+                'calendars_failed'       => count($calendarTransfer['failed']),
+                // v4.6.23 — same reasoning as the calendar counts. A board
+                // left behind is a deletion risk somebody has to know about;
+                // a conversation left behind is a stale moderator.
+                'deck_boards_moved'      => count($deckTransfer['moved']),
+                'deck_boards_failed'     => count($deckTransfer['failed']),
+                'talk_rooms_moved'       => count($talkTransfer['moved']),
+                'talk_rooms_failed'      => count($talkTransfer['failed']),
             ],
         );
     }
@@ -2277,14 +2484,20 @@ class MaintenanceService {
      * owner about to be removed and a just-invited member may not have accepted
      * yet. See DESIGN §2.25 for the pattern.
      *
-     * Two differences from `updateMemberLevel()` worth stating plainly:
+     * Three differences from `updateMemberLevel()` worth stating plainly:
      *
      *  - **Status is not filtered.** On a team carrying `CFG_INVITE` an invited
-     *    member sits at status `Invited`, level 0, until they accept. Writing
-     *    the level anyway records the intent, so accepting lands them as an
-     *    admin rather than silently as a plain member. `updateMemberLevel()`'s
-     *    `status = 'Member'` clause would match no row and report success —
-     *    the one outcome an admin cannot act on (HANDOFF §0).
+     *    member sits at status `Invited`, level 0, until they accept.
+     *    `updateMemberLevel()`'s `status = 'Member'` clause would match no row
+     *    and report success — the one outcome an admin cannot act on.
+     *  - **Status is confirmed, not merely preserved (v4.6.12).** A pending
+     *    invite is a question put to the invitee; an admin naming somebody in
+     *    the import's `admin` column has already answered it on their behalf,
+     *    the same way the group/team invite path in `MemberService` treats an
+     *    admin's choice as confirmation. Leaving the row `Invited` produced an
+     *    admin on paper with no access at all: no `circles_membership` row, so
+     *    no share resolution, no resource ACL, nothing. Level without status is
+     *    half a promotion.
      *  - **The owner is still off-limits.** A level-9 row belongs to
      *    `assignOwner()`; changing it here would leave a circle with no owner.
      *
@@ -2318,7 +2531,7 @@ class MaintenanceService {
         // Read the direct row first — both to confirm it exists and to refuse
         // the owner before writing anything.
         $mQb  = $this->db->getQueryBuilder();
-        $mRes = $mQb->select('level')
+        $mRes = $mQb->select('level', 'status')
             ->from('circles_member')
             ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
             ->andWhere($mQb->expr()->eq('user_id',  $mQb->createNamedParameter($userId)))
@@ -2334,20 +2547,48 @@ class MaintenanceService {
         if ((int)$mRow['level'] >= 9) {
             throw new \Exception('Cannot change the level of the team owner — use assignOwner instead');
         }
-        if ((int)$mRow['level'] === $level) {
+
+        $wasStatus  = (string)($mRow['status'] ?? '');
+        $wasLevel   = (int)$mRow['level'];
+        $needsLevel = $wasLevel !== $level;
+        // Anything that is not already a confirmed member gets confirmed —
+        // `Invited` on a CFG_INVITE team, and any other pending status Circles
+        // may introduce. Comparison is case-insensitive because the column
+        // carries Circles' own capitalisation ('Member', 'Invited').
+        $needsStatus = strcasecmp($wasStatus, 'Member') !== 0;
+
+        if (!$needsLevel && !$needsStatus) {
             return true;    // already there; no write, no audit row
         }
 
         $upQb = $this->db->getQueryBuilder();
         $upQb->update('circles_member')
-            ->set('level', $upQb->createNamedParameter($level, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-            ->where($upQb->expr()->eq('circle_id', $upQb->createNamedParameter($teamId)))
+            ->set('level', $upQb->createNamedParameter($level, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+        if ($needsStatus) {
+            $upQb->set('status', $upQb->createNamedParameter('Member'));
+        }
+        $upQb->where($upQb->expr()->eq('circle_id', $upQb->createNamedParameter($teamId)))
             ->andWhere($upQb->expr()->eq('user_id',  $upQb->createNamedParameter($userId)))
             ->andWhere($upQb->expr()->eq('user_type', $upQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->executeStatement();
 
-        // Level does not change the membership set, so the circles_membership
-        // cache does not need rebuilding here — unlike the remove path above.
+        // Level alone would not move the membership set, but confirming the
+        // status does: Circles only writes a circles_membership row for a
+        // confirmed member, and that cache is what share pickers, resource
+        // ACLs and — importantly — Circles' own initiator check all read. A
+        // promotion without this leaves an admin who cannot be resolved as a
+        // member of the team they administer.
+        if ($needsStatus) {
+            try {
+                $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
+                $membershipService->onUpdate($teamId);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MaintenanceService] adminSetMemberLevel: cache rebuild failed', [
+                    'teamId' => $teamId, 'userId' => $userId,
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
 
         $actor = $this->userSession->getUser();
         $this->auditService->log(
@@ -2356,12 +2597,13 @@ class MaintenanceService {
             $actor !== null ? $actor->getUID() : null,
             'user',
             $userId,
-            ['source' => 'admin', 'from' => (int)$mRow['level'], 'to' => $level],
+            ['source' => 'admin', 'from' => $wasLevel, 'to' => $level, 'confirmed' => $needsStatus],
         );
 
         $this->logger->info('[TeamHub][MaintenanceService] adminSetMemberLevel: level set', [
             'teamId' => $teamId, 'userId' => $userId,
-            'from' => (int)$mRow['level'], 'to' => $level,
+            'from' => $wasLevel, 'to' => $level,
+            'statusWas' => $wasStatus, 'confirmed' => $needsStatus,
             'app' => Application::APP_ID,
         ]);
 

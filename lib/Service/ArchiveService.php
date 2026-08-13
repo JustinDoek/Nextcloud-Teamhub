@@ -74,7 +74,17 @@ class ArchiveService {
         private CalendarService        $calendarService,
         private DeckService            $deckService,
         private CollectivesService     $collectivesService,
+        private TimezoneService        $timezoneService,
     ) {}
+
+    /**
+     * Whose timezone the archive's dates are rendered in: the person running
+     * the archive. Empty (cron-driven grace deletion) falls back to the
+     * instance default_timezone inside TimezoneService.
+     */
+    private function archiveUid(): string {
+        return $this->userSession->getUser()?->getUID() ?? '';
+    }
 
     // =========================================================================
     // Public API
@@ -1052,7 +1062,7 @@ class ArchiveService {
 
             // ── 13. Zip atomically ────────────────────────────────────────────
             $slug     = $this->slugify($teamName);
-            $dateStr  = date('Y-m-d', $this->timeFactory->getTime());
+            $dateStr  = $this->timezoneService->formatTimestamp($this->timeFactory->getTime(), $this->archiveUid());
             $filename = "{$slug}-{$dateStr}.zip";
             $tmpZip   = sys_get_temp_dir() . '/' . $filename . '.tmp';
             $this->writer->produceZip($workDir, $tmpZip, $tmpZip);
@@ -2504,7 +2514,9 @@ class ArchiveService {
                     $dueTs    = strtotime((string)$card['due_date']);
                     $overdue  = $dueTs && $dueTs < time();
                     $dueHtml  = '<div class="due' . ($overdue ? ' due--overdue' : '') . '">Due: '
-                        . $esc($dueTs ? date('Y-m-d', $dueTs) : (string)$card['due_date']) . '</div>';
+                        . $esc($dueTs
+                            ? $this->timezoneService->formatTimestamp($dueTs, $this->archiveUid())
+                            : (string)$card['due_date']) . '</div>';
                 }
 
                 // Description (first 200 chars — cards can have long markdown).
@@ -2743,8 +2755,9 @@ HTML;
         foreach ($messages as $msg) {
             // Date separator.
             $ts        = strtotime((string)$msg['creation_timestamp']) ?: 0;
-            $dateStr   = $ts ? date('Y-m-d', $ts) : '';
-            $timeStr   = $ts ? date('H:i', $ts)   : '';
+            $uid       = $this->archiveUid();
+            $dateStr   = $ts ? $this->timezoneService->formatTimestamp($ts, $uid) : '';
+            $timeStr   = $ts ? $this->timezoneService->formatTimestamp($ts, $uid, 'H:i') : '';
 
             if ($dateStr && $dateStr !== $lastDate) {
                 $rows     .= '<div class="date-sep">' . $esc($dateStr) . '</div>';

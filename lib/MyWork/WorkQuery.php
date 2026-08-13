@@ -14,6 +14,33 @@ namespace OCA\TeamHub\MyWork;
  * list is passed in so providers can also push the constraint down into their
  * SQL instead of over-fetching.
  *
+ * ## The one exception: instance-scoped providers (v4.6.13)
+ *
+ * Some work is owed by a *Nextcloud administrator*, about teams they may have
+ * no membership in at all — a team approaching its expiration date is the first
+ * such case. Membership is the wrong boundary for that, because the whole point
+ * is to reach an admin who is not in the team.
+ *
+ * A provider may declare `isInstanceScoped(): bool` (optional, discovered by
+ * `method_exists` the way ProviderRegistry already discovers `getDiagnostics`).
+ * MyWorkService puts its id in `$instanceScopedProviderIds` **only when the
+ * viewer is a Nextcloud administrator**, and only then does `bypassesTeamScope`
+ * let its items past the membership filter.
+ *
+ * Three properties keep that from being a hole:
+ *
+ *   1. The allow-list is built server-side from `IGroupManager::isAdmin()`. A
+ *      client cannot ask to be on it.
+ *   2. It is per-provider, not global. Every other provider keeps the
+ *      membership boundary exactly as it was.
+ *   3. An instance-scoped provider owes its own authorisation in **both**
+ *      `fetchItems()` and `getItem()` — MyWorkService is no longer checking on
+ *      its behalf. A provider that declares this and then does not check is
+ *      the bug this contract makes findable.
+ *
+ * An explicit team filter still wins: `$teamFilterActive` turns the bypass off,
+ * because a user who narrowed to one team asked to see that team.
+ *
  * Filters are passed to providers as *hints* for server-side narrowing. A
  * provider that ignores them is still correct: MyWorkService applies every
  * filter again on the merged result. Providers should honour the cheap ones
@@ -27,6 +54,17 @@ final class WorkQuery {
      * themselves are always ordered by category urgency, because that is the
      * structure of the page rather than a preference.
      */
+    /**
+     * Fallback retention window for the Completed category, in days.
+     *
+     * The configured value comes from MyWorkConfigService and reaches a query
+     * through `$completedDays`. This constant is the default that applies when
+     * nothing has been configured, and it exists as a name so a provider
+     * re-reading a single completed item outside a real query can use the same
+     * window rather than its own literal.
+     */
+    public const DEFAULT_COMPLETED_DAYS = 7;
+
     public const SORT_DEADLINE = 'deadline';
     public const SORT_PRIORITY = 'priority';
     public const SORT_TEAM     = 'team';
@@ -70,6 +108,12 @@ final class WorkQuery {
      *                                  return, so one noisy source cannot starve
      *                                  the others out of the merged page
      * @param string   $sortBy          one of SORTS; orders items within a group
+     * @param bool     $isInstanceAdmin viewer holds Nextcloud admin. Set from
+     *                                  IGroupManager, never from the request.
+     * @param bool     $teamFilterActive the client narrowed to specific teams,
+     *                                  which disables the instance-scope bypass
+     * @param string[] $instanceScopedProviderIds providers allowed past the
+     *                                  membership filter for this viewer
      */
     public function __construct(
         public readonly string $userId,
@@ -87,18 +131,33 @@ final class WorkQuery {
         public readonly bool $includeCompleted = true,
         public readonly int $upcomingDays = 7,
         public readonly int $actionRequiredDays = 2,
-        public readonly int $completedDays = 7,
+        public readonly int $completedDays = self::DEFAULT_COMPLETED_DAYS,
         public readonly int $now = 0,
         public readonly int $limit = 50,
         public readonly int $offset = 0,
         public readonly int $perProviderCap = 200,
         public readonly string $sortBy = self::SORT_DEADLINE,
+        public readonly bool $isInstanceAdmin = false,
+        public readonly bool $teamFilterActive = false,
+        public readonly array $instanceScopedProviderIds = [],
     ) {
     }
 
     /** Resolved display name for a team, falling back to the raw id. */
     public function teamName(string $teamId): string {
         return $this->teamNames[$teamId] ?? $teamId;
+    }
+
+    /**
+     * May this provider's items skip the membership filter for this viewer?
+     *
+     * See the class docblock. All three conditions must hold, and the first two
+     * are decided by the server rather than the request.
+     */
+    public function bypassesTeamScope(string $providerId): bool {
+        return $this->isInstanceAdmin
+            && !$this->teamFilterActive
+            && in_array($providerId, $this->instanceScopedProviderIds, true);
     }
 
     /** True when the caller asked for this category (or for everything). */

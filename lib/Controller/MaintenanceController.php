@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Service\MaintenanceService;
+use OCA\TeamHub\Service\MyWorkService;
+use OCA\TeamHub\Service\TeamExpiryService;
 use OCA\TeamHub\Service\TelemetryService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -12,6 +14,7 @@ use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 use OCP\IUserManager;
+use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -22,12 +25,21 @@ use Psr\Log\LoggerInterface;
  */
 class MaintenanceController extends Controller {
 
+    // v4.6.13 — the expiry endpoints below map service exceptions properly
+    // (403/404/400) instead of the blanket 500 the older methods in this file
+    // return. Those are a known issue in HANDOFF.md; this trait is how new
+    // methods here avoid adding to it.
+    use ExceptionResponseTrait;
+
     public function __construct(
         string $appName,
         IRequest $request,
         private MaintenanceService $maintenanceService,
+        private TeamExpiryService  $expiryService,
         private TelemetryService   $telemetryService,
+        private MyWorkService      $myWorkService,
         private IUserManager       $userManager,
+        private IUserSession       $userSession,
         private LoggerInterface    $logger,
     ) {
         parent::__construct($appName, $request);
@@ -487,5 +499,113 @@ class MaintenanceController extends Controller {
         }
 
         return new JSONResponse(['results' => $results]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Team expiration dates (v4.6.13)
+    // -------------------------------------------------------------------------
+
+    /**
+     * PUT /api/v1/admin/maintenance/teams/{teamId}/expiry
+     *
+     * Set, extend or clear a team's expiration date.
+     * Body: { "expiresOn": "YYYY-MM-DD" }  — omit or send "" to clear.
+     *
+     * Returns the resulting expiry state, or `null` when it was cleared.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function setTeamExpiry(string $teamId, string $expiresOn = ''): JSONResponse {
+        $teamId = trim($teamId);
+        if ($teamId === '') {
+            return new JSONResponse(['error' => 'teamId is required'], Http::STATUS_BAD_REQUEST);
+        }
+        try {
+            $expiry = $this->expiryService->setExpiry($teamId, $expiresOn === '' ? null : $expiresOn);
+            return new JSONResponse(['expiry' => $expiry]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save the expiration date', ['teamId' => $teamId]);
+        }
+    }
+
+    /**
+     * GET /api/v1/admin/maintenance/expiry-requests
+     * Every extension request waiting for a decision, oldest first.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function listExpiryRequests(): JSONResponse {
+        try {
+            return new JSONResponse([
+                'requests'    => $this->expiryService->listPendingRequests(),
+                'warningDays' => $this->expiryService->getWarningDays(),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load extension requests');
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/expiry-requests/{requestId}/approve
+     *
+     * Body: { "grantedOn": "YYYY-MM-DD", "note": "…" } — both optional.
+     * Omitting grantedOn grants exactly the date that was proposed.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function approveExpiryRequest(int $requestId, string $grantedOn = '', string $note = ''): JSONResponse {
+        try {
+            $request = $this->expiryService->approveRequest(
+                $requestId,
+                $grantedOn === '' ? null : $grantedOn,
+                $note,
+            );
+            $this->dropMyWorkCache();
+            return new JSONResponse(['request' => $request]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to approve the request', ['requestId' => $requestId]);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/expiry-requests/{requestId}/deny
+     * Body: { "note": "…" } — optional, but it is the only thing the requester
+     * gets told, so the UI should encourage it.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function denyExpiryRequest(int $requestId, string $note = ''): JSONResponse {
+        try {
+            $decided = $this->expiryService->denyRequest($requestId, $note);
+            $this->dropMyWorkCache();
+            return new JSONResponse(['request' => $decided]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to deny the request', ['requestId' => $requestId]);
+        }
+    }
+
+    /**
+     * Drop the deciding administrator's My Work cache (v4.6.16).
+     *
+     * The same request also sits in this administrator's My Work queue, and
+     * once it is decided `listPendingRequests()` stops returning it — but the
+     * queue answers from a 60-second cache, so without this the row lingers
+     * after the decision was made on this screen. Deciding from the queue
+     * itself already invalidates through MyWorkService; this closes the other
+     * door into the same state.
+     *
+     * Only the acting user's cache: another administrator's queue is keyed
+     * separately, and their row ages out on the same TTL it always did.
+     * Non-fatal — the decision is already committed and audited, and a cache
+     * that could not be dropped costs a minute, not correctness.
+     */
+    private function dropMyWorkCache(): void {
+        try {
+            $uid = $this->userSession->getUser()?->getUID();
+            if ($uid !== null && $uid !== '') {
+                $this->myWorkService->invalidateUser($uid);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][Maintenance] My Work cache invalidation failed', [
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

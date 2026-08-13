@@ -192,6 +192,61 @@ final class CirclesConfig {
      */
     public const APP_OWNED_BITS = self::CFG_APP; // = 131072
 
+    // -------------------------------------------------------------------------
+    // Join policy — the one place that decides how a non-member gets in
+    // -------------------------------------------------------------------------
+
+    /** Anyone may join; they land as a full member immediately. */
+    public const JOIN_OPEN = 'open';
+
+    /** Anyone may ask to join; a moderator confirms before membership starts. */
+    public const JOIN_REQUEST = 'request';
+
+    /** Nobody joins on their own — membership only ever arrives by invitation. */
+    public const JOIN_CLOSED = 'closed';
+
+    /**
+     * Which of the three join routes a team's config allows.
+     *
+     * **Read off Circles' own source, not inferred.** `CircleJoin::manageMemberStatus()`
+     * (verified against the Circles shipped with NC 34) is the only code that
+     * decides what a self-service join does, and it branches exactly twice:
+     *
+     * ```php
+     * if (!$circle->isConfig(Circle::CFG_OPEN)) {
+     *     throw new FederatedItemBadRequestException(…, 124);   // refused outright
+     * }
+     * if ($circle->isConfig(Circle::CFG_REQUEST)) {
+     *     $member->setStatus(Member::STATUS_REQUEST);           // moderator confirms
+     * } else {
+     *     $member->setLevel(Member::LEVEL_MEMBER);              // straight in
+     *     $member->setStatus(Member::STATUS_MEMBER);
+     * }
+     * ```
+     *
+     * So CFG_OPEN is the gate and CFG_REQUEST only modulates what happens once
+     * you are through it. CFG_REQUEST **without** CFG_OPEN is not "closed but
+     * askable" — it is simply closed, which is why the Manage Team label reads
+     * `Membership requests must be approved by a Moderator (requires "Anyone
+     * can join")`.
+     *
+     * Every surface that offers, describes, or performs a join must call this
+     * rather than test bits itself. Two hand-rolled readings had already drifted
+     * apart before this existed: `browseAllTeams()` treated every non-open team
+     * as merely needing approval, and `MemberService::requestJoinTeam()`'s DB
+     * fallback auto-approved on CFG_OPEN alone — letting a user past a
+     * moderator gate the team had explicitly asked for.
+     */
+    public static function joinPolicy(int $config): string {
+        if (($config & self::CFG_OPEN) === 0) {
+            return self::JOIN_CLOSED;
+        }
+
+        return ($config & self::CFG_REQUEST) !== 0
+            ? self::JOIN_REQUEST
+            : self::JOIN_OPEN;
+    }
+
     /**
      * Legacy bit mask used by TeamHub <= 3.39.0 for `updateTeamConfig`.
      * Held here for the migration's decode step only — DO NOT use anywhere else.

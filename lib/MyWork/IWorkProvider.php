@@ -36,6 +36,23 @@ namespace OCA\TeamHub\MyWork;
  *    provider cost a UI change, which this file's opening claim says it must
  *    not.
  *    Omitting it is legal and means "open `resourceUrl` in a new browser tab".
+ *
+ * ## Optional: instance scope (v4.6.13)
+ *
+ * A provider may additionally declare, outside this interface:
+ *
+ *     public function isInstanceScoped(): bool;
+ *
+ * discovered by `method_exists` the same way `getDiagnostics()` is, so a
+ * provider with no use for it implements nothing. Returning true asks
+ * MyWorkService to let this provider's items past the membership filter **for
+ * Nextcloud administrators only** — see WorkQuery's docblock for the three
+ * conditions and why they are safe.
+ *
+ * Declaring it inverts rule 1 for that provider: MyWorkService is no longer
+ * checking on its behalf, so the provider MUST establish for itself, in both
+ * `fetchItems()` and `getItem()`, that the caller is entitled to what it
+ * returns. `TeamExpiryAdminWorkProvider` is the reference implementation.
  */
 interface IWorkProvider {
 

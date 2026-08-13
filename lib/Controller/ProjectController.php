@@ -194,7 +194,8 @@ class ProjectController extends Controller {
     public function generateClosingArtifact(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
-            return new JSONResponse($this->closingArtifactService->generate($teamId));
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            return new JSONResponse($this->closingArtifactService->generate($teamId, $uid));
         } catch (\Throwable $e) {
             return $this->mapError($e, 'generateClosingArtifact');
         }

@@ -14,6 +14,7 @@ use OCA\TeamHub\MyWork\ProviderRegistry;
 use OCA\TeamHub\MyWork\WorkItem;
 use OCA\TeamHub\MyWork\WorkQuery;
 use OCP\ICacheFactory;
+use OCP\IGroupManager;
 use OCP\IL10N;
 use Psr\Log\LoggerInterface;
 
@@ -40,6 +41,21 @@ use Psr\Log\LoggerInterface;
  * provider, re-checks the team boundary, re-checks the action against the
  * provider's own permission logic and the administrator's allow-list, and only
  * then executes.
+ *
+ * ## The one hole punched in that shape (v4.6.13)
+ *
+ * A provider may declare `isInstanceScoped()` and, **for a viewer who holds
+ * Nextcloud admin**, have its items skip the membership filter. That exists
+ * because some work is owed by an administrator about teams they are not in —
+ * a team a week from its expiration date is the first case — and membership is
+ * simply the wrong question to ask there.
+ *
+ * `instanceScopedProviderIds()` below is the only place the allow-list is
+ * built, it consults `IGroupManager` rather than anything in the request, and
+ * it returns an empty list for every non-admin. Everything downstream goes
+ * through `WorkQuery::bypassesTeamScope()`, so there is one predicate to audit
+ * rather than five inlined conditions. A provider on that list owes its own
+ * authorisation — see IWorkProvider's docblock.
  */
 class MyWorkService {
 
@@ -58,9 +74,51 @@ class MyWorkService {
         private TeamService $teamService,
         private AuditService $auditService,
         private ICacheFactory $cacheFactory,
+        private IGroupManager $groupManager,
         private IL10N $l,
         private LoggerInterface $logger,
     ) {
+    }
+
+    /**
+     * Providers whose items may skip the membership filter for this viewer.
+     *
+     * Empty for everyone who is not a Nextcloud administrator — that check is
+     * the whole gate, and it is made here rather than in each provider so there
+     * is one line to audit. `method_exists` rather than an interface method:
+     * the capability is opt-in and most providers have no use for it, the same
+     * reasoning ProviderRegistry uses for `getDiagnostics()`.
+     *
+     * @return string[]
+     */
+    private function instanceScopedProviderIds(string $userId): array {
+        try {
+            if (!$this->groupManager->isAdmin($userId)) {
+                return [];
+            }
+        } catch (\Throwable $e) {
+            // Cannot establish admin — assume not. Failing closed here costs an
+            // admin their expiry queue; failing open would widen a boundary.
+            $this->logger->warning('[TeamHub][MyWork] Admin check failed; instance scope withheld', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+
+        $out = [];
+        foreach ($this->registry->all() as $id => $provider) {
+            if (!method_exists($provider, 'isInstanceScoped')) {
+                continue;
+            }
+            try {
+                if ($provider->isInstanceScoped() === true) {
+                    $out[] = $id;
+                }
+            } catch (\Throwable) {
+                // A provider that cannot answer does not get the exemption.
+            }
+        }
+        return $out;
     }
 
     // ---------------------------------------------------------------------
@@ -74,12 +132,17 @@ class MyWorkService {
      * @return array<string,mixed>
      */
     public function getWork(string $userId, array $params): array {
-        $teams = $this->resolveTeams();
-        if ($teams === []) {
+        $teams          = $this->resolveTeams();
+        $instanceScoped = $this->instanceScopedProviderIds($userId);
+
+        // An administrator who happens to be in no team at all still has an
+        // expiry queue to work. Only a viewer with neither teams nor an
+        // instance-scoped provider has nothing this page could ever show.
+        if ($teams === [] && $instanceScoped === []) {
             return $this->emptyPayload();
         }
 
-        $query   = $this->buildQuery($userId, $teams, $params);
+        $query   = $this->buildQuery($userId, $teams, $params, $instanceScoped);
         $groupBy = (string)($params['groupBy'] ?? 'category');
 
         // groupBy participates in the cache key because it changes the shape of
@@ -113,7 +176,8 @@ class MyWorkService {
         $allowed = array_flip(array_keys($teams));
         $items   = array_values(array_filter(
             $items,
-            static fn (WorkItem $i): bool => $i->teamId !== '' && isset($allowed[$i->teamId]),
+            static fn (WorkItem $i): bool => $i->teamId !== ''
+                && (isset($allowed[$i->teamId]) || $query->bypassesTeamScope($i->providerId)),
         ));
 
         // ── Team names ────────────────────────────────────────────────────
@@ -278,13 +342,23 @@ class MyWorkService {
             );
         }
 
-        $teams = $this->resolveTeams();
-        if ($teams === []) {
+        $teams          = $this->resolveTeams();
+        $instanceScoped = $this->instanceScopedProviderIds($userId);
+        $bypasses       = in_array($providerId, $instanceScoped, true);
+
+        if ($teams === [] && !$bypasses) {
             return ActionResult::forbidden($this->l->t('You are not a member of any team.'));
         }
 
         // Re-read from source. This is the authorisation step — nothing about
         // the item comes from the request beyond its id.
+        //
+        // v4.6.13 — an instance-scoped provider is handed the team list all the
+        // same, but it is expected to ignore it and answer from its own check.
+        // The list is never widened here: doing that would make a *different*
+        // provider's getItem() see teams the user is not in, and only this one
+        // has signed up for that responsibility. `$bypasses` is what tells the
+        // provider's own gate to fire — see IWorkProvider's docblock.
         try {
             $item = $provider->getItem($userId, $itemId, array_keys($teams));
         } catch (\Throwable $e) {
@@ -490,7 +564,12 @@ class MyWorkService {
      * @param array<string,string> $teams
      * @param array<string,mixed>  $params
      */
-    private function buildQuery(string $userId, array $teams, array $params): WorkQuery {
+    private function buildQuery(
+        string $userId,
+        array $teams,
+        array $params,
+        array $instanceScopedProviderIds = [],
+    ): WorkQuery {
         $upcomingDays  = $this->config->getUpcomingDays();
         $completedDays = $this->config->getCompletedDays();
 
@@ -504,10 +583,16 @@ class MyWorkService {
         // never widen it, whatever the client sends.
         $requestedTeams = $this->stringList($params['teamIds'] ?? []);
         $teamIds        = array_keys($teams);
+        // v4.6.13 — whether the user actually narrowed matters beyond the list
+        // itself: an active team filter switches the instance-scope bypass off,
+        // because somebody who picked one team asked to see that team and not
+        // an admin queue about six others.
+        $teamFilterActive = false;
         if ($requestedTeams !== []) {
             $narrowed = array_values(array_intersect($teamIds, $requestedTeams));
             if ($narrowed !== []) {
-                $teamIds = $narrowed;
+                $teamIds          = $narrowed;
+                $teamFilterActive = true;
             }
         }
 
@@ -540,6 +625,10 @@ class MyWorkService {
             limit:            max(1, min(200, (int)($params['limit']  ?? 50))),
             offset:           max(0, (int)($params['offset'] ?? 0)),
             sortBy:           $this->resolveSort($params['sortBy'] ?? null),
+            // Server-decided, never read from $params. See the class docblock.
+            isInstanceAdmin:  $instanceScopedProviderIds !== [],
+            teamFilterActive: $teamFilterActive,
+            instanceScopedProviderIds: $instanceScopedProviderIds,
         );
     }
 
@@ -744,7 +833,10 @@ class MyWorkService {
             if ($query->statuses !== [] && !in_array($item->status, $query->statuses, true)) {
                 return false;
             }
-            if ($query->teamIds !== [] && !in_array($item->teamId, $query->teamIds, true)) {
+            if ($query->teamIds !== []
+                && !in_array($item->teamId, $query->teamIds, true)
+                && !$query->bypassesTeamScope($item->providerId)
+            ) {
                 return false;
             }
             if ($query->dueFrom !== null && ($item->dueAt === null || $item->dueAt < $query->dueFrom)) {
@@ -1077,22 +1169,49 @@ class MyWorkService {
         return ['later', $this->l->t('Later')];
     }
 
+    /**
+     * Group headings for `groupBy=category`.
+     *
+     * **Every value of `Category` must have an arm here.** The `default` is not
+     * a fallback, it is a bug surfacing: it puts the raw constant on the screen,
+     * so a section reads `team_admin` in every language. That is exactly what
+     * happened between v4.5.45 and v4.6.17 — `Category::TEAM_ADMIN` was added,
+     * `constants/myWork.js::categoryLabel()` gained its arm, and this mirror did
+     * not. Adding a category means editing both.
+     */
     private function categoryLabel(string $category): string {
         return match ($category) {
             Category::ACTION_REQUIRED    => $this->l->t('Action required'),
             Category::TODAY              => $this->l->t('Today'),
             Category::UPCOMING           => $this->l->t('Upcoming'),
             Category::WAITING_FOR_OTHERS => $this->l->t('Waiting for others'),
+            // TRANSLATORS: My Work section heading — housekeeping the viewer
+            // owes their team as its admin. Same string as the JS mirror.
+            Category::TEAM_ADMIN         => $this->l->t('Team admin'),
             Category::COMPLETED          => $this->l->t('Completed'),
             default                      => $category,
         };
     }
 
+    /**
+     * Group headings for `groupBy=resource_type`. Plural, because each names a
+     * section holding several rows — the singular forms in `constants/myWork.js`
+     * label one row's type and are deliberately different strings.
+     *
+     * Carried the same gap as `categoryLabel()` above: five of the seven types
+     * that reach here fell through to the raw key. Fixed in v4.6.17.
+     */
     private function resourceTypeLabel(string $type): string {
         return match ($type) {
-            'deck_card' => $this->l->t('Deck cards'),
-            'file'      => $this->l->t('Files'),
-            default     => $type,
+            'deck_card'           => $this->l->t('Deck cards'),
+            'file'                => $this->l->t('Files'),
+            'decision'            => $this->l->t('Decisions'),
+            'meeting'             => $this->l->t('Meetings'),
+            'team_resource'       => $this->l->t('Team resources'),
+            'team_join_request'   => $this->l->t('Membership requests'),
+            'team_expiry'         => $this->l->t('Team expirations'),
+            'team_expiry_request' => $this->l->t('Extension requests'),
+            default               => $type,
         };
     }
 

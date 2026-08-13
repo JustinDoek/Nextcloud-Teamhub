@@ -172,6 +172,30 @@ final class OpenTarget {
                 (string)($value['boardName'] ?? ''),
             ),
             self::FILE => self::file((int)($value['fileId'] ?? 0)),
+            // v4.6.18 — MANAGE_TEAM was in KINDS but had no arm here, so every
+            // `manageTeam()` target passed `isValidKind()` above and then fell
+            // through to the `default` below and went out on the wire as
+            // EXTERNAL. The reader saw the row switch to the team and then open
+            // the team's own URL in a second browser tab, which is what
+            // `openMyWorkItemExternally` does — never Manage team. Three
+            // providers were affected: the expiry row (`danger`/`expiry`) and
+            // both TeamAdmin rows (`integrations`, `members`).
+            //
+            // An empty tab degrades to EXTERNAL rather than passing through.
+            // Unlike TEAMHUB_VIEW — where the frontend checks the view against
+            // `TEAMHUB_VIEW_TARGETS` and falls back on its own — nothing
+            // downstream validates this one: `ManageTeamView` assigns
+            // `activeTab = payload.tab` verbatim, so '' renders a Manage-team
+            // screen with no tab selected. This class promises a row that opens
+            // in the wrong place over one that opens broken.
+            self::MANAGE_TEAM => (string)($value['tab'] ?? '') !== ''
+                ? self::manageTeam(
+                    (string)($value['tab'] ?? ''),
+                    isset($value['section']) && (string)$value['section'] !== ''
+                        ? (string)$value['section']
+                        : null,
+                )
+                : self::external(),
             self::TEAMHUB_VIEW => self::teamHubView(
                 (string)($value['view'] ?? ''),
                 isset($value['targetId']) ? (int)$value['targetId'] : null,

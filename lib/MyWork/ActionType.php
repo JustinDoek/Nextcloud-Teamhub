@@ -57,23 +57,54 @@ final class ActionType {
     /** v4.5.25 — navigation only. See NAVIGATION below. */
     public const JOIN            = 'join';
     public const AGENDA          = 'agenda';
+    /**
+     * v4.6.16 — write to the person behind the item. Navigation, not a source
+     * action: TeamHub never sends anything. The provider supplies a compose URL
+     * — Nextcloud Mail when that app is installed, a plain `mailto:` otherwise
+     * — and the message is written, read and sent by the administrator in their
+     * own client. Nothing leaves the server on their behalf, so there is no
+     * template to keep current and nothing to put in the audit log.
+     */
+    public const EMAIL           = 'email';
+    /**
+     * v4.6.16 — a team administrator asking for more time on their team's
+     * expiration date.
+     *
+     * **v4.6.17 — a real source action, no longer navigation.** It was
+     * navigation on the reasoning that a request carries a proposed date and a
+     * reason, and neither fits in a queue row — so the row sent the reader to
+     * Manage team → Maintenance, where that form already existed. What that
+     * missed is that the form not fitting *on the row* is an argument for a
+     * dialog, not for leaving My Work: a queue you get ejected from to do the
+     * thing the queue told you to do is not a queue. The date and reason are
+     * collected in a modal and travel as `params`.
+     *
+     * It stays a distinct verb rather than reusing OPEN because the row's only
+     * button is icon-only — without a labelled menu entry nothing on the row
+     * says what it is for, which is what Justin reported against v4.6.13.
+     */
+    public const REQUEST_EXTENSION = 'request_extension';
 
     public const ALL = [
         self::OPEN, self::COMPLETE, self::APPROVE, self::REJECT,
         self::REQUEST_CHANGES, self::COMMENT, self::DELEGATE,
         self::SNOOZE, self::UNSNOOZE, self::FINALIZE,
-        self::JOIN, self::AGENDA,
+        self::JOIN, self::AGENDA, self::EMAIL, self::REQUEST_EXTENSION,
     ];
 
     /** Handled by TeamHub itself; a provider never sees these. */
     public const NATIVE = [self::SNOOZE, self::UNSNOOZE];
 
     /**
-     * Opened by the frontend from a URL in the item's metadata; never posted
-     * to the action endpoint, so no provider implements them and there is
-     * nothing for an administrator to restrict — they change nothing.
+     * Handled entirely by the frontend, from a URL in the item's metadata.
+     * Never posted to the action endpoint, so no provider implements them and
+     * there is nothing for an administrator to restrict: they change nothing by
+     * themselves.
+     *
+     * v4.6.17 — REQUEST_EXTENSION left this list; it writes a row now, through
+     * the action endpoint like any other verb that changes something.
      */
-    public const NAVIGATION = [self::JOIN, self::AGENDA];
+    public const NAVIGATION = [self::JOIN, self::AGENDA, self::EMAIL];
 
     /**
      * Actions that change state in the source application. These are the ones
@@ -83,6 +114,10 @@ final class ActionType {
     public const SOURCE_MUTATING = [
         self::COMPLETE, self::APPROVE, self::REJECT, self::REQUEST_CHANGES,
         self::DELEGATE, self::FINALIZE,
+        // v4.6.17 — creates a TeamExpiryRequest row that a Nextcloud
+        // administrator then has to decide. Restrictable and audited for the
+        // same reason the rest of this list is.
+        self::REQUEST_EXTENSION,
     ];
 
     public static function isValid(string $action): bool {

@@ -11,6 +11,7 @@ use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
 use OCA\TeamHub\Service\ProjectService;
+use OCA\TeamHub\Service\TeamExpiryService;
 use OCA\TeamHub\Service\TeamTypeService;
 use OCA\TeamHub\Service\TimeService;
 use OCA\TeamHub\Service\TimelineService;
@@ -215,6 +216,7 @@ class LayoutController extends Controller {
         private BudgetService $budgetService,
         private TimeService $timeService,
         private TeamTypeService $teamTypeService,
+        private TeamExpiryService $teamExpiryService,
         private CollectivesService $collectivesService,
     ) {
         parent::__construct($appName, $request);
@@ -301,6 +303,13 @@ class LayoutController extends Controller {
             // Legacy teams (pre-4.0.2) have no row and land at null so the
             // Team info widget/BrowseTeamsView hide the badge.
             'teamType'               => $this->teamTypeService->getType($teamId),
+            // v4.6.13 — optional expiration date, or null when the team has
+            // none: every team predating the feature, and every Department.
+            // Rides this bundle rather than getting its own endpoint, for the
+            // reason HANDOFF.md records about the project fact — the Team info
+            // banner needs it on every team load, and a second request would
+            // put a round trip in that path.
+            'teamExpiry'             => $this->teamExpiryService->getExpiry($teamId),
             'budgetConfig'           => [
                 'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
                 // v3.94.0 — tab visibility uses a project-level role floor
@@ -369,6 +378,13 @@ class LayoutController extends Controller {
             // Legacy teams (pre-4.0.2) have no row and land at null so the
             // Team info widget/BrowseTeamsView hide the badge.
             'teamType'               => $this->teamTypeService->getType($teamId),
+            // v4.6.13 — optional expiration date, or null when the team has
+            // none: every team predating the feature, and every Department.
+            // Rides this bundle rather than getting its own endpoint, for the
+            // reason HANDOFF.md records about the project fact — the Team info
+            // banner needs it on every team load, and a second request would
+            // put a round trip in that path.
+            'teamExpiry'             => $this->teamExpiryService->getExpiry($teamId),
             'budgetConfig'           => [
                 'budget_enabled'   => $this->config->getAppValue(Application::APP_ID, 'budget_enabled_' . $teamId, '1') === '1',
                 // v3.94.0 — tab visibility uses a project-level role floor

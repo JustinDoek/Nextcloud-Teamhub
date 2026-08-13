@@ -64,6 +64,7 @@ class ClosingArtifactService {
         private TimeService          $timeService,
         private ResourceService      $resourceService,
         private ContainerInterface   $container,
+        private TimezoneService      $timezoneService,
         private LoggerInterface      $logger,
     ) {}
 
@@ -71,11 +72,15 @@ class ClosingArtifactService {
      * Generate the closing artifact for a team. Returns the path (as
      * displayed in NC Files) on success.
      *
+     * $uid is the person who pressed the button — every date in the rendered
+     * documents is formatted in their timezone, so the artifact reads in the
+     * dates they saw on screen rather than the server's UTC day.
+     *
      * @return array{filePath: string, generatedAt: int}
      * @throws \RuntimeException on any hard failure (no Files folder,
      *                          write error, project not Advanced).
      */
-    public function generate(string $teamId): array {
+    public function generate(string $teamId, string $uid = ''): array {
         $project = $this->projectMapper->findByTeam($teamId);
         if ($project === null || $project->getMode() !== 'advanced') {
             throw new \RuntimeException('Closing artifact is only available for Advanced projects.');
@@ -91,6 +96,7 @@ class ClosingArtifactService {
         $data = [
             'project'    => $project,
             'teamId'     => $teamId,
+            'uid'        => $uid,
             'decisions'  => $this->safeLoadDecisions($teamId),
             'budget'     => $this->safeLoadBudget($teamId),
             'time'       => $this->safeLoadTime($teamId),
@@ -255,9 +261,10 @@ class ClosingArtifactService {
     private function renderSummary(array $data): string {
         /** @var Project $p */
         $p = $data['project'];
-        $now = date('Y-m-d');
-        $start = $p->getStartDate() ? date('Y-m-d', $p->getStartDate()) : '—';
-        $end   = $p->getTargetEnd() ? date('Y-m-d', $p->getTargetEnd()) : '—';
+        $uid = (string)($data['uid'] ?? '');
+        $now = $this->timezoneService->today($uid);
+        $start = $p->getStartDate() ? $this->timezoneService->formatTimestamp((int)$p->getStartDate(), $uid) : '—';
+        $end   = $p->getTargetEnd() ? $this->timezoneService->formatTimestamp((int)$p->getTargetEnd(), $uid) : '—';
 
         $decisionCount   = count($data['decisions'] ?? []);
         $milestoneCount  = count($data['milestones'] ?? []);
@@ -305,7 +312,7 @@ class ClosingArtifactService {
             $impact   = $r->getImpact();
             $category = $this->mdEscape($r->getCategory() ?? '—');
             $by       = $this->mdEscape($r->getProposedBy());
-            $date     = date('Y-m-d', $r->getCreatedAt());
+            $date     = $this->timezoneService->formatTimestamp((int)$r->getCreatedAt(), (string)($data['uid'] ?? ''));
             $s .= "| {$id} | {$question} | {$status} | {$impact} | {$category} | {$by} | {$date} |\n";
         }
         return $s;
@@ -347,7 +354,9 @@ class ClosingArtifactService {
                     $desc = $this->mdEscape($e['description'] ?? '');
                     $pj = $this->minorToMajorStr($e['projectedMinor'] ?? 0);
                     $rl = $this->minorToMajorStr($e['realMinor'] ?? null);
-                    $iat = !empty($e['incurredAt']) ? date('Y-m-d', (int)$e['incurredAt']) : '—';
+                    $iat = !empty($e['incurredAt'])
+                        ? $this->timezoneService->formatTimestamp((int)$e['incurredAt'], (string)($data['uid'] ?? ''))
+                        : '—';
                     $s .= "| {$desc} | {$pj} | {$rl} | {$iat} |\n";
                 }
                 $s .= "\n";
@@ -400,13 +409,14 @@ class ClosingArtifactService {
         }
         $s .= "| Label | Date | Reached |\n";
         $s .= "|---|---|---|\n";
+        $uid = (string)($data['uid'] ?? '');
         foreach ($rows as $r) {
             $label = $this->mdEscape($r->getLabel());
             $ts = $r->getMilestoneDate();
-            $date = $ts !== null ? date('Y-m-d', $ts) : '_undated_';
+            $date = $ts !== null ? $this->timezoneService->formatTimestamp((int)$ts, $uid) : '_undated_';
             $posted = $r->getPostedAt();
             $reached = $posted !== null
-                ? date('Y-m-d', $posted)
+                ? $this->timezoneService->formatTimestamp((int)$posted, $uid)
                 : ($ts !== null && $ts < time() ? '_past date, not yet announced_' : '_upcoming_');
             $s .= "| {$label} | {$date} | {$reached} |\n";
         }

@@ -13,9 +13,11 @@ use OCP\AppFramework\Http\Attribute\AuthorizedAdminSetting;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\DataDownloadResponse;
 use OCP\AppFramework\Http\JSONResponse;
+use OCA\TeamHub\Service\TimezoneService;
 use OCP\IAppConfig;
 use OCP\IDBConnection;
 use OCP\IRequest;
+use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -44,6 +46,8 @@ class AuditController extends Controller {
         private AuditLogMapper  $mapper,
         private IDBConnection   $db,
         private IAppConfig      $appConfig,
+        private IUserSession    $userSession,
+        private TimezoneService $timezoneService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -301,7 +305,7 @@ class AuditController extends Controller {
             $filename = sprintf(
                 'teamhub-audit-%s-%s.zip',
                 $this->slugify($displayName),
-                date('Y-m-d', time()),
+                $this->timezoneService->today($this->userSession->getUser()?->getUID() ?? ''),
             );
 
             return new DataDownloadResponse($bytes, $filename, 'application/zip');

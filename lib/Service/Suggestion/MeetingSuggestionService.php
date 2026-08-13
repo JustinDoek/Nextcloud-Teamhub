@@ -11,6 +11,7 @@ use OCA\TeamHub\Db\RoomMapper;
 use OCA\TeamHub\Db\FloorMapper;
 use OCA\TeamHub\Db\BuildingMapper;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\TimezoneService;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
 
@@ -67,6 +68,7 @@ class MeetingSuggestionService {
         private FloorMapper $floorMapper,
         private BuildingMapper $buildingMapper,
         private IConfig $config,
+        private TimezoneService $timezoneService,
         private LoggerInterface $logger,
         private array $busyProviders = [],
     ) {
@@ -301,17 +303,7 @@ class MeetingSuggestionService {
      * Resolve a user's NC timezone, falling back to the server default.
      */
     private function userTimezone(string $uid): \DateTimeZone {
-        $tz = $this->config->getUserValue($uid, 'core', 'timezone', '');
-        if ($tz === '') {
-            // Match the codebase convention of getSystemValue (the typed
-            // getSystemValueString variant is not used elsewhere in TeamHub).
-            $tz = (string)$this->config->getSystemValue('default_timezone', date_default_timezone_get());
-        }
-        try {
-            return new \DateTimeZone($tz);
-        } catch (\Throwable $e) {
-            return new \DateTimeZone('UTC');
-        }
+        return $this->timezoneService->forUser($uid);
     }
 
     /**

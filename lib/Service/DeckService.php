@@ -33,6 +33,179 @@ class DeckService {
     ) {}
 
     /**
+     * Move the team's own Deck boards to the new team owner (v4.6.23).
+     *
+     * The counterpart to `CalendarService::transferTeamCalendars()`, and it
+     * exists for the same reason rather than for tidiness. A Deck board has a
+     * single human owner in `deck_boards.owner`, and Deck's
+     * `ParticipantCleanupListener` handles `UserDeletedEvent` by calling
+     * `findAllByOwner()` and **deleting every board that account owns** — ACL
+     * participants do not save it. So a board left on a departed creator is
+     * destroyed for the whole team, exactly the failure the calendar transfer
+     * was written for.
+     *
+     * **Only boards TeamHub created**, `origin = 'teamhub_create'` in the
+     * resource registry. A board the team merely connected belongs to the
+     * person who already had it, and moving it out of their account because a
+     * team changed hands would be taking their board away.
+     *
+     * **`changeContent: false` is deliberate.** Deck's own flag would rewrite
+     * card assignees and card authorship to the new owner. Ownership of the
+     * board is an administrative fact; who wrote a card and who is working on
+     * it are not, and rewriting them would falsify the board's history. With
+     * the flag off, `transferBoardOwnership()` also re-adds the previous owner
+     * as a full-permission ACL participant, so they keep the access their team
+     * role still entitles them to — they simply stop being owner.
+     *
+     * Deck's method is transactional per board. This loop is best-effort
+     * across boards: one board that cannot move is reported, not thrown, so it
+     * cannot fail an ownership transfer that has already happened.
+     *
+     * @return array{moved: list<array{boardId:int, from:string, to:string}>, failed: list<array{boardId:int, reason:string}>}
+     */
+    public function transferTeamBoards(string $teamId, string $newOwnerUid): array {
+        $moved  = [];
+        $failed = [];
+
+        if (!$this->appManager->isInstalled('deck')) {
+            return ['moved' => $moved, 'failed' => $failed];
+        }
+
+        $userManager = $this->container->get(\OCP\IUserManager::class);
+        if (!$userManager->userExists($newOwnerUid)) {
+            // Same refusal CalendarService makes. Writing an owner that does
+            // not exist would orphan the board the way this method prevents.
+            throw new \InvalidArgumentException('Cannot move boards to an account that does not exist.');
+        }
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        foreach ($this->teamOwnedBoardIds($db, $teamId) as $boardId) {
+            try {
+                $current = $this->boardOwner($db, $boardId);
+                if ($current === null) {
+                    // Registered but gone from deck_boards — a stale registry
+                    // row, not a failure worth reporting.
+                    continue;
+                }
+                if ($current === $newOwnerUid) {
+                    continue; // Already there; no-op for this board.
+                }
+
+                $boardService      = $this->container->get(\OCA\Deck\Service\BoardService::class);
+                $permissionService = $this->container->get(\OCA\Deck\Service\PermissionService::class);
+
+                // **Impersonate the outgoing board owner for the call.** This
+                // is not a workaround; it is what Deck's own
+                // `occ deck:transfer-ownership` does, and without it the main
+                // path here fails. `transferBoardOwnership()` re-adds the
+                // previous owner through `addAcl()`, which runs
+                // `checkPermission(PERMISSION_SHARE)` against the *session*
+                // user — and Deck's permission model is `owner || ACL` with no
+                // administrator bypass. An NC admin repairing a team they are
+                // not a member of therefore has no rights on its board, and
+                // the whole transaction would roll back. The board's own owner
+                // always passes.
+                $restoreTo = $this->userSession->getUser()?->getUID();
+                try {
+                    $boardService->setUserId($current);
+                    $permissionService->setUserId($current);
+                    $boardService->transferBoardOwnership($boardId, $newOwnerUid, false);
+
+                    // **Then take the individual grant back off.** With
+                    // `changeContent: false` Deck re-adds the outgoing owner as
+                    // a PERMISSION_TYPE_USER ACL carrying edit + share + manage
+                    // — strictly more than the team's own circle row, which is
+                    // edit only. On a team board that is the wrong shape: the
+                    // previous owner is still a team member and inherits
+                    // through the team like everybody else, and leaving a
+                    // personal grant behind means their access no longer tracks
+                    // their team role. If they later leave the team, the team's
+                    // row stops applying to them and this one would not.
+                    //
+                    // `AclMapper::deleteParticipantFromBoard()` and not
+                    // `BoardService::deleteAcl()`: the latter also calls
+                    // `assignedUsersMapper->deleteByParticipantOnBoard()`,
+                    // which would unassign them from every card on the board.
+                    // Losing ownership is not a reason to lose your work. The
+                    // mapper call is the same one `transferBoardOwnership()`
+                    // uses internally to clear the incoming owner's row.
+                    $this->container->get(\OCA\Deck\Db\AclMapper::class)
+                        ->deleteParticipantFromBoard(
+                            $boardId,
+                            \OCA\Deck\Db\Acl::PERMISSION_TYPE_USER,
+                            $current,
+                        );
+                } finally {
+                    // Both services are request-scoped singletons and
+                    // assignOwner() keeps working after this returns, so the
+                    // impersonation must not outlive the call.
+                    if ($restoreTo !== null) {
+                        $boardService->setUserId($restoreTo);
+                        $permissionService->setUserId($restoreTo);
+                    }
+                }
+
+                $moved[] = ['boardId' => $boardId, 'from' => $current, 'to' => $newOwnerUid];
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][DeckService] transferTeamBoards: board did not move', [
+                    'teamId' => $teamId, 'boardId' => $boardId, 'newOwner' => $newOwnerUid,
+                    'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                $failed[] = ['boardId' => $boardId, 'reason' => $e->getMessage()];
+            }
+        }
+
+        return ['moved' => $moved, 'failed' => $failed];
+    }
+
+    /**
+     * Board ids this team owns outright, from the resource registry.
+     *
+     * Registry only — no `deck_board_acl` fallback, unlike the read paths in
+     * this class. The fallback answers "which board is this team using", which
+     * is the right question for showing a widget and the wrong one for
+     * changing who owns something: a board reachable through the team's ACL
+     * may well be somebody's personal board that they shared.
+     *
+     * @return list<int>
+     */
+    private function teamOwnedBoardIds(\OCP\IDBConnection $db, string $teamId): array {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('resource_id')
+            ->from('teamhub_team_app_resources')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('app_id', $qb->createNamedParameter('deck')))
+            ->andWhere($qb->expr()->eq('origin', $qb->createNamedParameter('teamhub_create')))
+            ->executeQuery();
+
+        $ids = [];
+        while ($row = $res->fetch()) {
+            $id = (int)$row['resource_id'];
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        $res->closeCursor();
+
+        return $ids;
+    }
+
+    /** Current owner uid of a board, or null when the board is gone. */
+    private function boardOwner(\OCP\IDBConnection $db, int $boardId): ?string {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('owner')
+            ->from('deck_boards')
+            ->where($qb->expr()->eq('id', $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        return $row === false ? null : (string)$row['owner'];
+    }
+
+    /**
      * v3.98.2 — create a new Deck stack on the team's board. Called from the
      * ProjectSwimlanesModal (Planning-phase "Define workstreams" activity)
      * so admins can add lanes as they're known, without being forced to

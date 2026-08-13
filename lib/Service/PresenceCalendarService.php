@@ -71,6 +71,7 @@ class PresenceCalendarService {
         private RoomMapper          $roomMapper,
         private IDBConnection       $db,
         private ContainerInterface  $container,
+        private TimezoneService     $timezoneService,
         private LoggerInterface     $logger,
     ) {}
 
@@ -270,8 +271,11 @@ class PresenceCalendarService {
      * Looking up by UID ensures we always find the row and update rather than create.
      */
     public function syncAllSlotsForUser(string $userId): void {
-        $today   = date('Y-m-d');
-        $endYear = sprintf('%04d-12-31', (int)date('Y') + 1);
+        // The user's today, not the server's — slot_date is a floating local
+        // date, so a UTC "today" would drop or duplicate the boundary day for
+        // anyone whose offset has already rolled them over.
+        $today   = $this->timezoneService->today($userId);
+        $endYear = sprintf('%04d-12-31', (int)substr($today, 0, 4) + 1);
 
         $slots = $this->slotMapper->findByUserAndRange($userId, $today, $endYear);
         if (count($slots) === 0) {

@@ -154,6 +154,74 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            // v4.6.13 — the outcome of an extension request, back to whoever
+            // asked. Both branches use the recipient's own language via
+            // $languageCode, which is what INotifier::prepare exists for and
+            // what SKILLS.md § Translation standards requires of backend
+            // strings sent to a specific user.
+            case 'expiry_request_approved':
+            case 'expiry_request_denied': {
+                $params    = $notification->getSubjectParameters();
+                $l         = $this->l10nFactory->get('teamhub', $languageCode);
+                $adminName = $params['adminName'] ?? ($params['adminUid'] ?? $l->t('An administrator'));
+                $teamName  = $params['teamName']  ?? $l->t('a team');
+                $teamId    = $params['teamId']    ?? '';
+                $grantedOn = $params['grantedOn'] ?? '';
+                $approved  = $notification->getSubject() === 'expiry_request_approved';
+
+                // Rich parameters only — no sprintf placeholders mixed in.
+                // `{date}` is a rich parameter for the same reason `{team}` is:
+                // the whole string is a template the renderer fills, and a
+                // half-sprintf/half-rich string is one substitution pass away
+                // from rendering a literal "%s" at somebody.
+                $richParams = [
+                    'admin' => [
+                        'type' => 'user',
+                        'id'   => $params['adminUid'] ?? $adminName,
+                        'name' => $adminName,
+                    ],
+                    'team' => [
+                        'type' => 'highlight',
+                        'id'   => $teamId,
+                        'name' => $teamName,
+                    ],
+                ];
+                if ($approved) {
+                    $richParams['date'] = [
+                        'type' => 'highlight',
+                        'id'   => $grantedOn,
+                        'name' => $grantedOn,
+                    ];
+                }
+
+                $notification->setRichSubject(
+                    $approved
+                        ? $l->t('{admin} extended {team} until {date}')
+                        : $l->t('{admin} declined to extend {team}'),
+                    $richParams,
+                );
+                $notification->setParsedSubject($approved
+                    ? $l->t('%1$s extended %2$s until %3$s', [$adminName, $teamName, $grantedOn])
+                    : $l->t('%1$s declined to extend %2$s', [$adminName, $teamName]));
+
+                // The admin's note is the whole value of a denial, so it
+                // becomes the message body rather than being dropped.
+                $note = (string)($params['note'] ?? '');
+                if ($note !== '') {
+                    $notification->setParsedMessage($note);
+                }
+
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+                return $notification;
+            }
+
             case 'message_mention':
                 $params     = $notification->getSubjectParameters();
                 $authorName = $params['author']   ?? 'Someone';

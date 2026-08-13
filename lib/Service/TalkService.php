@@ -559,6 +559,213 @@ class TalkService {
         }
     }
 
+    /**
+     * Hand the team's conversations to the new team owner (v4.6.23).
+     *
+     * **This is not the same kind of fix as the calendar and Deck transfers,
+     * and the difference is worth stating.** Those two exist because the app
+     * destroys the resource when its owner's account is deleted — NC deletes a
+     * user's calendars, and Deck's `ParticipantCleanupListener` deletes every
+     * board they own. Talk does neither: `Manager::removeUserFromAllRooms()`
+     * deletes a room only when the departing account was its **last**
+     * participant, and otherwise just removes them. A team conversation with
+     * other members in it survives its owner's deletion intact.
+     *
+     * So nothing is at risk of being lost here. What is wrong is who holds the
+     * rights: the conversation's OWNER row stays with whoever ran the create
+     * wizard, so a former owner keeps the highest level of control over the
+     * team's conversation and the actual owner does not. That is a permission
+     * boundary drifting from the team's own, which is what this corrects.
+     *
+     * **The previous owner drops to USER, not removed and not left moderating.**
+     * The rule is the one the Deck transfer follows: remove the *personal*
+     * grant and let the team's own membership decide what they get. A previous
+     * owner still in the team keeps whatever the circle attendee row confers;
+     * one who has left keeps nothing. Leaving them at MODERATOR — the first
+     * attempt — pinned a personal right that no longer tracked their team role,
+     * which is the same mistake as leaving a personal ACL on a team's board.
+     *
+     * **The circle row is deliberately untouched** — because this method only
+     * ever looks up `users` actors, not because Talk would stop it.
+     * `updateParticipantType()` refuses `ACTOR_GROUPS` only; circle actors it
+     * accepts, which is exactly what `promoteTalkCircleToModerator` relies on.
+     * The circle sits at MODERATOR by design so every team member has
+     * moderation through it, and that is independent of who owns the room.
+     * Only the two human rows change.
+     *
+     * Best-effort per room, like the calendar and Deck transfers: the team's
+     * ownership has already changed by the time this runs, and failing that
+     * operation because a participant row could not be updated would leave the
+     * team worse off than a stale moderator does.
+     *
+     * @return array{moved: list<array{token:string, from:?string, to:string}>, failed: list<array{token:string, reason:string}>}
+     */
+    public function transferTeamRoomOwnership(string $teamId, string $newOwnerUid): array {
+        $moved  = [];
+        $failed = [];
+
+        if (!$this->appManager->isInstalled('spreed')) {
+            return ['moved' => $moved, 'failed' => $failed];
+        }
+
+        $userManager = $this->container->get(\OCP\IUserManager::class);
+        if (!$userManager->userExists($newOwnerUid)) {
+            throw new \InvalidArgumentException('Cannot hand conversations to an account that does not exist.');
+        }
+
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        // **Sync membership before touching anybody's type.** A circle
+        // attendee row is a marker, not a live expansion: Talk writes the
+        // per-user rows when the circle is added and does not revisit them, so
+        // anyone who joined the team afterwards has no row and cannot see the
+        // conversation at all. That was true of the first real transfer — the
+        // incoming owner was a level-1 circle member with no `talk_attendees`
+        // row, so the promotion below found nobody, and because the lookup
+        // came first the outgoing owner was never demoted either. The whole
+        // transfer silently did nothing.
+        //
+        // Reconciling first fixes the cause rather than the symptom: it gives
+        // every effective member their row, not just the new owner. It leaves
+        // `participant_type = 1` rows alone by design, so it cannot strip the
+        // outgoing owner before the demotion below decides what to do with
+        // them.
+        try {
+            $this->reconcileEffectiveTalkRoomMembers($teamId);
+        } catch (\Throwable $e) {
+            // Non-fatal: a member who is already in the room is unaffected,
+            // and the per-room failure below reports anyone who is not.
+            $this->logger->warning('[TeamHub][TalkService] transferTeamRoomOwnership: member sync failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        foreach ($this->teamOwnedRoomTokens($db, $teamId) as $token) {
+            try {
+                $manager            = $this->container->get(\OCA\Talk\Manager::class);
+                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+                $room               = $manager->getRoomByToken($token);
+
+                // The new owner needs a direct attendee row to be promoted:
+                // reaching the room through the circle is enough to take part
+                // but is not a row whose type can be raised, and Talk refuses
+                // to promote a group actor at all. In practice TeamHub's own
+                // reconciliation has already written the direct row for every
+                // effective member; when it has not, that is reported rather
+                // than papered over by inserting one here, because membership
+                // is reconcileEffectiveTalkRoomMembers' job and not this one's.
+                //
+                // `getParticipantByActor()` is declared `: Participant` and
+                // throws rather than returning null, so the absence has to be
+                // caught — a `=== null` test here would be dead code and the
+                // case would surface as an opaque failure instead of this one.
+                try {
+                    $incoming = $participantService->getParticipantByActor($room, 'users', $newOwnerUid);
+                } catch (\OCA\Talk\Exceptions\ParticipantNotFoundException) {
+                    $failed[] = [
+                        'token'  => $token,
+                        'reason' => 'the new owner is not a direct participant of this conversation',
+                    ];
+                    continue;
+                }
+
+                // Read the outgoing owner before promoting: once a second
+                // OWNER exists there is no way to tell which one was there
+                // first, and demoting the wrong row would remove the person
+                // who just took the team on.
+                $previousOwnerUid = $this->currentRoomOwnerUid($db, $room->getId(), $newOwnerUid);
+
+                if ((int)$incoming->getAttendee()->getParticipantType() !== \OCA\Talk\Participant::OWNER) {
+                    $participantService->updateParticipantType($room, $incoming, \OCA\Talk\Participant::OWNER);
+                }
+
+                if ($previousOwnerUid !== null) {
+                    try {
+                        $outgoing = $participantService->getParticipantByActor($room, 'users', $previousOwnerUid);
+                        // USER, not MODERATOR. Same rule as the Deck ACL: take
+                        // the personal grant away and let the team's own row
+                        // decide what they get. A previous owner who is still a
+                        // team member keeps whatever the circle attendee row
+                        // confers; one who has left keeps nothing, which is the
+                        // point. Demoting to MODERATOR would have pinned a
+                        // personal moderation right that no longer tracks their
+                        // team role.
+                        $participantService->updateParticipantType($room, $outgoing, \OCA\Talk\Participant::USER);
+                    } catch (\OCA\Talk\Exceptions\ParticipantNotFoundException) {
+                        // Their row went between the read above and here. The
+                        // promotion that matters has already happened, so this
+                        // is nothing to report.
+                    }
+                }
+
+                $moved[] = ['token' => $token, 'from' => $previousOwnerUid, 'to' => $newOwnerUid];
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][TalkService] transferTeamRoomOwnership: room not handed over', [
+                    'teamId' => $teamId, 'token' => $token, 'newOwner' => $newOwnerUid,
+                    'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                $failed[] = ['token' => $token, 'reason' => $e->getMessage()];
+            }
+        }
+
+        return ['moved' => $moved, 'failed' => $failed];
+    }
+
+    /**
+     * Room tokens this team owns outright, from the resource registry.
+     *
+     * Registry only, and `origin = 'teamhub_create'` only — a conversation the
+     * team merely connected belongs to whoever made it, and reassigning its
+     * moderation because a team changed hands would reach outside the team.
+     *
+     * @return list<string>
+     */
+    private function teamOwnedRoomTokens(\OCP\IDBConnection $db, string $teamId): array {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('resource_id')
+            ->from('teamhub_team_app_resources')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('app_id', $qb->createNamedParameter('talk')))
+            ->andWhere($qb->expr()->eq('origin', $qb->createNamedParameter('teamhub_create')))
+            ->executeQuery();
+
+        $tokens = [];
+        while ($row = $res->fetch()) {
+            $token = trim((string)$row['resource_id']);
+            if ($token !== '') {
+                $tokens[] = $token;
+            }
+        }
+        $res->closeCursor();
+
+        return $tokens;
+    }
+
+    /**
+     * The room's current human OWNER, excluding the account about to become
+     * one. Null when the room has no user-owner — which is normal for a room
+     * whose creator was already removed.
+     *
+     * Read straight from `talk_attendees` rather than through Talk: there is
+     * no "get me the owner" call, only per-actor lookups, and the whole point
+     * here is that we do not yet know whose row it is.
+     */
+    private function currentRoomOwnerUid(\OCP\IDBConnection $db, int $roomId, string $excludeUid): ?string {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('actor_id')
+            ->from('talk_attendees')
+            ->where($qb->expr()->eq('room_id', $qb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('actor_type', $qb->createNamedParameter('users')))
+            ->andWhere($qb->expr()->eq('participant_type', $qb->createNamedParameter(\OCA\Talk\Participant::OWNER, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->neq('actor_id', $qb->createNamedParameter($excludeUid)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        return $row === false ? null : (string)$row['actor_id'];
+    }
+
     public function promoteTalkCircleToModerator(int $roomId, string $teamId, \OCP\IDBConnection $db): void {
         // v3.100.8 (apps.md W-5) — try ParticipantService first, fall back
         // to raw UPDATE. Gains system chat message on promotion.

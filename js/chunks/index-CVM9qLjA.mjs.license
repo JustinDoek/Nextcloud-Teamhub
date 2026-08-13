@@ -4,6 +4,7 @@ SPDX-License-Identifier: BSD-3-Clause
 SPDX-License-Identifier: GPL-3.0-or-later
 SPDX-License-Identifier: ISC
 SPDX-License-Identifier: MIT
+SPDX-License-Identifier: undefined
 SPDX-FileCopyrightText: @nextcloud/dialogs developers
 SPDX-FileCopyrightText: Andrea Giammarchi
 SPDX-FileCopyrightText: Anthony Fu <https://github.com/antfu>
@@ -42,6 +43,7 @@ SPDX-FileCopyrightText: escape-html developers
 SPDX-FileCopyrightText: inline-style-parser developers
 SPDX-FileCopyrightText: p-queue developers
 SPDX-FileCopyrightText: rhysd <lin90162@yahoo.co.jp>
+SPDX-FileCopyrightText: teamhub developers
 SPDX-FileCopyrightText: ts-md5 developers
 
 This file is generated from multiple sources. Included packages:
@@ -324,6 +326,9 @@ This file is generated from multiple sources. Included packages:
 - tabbable
 	- version: 6.4.0
 	- license: MIT
+- teamhub
+	- version: 4.7.0
+	- license: undefined
 - toastify-js
 	- version: 1.12.0
 	- license: MIT

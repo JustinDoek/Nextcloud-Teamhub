@@ -77,9 +77,16 @@ class TeamImportService {
     /** A run whose heartbeat is older than this is considered abandoned. */
     public const STALE_AFTER_SECONDS = 300;
 
-    /** Canonical column order — also the order `sampleCsv()` writes. */
+    /**
+     * Canonical column order — also the order `sampleCsv()` writes.
+     *
+     * v4.6.13 added `expires`, optional, `YYYY-MM-DD`. Appended at the end so
+     * a file written for 4.6.12 still parses: the header is matched by name,
+     * and a column nobody sends is simply absent.
+     */
     public const COLUMNS = [
         'name', 'description', 'template', 'project_mode', 'admin', 'members', 'apps', 'modules',
+        'expires',
     ];
 
     /** Header aliases, alias => canonical. Matched case-insensitively. */
@@ -105,6 +112,9 @@ class TeamImportService {
         private ResourceService     $resourceService,
         private MaintenanceService  $maintenanceService,
         private TeamTypeMapper      $teamTypeMapper,
+        // v4.6.13 — the optional `expires` column. Validated at preview time
+        // and written after the team type, which is what decides eligibility.
+        private TeamExpiryService   $expiryService,
         private ProjectService      $projectService,
         private PresenceTeamService $presenceTeamService,
         private DecisionTeamService $decisionTeamService,
@@ -175,11 +185,21 @@ class TeamImportService {
         // that is the shape a Microsoft Teams export lands in (several owners
         // per team) and the collapse rule — first name owns, the rest are team
         // admins — is not guessable from a single-value example.
+        // v4.6.13 — `expires` is computed rather than written as a literal.
+        // A hard-coded date would validate today and fail every import once it
+        // passed, turning the sample file into a trap. Six months out is the
+        // same default the create wizard's picker opens on.
+        $sampleExpiry = $this->expiryService->defaultPickerDate();
+
         $rows = [
             self::COLUMNS,
-            ['Website Redesign', 'Rebuild of the public website', 'project',       'advanced', 'Jane Doe;Bob Jones', 'Alice Smith;group:marketing', '',           ''],
-            ['Design Guild',     'Cross-team design practice',    'collaboration', '',         'Alice Smith',        'Bob Jones;Renée Muñoz',       '',           ''],
-            ['Human Resources',  'HR department team',            'department',    '',         'hr-lead',            'group:HR staff',              'talk;files', 'decisions;presence'],
+            // Project row carries a date; the collaboration row leaves it blank
+            // to show that blank is legal and means "no end date"; the
+            // department row leaves it blank because a department cannot have
+            // one at all.
+            ['Website Redesign', 'Rebuild of the public website', 'project',       'advanced', 'Jane Doe;Bob Jones', 'Alice Smith;group:marketing', '',           '',                    $sampleExpiry],
+            ['Design Guild',     'Cross-team design practice',    'collaboration', '',         'Alice Smith',        'Bob Jones;Renée Muñoz',       '',           '',                    ''],
+            ['Human Resources',  'HR department team',            'department',    '',         'hr-lead',            'group:HR staff',              'talk;files', 'decisions;presence',  ''],
         ];
 
         $handle = fopen('php://temp', 'r+');
@@ -349,6 +369,35 @@ class TeamImportService {
             $projectMode = '';
         }
 
+        // ── expires (v4.6.13) ────────────────────────────────────────────
+        // Optional. Blank means no expiration date, which is what every row
+        // written before this column existed produces.
+        //
+        // A date on a Department row is a warning rather than an error: the
+        // intent is legible, the rule is a TeamHub one rather than a typo, and
+        // failing the whole row over it would cost the team for a field the
+        // author probably copied down a spreadsheet column.
+        $expires = trim($get('expires'));
+        if ($expires !== '') {
+            if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $expires, $dm) || !checkdate((int)$dm[2], (int)$dm[3], (int)$dm[1])) {
+                $errors[] = 'Expires must be a real date in YYYY-MM-DD format.';
+                $expires  = '';
+            } elseif (!TeamExpiryService::isEligibleType($template)) {
+                $warnings[] = 'Only collaboration and project teams can expire — the expiration date was ignored.';
+                $expires    = '';
+            } else {
+                // Parsed again by the service on the write path, which is also
+                // where "must be in the future" is enforced. Checked here too
+                // so the preview reports it before anything is created.
+                try {
+                    $this->expiryService->parseDate($expires);
+                } catch (\Throwable $e) {
+                    $errors[] = 'Expires: ' . $e->getMessage();
+                    $expires  = '';
+                }
+            }
+        }
+
         // ── admin ────────────────────────────────────────────────────────
         // v4.6.10 — multi-value, and the position in the cell carries meaning:
         // the FIRST name becomes the team's level-9 owner, every later name
@@ -506,6 +555,9 @@ class TeamImportService {
             'members'      => $members,
             'apps'         => $apps,
             'modules'      => $modules,
+            // '' when absent, ignored or invalid — the provisioning step treats
+            // empty as "no expiration date" without re-deciding why.
+            'expires'      => $expires,
             'warnings'     => $warnings,
         ];
 
@@ -1048,6 +1100,7 @@ class TeamImportService {
         $members     = is_array($payload['members'] ?? null) ? $payload['members'] : [];
         $apps        = is_array($payload['apps'] ?? null) ? $payload['apps'] : [];
         $modules     = is_array($payload['modules'] ?? null) ? $payload['modules'] : [];
+        $expires     = (string)($payload['expires'] ?? '');
 
         // Extra admins have to be members before they can be promoted, and the
         // admin column is a separate cell from the members column — so fold
@@ -1102,6 +1155,21 @@ class TeamImportService {
         $this->bestEffort($notes, 'team type', function () use ($teamId, $template, $adminUid) {
             $this->teamTypeMapper->upsert($teamId, $template, $adminUid);
         });
+
+        // ── 4b. Expiration date (v4.6.13) ────────────────────────────────
+        // After the type, because setAtCreation() decides eligibility from the
+        // template it is handed — passing it here rather than making it re-read
+        // the row we have just written. Empty means no date, and every row from
+        // a pre-4.6.13 file is empty.
+        //
+        // `setAtCreation()` performs no level check by design; the gate is that
+        // this whole job runs NC-admin-only, which TeamImportController and the
+        // service's own entry points establish.
+        if ($expires !== '') {
+            $this->bestEffort($notes, 'expiration date', function () use ($teamId, $template, $expires, $adminUid) {
+                $this->expiryService->setAtCreation($teamId, $template, $expires, $adminUid);
+            });
+        }
 
         // ── 5. App resources ─────────────────────────────────────────────
         if ($apps !== []) {
@@ -1193,6 +1261,15 @@ class TeamImportService {
         // invite in step 8 did not land, which is exactly the failure HANDOFF
         // §0 is open on, and an admin promotion silently doing nothing is how
         // that bug stayed invisible for a version.
+        //
+        // v4.6.12 — adminSetMemberLevel() also confirms the row's status. On a
+        // team whose template sets CFG_INVITE (the collaboration profile does:
+        // config 40) an invited user sits at status `Invited`, level 0, with no
+        // circles_membership row until they accept — so a promotion alone
+        // produced a level-8 admin with no access to anything. An admin naming
+        // somebody in the `admin` column has already made that decision; the
+        // acceptance step is bypassed for them and only for them. Ordinary
+        // members from the `members` column still get a real invite.
         if ($extraAdmins !== []) {
             $this->bestEffort($notes, 'team admins', function () use ($teamId, $extraAdmins) {
                 $notPromoted = [];
@@ -1544,7 +1621,20 @@ class TeamImportService {
             // Personal, group-backed, mail and contact circles are Circles'
             // own plumbing, not teams. Filtering them here is what stops
             // `team:` resolving to somebody's personal circle.
-            $systemPrefixes = ['user:', 'group:', 'mail:', 'app:occ:', 'contact:'];
+            //
+            // v4.6.18 — `app:circles:` added. It was the one system prefix
+            // missing, so Circles' own app circle (`display_name` "Circles")
+            // was counted as a team and reserved that name: a CSV row calling a
+            // team "Circles" was skipped as "Team name already exists" against
+            // a row that is not a team. This mattered from v4.6.18 because
+            // `TeamService::assertTeamNameAvailable()` now enforces the same
+            // uniqueness on the interactive create path and excludes the app
+            // circle by config bit (`CFG_ROOT`), so the two paths disagreed
+            // about exactly this row — creatable in the wizard, skipped in an
+            // import. The two filters are written differently (prefixes here,
+            // config bits there) because each is cheap in its own context; they
+            // are required to agree on which rows are teams, and now do.
+            $systemPrefixes = ['user:', 'group:', 'mail:', 'app:occ:', 'app:circles:', 'contact:'];
             while ($row = $result->fetch()) {
                 $name = (string)($row['name'] ?? '');
                 foreach ($systemPrefixes as $prefix) {
@@ -1553,12 +1643,13 @@ class TeamImportService {
                     }
                 }
 
+                // The `app:circles:` display-name fallback that used to sit in
+                // this chain went with the prefix above — the only rows it could
+                // fire for are now filtered out before reaching here.
                 if (!empty($row['display_name'])) {
                     $display = (string)$row['display_name'];
                 } elseif (!empty($row['sanitized_name'])) {
                     $display = (string)$row['sanitized_name'];
-                } elseif (str_starts_with($name, 'app:circles:')) {
-                    $display = substr($name, strlen('app:circles:'));
                 } else {
                     $display = $name;
                 }

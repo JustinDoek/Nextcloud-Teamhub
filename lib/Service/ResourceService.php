@@ -277,31 +277,21 @@ class ResourceService {
                         if ($calDetail = $calRes->fetch()) {
                             $calName = $calDetail['displayname'] ?? $calDetail['uri'] ?? 'Team Calendar';
 
-                            // Resolve the public embed token (dav_shares access=4 row).
-                            $publicUri = null;
-                            try {
-                                $psQb  = $db->getQueryBuilder();
-                                $psRes = $psQb->select('publicuri')
-                                    ->from('dav_shares')
-                                    ->where($psQb->expr()->eq('resourceid', $psQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                                    ->andWhere($psQb->expr()->eq('type', $psQb->createNamedParameter('calendar')))
-                                    ->andWhere($psQb->expr()->eq('access', $psQb->createNamedParameter(4, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                                    ->setMaxResults(1)
-                                    ->executeQuery();
-                                if ($psRow = $psRes->fetch()) {
-                                    $publicUri = $psRow['publicuri'];
-                                }
-                                $psRes->closeCursor();
-                            } catch (\Throwable $e) {
-                                // Non-fatal — public token may not exist yet.
-                            }
-
+                            // v4.6.20 — the public embed token is no longer
+                            // looked up or sent. It was read from the
+                            // `access = 4` dav_shares row so the Calendar tab
+                            // could iframe `/apps/calendar/p/{token}`; shipping
+                            // it in the layout bundle put an unauthenticated,
+                            // non-expiring URL for the team's whole agenda into
+                            // every member's browser, where a screenshot or a
+                            // proxy log was enough to publish it for good. The
+                            // tab renders the events directly now, so nothing
+                            // downstream wants this value.
                             $calendars[] = [
                                 'id'             => $calendarId,
                                 'uri'            => $calDetail['uri'],
                                 'name'           => $calName,
                                 'ownerPrincipal' => $calDetail['principaluri'],
-                                'public_token'   => $publicUri,
                             ];
                         }
                         $calRes->closeCursor();

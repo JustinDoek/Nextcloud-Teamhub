@@ -5,10 +5,12 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ActivityService;
+use OCA\TeamHub\Service\CalendarService;
 use OCA\TeamHub\Service\CollectivesService;
 use OCA\TeamHub\Service\DeckService;
 use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
+use OCA\TeamHub\Service\MailClientService;
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
@@ -16,6 +18,7 @@ use OCA\TeamHub\Service\MilestoneService;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TaskService;
+use OCA\TeamHub\Service\TeamExpiryService;
 use OCA\TeamHub\Service\TeamService;
 use OCA\TeamHub\Service\TeamTypeService;
 use OCA\TeamHub\Service\TimelineService;
@@ -52,10 +55,21 @@ class TeamController extends Controller {
         private TaskService $taskService,
         private TimelineService $timelineService,
         private TeamTypeService $teamTypeService,
+        // v4.6.13 — the create wizard's optional expiration date rides
+        // saveTeamType(), because an expiry is only meaningful next to the
+        // template that decides whether it is allowed at all.
+        private TeamExpiryService $teamExpiryService,
         private MilestoneService $milestoneService,
         // v3.98.2 — for the createDeckStack endpoint powering the Compass
         // "Define workstreams" Planning-phase activity.
         private DeckService $deckService,
+        // v4.6.20 — the team calendar grid's range reader. Distinct from
+        // ActivityService's upcoming-events feed, which still serves the home
+        // widget; see CalendarService::getTeamEventsInRange().
+        private CalendarService $calendarService,
+        // v4.6.26 — decides whether a compose URL points at Nextcloud Mail or
+        // hands off to the OS handler. Backs the sidebar's Email all members.
+        private MailClientService $mailClientService,
         private IConfig $config,
         private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
         private IUserSession $userSession,
@@ -96,6 +110,36 @@ class TeamController extends Controller {
             return new JSONResponse($team);
         } catch (\Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/preview
+     *
+     * The non-member view of a team: name, and — unless the team is invite-only
+     * — its description and image, plus how the caller may get in. This is what
+     * a copied team link resolves to for somebody who is not in the team yet.
+     *
+     * Deliberately NOT membership-gated; `getTeam()` above is, and every other
+     * team-scoped endpoint stays so. The disclosure boundary is drawn in
+     * `TeamService::getTeamPreview()` — read the note there before widening
+     * what this returns.
+     *
+     * 404 covers both "no such team" and "malformed id", which are the same
+     * fact to a caller holding a link.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getTeamPreview(string $teamId): JSONResponse {
+        try {
+            return new JSONResponse($this->teamService->getTeamPreview($teamId));
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][TeamController] getTeamPreview: no team returned', [
+                'teamId' => $teamId,
+                'reason' => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Team not found'], Http::STATUS_NOT_FOUND);
         }
     }
 
@@ -223,6 +267,55 @@ class TeamController extends Controller {
                 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Where "Email all members" should send the current user (v4.6.26).
+     *
+     * Response envelope:
+     *   { url: string|null, recipientCount: int, memberCount: int,
+     *     mailAvailable: bool }
+     *
+     * `url` is `null` when nobody in the team has an email address on their
+     * account, which is a real state rather than an error — see HANDOFF
+     * §0-mail, where no account on the test instance has one. The client says
+     * so instead of opening an empty composer, and that is why this endpoint
+     * answers 200 with a null URL rather than a 404.
+     *
+     * The two counts are what let the client be honest about partial reach:
+     * `recipientCount` of 9 against a `memberCount` of 14 means five people
+     * will not receive it, and the user should know that before the composer
+     * opens.
+     *
+     * **Resolved per request, not cached, and only on click.** The sidebar
+     * lists every team the user is in; resolving addresses for all of them on
+     * page load would be one membership walk per team for an action almost
+     * nobody takes on any given visit. The cost is paid by whoever asks.
+     *
+     * No subject or body is pre-filled. A subject the sender has to delete is
+     * worse than an empty one, and there is nothing TeamHub knows about why
+     * they are writing.
+     *
+     * Member-gated in the service. No `#[NoCSRFRequired]`: this is a GET that
+     * mutates nothing and `@nextcloud/axios` sends the token, so there is no
+     * reason to opt out of the framework's protection.
+     */
+    #[NoAdminRequired]
+    public function getTeamMailComposeUrl(string $teamId): JSONResponse {
+        try {
+            $resolved = $this->memberService->getTeamMemberEmailAddresses($teamId);
+
+            return new JSONResponse([
+                'url' => $this->mailClientService->composeUrl($resolved['addresses']),
+                'recipientCount' => count($resolved['addresses']),
+                'memberCount'    => $resolved['memberCount'],
+                'mailAvailable'  => $this->mailClientService->isAvailableForCurrentUser(),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to build the team mail compose URL', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -968,13 +1061,39 @@ class TeamController extends Controller {
      * Sets the team's template label. Body: { type: 'collaboration'|'project'|'department' }.
      * Admin-gated (mirrors the timeline/messages toggles) and validated
      * server-side by TeamTypeService.
+     *
+     * v4.6.13 — optionally also carries `expiresOn` ('YYYY-MM-DD'), the
+     * expiration date the create wizard collected. It rides this call rather
+     * than getting one of its own for two reasons: the wizard is already making
+     * it, and an expiry is only meaningful next to a template — the eligibility
+     * rule is "collaboration or project", which is exactly the value being
+     * written here. Ignored for Department and for a blank date.
+     *
+     * `setType()` has already established team-admin level by the time the
+     * expiry is written, so the creation path is gated even though
+     * `setAtCreation()` does not gate itself.
      */
     #[NoAdminRequired]
     public function saveTeamType(string $teamId): JSONResponse {
         try {
             $type = (string)$this->request->getParam('type', '');
             $stored = $this->teamTypeService->setType($teamId, $type);
-            return new JSONResponse(['type' => $stored]);
+
+            $expiresOn = trim((string)$this->request->getParam('expiresOn', ''));
+            if ($expiresOn !== '') {
+                $user = $this->userSession->getUser();
+                $this->teamExpiryService->setAtCreation(
+                    $teamId,
+                    $stored,
+                    $expiresOn,
+                    $user !== null ? $user->getUID() : '',
+                );
+            }
+
+            return new JSONResponse([
+                'type'   => $stored,
+                'expiry' => $this->teamExpiryService->getExpiry($teamId),
+            ]);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to save team type', [
                 'teamId' => $teamId,
@@ -1523,6 +1642,63 @@ class TeamController extends Controller {
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
+    /**
+     * Every event instance overlapping an arbitrary window (v4.6.20).
+     *
+     * The team calendar grid's data source. `start` and `end` are ISO-8601 or
+     * anything `DateTime` accepts, and are the window FullCalendar asks for —
+     * which is wider than the visible month, because a month grid shows
+     * trailing days of the previous month and leading days of the next.
+     *
+     * Separate from `getCalendarEventsForWeek` rather than replacing it: that
+     * endpoint has its own caller and its own fixed-week semantics, and
+     * widening it would have changed a payload the grid does not use.
+     */
+    #[NoAdminRequired]
+    public function getCalendarEventsInRange(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+
+            $startParam = trim((string)$this->request->getParam('start', ''));
+            $endParam   = trim((string)$this->request->getParam('end', ''));
+            if ($startParam === '' || $endParam === '') {
+                return new JSONResponse(['error' => 'Both start and end are required'], Http::STATUS_BAD_REQUEST);
+            }
+
+            try {
+                $startDt = new \DateTime($startParam);
+                $endDt   = new \DateTime($endParam);
+            } catch (\Exception $e) {
+                return new JSONResponse(['error' => 'Invalid start or end parameter'], Http::STATUS_BAD_REQUEST);
+            }
+
+            // A window is bounded before it reaches the service. Without this a
+            // caller could ask for a century and the expansion of every
+            // infinite series in it — the cost is in the expansion, not the
+            // query, so the guard belongs at the entry point where the number
+            // is still just a number.
+            $span = $endDt->getTimestamp() - $startDt->getTimestamp();
+            if ($span <= 0) {
+                return new JSONResponse(['error' => 'The range end must be later than its start'], Http::STATUS_BAD_REQUEST);
+            }
+            if ($span > 400 * 24 * 60 * 60) {
+                return new JSONResponse(['error' => 'The requested range is too large (max 400 days)'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $result = $this->calendarService->getTeamEventsInRange(
+                $teamId,
+                $startDt->getTimestamp(),
+                $endDt->getTimestamp(),
+            );
+
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to load calendar events', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
     public function getCalendarEventsForWeek(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
@@ -1624,7 +1800,14 @@ class TeamController extends Controller {
             $this->memberService->requestJoinTeam($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            // invite_only is a sentinel from MemberService — the team admits
+            // nobody who was not invited, so this is a refusal (403), not a
+            // malformed request. Passed through verbatim, as leaveTeam's
+            // indirect_member is, so the frontend can say why.
+            $code = $e->getMessage() === 'invite_only'
+                ? Http::STATUS_FORBIDDEN
+                : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $code);
         }
     }
 

@@ -200,7 +200,20 @@ class TeamService {
                        $qb->expr()->isNotNull('ms.single_id')       // indirect via group/team
                    )
                )
-               ->orderBy('c.name', 'ASC');
+               // v4.6.17 — LOWER(), not the raw column. Postgres sorts by byte
+               // value, so every capital letter sorts before every lowercase
+               // one and the sidebar read `DEsign, DJ tool, DS now, Design
+               // Guild, Dit is nieuws` — three names interleaved by the case of
+               // their *second* character, with `publicOne` stranded after
+               // `Website Redesign`. MySQL's default collation is already
+               // case-insensitive, which is why this survived: the bug is
+               // invisible on half the databases we support.
+               //
+               // `LOWER(col)` + the portability note in HANDOFF's Circles
+               // section is the same tool used for case-insensitive search;
+               // there is no `iLower`, and a functional ORDER BY costs nothing
+               // on a list this size.
+               ->orderBy($qb->createFunction('LOWER(c.name)'), 'ASC');
 
             $result = $qb->executeQuery();
             $rows   = [];
@@ -326,13 +339,25 @@ class TeamService {
                 // the frontend's role-gated sidebar actions.
                 $level = $row['level'] !== null ? (int)$row['level'] : 0;
 
+                // URL and storage together — one app-data walk per team rather
+                // than two. Every team in this list is one the viewer belongs
+                // to, so the image needs no further membership gate here.
+                $image = $this->teamImageService->describeImage($id);
+
                 $teams[] = [
                     'id'          => $id,
                     'name'        => $row['name'],
                     'description' => $row['description'] ?? '',
                     'members'     => $memberCounts[$id] ?? 0,
                     'unread'      => $unread,
-                    'image_url'   => $this->teamImageService->getImageUrl($id),
+                    'image_url'   => $image['url'],
+                    // v4.6.25 — 'nc' | 'legacy' | null. The frontend reads this
+                    // to find the teams that still carry a TeamHub-era picture
+                    // and move them into Teams (DESIGN §2.68's one-way
+                    // migration). It exists so that migration can be driven off
+                    // a fact the server already knows instead of probing every
+                    // team over the network to discover it has nothing.
+                    'image_source' => $image['source'],
                     // NC 34+ only: signals the frontend to prefer the Teams-native
                     // avatar (with image_url as fallback). See isTeamsAvatarSupported().
                     'nc_avatar_supported' => $this->isTeamsAvatarSupported(),
@@ -451,35 +476,232 @@ class TeamService {
         ];
     }
 
+    /**
+     * The little a non-member is allowed to know about a team they hold a link to.
+     *
+     * `getTeam()` above refuses anyone who is not already a member, which is
+     * correct for every surface that shows a team's contents — and is exactly
+     * why a copied team link used to lead nowhere. This is the deliberate
+     * exception: enough to decide whether to join, and nothing else.
+     *
+     * **What it discloses, and to whom.** Any authenticated user who supplies a
+     * team id learns that team's name and how to get in. That is the feature —
+     * a link is worth nothing if the recipient cannot see what they are being
+     * offered. It is not an enumeration surface: a Circles `unique_id` is a
+     * 31-character random token, so possession of one is possession of the
+     * link. Malformed ids are rejected before any query runs, and Circles'
+     * internal `user:` / `group:` auto-circles are filtered out so a personal
+     * circle can never be resolved to its owner's name through here.
+     *
+     * **A closed team discloses its name only.** Description and image are
+     * withheld: on an invite-only team they are content, and the only thing the
+     * holder of the link needs is to learn that the link is not for them.
+     *
+     * @return array{id: string, name: string, description: string,
+     *               image_url: ?string, joinPolicy: string, membership: string}
+     * @throws \Exception when the id is malformed or no such team exists.
+     */
+    public function getTeamPreview(string $teamId): array {
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+
+        // Same cheap shape guard the user search uses: bind protects against
+        // injection, but not against a fuzzer spending our SELECTs for us.
+        if (!preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $teamId)) {
+            throw new \Exception('Team not found');
+        }
+
+        $db  = $this->container->get(\OCP\IDBConnection::class);
+        $uid = $user->getUID();
+
+        // Read the circle directly rather than through CirclesManager: the
+        // caller is by definition not a member, so the API's caller-scoped
+        // visibility would hide the very row we are here to describe.
+        //
+        // `source = 16` is the gate, not a name-prefix test. A Circles install
+        // also holds personal circles (source 1, named `user:…`), group circles
+        // (2, `group:…`) and app-owned circles (10001, `app:…`), none of which
+        // is a team and none of which may be described to anybody through here.
+        // TeamSearchProvider and MaintenanceService identify a team the same
+        // way; browseAllTeams() filters the two `user:`/`group:` name prefixes
+        // instead, which would let an `app:` circle through — verified present
+        // on the test instance — so this does not copy that test.
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config')
+            ->from('circles_circle', 'c')
+            ->where($qb->expr()->eq('c.unique_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('c.source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        if (!$row) {
+            throw new \Exception('Team not found');
+        }
+
+        $name       = (string)($row['name'] ?? '');
+        $config     = (int)($row['config'] ?? 0);
+        $joinPolicy = CirclesConfig::joinPolicy($config);
+        $membership = $this->resolvePreviewMembership($db, $teamId, $uid);
+        $isClosed   = $joinPolicy === CirclesConfig::JOIN_CLOSED;
+
+        return [
+            'id'          => $teamId,
+            'name'        => $name,
+            'description' => $isClosed ? '' : (string)($row['description'] ?? ''),
+            // v4.6.25 — members only, the same boundary Circles puts on its own
+            // avatar route. This is narrower than the description rule directly
+            // above it, deliberately: a description is TeamHub's own text and a
+            // non-closed team volunteers it, whereas the picture is served by a
+            // route that refuses non-members. Returning a URL a link-holder
+            // cannot load only produced a broken image and a failed request in
+            // the console. See DESIGN §2.95.
+            'image_url'   => $membership === 'member'
+                ? $this->teamImageService->getImageUrl($teamId)
+                : null,
+            'joinPolicy'  => $joinPolicy,
+            'membership'  => $membership,
+        ];
+    }
+
+    /**
+     * Where the current user already stands with a team they are previewing:
+     * `member` (direct or via a group), `requesting` (waiting on a moderator),
+     * or `none`.
+     *
+     * `requesting` is the state that has no other way of being seen — a pending
+     * request keeps the user out of `getUserTeams()`, which filters on
+     * `status = 'Member'`, so without this they would be shown the join button
+     * they already pressed.
+     */
+    private function resolvePreviewMembership(\OCP\IDBConnection $db, string $teamId, string $uid): string {
+        if ($this->memberService->getMemberLevelFromDb($db, $teamId, $uid) >= 1
+            || $this->memberService->isEffectiveMember($teamId, $uid, $db)
+        ) {
+            return 'member';
+        }
+
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('status')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($uid)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        // 'Requesting' is Circles' pending-join status; 'Invited' means the team
+        // has already reached out, so the join controls are equally beside the
+        // point. Both are reported as a request already in flight.
+        $status = (string)($row['status'] ?? '');
+        if (strcasecmp($status, 'Requesting') === 0 || strcasecmp($status, 'Invited') === 0) {
+            return 'requesting';
+        }
+
+        return 'none';
+    }
+
     // =========================================================================
     // Team CRUD
     // =========================================================================
 
     /**
+     * Characters a new team name may not contain (v4.6.18).
+     *
+     * A blocklist, not an allowlist — see `assertValidTeamName()` for why the
+     * ASCII allowlist this replaced was the wrong shape. Each range earns its
+     * place by breaking something concrete:
+     *
+     *   - `/` and `\` — NC's `Folder::newFolder()` resolves them as path
+     *     separators, so "A/B" silently becomes folder "A" containing "B".
+     *     This is the v4.3.19 bug the original rule was written for and it is
+     *     the one entry here that is genuinely about correctness rather than
+     *     abuse.
+     *   - `\x00-\x1F`, `\x7F` — control characters. A newline in a team name
+     *     splits a log line and lets a name forge a second entry; NUL
+     *     truncates on any C-string boundary it reaches.
+     *   - `U+200B-U+200F`, `U+202A-U+202E`, `U+2066-U+2069`, `U+FEFF` —
+     *     zero-width and bidirectional-override codepoints. These are the
+     *     homograph-spoofing set: `U+202E` (RTL override) renders
+     *     "Marketing<RLO>gnp.exe" as "Marketing exe.png", and the zero-width
+     *     ones make two visually identical names that compare as different —
+     *     which would defeat the uniqueness check below.
+     *
+     * Everything else is legal, including accented Latin letters, non-Latin
+     * scripts, emoji, and ordinary punctuation. See the note on injection in
+     * `assertValidTeamName()`.
+     */
+    private const NAME_FORBIDDEN_PATTERN =
+        '/[\/\\\\\x00-\x1F\x7F\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]/u';
+
+    /**
      * Validate a team name for NEW team creation.
      *
-     * Applies only to `createTeam()` — existing teams (created before this
-     * guard landed) may contain any character and are treated as opaque
-     * strings by the rest of the app. This rule stops new teams from
-     * introducing the problem class going forward:
-     *   - `/` and `\` cause NC Folder::newFolder() to create nested dirs.
-     *   - Non-ASCII / punctuation cause downstream issues in Deck board
-     *     titles, Talk room names, Group Folder mount paths, and
-     *     Collectives / IntraVox page slugs.
+     * Applies only to `createTeam()` and the CSV importer — existing teams
+     * (created before this guard landed) may contain any character and are
+     * treated as opaque strings by the rest of the app.
      *
      * Rules:
-     *   - Non-empty after trim.
-     *   - ≤ 255 chars.
-     *   - Only ASCII letters (A–Z, a–z), digits (0–9), spaces, `-`, and `_`.
+     *   - Non-empty after trim, and valid UTF-8.
+     *   - ≤ 120 chars.
+     *   - No character from `NAME_FORBIDDEN_PATTERN`.
+     *   - Not composed entirely of dots.
      *
-     * v4.6.9 — underscore admitted. It clears every bar the rule exists to
-     * hold: legal in a filename on all three host platforms, so
-     * `Folder::newFolder()` and Group Folder mount paths are unaffected;
-     * unreserved in a URL path; and harmless in a Deck board title or Talk
-     * room name. Collectives is safe for a different reason — it slugifies
-     * with its own `NodeHelper::sanitiseFilename` and we read `getSlug()`
-     * back rather than deriving one, so whatever it does with `_` is what we
-     * link to.
+     * v4.6.19 — **the length cap dropped from 255 to 120, because 255 could not
+     * be stored.** `circles_circle.name` is `varchar(127)`; the 255-character
+     * column on that table is `display_name`, and the old cap had been written
+     * against the wrong one. Circles' `Circle::setName()` does not truncate, so
+     * a name of 128–255 characters passed validation here and then failed at
+     * the insert — Postgres raising `value too long for type character
+     * varying(127)`, MySQL raising in strict mode and silently truncating
+     * outside it. The wizard surfaced that as a raw "Failed to create team: …"
+     * and the CSV importer as a failed row, in both cases naming a database
+     * error for what is a length the user could have been told about up front.
+     *
+     * 120 rather than 127: `mb_strlen()` counts codepoints and both databases
+     * count characters in a `varchar`, so 127 would fit exactly — but leaving
+     * the cap flush against the column means any future column-width change,
+     * or any caller that appends a suffix before storing, overflows silently
+     * again. Seven characters of headroom costs nothing at a length nobody
+     * reaches deliberately.
+     *
+     * v4.6.18 — **the ASCII allowlist became a harm-based blocklist.** The old
+     * rule was `/^[A-Za-z0-9 _-]+$/`, which rejected every accented character
+     * in the six languages this app ships in: "Café Crew", "Zürich Ø" and
+     * "Ingénierie" were all illegal team names. That produced a steady stream
+     * of requests to re-admit one character at a time — `_` in v4.6.9 was the
+     * last of them — and each one was argued on its own merits because the
+     * rule had no principle to appeal to. It now has one: a character is
+     * forbidden when it breaks something, and the list of things it can break
+     * is finite and written down above.
+     *
+     * The docblock this replaces justified the allowlist with "non-ASCII /
+     * punctuation cause downstream issues in Deck board titles, Talk room
+     * names, Group Folder mount paths, and Collectives / IntraVox page slugs".
+     * That was over-broad. Deck titles and Talk room names are free-form
+     * strings; Collectives slugifies with its own `NodeHelper::sanitiseFilename`
+     * and we read `getSlug()` back rather than deriving one; and the filesystem
+     * paths are defended independently by
+     * `FilesService::sanitiseForFolderName()`, which strips path separators and
+     * control characters from whatever it is handed. The `/` case was real —
+     * it is item one of the blocklist and is now the rule's actual subject.
+     *
+     * **On injection**, which is the reason usually given for a strict rule
+     * here: it is not what makes a name safe in this codebase. Every query goes
+     * through `QueryBuilder` with bound parameters, so an apostrophe in a team
+     * name is inert at the database — a name rule is the wrong layer to defend
+     * that, and one that let `'` through would still be safe. Rendering is the
+     * same story: Vue escapes interpolated text, no `v-html` site is ever
+     * handed a team name, and `templates/timeline.php` escapes with
+     * `htmlspecialchars()` and is passed only a team id. If either of those
+     * facts ever stops holding, the fix belongs at that site and not here,
+     * because this rule protects new teams only and every pre-existing team
+     * would walk straight past it.
      *
      * @throws \InvalidArgumentException with a message safe to surface to the user.
      */
@@ -488,11 +710,138 @@ class TeamService {
         if ($trimmed === '') {
             throw new \InvalidArgumentException('Team name cannot be empty.');
         }
-        if (mb_strlen($trimmed) > 255) {
-            throw new \InvalidArgumentException('Team name is too long (max 255 characters).');
+        // Checked before the pattern below, not after: `preg_match()` with the
+        // `/u` modifier returns **false** on malformed UTF-8, and `false === 1`
+        // is false — so an invalid-encoding name would read as "no forbidden
+        // character found" and be admitted by the very check meant to stop it.
+        if (!mb_check_encoding($trimmed, 'UTF-8')) {
+            throw new \InvalidArgumentException('Team name is not valid text (it must be valid UTF-8).');
         }
-        if (preg_match('/^[A-Za-z0-9 _-]+$/', $trimmed) !== 1) {
-            throw new \InvalidArgumentException('Team name may only contain letters (A–Z, a–z), digits (0–9), spaces, hyphens (-), and underscores (_). Punctuation and non-ASCII characters are not allowed.');
+        if (mb_strlen($trimmed) > 120) {
+            throw new \InvalidArgumentException('Team name is too long (max 120 characters).');
+        }
+        if (preg_match(self::NAME_FORBIDDEN_PATTERN, $trimmed) === 1) {
+            throw new \InvalidArgumentException('Team name may not contain slashes, control characters, or invisible formatting characters.');
+        }
+        // "." and ".." are the filesystem's own names for a directory and its
+        // parent; a longer run of dots is the same trick with less to gain but
+        // no more legitimacy. `sanitiseForFolderName()` already substitutes
+        // "team" for the first two, so this is about rejecting the name at
+        // input rather than silently creating a team whose folder is called
+        // something else.
+        if (preg_match('/^\.+$/', $trimmed) === 1) {
+            throw new \InvalidArgumentException('Team name cannot consist only of dots.');
+        }
+    }
+
+    /**
+     * Circles rows that are not teams, and must not reserve a team name
+     * (v4.6.18).
+     *
+     * `circles_circle` holds more than teams, and on a live instance most of
+     * its rows are not one. Each excluded bit is a class of row that carries a
+     * `display_name` a person might reasonably want to call a team:
+     *
+     *   - `CFG_SINGLE` / `CFG_PERSONAL` — the per-user personal circle. Its
+     *     `display_name` is the account's first name, so leaving these in would
+     *     stop anyone creating a team called "Angela".
+     *   - `CFG_SYSTEM` — group-backed circles, one per NC group. **This is the
+     *     one that would have bitten**: the test instance carries a circle
+     *     `group:Marketing` whose `display_name` is exactly "Marketing", which
+     *     is also a real team. A check that did not exclude these would report
+     *     every group name as taken, and would have called the existing
+     *     Marketing team a duplicate of the group it has nothing to do with.
+     *   - `CFG_ROOT` — the `app:circles` row.
+     *
+     * Verified against the instance: with these four excluded the table yields
+     * exactly the 12 real teams and nothing else.
+     */
+    private const NAME_UNIQUENESS_EXCLUDED_BITS =
+        CirclesConfig::CFG_SINGLE
+        | CirclesConfig::CFG_PERSONAL
+        | CirclesConfig::CFG_SYSTEM
+        | CirclesConfig::CFG_ROOT;
+
+    /**
+     * Assert that no existing team already uses this name (v4.6.18).
+     *
+     * Separate from `assertValidTeamName()` on purpose, and the reason is
+     * `TeamExportService`: it validates the names of **existing** teams to warn
+     * that a name could not be re-created today. Folding uniqueness into the
+     * character rule would make every team on the instance report itself as a
+     * duplicate of itself. Callers that are creating a team call both; callers
+     * that are inspecting one call only the first.
+     *
+     * **Scope is the whole instance, not the caller's visible teams.** A check
+     * limited to teams the creator can see leaves the hole open in the case
+     * that matters — two people who cannot see each other's teams producing the
+     * pair — and the shared folder still lands as "Name (1)". The cost is that
+     * the refusal tells the creator a team by that name exists somewhere they
+     * cannot see, so the message deliberately says nothing else: not the team's
+     * id, not its owner, not whether they could join it.
+     *
+     * **Case-insensitivity is done by the database.** `LOWER()` runs under the
+     * DB's own collation, which for non-Latin scripts and a few Latin edge
+     * cases (dotted/dotless I) can disagree with PHP's `mb_strtolower()`, and
+     * on a C-collation database does not fold non-ASCII at all. The
+     * disagreement degrades to *admitting* a pair that differs only by the case
+     * of an exotic character — i.e. back to the behaviour before this check
+     * existed — rather than rejecting a name wrongly. Worth knowing, not worth
+     * fetching every team's name into PHP to fold it there.
+     *
+     * Both `name` and `display_name` are tested. They are identical for every
+     * real team on the instance (verified: zero rows diverge), but
+     * `display_name` is nullable with a `''` default while `name` is `NOT NULL`,
+     * so neither one alone is safe to trust as *the* name.
+     *
+     * @throws \InvalidArgumentException with a message safe to surface to the user.
+     */
+    public function assertTeamNameAvailable(string $name): void {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            // Emptiness belongs to assertValidTeamName(), which every caller of
+            // this method runs first. Returning rather than throwing keeps the
+            // two rules from reporting the same problem twice.
+            return;
+        }
+
+        $db    = $this->container->get(\OCP\IDBConnection::class);
+        $qb    = $db->getQueryBuilder();
+        $lower = mb_strtolower($trimmed);
+
+        // The bit test follows the established pattern in this file (see
+        // browseAllTeams) — createFunction with a class constant interpolated.
+        // The value is a compile-time int, never user input.
+        $excluded = (int)self::NAME_UNIQUENESS_EXCLUDED_BITS;
+
+        $qb->select('unique_id')
+           ->from('circles_circle')
+           ->where(
+               $qb->expr()->orX(
+                   $qb->expr()->eq(
+                       $qb->createFunction('LOWER(name)'),
+                       $qb->createNamedParameter($lower)
+                   ),
+                   $qb->expr()->eq(
+                       $qb->createFunction('LOWER(display_name)'),
+                       $qb->createNamedParameter($lower)
+                   )
+               )
+           )
+           ->andWhere(
+               $qb->expr()->eq(
+                   $qb->createFunction('(config & ' . $excluded . ')'),
+                   $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+               )
+           )
+           ->setMaxResults(1);
+
+        $result = $qb->executeQuery();
+        $row    = $result->fetch();
+        $result->closeCursor();
+
+        if ($row !== false) {
+            throw new \InvalidArgumentException('A team with this name already exists. Team names must be unique.');
         }
     }
 
@@ -515,6 +864,20 @@ class TeamService {
         // instead of a single folder called "A/B". Guard the string at
         // input rather than sanitising in every downstream folder call.
         $this->assertValidTeamName($name);
+
+        // v4.6.18 — and reject a name another team already holds. Circles does
+        // not enforce this (a circle is identified by `unique_id`, so two
+        // circles may share a name), and the duplicate did not stay cosmetic:
+        // `FilesService::createSharedFolder()` finds the folder name taken and
+        // walks a counter until it is free, so the second "Marketing" gets a
+        // shared folder called "Marketing (1)" while the team itself is still
+        // called "Marketing". Every other provisioned resource that derives a
+        // name from the team does something similar, which is how one duplicate
+        // becomes a whole team's worth of subtly mismatched resources.
+        //
+        // Checked here rather than inside assertValidTeamName() — see that
+        // method's note on TeamExportService.
+        $this->assertTeamNameAvailable($name);
 
         $circlesManager = $this->getCirclesManager();
         $federatedUser  = $circlesManager->getFederatedUser($user->getUID(), 1);
@@ -1001,7 +1364,10 @@ class TeamService {
                        )
                    )
                )
-               ->orderBy('c.name', 'ASC');
+               // Case-insensitive, for the reason spelled out on getUserTeams()'
+               // own orderBy above. Browse Teams had the same byte-order
+               // sorting; the sidebar is just where it was noticed.
+               ->orderBy($qb->createFunction('LOWER(c.name)'), 'ASC');
 
             $result = $qb->executeQuery();
             $teams  = [];
@@ -1019,7 +1385,15 @@ class TeamService {
                 // requiresApproval=false regardless of its actual config
                 // — masked because the migration path used to normalise the
                 // bitmask elsewhere. Fixed in v3.100.8.
-                $isOpen           = ($config & $CFG_OPEN) > 0;
+                //
+                // v4.6.17 — and the bit it settled on was still only half the
+                // rule. `requiresApproval = !isOpen` conflated "a moderator
+                // must approve you" with "you cannot join at all", so an
+                // invite-only team offered a Request Access button that
+                // Circles refuses, while an open team that genuinely wants
+                // moderator approval offered a plain Join. CirclesConfig::
+                // joinPolicy() is now the only reading of these two bits.
+                $joinPolicy       = CirclesConfig::joinPolicy($config);
                 $isDirectMember   = $row['member_uid'] !== null;
                 $isIndirectMember = !$isDirectMember && ($row['ms_single_id'] ?? null) !== null;
 
@@ -1029,8 +1403,20 @@ class TeamService {
                     'description'      => $row['description'] ?? '',
                     'isMember'         => $isDirectMember || $isIndirectMember,
                     'isDirectMember'   => $isDirectMember,
-                    'requiresApproval' => !$isOpen,
-                    'image_url'        => $this->teamImageService->getImageUrl($row['unique_id']),
+                    'joinPolicy'       => $joinPolicy,
+                    // Retained for any caller still reading the old field; it
+                    // now means what its name says and nothing more.
+                    'requiresApproval' => $joinPolicy === CirclesConfig::JOIN_REQUEST,
+                    // v4.6.25 — the picture follows Circles' own rule: members
+                    // only, direct or inherited. Browse lists teams the viewer
+                    // is not in, and the serve route answers those 403. Sending
+                    // a URL anyway would render an <img> that fails on every
+                    // card, which is exactly the console noise this release
+                    // removes — so a non-member gets null and the placeholder
+                    // icon. See DESIGN §2.95.
+                    'image_url'        => ($isDirectMember || $isIndirectMember)
+                        ? $this->teamImageService->getImageUrl($row['unique_id'])
+                        : null,
                     'nc_avatar_supported' => $this->isTeamsAvatarSupported(),
                     // v4.0.2 — filled in below via a single batch lookup so
                     // BrowseTeamsView can render the template badge. Absent
@@ -1163,6 +1549,25 @@ class TeamService {
             // the instance, so one admin settling it settles it for all.
             // Default '0' — a fresh install shows the checklist.
             'onboardingChecklistDismissed' => $config->getAppValue(Application::APP_ID, 'onboarding_checklist_dismissed', '0') === '1',
+            // v4.6.13 — how many days before a team's expiration date the
+            // warning surfaces in My Work, for both Nextcloud admins and the
+            // team's own admins. The key name and bounds come from
+            // TeamExpiryService so this stays one definition rather than a
+            // mirror; only the storage call lives here, next to every other
+            // admin setting, so the Team creation tab's autosave carries it.
+            'expiryWarningDays'      => TeamExpiryService::clampWarningDays((int)$config->getAppValue(
+                Application::APP_ID,
+                TeamExpiryService::CONFIG_WARNING_DAYS,
+                (string)TeamExpiryService::DEFAULT_WARNING_DAYS,
+            )),
+            'expiryWarningDaysMin'   => TeamExpiryService::MIN_WARNING_DAYS,
+            'expiryWarningDaysMax'   => TeamExpiryService::MAX_WARNING_DAYS,
+            // The date the create-team wizard's picker opens on when a user
+            // first clicks it. Computed server-side so the wizard, the CSV
+            // importer's documentation and this panel cannot drift apart.
+            'expiryDefaultDate'      => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+                ->modify('+' . TeamExpiryService::DEFAULT_PICKER_MONTHS . ' months')
+                ->format('Y-m-d'),
         ];
     }
 
@@ -1235,6 +1640,17 @@ class TeamService {
             $raw  = trim((string)$settings['intravoxParentPath'], '/');
             $path = preg_match('/^[a-zA-Z0-9_\-\/]+$/', $raw) ? $raw : 'en/teamhub';
             $config->setAppValue(Application::APP_ID, 'intravoxParentPath', $path);
+        }
+        if (isset($settings['expiryWarningDays'])) {
+            // Clamped rather than rejected, matching pinMinLevel and
+            // intravoxParentPath above: this tab autosaves as the admin types,
+            // so a half-typed number is a keystroke and not an error. The
+            // response re-renders the field with what was actually stored.
+            $config->setAppValue(
+                Application::APP_ID,
+                TeamExpiryService::CONFIG_WARNING_DAYS,
+                (string)TeamExpiryService::clampWarningDays((int)$settings['expiryWarningDays']),
+            );
         }
         if (array_key_exists('createTeamGroup', $settings)) {
             $raw = $settings['createTeamGroup'];

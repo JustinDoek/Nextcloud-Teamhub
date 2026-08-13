@@ -1,18 +1,36 @@
 SPDX-License-Identifier: AGPL-3.0-or-later
 SPDX-License-Identifier: MIT
 SPDX-License-Identifier: undefined
+SPDX-FileCopyrightText: @fullcalendar/vue3 developers
+SPDX-FileCopyrightText: Adam Shaw
 SPDX-FileCopyrightText: Christopher Jeffrey
 SPDX-FileCopyrightText: Evan You
 SPDX-FileCopyrightText: Guillaume Chau
 SPDX-FileCopyrightText: Nextcloud GmbH and Nextcloud contributors
 SPDX-FileCopyrightText: Rob Cresswell <robcresswell@pm.me>
 SPDX-FileCopyrightText: interactjs developers
+SPDX-FileCopyrightText: preact developers
 SPDX-FileCopyrightText: qmhc
 SPDX-FileCopyrightText: sortablejs developers
 SPDX-FileCopyrightText: teamhub developers
 SPDX-FileCopyrightText: vuedraggable developers
 
 This file is generated from multiple sources. Included packages:
+- @fullcalendar/core
+	- version: 6.1.21
+	- license: MIT
+- @fullcalendar/daygrid
+	- version: 6.1.21
+	- license: MIT
+- @fullcalendar/list
+	- version: 6.1.21
+	- license: MIT
+- @fullcalendar/timegrid
+	- version: 6.1.21
+	- license: MIT
+- @fullcalendar/vue3
+	- version: 6.1.21
+	- license: MIT
 - @nextcloud/vue
 	- version: 9.8.0
 	- license: AGPL-3.0-or-later
@@ -46,11 +64,14 @@ This file is generated from multiple sources. Included packages:
 - marked
 	- version: 14.1.4
 	- license: MIT
+- preact
+	- version: 10.12.1
+	- license: MIT
 - sortablejs
 	- version: 1.14.0
 	- license: MIT
 - teamhub
-	- version: 4.6.11
+	- version: 4.7.0
 	- license: undefined
 - vue
 	- version: 3.5.34

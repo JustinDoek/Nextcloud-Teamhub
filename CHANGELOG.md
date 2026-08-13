@@ -3,6 +3,278 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.7.0] — 2026-08-12 — Session close
+
+Rolls up 4.6.1–4.6.28. No new migration since `Version000406020Date20260810000000`; **a rebuild is required** (`npm run build`) — both for the version bump, which invalidates the integrity manifest, and for the one source change below.
+
+### What the 4.6 line delivered, one line each
+
+- **4.6.6–4.6.11** — bulk team import: its own tab, multiple admins per team, resolved account names, underscores and Collectives named properly, and `team:` in a member list accepting a name.
+- **4.6.12** — a bulk-imported team admin is activated outright instead of being left on a pending invite (level 8 with no `circles_membership` row meant no access at all).
+- **4.6.13–4.6.16** — the team-expiration workflow: request, decide, warn (no CHANGELOG entry of their own — see Known gaps).
+- **4.6.17** — a copied `?team=` link works for the person you sent it to (join / request-to-join / invite-only), and two join-gate holes close: invite-only teams were joinable by crafted POST, and approval-required teams auto-approved.
+- **4.6.20** — every TeamHub-created team calendar was published to the internet; the public share is removed and revoked by migration, replaced by an in-app FullCalendar grid. Team names move to a harm-based blocklist capped at 120 characters, and duplicates are refused.
+- **4.6.21** — dates belong to the reader: `TimezoneService` and `src/lib/localDate.js` fix meetings created at the UTC offset and "today" meaning the UTC day in 17 browser places and several server paths.
+- **4.6.22** — the expiration workflow gets an ending: approved / denied / superseded requests appear as Completed instead of vanishing from both sides.
+- **4.6.23–4.6.24** — Deck boards and Talk conversations follow team ownership, and the corrections from the first real transfer: access comes from team membership afterwards, not from a personal grant left behind.
+- **4.6.27** — the Maintenance expiration panel goes from eleven blocks to four, and `{n} day left` stops rendering its English plural in every locale.
+- **4.6.28** — bulk team export becomes a licensed feature; bulk import deliberately stays open.
+
+### Security
+
+- **A decision's `sourceRef` was stored with no scheme check and rendered into an `href` and an iframe `src`.** `DecisionService`'s own contract note has said *"controllers must validate"* since the field was added; no controller did, and `propose()` checked length only. `TeamDecisionsView` hands a ref whose `sourceType` is `url` to `openSourceUrl()`, which puts it in `<a :href>` **and** `<iframe :src>` — a `javascript:` ref there is stored XSS in the Nextcloud origin, executable by anyone who opens the decision.
+
+  **It was not reachable through `propose()`**, because `ALLOWED_SOURCE_TYPES` does not contain `url` — the value the render branch keys on. That is an accident of an unrelated allowlist rather than a defence of this field, and the render path stays live for any legacy row already carrying that type. Fixed at both ends: `assertSourceRefSchemeSafe()` refuses a scriptable scheme (`javascript`, `data`, `vbscript`, `file`, `blob`) or any non-http(s) `scheme://` form on write, and `openSourceUrl()` re-checks at the sink with `new URL()` — the half that protects rows stored before the server check existed. The sink stores `parsed.href`, so the value that was validated is the value that reaches the attribute.
+
+  **The two checks are deliberately not the same check.** The server is looser than `DecisionExternalLinkService::validateUrl()`'s strict http(s) allowlist, because `sourceRef` legitimately holds a bare message id, a `.proposals/…md` path or prose; the strict allowlist is applied at the sink, where the value is about to become a URL and nothing else. Copying either rule to the other end breaks something: the strict one rejects valid data, the loose one lets a protocol-relative `//evil.example/x` through. Reasoning in `DESIGN.md` §2.100.
+
+  Control characters are stripped before matching, since a browser dispatches `java\tscript:` as `javascript:`. **Spaces are not** — stripping them too would join `see http://x.com` into `seehttp://x.com` and refuse a legitimate free-text ref. Behaviour pinned against 24 inputs covering scriptable schemes, mixed case, embedded control characters, protocol-relative URLs, ids, paths and prose.
+
+### Added
+
+- One string — the refusal shown when a source link is not http(s) — keyed in all seven locale files.
+
+### Removed
+
+- **The unconditional `console.log` in `ProjectSwimlaneView.vue`'s `buildDependencyEdges()`**, added as a diagnostic in 4.3.18 and shipped ever since. It fired on every `canvasLayout` compute — spreading an object, materialising `[...cardAnchor.keys()]` and mapping a five-event sample on each render, whether or not anything was wrong. The five skip counters and two id arrays that existed only to feed it are gone with it; the `supported` parameter stays in the signature, as it already did.
+
+### Known gaps
+
+- **Nineteen versions in the 4.6 line have no CHANGELOG entry**: 4.6.1–4.6.5, 4.6.13–4.6.16, 4.6.18, 4.6.19, 4.6.25 and 4.6.26. Several are provably real — 4.6.13 created the expiry indexes this file still cites, 4.6.14 shipped the export routes 4.6.28 documented, 4.6.16 introduced the Email-owner gating — so this is step 5 being skipped at session end, not versions that never existed. The pattern is recorded in `HANDOFF.md` §3 with two earlier instances.
+
+### Notes
+
+- **The full Nextcloud security-guideline checklist was walked at close**, against the app as it stands rather than against a diff — this working copy has no git. Results by guideline: **1** no raw SQL beyond four bound `?` statements, no interpolation into any `QueryBuilder` string method, every `orderBy()` a column literal and every `createFunction()` a literal fragment. **2** six `v-html` bindings, all fed from `marked` → `DOMPurify.sanitize()`; both PHP templates escape through `htmlspecialchars()`; the one unvalidated URL sink is fixed above. **4, 6** no `eval`, `exec`, `shell_exec`, `system`, `proc_open`, `passthru`, `popen`, `call_user_func` or `unserialize` anywhere in `lib/`. **7** no `#[PublicPage]` and no `#[CORS]` in the app at all; `getTeamPreview()`, the one deliberately un-gated endpoint, still requires a session, shape-guards its id, binds both parameters and gates on `source = 16`. **9** all 310 routes cross-checked against the 121 CSRF-exempt methods: only two non-GET routes are exempt (`integration#registerIntegration`, `integration#deregisterIntegration`), both admin-gated with the reason documented in place, and no GET route mutates. **3** no `X-Frame-Options` or CSP manipulation anywhere, so the framework defaults stand. **5** the one filesystem read driven by a name (`AnnouncementService::loadMarkdownBody`) resolves only against a server-side registry and re-rejects `/`, `\` and `..` before touching disk; the CSV and image uploads `basename()` the client-supplied name. **8** no password, API key or credential reaches a log; what appears in log context is Talk **room** tokens, which are conversation identifiers already in every member's URL — not the bearer secret 4.6.20 removed. **10** no `RedirectResponse` in the app at all, so there is no redirect surface. **11** the link-preview and image-proxy paths validate every redirect hop, reject encoded-IP forms, resolve DNS and check every A/AAAA record, and fail closed.
+- **Guideline 7 cannot be verified mechanically in this codebase, and that is worth knowing.** A script flagged 40 of 184 team-scoped routes as ungated; every one sampled turned out to be gated, just under a different name each time — `requireAdminLevel`, `getMemberLevelFromDb` plus an inline level comparison, `requireLinkLevel`, `requireLaneWithEdit`, `requireActionLevel`, or a service throwing `AccessDeniedException`. There is no single gate idiom to grep for, so the check is manual by construction. Recorded in `HANDOFF.md`.
+- **Not covered:** no PHP was executed — `php` is not on the development machine's PATH, so not even `php -l` ran against the changed service.
+- `oc_migrations` carries a stale `teamhub / 000407000Date20260810000000` row from the 4.7.0 that was rolled back on 2026-08-10. Nothing looks it up and this release adds no migration, so it stays harmless — but **that class name is now burnt**: a migration created under it would be treated as already applied and never run.
+
+---
+
+## [4.6.28] — 2026-08-12 — Bulk team export is a licensed feature
+
+> **Rebuild required** — `npm run build`. Frontend + PHP. No migration.
+
+### Changed
+
+- **Bulk team export now needs an active license.** The Import/Export tab's export section shows a "License required" banner instead of the panel when the instance is unlicensed or soft-locked; `none` (Active or Trial) and `grace` unlock it — the same ladder Compliance and "What's new" already read.
+- **All three export endpoints refuse server-side**, with 403 and `{ "licenseGate": true, "enforcementLevel": … }` so a client can tell a license refusal apart from a generic failure. The hidden section is a courtesy; `TeamExportController::licenceGate()` is the boundary. On `download` the gate runs **before** the service, so a locked instance writes no `team.exported` audit events for a file it never produced.
+- **Bulk import stays open, deliberately.** An instance whose license has lapsed must still be able to get data *in*. The gate is on the side that is a convenience, not the side that would be a lock-in.
+- `AdminSettings.vue` grew a single `licenseActive` computed and `complianceUnlocked` now delegates to it — the enforcement ladder had been written out twice and was about to be written a third time.
+
+### Added
+
+- The three export routes are documented in `APIendpoints.md`, which they had never been (4.6.14 shipped without them), including the gate's response envelope.
+- The gate's banner string is translated in all seven locales.
+
+### Notes
+
+- A license that has not loaded yet reads as inactive, so a licensed admin can see the banner for the width of one round trip — and permanently if `GET /api/v1/admin/license` fails. That is the behaviour the Compliance tab has shipped with since 4.3.0 and it is now shared rather than duplicated; treating "unknown" as licensed would show a paid feature to an instance that has not paid for it every time the endpoint is slow.
+
+## [4.6.27] — 2026-08-12 — Expiration date: one row for the state, a dialog for the detail
+
+> **Rebuild required** — `npm run build`. Frontend and locale files only. No migration.
+
+The Maintenance tab's Expiration-date panel was eleven stacked blocks tall for a section whose whole content is one date and one question. It is now four, without dropping anything a reader acts on.
+
+### Changed
+
+- **The date and the fate of the last request share one row.** The outcome was a three-line coloured notice under the date; it is now a chip beside it — icon, one word, and a dialog behind it holding who decided, their note, and a grant shorter than the one asked for. A question already answered belongs on the page as a headline, not as the largest block in the panel. **What is still actionable does not move**: while a request is open, Withdraw stays in the row, so the dialog is read-only detail and never the only route to an action.
+- **The chip carries its state on the icon and the label, not on a filled panel.** `--color-success-text` and friends are the darkened variants meant for text on the main background — the reason an approval can now sit next to an amber "expires soon" row without the two colours fighting. Icon *and* word distinguish the three outcomes, so nothing rests on hue (WCAG 1.4.1).
+- **Two paragraphs became one.** The second ("A Nextcloud administrator decides. They can grant a shorter date…") lived under the form's sub-head and repeated the first a screenful later. Both facts a reader needs before asking now arrive together, above the date.
+- **The form is one line.** "New date" over a date picker, under a heading that already reads "Request an extension", named nothing the control did not; the reason field asks its own question in the placeholder. Both `<label for>` elements stay in the DOM and are visually hidden — a placeholder is not an accessible name.
+
+### Fixed
+
+- **`{n} day left` rendered its English plural in every locale.** The pair was stored as two separate string keys instead of one key with an array value, which is not the shape `n()` looks up — so a Dutch reader with eight days left saw "8 days left". Repaired in all seven locale files. **Nine other plural keys have the same defect** and are logged in `HANDOFF.md` rather than fixed here.
+
+### Added
+
+- The 22 strings this panel uses now have keys in all seven locale files, including the ones it inherited untranslated from 4.6.13. `ManageTeamView.vue` drops out of `check:l10n` entirely (84 → 65 missing instance-wide).
+- The request dialog shows **the reason the team gave**, which the UI had never played back, under its own heading beside the administrator's note. Two notes from two people read as one person's when neither is labelled.
+
+## [4.6.24] — 2026-08-11 — Ownership transfer: inherit through the team, not personally
+
+> **Rebuild not required** — PHP only. No migration.
+
+Corrections from the first real transfer (`Website Redesign`, Lieke Adm → Inge NC). The principle both changes settle: **after a transfer, access comes from team membership, not from a personal grant left behind.** A leftover personal grant stops tracking the person's team role — it survives them leaving the team, which is exactly what it should not do.
+
+### Fixed
+
+- **The Talk transfer did nothing at all, rather than half of it.** The incoming owner was a level-1 circle member with no `talk_attendees` row — a circle attendee row is a marker written when the circle is added, not a live expansion, so anyone who joins the team later has no row and cannot see the conversation. The lookup for the incoming owner came first and threw `ParticipantNotFoundException`, so the loop moved on before demoting anyone: the previous owner stayed OWNER and the new one stayed absent. Recorded correctly at the time as `talk_rooms_failed: 1` in the `team.owner_transferred` audit row.
+
+  The transfer now calls `reconcileEffectiveTalkRoomMembers()` first, which fixes the cause rather than the symptom — every effective member gets their row, not just the new owner. It leaves `participant_type = 1` alone by design, so it cannot strip the outgoing owner before the demotion decides what to do with them.
+- **The previous owner kept a personal Deck grant.** `transferBoardOwnership(changeContent: false)` re-adds them as a `PERMISSION_TYPE_USER` ACL with edit + share + manage — strictly more than the team's own circle row, which is edit only. That row is now removed after the transfer, so the previous owner inherits through the team like everybody else.
+
+  Via `AclMapper::deleteParticipantFromBoard()`, **not** `BoardService::deleteAcl()`: the latter also calls `assignedUsersMapper->deleteByParticipantOnBoard()`, which would unassign them from every card on the board. Losing ownership is not a reason to lose your work.
+
+### Changed
+
+- **The previous owner is demoted to USER in Talk, not MODERATOR.** Same rule as the Deck ACL. Someone still in the team keeps whatever the circle attendee row confers; someone who has left keeps nothing. The 4.6.23 choice of MODERATOR pinned a personal moderation right that no longer tracked their team role.
+
+## [4.6.23] — 2026-08-11 — Deck boards and conversations follow team ownership
+
+> **Rebuild not required** — PHP only. No migration.
+
+4.6.20 made the team calendar follow team ownership. The same reasoning applies to Deck, and a different one applies to Talk; both now happen in `assignOwner()`, as steps 4e and 4f beside the calendar's 4d. All three are best-effort: the team's ownership has already changed by the time they run, and failing that because a resource could not be moved would leave the team worse off. Counts of what moved and what did not are audited.
+
+### Added
+
+- **The team's Deck boards move to the new owner.** Same failure as the calendar, in a different app: `deck_boards.owner` is a single uid, and Deck's `ParticipantCleanupListener` answers `UserDeletedEvent` by calling `findAllByOwner()` and **deleting every board that account owns** — ACL participants do not save it. A board left on a departed creator is destroyed for the whole team. Only boards with `origin = 'teamhub_create'`; a board the team merely connected stays with the person who already had it.
+- **The team's conversations change hands.** The new owner is promoted to OWNER and the previous owner demoted to MODERATOR — not removed, since they are usually still in the team and often still an admin. Only rooms TeamHub created. The circle's own MODERATOR row is untouched, so every member keeps moderation through it.
+
+### Notes on the two, which are not the same kind of fix
+
+- **Talk destroys nothing.** `Manager::removeUserFromAllRooms()` deletes a room only when the departing account was its **last** participant; otherwise it just removes them and the conversation survives. So unlike the calendar and Deck cases there is no data at risk — what was wrong is that a former owner kept the highest rights over the team's conversation while the actual owner did not. This is a permission boundary following the team, not a rescue.
+- **Deck's transfer requires impersonating the outgoing board owner**, and this is not a workaround — it is what Deck's own `occ deck:transfer-ownership` does, via `BoardService::setUserId()` and `PermissionService::setUserId()`. `transferBoardOwnership()` re-adds the previous owner through `addAcl()`, which checks `PERMISSION_SHARE` against the *session* user, and Deck's permission model is `owner || ACL` with **no administrator bypass**. Verified against live data: the team circle's board ACL carries `permission_share = f`, so not even a team-member admin passes — without the impersonation every board on the instance would have failed and rolled back. The impersonation is restored in a `finally`, because both services are request-scoped and `assignOwner()` continues after the call.
+- **The bulk importer gets this for free.** `TeamImportService` provisions resources first and calls `assignOwner()` last (step 9), so imported teams' boards and conversations now land on the named owner instead of staying with the importing admin.
+
+## [4.6.22] — 2026-08-11 — The expiration workflow gets an ending
+
+> **Rebuild not required** — PHP only. No migration; the queries use the indexes `Version000406013` already created.
+
+### Fixed
+
+- **Extending a team's expiration date had no visible outcome.** Both expiry providers only ever read *open* work — `listPendingRequests()` returns `status = 'pending'`, and `findExpiringSoon()` returns teams inside the warning window. Approving a request fails both tests at once: the request stops being pending and the team's new date moves it out of the window, so the row did not move to Completed, it **disappeared**. The team admin who asked was never told the answer, and the administrator who decided got no confirmation it landed. On the test instance this is six approved requests producing zero rows.
+- **A denial read as the request having been forgotten.** The Waiting for others row vanished and an unchanged "expires soon" row took its place, with nothing anywhere saying it had been refused or why.
+
+### Added
+
+- Both expiry providers now emit `Category::COMPLETED` for requests decided inside the Completed retention window, with `completedAt` set to the decision time. Three outcomes are distinguished: **approved** (with the date actually granted, which can be shorter than asked), **denied** (with the administrator's note, which is the useful half of a denial), and **superseded** — a team withdrawing its own request, or an administrator answering by changing the date directly.
+- The administrator's row names who decided, because on an instance with several administrators the useful fact is often that somebody else already handled it.
+- `TeamExpiryRequestMapper::findDecidedSince()` / `findDecidedSinceForTeams()` and the two service readers over them. `WorkQuery::DEFAULT_COMPLETED_DAYS` replaces a bare `7` in the constructor and gives a single-item re-read the same window a real query uses.
+
+### Changed
+
+- Completed rows carry **no `dueAt`**. The deadline on a pending request is the team's current expiry, because that is when somebody has to have decided by — once decided, nobody does, and leaving the date on would let `applyUrgency()` promote a finished row back into Action required.
+- Approve, Deny and Request extension are withheld on completed rows. The service already refused them (`loadPendingRequest()` checks the status), but a button that always errors is the affordance SKILLS.md § Permissions says to withhold rather than let fail. `executeAction` answers a stale post with `conflict`, which tells the client to refresh.
+- `TeamExpiryTeamWorkProvider` item ids now take two shapes — a bare team id for the countdown row, `req:{id}` for a decision — so a team denied an extension correctly shows both the answer and what to do next.
+
+## [4.6.21] — 2026-08-11 — Dates belong to the reader, not the server
+
+> **Rebuild required (`npm run build`). No migration.** No stored value changes shape; this is entirely about how instants are converted to calendar days.
+
+Nextcloud pins PHP to UTC, and the app had no server-side notion of the viewer's timezone — `IDateTimeZone` appeared nowhere, and the one correct helper (`userTimezone()`) had been copy-pasted into two suggestion services and used nowhere else. On the browser side, `new Date().toISOString().slice(0, 10)` was the standard way to get "today", which is the UTC day. Every account on the test instance is `Europe/Amsterdam`, so both mistakes were live and two hours wide.
+
+The rule itself was not new — DESIGN.md already stated it for the feed period and the My Work snooze presets. What was missing was one place to ask the question. See DESIGN.md §2.92.
+
+### Fixed
+
+- **Every meeting was created at the organiser's UTC offset — two hours late on a Europe/Amsterdam instance.** `MeetingService` built the event from `new \DateTime("{$date}T{$startTime}:00")` with no timezone, so PHP's UTC default read the organiser's "14:00" as 14:00 UTC, and the `->setTimezone(new \DateTimeZone('UTC'))` that followed was a no-op on an already-wrong value. Demonstrated before and after: 14:00 Amsterdam stored as `14:00Z` and read back as 16:00; it now stores `12:00Z` and reads back as 14:00. The same parse fed the agenda cut-off (`strtotime`), so Deck cards due inside that window were mis-classified as overdue in the meeting notes.
+- **"Today" was the UTC day in 17 places in the browser**, so between 00:00 and 02:00 Amsterdam time it named yesterday — and all evening for anyone west of Greenwich. Affected the presence calendar's today-highlight, the presence slot window, the time-log and holiday default dates, the team-expiry minimum and six-month prefills, the audit-export filename and the meeting wizard's target date.
+- **"Today" was the UTC day server-side too**, in the presence rolling window (which decides the first day materialised, and which template slots are deleted and rebuilt on save), the closing artifact, the proposal document, the team-export and audit-export filenames, and the archive bundle.
+- **Floating dates were rendered through the viewer's zone, moving them a day west of Greenwich.** `workedAt` and `incurredAt` are calendar days snapped to UTC midnight, so formatting them with a local `Intl.DateTimeFormat` showed every time log and expense on the previous day for a US reader. Same bug in `ProjectHealthWidget`, which parsed milestone dates as `iso + 'T00:00:00Z'` and then rendered them locally.
+- **Milestone auto-post localised the language but not the date.** `IL10N::l()` passes the `DateTime` straight to `Calendar::formatDate` without touching its zone, and `new \DateTime('@' . $ts)` is always UTC — so the fallback and the primary path were both UTC-bound.
+
+### Added
+
+- `lib/Service/TimezoneService.php` — the single server-side answer to "what day is it for this user". Resolves `core`/`timezone`, falls back to the instance `default_timezone`, then UTC; memoised per uid. Exposes `forUser()`, `today()`, `formatTimestamp()`, `wallClockToTimestamp()` and `dayBounds()` (which adds a calendar day rather than 86400 seconds, so a DST transition cannot shorten it).
+- `src/lib/localDate.js` — the browser counterpart, built from the two functions in `FeedControlRail.vue` that were already correct. Names the distinction explicitly: `todayIso()` / `shiftIsoDate()` / `formatIsoDate()` for local calendar days, `epochDateToIso()` / `isoToEpochDate()` / `formatEpochDate()` for floating dates stored at UTC midnight, `toDateInput()` / `fromDateInput()` for instant-range pickers. `shiftIsoDate()` does calendar arithmetic on the string, so there is no zone to get wrong and no DST edge where "+1 day" is 23 or 25 hours; month shifts clamp (31 Aug + 6 months is 28 Feb). Verified across Europe/Amsterdam, America/Denver, Pacific/Auckland, Asia/Kolkata and UTC.
+
+### Changed
+
+- `userTimezone()` in `MeetingSuggestionService` and `TimeslotSuggestionService` now delegates to `TimezoneService`; the two duplicated bodies are gone.
+- The four `toISOString().slice(0, 10)` calls that were **correct** — the UTC round trip for project dates, `workedAt` and `incurredAt` — now go through the named `epochDateToIso()` so they no longer look like the bug that was removed everywhere else.
+- `ClosingArtifactService::generate()` takes the acting uid so the documents carry the dates the generator saw.
+
+## [4.6.20] — 2026-08-10 — The team calendar stops being a public link
+
+> **Rebuild required. New migration `Version000406020Date20260810000000`** — revokes the public share on every TeamHub-created team calendar.
+
+### Security
+
+- **Every team calendar was published to the internet, and no longer is.** Creating a team added a second `dav_shares` row with `access = 4` and a random token so the Calendar tab could iframe `/apps/calendar/p/{token}` — the only route in NC Calendar that shows a *single* calendar; its authenticated routes take a view and a date and cannot name one. The consequence was that `…/apps/calendar/p/{token}` answered without a login, and so did `remote.php/dav/public-calendars/{token}/?export`, which returns the team's entire agenda as ICS. The token reached every member's browser in the layout bundle, never expired, and had no revocation path. Verified against a live instance before removal: both URLs returned HTTP 200 unauthenticated. Creation is removed on both paths (`createCalendar` and `connectExistingCalendar`), the token is no longer read into or shipped with the layout bundle, and the migration deletes the rows.
+- The migration is scoped to calendars whose registry `origin` is `teamhub_create`. A publish row TeamHub made and one a user made themselves are identical in `dav_shares`, and a deleted share cannot be restored — so a calendar the team merely *connected* is left alone rather than silently unpublished.
+
+### Added
+
+- **A team calendar view TeamHub renders itself** (`TeamCalendarGrid.vue`, FullCalendar 6.1.21, MIT). Month / week / day / list-month / list-week / list-day, scoped to the calendars connected to the team, drawn in each calendar's own colour. Read-only: clicking an event opens a detail panel with time, location, calendar, organiser, attendees and their reply status, and an **Edit in Calendar** action that opens NC Calendar on the occurrence clicked. This is what makes "one calendar, authenticated" possible without publishing anything.
+- `GET /api/v1/teams/{teamId}/calendar/events/range` — membership-gated, arbitrary window. Expands recurrence, honours `RECURRENCE-ID` overrides, filters by overlap rather than start, and narrows in SQL first via `firstoccurence` / `lastoccurence`.
+- **The team calendar follows team ownership.** `assignOwner()` now moves the team's own calendars to the new owner. A CalDAV calendar can only belong to a person — `RootCollection` mounts calendar homes for users, calendar-resources and calendar-rooms only, never for a circle — and NC deletes a user's own calendars when the account is deleted, so a calendar left on a departed creator was destroyed for the whole team. Only calendars with `origin = 'teamhub_create'` move; a connected personal calendar stays with its owner. Best-effort and audited (`calendars_moved` / `calendars_failed`); a calendar that cannot move never fails the ownership transfer itself.
+- `AppEmbed` gains a `hosted` mode: a default slot replaces the iframe so a TeamHub-rendered view gets the standard toolbar without a second copy of it. Passing no `url` removes **Open in new tab** on its own, and **Reload** emits to the host.
+- Grid palette written against NC theme tokens so it follows dark mode: past days recessed, today and future on the page background, today marked on its header and day-number rather than by flooding the cell, and borders as a tone shift rather than a drawn line. The day-of-week header and the Week/Day hour column both keep a plain background with lighter text, following NC Calendar's own `fullcalendar.scss`, and today is marked with a pill on its label in every view. (The header started as an inverted band and became this in stages — Week and Day first, where the header sits atop a full-height hour column and the pair read as a wall, then Month for consistency once the views sat side by side.) The list views keep an inverted day header, where the day is a divider between groups of rows rather than a column heading. List views are given an explicit surface: FullCalendar paints no background on the list container, table or rows, so it sat on whatever was behind it. All of it via `:deep()` — FullCalendar renders its own DOM, so a plain scoped selector matches nothing.
+
+### Changed
+
+- The Calendar tab keeps every toolbar control it had — prev / next / today, the six-view selector, Add event, Delete events, Suggest meeting times, Reload — and loses **Open in new tab**, which pointed at the public share view.
+- Switching calendar view no longer resets the date to today; the grid keeps its position. Stepping within a period already loaded no longer refetches.
+- `watchCalendarReturn()` is gone. It polled the iframe's location to detect the user leaving an event so the tab could be put back on the team's agenda — an event could only be opened on the personal route, so opening one navigated out of the team calendar. With the grid there is nothing to navigate away from: a pinned event just moves the window to its date.
+
+### Fixed
+
+- **Transferring team ownership showed a success toast and an error together.** The transfer itself always worked; the failure was the reload directly after it. `POST /transfer-owner` is gated on `requireOwnerLevel`, so the caller is by definition the outgoing owner, and `assignOwner()` demotes them to moderator (level 4) as part of the transfer — while every member surface on Manage team needs level 8, and `requireAdminLevel` has no NC-admin bypass. So `loadMembers()` answered 403 (`Failed to get manage members`) and left the user stranded on a screen they no longer had rights to. Manage team is now left on a successful transfer, returning to the team, and the toast says the caller is now a moderator.
+- `AppEmbed`'s viewport no longer paints `--color-background-plain`. Harmless while it only ever held an iframe that covered it; in hosted mode it showed through wherever the hosted view was transparent.
+- **The grid showed no events at all on PostgreSQL.** `calendarobjects.calendardata` is `bytea` on Postgres, and NC's QueryBuilder returns a *stream resource* for it — so `(string)$row['calendardata']` produced `"Resource id #946"`, Sabre rejected it, and every event on every team calendar was discarded as unparseable. MySQL returns a string and was unaffected, which is exactly the shape of bug the Postgres compatibility check exists to catch. Read through a `readBlob()` helper now, mirroring `CalDavBackend`'s own private one.
+- **The month view came up mis-laid-out and empty until you switched views and back.** The Calendar tab is preloaded *hidden* (`v-show`), so FullCalendar measured a `display: none` container as zero at mount. A `ResizeObserver` calls `updateSize()` when the container first gains size; `changeView()` was what accidentally fixed it before.
+- **My Work rows that open Manage team went to the wrong place entirely.** `OpenTarget::normalize()` had no `MANAGE_TEAM` arm, so every `manageTeam()` target passed the `isValidKind()` guard and then fell through the `match` to `default`, going out on the wire as `EXTERNAL`. The reader saw the row switch to the team and then open the team's own URL in a second browser tab. Three providers were affected: the team-expiry row (Maintenance → expiry) and both TeamAdmin rows (integrations, members).
+- **Duplicate team names were possible, and produced mismatched resources.** Circles does not enforce unique names, so a second "Marketing" was created happily and `FilesService::createSharedFolder()` then walked a counter until the folder name was free — leaving a team called "Marketing" whose shared folder is "Marketing (1)". `createTeam()` now refuses a name already taken, case-insensitively and instance-wide, excluding personal, group-backed and app circles. The CSV importer already enforced this; the interactive path never did.
+- The CSV importer counted Circles' own `app:circles` row as a team and reserved the name "Circles". It was the one system prefix missing from its filter.
+- `ScheduleMeetingModal`'s unused `calendarToken` prop removed.
+
+### Changed — team names
+
+- **The character rule is a harm-based blocklist instead of an ASCII allowlist.** `/^[A-Za-z0-9 _-]+$/` rejected every accented character in the six languages this app ships in — "Café Crew", "Zürich Ø" and "Ingénierie" were all illegal — which produced a steady stream of requests to re-admit one character at a time, each argued on its own because the rule had no principle to appeal to. Now forbidden: path separators (`/`, `\`), control characters, and the zero-width / bidirectional-override set used for homograph spoofing; plus names that are only dots. Accented letters, non-Latin scripts, emoji and ordinary punctuation are allowed. Injection was never what this rule defended — `QueryBuilder` binds parameters and Vue escapes output — and the filesystem case is separately defended by `sanitiseForFolderName()`.
+- Malformed UTF-8 is now rejected explicitly. `preg_match()` with `/u` returns `false` on invalid encoding, and `false === 1` is false, so such a name would otherwise have read as "no forbidden character found".
+- **The maximum team name length is 120 characters, down from 255.** `circles_circle.name` is `varchar(127)` — the 255-wide column on that table is `display_name` — and Circles' `setName()` does not truncate, so a name of 128–255 characters passed validation and then failed at the insert with a raw database error. 120 rather than 127 leaves headroom so the cap is not flush against the column.
+
+---
+
+## [4.6.17] — 2026-08-09 — A copied team link works for the person you sent it to
+
+> **Rebuild required. No new migration.**
+
+### Added
+
+- **A team link opened by a non-member now shows the team and how to get in.** `?team=<id>` — the URL the Copy link action writes — used to be readable only by people who already had access: `App.vue` checked the id against the user's own team list and, finding nothing, logged a warning and rendered the generic welcome screen. The one thing the link is for was the case it did not serve. `TeamJoinView.vue` now shows the team's name and description with **Join** (open team), **Request to join** (a moderator approves), or an explanation that the team is **invite only** and there is nothing to press. A pending request or an outstanding invitation says so instead of re-offering the button.
+- `GET /api/v1/teams/{teamId}/preview` — the non-member view of a team: name, and unless the team is invite-only its description and image, plus `joinPolicy` and the caller's `membership`. The only team-scoped endpoint that is not membership-gated; the disclosure boundary is documented on `TeamService::getTeamPreview()`.
+- `CirclesConfig::joinPolicy()` — one reading of `CFG_OPEN` + `CFG_REQUEST` for every surface that offers, describes or performs a join, taken from Circles' `CircleJoin::manageMemberStatus()` rather than inferred.
+
+### Fixed
+
+- **Security: an invite-only team could be joined-by-request from a crafted POST.** Circles refuses a join on a team without `CFG_OPEN`, but `MemberService::requestJoinTeam()` caught that refusal and answered it with a direct `circles_member` insert, creating a `Requesting` row and notifying the team's admins about a request the team's configuration does not permit. Refused up front now, with a 403 and an `invite_only` sentinel.
+- **Security: a team requiring moderator approval let users in without it.** The same fallback tested `CFG_OPEN` alone to decide whether to auto-approve — but that bit governs *whether* you may join, not whether approval is needed. On a team configured "anyone can join, but a moderator approves", the row was flipped straight to `Member` and no notification was sent: the approval gate existed in Manage Team and nowhere else. `CFG_REQUEST` is what distinguishes the two.
+- **Browse Teams offered Request Access on invite-only teams.** `browseAllTeams()` set `requiresApproval = !isOpen`, conflating "a moderator must approve you" with "you cannot join at all". It now reports a three-valued `joinPolicy`; invite-only cards show an "Invite only" label and no button, per SKILLS.md § Permissions.
+
+- **My Work rendered its own section heading as `team_admin`.** `MyWorkService::categoryLabel()` had no arm for `Category::TEAM_ADMIN`, so the group heading fell through to `default => $category` and put the raw constant on screen in every language. The JS mirror in `constants/myWork.js` has been right since v4.5.45; only the server-side copy was missed. `resourceTypeLabel()` two lines below carried the identical gap — five of the seven types fell through — and now names all of them.
+
+- **"Email owner" opened Nextcloud Mail's account-setup wizard.** The check was `isEnabledForUser('mail')`, which answers "is the app installed and switched on" — not "can this person send a message with it". On an install where Mail ships enabled and nobody has added an account, a request to write one email was answered by asking the reader to configure IMAP. It now tests whether **the viewer** has a row in `oc_mail_accounts`, and falls back to the system `mailto:` handler otherwise. Per-user by necessity: Mail accounts are personal, and an administrator with none needs the system handler even where colleagues use Mail daily.
+- **The team list sorted by byte value, not alphabetically.** `ORDER BY c.name` on Postgres puts every capital before every lowercase letter, so the sidebar read `DEsign, DJ tool, DS now, Design Guild, Dit is nieuws` — names interleaved by the case of their *second* character — with `publicOne` stranded after `Website Redesign`. Both the sidebar (`getUserTeams`) and Browse Teams (`browseAllTeams`) now order by `LOWER(name)`. MySQL's default collation is already case-insensitive, which is why this only ever showed on half the databases we support.
+- **A team waiting on an extension decision was escalated daily to Action required.** Once a request is in flight the team admin cannot act — the decision is a Nextcloud administrator's — but the row stayed in Team admin carrying `dueAt`, and `applyUrgency()` promotes anything dated into Action required as its deadline nears. It now moves to **Waiting for others** the moment a request exists, which is both the honest heading and the one category urgency promotion deliberately skips. It names the Nextcloud administrators group as who it is waiting on.
+- **Request extension in My Work went to Manage team instead of asking.** The verb was navigation resolved against the item's `openTarget`, so the queue answered "ask for more time" by ejecting you from the queue. It is a real source action now — the date and reason are collected in a modal and posted to `/mywork/action`, and the row refreshes in place as "Extension requested".
+
+### Changed
+
+- **The All teams expiry editor uses icon buttons.** Save / Clear / Cancel were full-width labelled buttons in a column narrow enough to wrap them onto three lines, making the row taller than the field they belong to. Now three icon-only buttons on one line under the date picker, each with a `title` and an `aria-label`.
+- **An Email owner button in the All teams table**, beside Set owner. Present only when the server resolved an address — a team with no owner, or an owner with none on their account, gets no button rather than one that opens an empty compose window.
+- **The extension-request decision is a dialog, not a popout.** It was absolutely positioned inside a table cell, so the row's own action buttons painted over it and the table's horizontal scroll clipped it. `NcDialog` gives it a stacking context and a focus trap, and the body type steps up from micro to body now that nothing has to fit in a cell.
+- **A request to join a team now appears in its admins' My Work**, under Team admin, with Approve and Reject on the row. Until now a join request reached the team's admins as a notification and nowhere else — read once and then gone, leaving nothing to work from while the person kept waiting. Ranked `NORMAL`, above the `LOW` that pending resources carry: somebody is waiting on an answer. Both verbs go through `MemberService::approveRequest` / `rejectRequest`, which re-check the caller's team level, so this is a second door onto the same room rather than a second lock.
+- `GET /api/v1/teams/browse` gains `joinPolicy` (`open` | `request` | `closed`). `requiresApproval` is retained and now means only what its name says.
+
+### Not a bug
+
+- **"Email owner" on an expiring-team row is withheld when the owner has no email address.** Working as designed since v4.6.16: `getAvailableActions()` offers it only when `resolveTeamOwner()` returned an address, because an action that opens an empty `mailto:` goes nowhere. On an instance where no account has an address set, the row correctly shows only Open.
+
+### Notes
+
+- `ActionType::REQUEST_EXTENSION` moved from `NAVIGATION` to `SOURCE_MUTATING`. It writes a row now, so it is restrictable per provider and written to the audit log like every other verb that changes something. An API caller that was relying on it never reaching the server will now find that it does.
+
+---
+
+## [4.6.12] — 2026-08-07 — An imported team admin does not have to accept an invite
+
+> **Rebuild required. No new migration.**
+
+### Fixed
+
+- **A bulk-imported team admin was an admin on paper with no access.** Every team template that sets `CFG_INVITE` — the collaboration profile does, `config = 40` — lands an invited user at `status = Invited`, `level = 0`, with **no `circles_membership` row**, and there they stay until they accept. 4.6.10 raised the level and left the status alone, producing a level-8 admin that Circles could not resolve as a member of the team at all: no share resolution, no resource ACL, nothing. `MaintenanceService::adminSetMemberLevel()` now confirms the row's status alongside the level and rebuilds the membership cache. **Scoped to the `admin` column only** — accounts in `members` still get a real invite, because a pending invite there is the team's privacy config doing its job.
+- A comment in `MemberService::inviteMembers()` claimed "for user_type=1, it goes straight to 'Member'". That is only true on a team without `CFG_INVITE`, and believing it is why the above went unnoticed. Corrected in place.
+
+### Known, not fixed
+
+- **`InitiatorNotConfirmedException` on the second member of a row** (HANDOFF §0) is unchanged and is a different fault: the *invite call itself* throws, so no row is created and there is nothing to confirm. Circles resolves the initiator's level by joining `oc_circles_membership` on `single_id`, and `MembershipService::onUpdate()` — which runs after every member add — deletes every membership row for a `single_id` whose principal it cannot resolve. The instance still carries the two phantom principals from HANDOFF §0b (`user:lieke adm:…`, `user:inge nc:…`), which is a live candidate but **not proven**. Clean those up before the next retest.
+
+---
+
 ## [4.6.11] — 2026-08-07 — `team:` in a member list accepts a name
 
 > **Rebuild required. No new migration.**

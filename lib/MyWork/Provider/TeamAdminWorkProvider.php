@@ -58,11 +58,27 @@ class TeamAdminWorkProvider implements IWorkProvider {
 
     public const ID = 'teamadmin';
 
-    /** The one resource type this provider emits. */
+    /** A resource awaiting an admin's accept/ignore. */
     private const RESOURCE_TYPE = 'team_resource';
+
+    /** A person waiting to be let into the team (v4.6.17). */
+    private const TYPE_JOIN_REQUEST = 'team_join_request';
 
     /** Source status for a resource awaiting an admin's accept/ignore. */
     public const STATUS_PENDING_REVIEW = 'resource_pending_review';
+
+    /** Source status for a person's pending request to join (v4.6.17). */
+    public const STATUS_JOIN_REQUESTED = 'join_requested';
+
+    /**
+     * First segment of a join request's `providerItemId`.
+     *
+     * A resource's id is `{teamId}:{appId}:{resourceId}`, and a join request's
+     * is `joinreq:{teamId}:{uid}` — same three-segment split, told apart by this
+     * marker rather than by counting. `joinreq` cannot collide with a team id:
+     * Circles ids are 31 characters.
+     */
+    private const JOIN_PREFIX = 'joinreq';
 
     /**
      * Rows per request across all teams.
@@ -112,8 +128,8 @@ class TeamAdminWorkProvider implements IWorkProvider {
                 ActionType::APPROVE,
                 ActionType::REJECT,
             ],
-            'resourceTypes' => [self::RESOURCE_TYPE],
-            'statuses'      => [self::STATUS_PENDING_REVIEW],
+            'resourceTypes' => [self::RESOURCE_TYPE, self::TYPE_JOIN_REQUEST],
+            'statuses'      => [self::STATUS_PENDING_REVIEW, self::STATUS_JOIN_REQUESTED],
             'categories'    => [Category::TEAM_ADMIN],
             'pagination'    => false,
             'incremental'   => false,
@@ -200,6 +216,40 @@ class TeamAdminWorkProvider implements IWorkProvider {
 
                 $items[] = $this->buildItem($query, $teamId, $row);
             }
+
+            // v4.6.17 — people waiting to be let in, listed beside the
+            // resources waiting to be reviewed. Until now a join request
+            // reached its team's admins as a notification and nowhere else: a
+            // notification is read once and then gone, so a request that was
+            // not acted on the moment it arrived left no trace anybody worked
+            // from. The person is still waiting either way.
+            //
+            // Second in the loop deliberately — a pending resource is quieter
+            // than a pending person, but the resource rows were here first and
+            // reordering them per team would make the list jump for no reason.
+            // Priority is what separates them, not position.
+            if (count($items) >= self::MAX_ITEMS) {
+                $truncated = true;
+                break;
+            }
+
+            try {
+                $requests = $this->memberService->getPendingRequests($teamId);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MyWork][TeamAdmin] join-request lookup failed', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(),
+                    'app' => Application::APP_ID,
+                ]);
+                continue;
+            }
+
+            foreach ($requests as $request) {
+                if (count($items) >= self::MAX_ITEMS) {
+                    $truncated = true;
+                    break;
+                }
+                $items[] = $this->buildJoinRequestItem($query, $teamId, $request);
+            }
         }
 
         return new WorkItemPage($items, count($items), $truncated);
@@ -213,6 +263,39 @@ class TeamAdminWorkProvider implements IWorkProvider {
         if (count($parts) !== 3) {
             return null;
         }
+
+        // v4.6.17 — a join request wears the same three-segment shape with a
+        // marker in front. Told apart before the resource branch reads $parts[0]
+        // as a team id.
+        if ($parts[0] === self::JOIN_PREFIX) {
+            [, $teamId, $uid] = $parts;
+            if (!in_array($teamId, $allowedTeamIds, true) || !$this->isTeamAdmin($teamId)) {
+                return null;
+            }
+
+            try {
+                $requests = $this->memberService->getPendingRequests($teamId);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MyWork][TeamAdmin] join-request re-read failed', [
+                    'itemId' => $itemId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                return null;
+            }
+
+            foreach ($requests as $request) {
+                if ((string)$request['userId'] === $uid) {
+                    return $this->buildJoinRequestItem(
+                        new WorkQuery(userId: $userId, teamIds: $allowedTeamIds, now: time()),
+                        $teamId,
+                        $request,
+                    );
+                }
+            }
+
+            // Decided by somebody else while the row was on screen.
+            return null;
+        }
+
         [$teamId, $appId, $resourceId] = $parts;
 
         if (!in_array($teamId, $allowedTeamIds, true) || !$this->isTeamAdmin($teamId)) {
@@ -251,6 +334,10 @@ class TeamAdminWorkProvider implements IWorkProvider {
     }
 
     public function executeAction(string $userId, WorkItem $item, string $action, array $params): ActionResult {
+        if ($item->resourceType === self::TYPE_JOIN_REQUEST) {
+            return $this->decideJoinRequest($item, $action);
+        }
+
         $appId      = (string)($item->metadata['appId'] ?? '');
         $resourceId = (string)($item->metadata['resourceId'] ?? '');
         if ($appId === '' || $resourceId === '') {
@@ -281,6 +368,59 @@ class TeamAdminWorkProvider implements IWorkProvider {
             return ActionResult::conflict($e->getMessage());
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][MyWork][TeamAdmin] action failed', [
+                'action' => $action, 'teamId' => $item->teamId,
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return ActionResult::failure($this->l->t('That could not be saved.'), 'failed');
+        }
+
+        return ActionResult::unsupported($this->l->t('Unknown action.'));
+    }
+
+    /**
+     * Approve or reject a pending join request (v4.6.17).
+     *
+     * Both service calls re-check the caller's team level and re-check that the
+     * row is still `Requesting`, so the authority for this decision lives where
+     * it does for the Manage team → Members buttons — this is a second door onto
+     * the same room, not a second lock.
+     */
+    private function decideJoinRequest(WorkItem $item, string $action): ActionResult {
+        $uid = (string)($item->metadata['requesterUid'] ?? '');
+        if ($uid === '') {
+            return ActionResult::failure($this->l->t('That request could not be identified.'), 'failed');
+        }
+
+        try {
+            if ($action === ActionType::APPROVE) {
+                $this->memberService->approveRequest($item->teamId, $uid);
+                return ActionResult::success(
+                    $this->l->t('%s is now a member of the team.', [
+                        (string)($item->metadata['requesterName'] ?? $uid),
+                    ]),
+                    null,
+                    true,
+                );
+            }
+
+            if ($action === ActionType::REJECT) {
+                $this->memberService->rejectRequest($item->teamId, $uid);
+                return ActionResult::success(
+                    $this->l->t('Request rejected. They can ask again if the team is still open to requests.'),
+                    null,
+                    true,
+                );
+            }
+        } catch (\Throwable $e) {
+            // 'Pending request not found' is what both services throw when the
+            // row has already been decided — a conflict, not a failure, so the
+            // row refreshes rather than reporting an error the admin caused.
+            if (str_contains($e->getMessage(), 'Pending request not found')) {
+                return ActionResult::conflict(
+                    $this->l->t('That request has already been decided.'),
+                );
+            }
+            $this->logger->error('[TeamHub][MyWork][TeamAdmin] join-request action failed', [
                 'action' => $action, 'teamId' => $item->teamId,
                 'exception' => $e, 'app' => Application::APP_ID,
             ]);
@@ -332,6 +472,63 @@ class TeamAdminWorkProvider implements IWorkProvider {
                 'appId'      => $appId,
                 'resourceId' => $resourceId,
                 'origin'     => $row->getOrigin(),
+            ],
+            'permissions'    => ['canApprove' => true],
+        ]);
+    }
+
+    /**
+     * One person's pending request to join a team (v4.6.17).
+     *
+     * **Ranked NORMAL, above the LOW that pending resources carry.** Somebody is
+     * waiting on an answer, and until they get one they cannot reach anything
+     * the team holds; an unreviewed Deck board inconveniences nobody. It stays
+     * out of Action required all the same — the category ranks below Waiting for
+     * others by design, so this can never outrank a deadline.
+     *
+     * No `dueAt`, for the same reason nothing else in this category has one:
+     * a request does not expire, and a date filter is a question about
+     * deadlines. See the class docblock.
+     *
+     * @param array{userId: string, displayName: string} $request
+     */
+    private function buildJoinRequestItem(WorkQuery $query, string $teamId, array $request): WorkItem {
+        $uid  = (string)$request['userId'];
+        $name = (string)($request['displayName'] ?: $uid);
+
+        return WorkItem::make([
+            'providerId'     => self::ID,
+            'providerItemId' => self::JOIN_PREFIX . ':' . $teamId . ':' . $uid,
+            'teamId'         => $teamId,
+            'teamName'       => $query->teamName($teamId),
+            'category'       => Category::TEAM_ADMIN,
+            'title'          => $this->l->t('%s asks to join', [$name]),
+            'subtitle'       => $this->l->t('Membership request'),
+            'resourceType'   => self::TYPE_JOIN_REQUEST,
+            'resourceId'     => $uid,
+            'resourceUrl'    => '/apps/teamhub?team=' . rawurlencode($teamId),
+            // Manage team → Members, where the pending-request list with its own
+            // Approve/Reject rows lives.
+            'openTarget'     => OpenTarget::manageTeam('members'),
+            'priority'       => Priority::NORMAL,
+            'status'         => self::STATUS_JOIN_REQUESTED,
+            'reason'         => $this->l->t('Waiting for a team admin to approve or reject'),
+            // Circles' `circles_member` row carries a `joined` timestamp but it
+            // is a DATETIME string and means something different per status, so
+            // it is not read here. Undated is honest; a wrong date is not.
+            'createdAt'      => null,
+            'updatedAt'      => null,
+            'dueAt'          => null,
+            'completedAt'    => null,
+            // The requester is who this is *about*, not who it is assigned to —
+            // the work is the admin's. waitingFor says the same thing the right
+            // way round: the team is what this person is waiting on.
+            'assignee'       => null,
+            'waitingFor'     => null,
+            'availableActions' => [],
+            'metadata'       => [
+                'requesterUid'  => $uid,
+                'requesterName' => $name,
             ],
             'permissions'    => ['canApprove' => true],
         ]);

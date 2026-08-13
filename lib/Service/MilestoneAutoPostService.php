@@ -82,6 +82,7 @@ class MilestoneAutoPostService {
         private DecisionMapper            $decisionMapper,
         private DecisionTeamConfigMapper  $decisionConfigMapper,
         private TimelineService           $timelineService,
+        private TimezoneService           $timezoneService,
         private IConfig                   $config,
         private IDBConnection             $db,
         private IUserManager              $userManager,
@@ -153,7 +154,7 @@ class MilestoneAutoPostService {
 
         // TRANSLATORS: system-posted stream message subject when a milestone's date has passed
         $subject = $l10n->t('Milestone reached: %s', [$milestone->getLabel()]);
-        $body    = $this->buildBody($milestone, $project, $l10n);
+        $body    = $this->buildBody($milestone, $project, $l10n, $authorUid);
 
         $this->messageMapper->create(
             $milestone->getTeamId(),
@@ -179,7 +180,7 @@ class MilestoneAutoPostService {
      * arguments so translators can reorder the numbers within their
      * language's sentence structure.
      */
-    private function buildBody(Milestone $milestone, Project $project, IL10N $l10n): string {
+    private function buildBody(Milestone $milestone, Project $project, IL10N $l10n, string $uid = ''): string {
         $paras = [];
 
         $paras[] = $l10n->t(
@@ -198,13 +199,13 @@ class MilestoneAutoPostService {
             $paras[] = $l10n->t(
                 // TRANSLATORS: %1$s is the label of the previous milestone; %2$s is its localised date. Introduces the counts that follow.
                 'Since the previous milestone "%1$s" (%2$s):',
-                [$prevMilestone->getLabel(), $this->formatDate($prevMilestone->getMilestoneDate(), $l10n)],
+                [$prevMilestone->getLabel(), $this->formatDate($prevMilestone->getMilestoneDate(), $l10n, $uid)],
             );
         } elseif ($project->getStartDate() !== null) {
             $paras[] = $l10n->t(
                 // TRANSLATORS: %s is the project start date, localised. Introduces the counts that follow when there is no previous milestone.
                 'Since the project started (%s):',
-                [$this->formatDate($project->getStartDate(), $l10n)],
+                [$this->formatDate($project->getStartDate(), $l10n, $uid)],
             );
         } else {
             $paras[] = $l10n->t('Up to this milestone date:');
@@ -441,13 +442,20 @@ class MilestoneAutoPostService {
         }
     }
 
-    private function formatDate(int $ts, IL10N $l10n): string {
+    private function formatDate(int $ts, IL10N $l10n, string $uid = ''): string {
         // IL10N::l returns a localised date/time string based on the target
         // language; falls back to ISO on failure so the message still ships.
+        //
+        // The timezone has to be set on the DateTime before handing it over:
+        // IL10N::l passes the object straight to Calendar::formatDate without
+        // touching its zone, and `new \DateTime('@' . $ts)` is always UTC. So
+        // the language was localised and the date was not — a milestone dated
+        // the 1st read as the 31st for anyone west of Greenwich.
         try {
-            return (string)$l10n->l('date', new \DateTime('@' . $ts));
+            $dt = (new \DateTime('@' . $ts))->setTimezone($this->timezoneService->forUser($uid));
+            return (string)$l10n->l('date', $dt);
         } catch (\Throwable) {
-            return date('Y-m-d', $ts);
+            return $this->timezoneService->formatTimestamp($ts, $uid);
         }
     }
 

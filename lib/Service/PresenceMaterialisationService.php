@@ -44,6 +44,7 @@ class PresenceMaterialisationService {
         private PresenceTemplateMapper  $templateMapper,
         private PresenceSlotMapper      $slotMapper,
         private PresenceCalendarService $calendarService,
+        private TimezoneService         $timezoneService,
         private IJobList                $jobList,
         private IDBConnection           $db,
         private LoggerInterface         $logger,
@@ -62,8 +63,6 @@ class PresenceMaterialisationService {
      * rematerialiseForUser() (triggered on every template save).
      */
     public function materialiseAll(): void {
-        [$start, $end] = $this->rollingWindow();
-
         // Fetch every distinct user_id that has template rows.
         $qb = $this->db->getQueryBuilder();
         $qb->selectDistinct('user_id')->from('teamhub_presence_template');
@@ -76,6 +75,10 @@ class PresenceMaterialisationService {
 
         $total = 0;
         foreach ($users as $userId) {
+            // Per user, not once for the sweep: the window starts on "today",
+            // and users in different timezones are not on the same day at the
+            // moment cron runs.
+            [$start, $end] = $this->rollingWindow($userId);
             $newSlots = $this->materialiseForUserInRange($userId, $start, $end, deleteStale: false);
             if ($newSlots > 0) {
                 // Queue calendar sync for users who got new slots (B4).
@@ -85,8 +88,8 @@ class PresenceMaterialisationService {
         }
 
         $this->logger->info(sprintf(
-            '[TeamHub][PresenceMaterialisationService] materialiseAll: %d users, %d new slots, window %s–%s',
-            count($users), $total, $start, $end
+            '[TeamHub][PresenceMaterialisationService] materialiseAll: %d users, %d new slots',
+            count($users), $total
         ));
     }
 
@@ -102,7 +105,7 @@ class PresenceMaterialisationService {
      * source='override' and source='holiday' are untouched.
      */
     public function rematerialiseForUser(string $userId): void {
-        [$start, $end] = $this->rollingWindow();
+        [$start, $end] = $this->rollingWindow($userId);
 
         // Delete template-sourced slots from today onward.
         $this->slotMapper->deleteTemplateSlotsByUserFromDate($userId, $start);
@@ -206,11 +209,20 @@ class PresenceMaterialisationService {
      * Rolling window: today → end of (current year + 1).
      * Returns [start ISO, end ISO].
      *
+     * "Today" is the *user's* today. A presence slot is a floating local
+     * half-day, so the window that materialises it has to start on the day
+     * the user is living in — `date('Y-m-d')` gives the UTC day, which for
+     * anyone east of Greenwich is still yesterday during their early hours,
+     * and the horizon would then be off by one at both ends.
+     *
+     * $userId is empty for the cron sweep, which has no single user; that
+     * falls back to the instance's default_timezone.
+     *
      * @return array{string, string}
      */
-    private function rollingWindow(): array {
-        $today     = date('Y-m-d');
-        $nextYear  = (int)date('Y') + 1;
+    private function rollingWindow(string $userId = ''): array {
+        $today     = $this->timezoneService->today($userId);
+        $nextYear  = (int)substr($today, 0, 4) + 1;
         $endOfNext = sprintf('%04d-12-31', $nextYear);
         return [$today, $endOfNext];
     }

@@ -14,6 +14,8 @@ return [
         ['name' => 'team#listTeams',             'url' => '/api/v1/teams',                                    'verb' => 'GET'],
         ['name' => 'team#browseAllTeams',         'url' => '/api/v1/teams/browse',                            'verb' => 'GET'],
         ['name' => 'team#getTeam',                'url' => '/api/v1/teams/{teamId}',                          'verb' => 'GET'],
+        // Non-member view of a team, for a shared team link. See TeamController.
+        ['name' => 'team#getTeamPreview',         'url' => '/api/v1/teams/{teamId}/preview',                  'verb' => 'GET'],
         ['name' => 'team#createTeam',             'url' => '/api/v1/teams',                                    'verb' => 'POST'],
         ['name' => 'team#updateTeam',             'url' => '/api/v1/teams/{teamId}',                          'verb' => 'PUT'],
         ['name' => 'team#deleteTeam',             'url' => '/api/v1/teams/{teamId}',                          'verb' => 'DELETE'],
@@ -32,6 +34,9 @@ return [
         ['name' => 'team#getTeamMembers',         'url' => '/api/v1/teams/{teamId}/members',                 'verb' => 'GET'],
         ['name' => 'team#getAllEffectiveMembers',   'url' => '/api/v1/teams/{teamId}/members/all',             'verb' => 'GET'],
         ['name' => 'team#getMembersForManage',     'url' => '/api/v1/teams/{teamId}/members/manage',          'verb' => 'GET'],
+        // v4.6.26 — literal segment, like /all and /manage above. Safe beside
+        // the {userId} route below it: that one is DELETE-only.
+        ['name' => 'team#getTeamMailComposeUrl',   'url' => '/api/v1/teams/{teamId}/members/mail',            'verb' => 'GET'],
         ['name' => 'team#removeMember',           'url' => '/api/v1/teams/{teamId}/members/{userId}',        'verb' => 'DELETE'],
         ['name' => 'team#updateMemberLevel',      'url' => '/api/v1/teams/{teamId}/members/{userId}/level',  'verb' => 'PUT'],
         ['name' => 'team#getPendingRequests',     'url' => '/api/v1/teams/{teamId}/pending-requests',        'verb' => 'GET'],
@@ -50,6 +55,8 @@ return [
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
         ['name' => 'team#listRooms',              'url' => '/api/v1/teams/{teamId}/rooms',                   'verb' => 'GET'],
         ['name' => 'team#getCalendarEventsForWeek', 'url' => '/api/v1/teams/{teamId}/calendar/events/week',  'verb' => 'GET'],
+        // v4.6.20 — arbitrary-window reader behind the team calendar grid.
+        ['name' => 'team#getCalendarEventsInRange', 'url' => '/api/v1/teams/{teamId}/calendar/events/range', 'verb' => 'GET'],
         ['name' => 'team#deleteCalendarEvents',   'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'DELETE'],
 
         // Files widgets — favourite files and recently modified files
@@ -189,6 +196,15 @@ return [
         ['name' => 'teamImage#serve',  'url' => '/api/v1/teams/{teamId}/image', 'verb' => 'GET'],
 
         // ----------------------------------------------------------------
+        // Team expiration — team-admin half (v4.6.13). Every method is
+        // #[NoAdminRequired] and gated inside TeamExpiryService by
+        // MemberService::requireAdminLevel().
+        // ----------------------------------------------------------------
+        ['name' => 'teamExpiry#status',           'url' => '/api/v1/teams/{teamId}/expiry',         'verb' => 'GET'],
+        ['name' => 'teamExpiry#requestExtension', 'url' => '/api/v1/teams/{teamId}/expiry/request', 'verb' => 'POST'],
+        ['name' => 'teamExpiry#withdrawRequest',  'url' => '/api/v1/teams/{teamId}/expiry/request', 'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
         // Maintenance & telemetry (NC admin only)
         // ----------------------------------------------------------------
         ['name' => 'maintenance#getAllTeams',        'url' => '/api/v1/admin/maintenance/teams',                                'verb' => 'GET'],
@@ -212,6 +228,15 @@ return [
         ['name' => 'maintenance#listTeamsForUser',          'url' => '/api/v1/admin/maintenance/users/{userId}/teams',              'verb' => 'GET'],
         ['name' => 'maintenance#removeUserFromTeams',       'url' => '/api/v1/admin/maintenance/users/{userId}/remove-from-teams', 'verb' => 'POST'],
 
+        // Team expiration dates (v4.6.13) — NC admin half. The team-admin half
+        // lives on teamExpiry# below. Registered before the generic
+        // /maintenance/teams GET is irrelevant here: the paths differ by depth,
+        // not by prefix ambiguity.
+        ['name' => 'maintenance#setTeamExpiry',        'url' => '/api/v1/admin/maintenance/teams/{teamId}/expiry',              'verb' => 'PUT'],
+        ['name' => 'maintenance#listExpiryRequests',   'url' => '/api/v1/admin/maintenance/expiry-requests',                    'verb' => 'GET'],
+        ['name' => 'maintenance#approveExpiryRequest', 'url' => '/api/v1/admin/maintenance/expiry-requests/{requestId}/approve','verb' => 'POST'],
+        ['name' => 'maintenance#denyExpiryRequest',    'url' => '/api/v1/admin/maintenance/expiry-requests/{requestId}/deny',   'verb' => 'POST'],
+
         // ----------------------------------------------------------------
         // Bulk team import (v4.6.6) — NC admin only. Every method in
         // TeamImportController carries #[AuthorizedAdminSetting] and the
@@ -228,6 +253,19 @@ return [
         ['name' => 'teamImport#show',     'url' => '/api/v1/admin/import/teams/{id}',          'verb' => 'GET'],
         ['name' => 'teamImport#destroy',  'url' => '/api/v1/admin/import/teams/{id}',          'verb' => 'DELETE'],
         ['name' => 'teamImport#index',    'url' => '/api/v1/admin/import/teams',               'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
+        // Bulk team export (v4.6.14) — the read side of the same CSV
+        // contract. NC admin only, on the same terms as the importer above:
+        // every method in TeamExportController carries
+        // #[AuthorizedAdminSetting] and TeamExportService re-checks.
+        //
+        // No {id} route here, so the literal-before-placeholder ordering trap
+        // the importer block documents does not apply.
+        // ----------------------------------------------------------------
+        ['name' => 'teamExport#selectable', 'url' => '/api/v1/admin/export/teams/selectable', 'verb' => 'GET'],
+        ['name' => 'teamExport#preview',    'url' => '/api/v1/admin/export/teams/preview',    'verb' => 'POST'],
+        ['name' => 'teamExport#download',   'url' => '/api/v1/admin/export/teams/download',   'verb' => 'GET'],
 
         // ----------------------------------------------------------------
         // Link preview — server-side Open Graph metadata resolver

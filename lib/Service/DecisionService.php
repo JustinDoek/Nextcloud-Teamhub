@@ -70,6 +70,10 @@ class DecisionService {
     private const PROPOSALS_FOLDER = '.proposals';
     private const ALLOWED_SOURCE_TYPES = ['message', 'document', 'external', 'direct'];
 
+    // v4.7.0 — schemes a browser will execute or inline if they reach an
+    // `href` or an iframe `src`. See assertSourceRefSchemeSafe().
+    private const SCRIPTABLE_SCHEMES = ['javascript', 'data', 'vbscript', 'file', 'blob'];
+
     // v4.5.42 — how a proposal was opened. See Decision's docblock and
     // Version000405042 for why 'immediate' is the backfill value.
     public const SHARE_IMMEDIATE = 'immediate';
@@ -95,6 +99,7 @@ class DecisionService {
         private ResourceService          $resourceService,
         private IUserManager             $userManager,
         private IRootFolder              $rootFolder,
+        private TimezoneService          $timezoneService,
         private LoggerInterface          $logger,
         private \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper,
         // v3.97.5 — optional milestone linkage on proposals (Advanced projects).
@@ -249,6 +254,8 @@ class DecisionService {
                 $sourceRef = null;
             } elseif (mb_strlen($sourceRef) > self::MAX_SOURCE_REF_LEN) {
                 throw new \InvalidArgumentException('sourceRef exceeds maximum length');
+            } else {
+                $this->assertSourceRefSchemeSafe($sourceRef);
             }
         }
         // If sourceType is set but sourceRef is null, or vice versa, that's
@@ -1021,6 +1028,57 @@ class DecisionService {
      * proposer's language cannot be read is fine — it is one sentence, and an
      * untranslated lead-in still reads.
      */
+    /**
+     * Refuse a sourceRef that could act as code once rendered.
+     *
+     * v4.7.0 — the contract note on this class has said "controllers must
+     * validate" since the field was added, and no controller does.
+     * `TeamDecisionsView` hands a ref whose type is `url` to
+     * `openSourceUrl()`, which puts it in an `<a href>` **and** an
+     * `<iframe src>`; a `javascript:` ref there is stored XSS in the
+     * Nextcloud origin, executable by anyone who opens the decision.
+     *
+     * It is not reachable through propose() today, because
+     * ALLOWED_SOURCE_TYPES does not contain 'url' — but that is an accident
+     * of a different allowlist rather than a defence of this field, and the
+     * render path stays live for legacy rows that already carry that type.
+     * Guideline 12 is explicit that a check is worth making where it looks
+     * unnecessary.
+     *
+     * Deliberately narrower than the strict http(s) allowlist that
+     * `DecisionExternalLinkService::validateUrl()` applies: that field is
+     * definitionally a URL, this one is not. A ref may legitimately be a bare
+     * message id, a `.proposals/…md` path, or free text a proposer typed — so
+     * only a scriptable scheme, or a non-http(s) authority-form URL, is
+     * refused. Text that merely contains a colon still passes.
+     */
+    private function assertSourceRefSchemeSafe(string $sourceRef): void {
+        // Leading scheme per RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":"
+        //
+        // Control characters are stripped anywhere in the string, because a
+        // browser ignores them inside a scheme — `java\tscript:` dispatches as
+        // `javascript:`. Spaces are NOT stripped, and that distinction matters:
+        // stripping them too would join `see http://x.com` into
+        // `seehttp://x.com`, which reads as a scheme and would refuse a
+        // perfectly legitimate free-text ref. A space cannot appear inside a
+        // real scheme, so leaving it in is what keeps the match honest.
+        // Leading whitespace is trimmed so a padded `  javascript:` cannot
+        // dodge the anchor (propose() already trims, but this method must not
+        // depend on its caller for that).
+        $probe = ltrim((string)preg_replace('/[\x00-\x1F\x7F]/', '', $sourceRef));
+        if (preg_match('#^([a-z][a-z0-9+.\-]*):#i', $probe, $m) !== 1) {
+            return; // no scheme — an id, a relative path, or prose
+        }
+        $scheme = strtolower($m[1]);
+        if (in_array($scheme, self::SCRIPTABLE_SCHEMES, true)) {
+            throw new \InvalidArgumentException('sourceRef may not use the "' . $scheme . ':" scheme');
+        }
+        // Anything written as `scheme://…` is a URL and must be http(s).
+        if (str_contains($probe, '://') && !in_array($scheme, ['http', 'https'], true)) {
+            throw new \InvalidArgumentException('sourceRef must be an http(s) URL');
+        }
+    }
+
     private function buildProposalPost(
         string $teamId,
         int    $decisionId,
@@ -1767,7 +1825,13 @@ class DecisionService {
     private function renderProposalMarkdown(Decision $d): string {
         $lines = [];
 
-        $iso = fn(int $ts) => date('Y-m-d H:i', $ts);
+        // Dates are rendered in the proposer's timezone. The document is a
+        // single shared artifact regenerated on every change, so there is no
+        // per-viewer choice to make; the proposer is the stable anchor and
+        // matches how the closing artifact attributes its dates. Bare date()
+        // would have used the server's UTC day for everyone.
+        $proposerUid = (string)$d->getProposedBy();
+        $iso = fn(int $ts) => $this->timezoneService->formatTimestamp($ts, $proposerUid, 'Y-m-d H:i');
         $name = function (string $uid): string {
             if ($uid === '') return 'Unknown';
             $user = $this->userManager->get($uid);

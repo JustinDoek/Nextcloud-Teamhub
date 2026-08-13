@@ -18,6 +18,8 @@ use OCA\TeamHub\MyWork\Provider\DeckWorkProvider;
 use OCA\TeamHub\MyWork\Provider\DecisionWorkProvider;
 use OCA\TeamHub\MyWork\Provider\MeetingWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
+use OCA\TeamHub\MyWork\Provider\TeamExpiryAdminWorkProvider;
+use OCA\TeamHub\MyWork\Provider\TeamExpiryTeamWorkProvider;
 use OCA\TeamHub\MyWork\ProviderRegistry;
 use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
@@ -106,6 +108,7 @@ class Application extends App implements IBootstrap {
                 $c->get(\OCA\TeamHub\Db\FloorMapper::class),
                 $c->get(\OCA\TeamHub\Db\BuildingMapper::class),
                 $c->get(\OCP\IConfig::class),
+                $c->get(\OCA\TeamHub\Service\TimezoneService::class),
                 $c->get(\Psr\Log\LoggerInterface::class),
                 [],
             );
@@ -148,6 +151,14 @@ class Application extends App implements IBootstrap {
                 // provider whose items are not the viewer's own work but
                 // their team's; it owns Category::TEAM_ADMIN.
                 TeamAdminWorkProvider::class,
+                // v4.6.13 — team expiration dates, in two halves. The team one
+                // is an ordinary team-scoped provider. The admin one is the
+                // first to declare `isInstanceScoped()`, so its rows reach a
+                // Nextcloud administrator about teams they are not in; see
+                // WorkQuery's docblock for the three conditions on that, and
+                // the provider's own for the authorisation it owes in return.
+                TeamExpiryTeamWorkProvider::class,
+                TeamExpiryAdminWorkProvider::class,
             ];
 
             foreach ($builtIn as $providerClass) {

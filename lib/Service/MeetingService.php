@@ -58,6 +58,7 @@ class MeetingService {
         private TeamAppResourceMapper   $resourceMapper,
         private IAppManager             $appManager,
         private ContainerInterface      $container,
+        private TimezoneService         $timezoneService,
         private LoggerInterface         $logger,
     ) {}
 
@@ -138,11 +139,19 @@ class MeetingService {
         // Resolve agenda content first — it's woven into the notes file.
         // Meeting start datetime is the cut-off for "overdue" so a card
         // due *during* the meeting still counts as scheduled, not overdue.
-        $meetingStartTs = strtotime("{$date}T{$startTime}:00") ?: time();
+        // $date/$startTime are wall-clock strings straight off the organiser's
+        // form. strtotime() would read them in PHP's timezone, which NC pins to
+        // UTC — so the cut-off landed at the organiser's UTC offset and cards
+        // due in that window were mis-classified as overdue.
+        try {
+            $meetingStartTs = $this->timezoneService->wallClockToTimestamp($date, $startTime, $uid);
+        } catch (\Throwable $e) {
+            $meetingStartTs = time();
+        }
         $tasksSection = '';
         if ($includeOverdueTasks || $includeUnscheduledTasks) {
             $tasksSection = $this->renderTasksSection(
-                $teamId, $meetingStartTs,
+                $teamId, $uid, $meetingStartTs,
                 $includeOverdueTasks, $includeUnscheduledTasks
             );
         }
@@ -169,10 +178,18 @@ class MeetingService {
         $calendarCreated = false;
         $eventUid = '';
         try {
-            $startIso = (new \DateTime("{$date}T{$startTime}:00"))
-                ->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
-            $endIso = (new \DateTime("{$date}T{$endTime}:00"))
-                ->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
+            // The organiser typed a wall-clock time; it only becomes an instant
+            // once read in THEIR timezone. Constructing the DateTime without a
+            // zone took PHP's default, which NC pins to UTC, so the subsequent
+            // setTimezone(UTC) was a no-op on an already-wrong value and every
+            // meeting was stored at the organiser's UTC offset — two hours late
+            // on a Europe/Amsterdam instance in summer.
+            $startIso = (new \DateTimeImmutable(
+                "{$date} {$startTime}:00", $this->timezoneService->forUser($uid)
+            ))->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
+            $endIso = (new \DateTimeImmutable(
+                "{$date} {$endTime}:00", $this->timezoneService->forUser($uid)
+            ))->setTimezone(new \DateTimeZone('UTC'))->format(\DateTimeInterface::ATOM);
 
             // Fold the notes URL into the calendar event description so
             // attendees can reach the file from their calendar client.
@@ -655,6 +672,7 @@ class MeetingService {
      */
     private function renderTasksSection(
         string $teamId,
+        string $uid,
         int    $meetingStartTs,
         bool   $includeOverdue,
         bool   $includeUnscheduled
@@ -675,7 +693,7 @@ class MeetingService {
         if ($includeOverdue && !empty($overdue)) {
             foreach ($overdue as $c) {
                 $due = $c['duedate']
-                    ? date('Y-m-d', $c['duedate'])
+                    ? $this->timezoneService->formatTimestamp((int)$c['duedate'], $uid)
                     : '—';
                 $lines[] = sprintf('- [%s](%s) — due %s', $this->mdEscape($c['title']), $c['url'], $due);
             }

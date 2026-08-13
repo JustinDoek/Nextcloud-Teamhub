@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service\Suggestion;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\TimezoneService;
 use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -68,10 +69,11 @@ class TimeslotSuggestionService {
     public const MAX_RESULTS = 3;
 
     public function __construct(
-        private MemberService    $memberService,
-        private IDBConnection    $db,
-        private IConfig          $config,
-        private LoggerInterface  $logger,
+        private MemberService     $memberService,
+        private IDBConnection     $db,
+        private IConfig           $config,
+        private TimezoneService   $timezoneService,
+        private LoggerInterface   $logger,
     ) {
     }
 
@@ -594,14 +596,6 @@ class TimeslotSuggestionService {
      * two services agree on what "morning" means for a given organiser.
      */
     private function userTimezone(string $uid): \DateTimeZone {
-        $tz = $this->config->getUserValue($uid, 'core', 'timezone', '');
-        if ($tz === '') {
-            $tz = (string)$this->config->getSystemValue('default_timezone', date_default_timezone_get());
-        }
-        try {
-            return new \DateTimeZone($tz);
-        } catch (\Throwable $e) {
-            return new \DateTimeZone('UTC');
-        }
+        return $this->timezoneService->forUser($uid);
     }
 }
