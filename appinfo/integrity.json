@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "app_version": "4.7.1",
-  "generated_at": "2026-08-13T14:25:17.934Z",
+  "generated_at": "2026-08-13T14:32:32.947Z",
   "algorithm": "sha256",
   "files": {
     "announcements/The_journey.md": "4c7cf855cf9b97ec646710f94606d80a5ee0669e78a771bc062c1275444c1aaa",
