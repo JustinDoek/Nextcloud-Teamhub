@@ -6,28 +6,28 @@
     <summary>Team collaboration hub — Collaboration, projects, department work all build on top of Nextcloud Teams</summary>
     <description><![CDATA[TeamHub is a workspace built on top of Nextcloud Teams (Circles).
 
-*** Each team gets a shared home
+**Each team gets a shared home
 - **Messages** — post announcements, questions and polls to your team
 - **Activity feed** — a single view of recent file, calendar, task and member changes across all shared resources
 - **App tabs** — quick-links to the team's shared Talk chat, Team folder, Calendar, Collective and Deck board
 - **Widgets** — upcoming calendar events, open Deck tasks, Pages, the activity snapshot and others through integrations
 
-*** Personal layer
+**Personal layer
 - **What's new** - One overview of all recent communication aggregated from all teams you belong to. 
 - **My work** - One actionable overview of all items that need your attention aggregated from all teams you belong to.   
 
-*** Management
+**Management
 - **Customizable view** — users can create their own layout per team
 - **Team management** — team admins/owners are in control on their teams by managing the resources, members and permissions
 - **TeamHub management** - Nextcloud admins have their own controls to manage TeamHub under admin settings
 - **Bulk import/export** - Admins can bulk import teams from a CSV file
 
-*** Development
+**Development
 - **Integrations** — developers can integrate their app with teamhub we are API driven
 - **Internal integrations** - Added TeamHub native integrations for Decisions, Presence, Timeline, Budget and Time  
 
 TeamHub works entirely within your Nextcloud instance and does not require any external services.]]></description>
-    <version>4.7.0</version>
+    <version>4.7.1</version>
     <licence>agpl</licence>
     <author mail="teamhub@tldr.host" homepage="https://tldr.host/teamhub">Justin Doek</author>
     <namespace>TeamHub</namespace>
@@ -36,10 +36,10 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
     <website>https://tldr.host/teamhub</website>
     <bugs>https://github.com/JustinDoek/nextcloud-teamhub/issues</bugs>
     <repository>https://github.com/JustinDoek/Nextcloud-Teamhub</repository>
-    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-workspace.jpg</screenshot>
-    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-mywork.jpg</screenshot>
-	<screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-whatsnew.jpg</screenshot>
-	<screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-decisions.jpg</screenshot>
+    <screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-workspace.jpg</screenshot>
+    <screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-mywork.jpg</screenshot>
+	<screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-whatsnew.jpg</screenshot>
+	<screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-decisions.jpg</screenshot>
 	
     <dependencies>
         <nextcloud min-version="32" max-version="34"/>

@@ -1,6 +1,6 @@
 {
   "name": "teamhub",
-  "version": "4.7.0",
+  "version": "4.7.1",
   "description": "Team collaboration hub for Nextcloud",
   "scripts": {
     "clean:chunks": "node -e \"require('fs').rmSync('js/chunks',{recursive:true,force:true})\"",
