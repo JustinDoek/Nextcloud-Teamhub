@@ -36,10 +36,10 @@ TeamHub works entirely within your Nextcloud instance and does not require any e
     <website>https://tldr.host/teamhub</website>
     <bugs>https://github.com/JustinDoek/nextcloud-teamhub/issues</bugs>
     <repository>https://github.com/JustinDoek/Nextcloud-Teamhub</repository>
-    <screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-workspace.jpg</screenshot>
-    <screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-mywork.jpg</screenshot>
-	<screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-whatsnew.jpg</screenshot>
-	<screenshot>https://github.com/JustinDoek/Nextcloud-Teamhub/blob/main/screenshots/teamhub-decisions.jpg</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-workspace.jpg</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-mywork.jpg</screenshot>
+	<screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-whatsnew.jpg</screenshot>
+	<screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/teamhub-decisions.jpg</screenshot>
 	
     <dependencies>
         <nextcloud min-version="32" max-version="34"/>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "app_version": "4.7.1",
-  "generated_at": "2026-08-13T14:10:42.244Z",
+  "generated_at": "2026-08-13T14:25:17.934Z",
   "algorithm": "sha256",
   "files": {
     "announcements/The_journey.md": "4c7cf855cf9b97ec646710f94606d80a5ee0669e78a771bc062c1275444c1aaa",
@@ -9,7 +9,7 @@
     "announcements/personal_layer.md": "9f4e5947638f451b6f3f875bf964ff690a5bd02e21fa0f405d0c3e9bbf9f47cf",
     "announcements/registry.json": "a0080066b7e287bfd9b7ec57003e8b53296b22e323f6d08baffcc01343fc61a5",
     "appinfo/index.html": "747ea6bcb4b28bf2ec0629b7a0802c264d04d0c32243a9f437ae96b09e2cf5ec",
-    "appinfo/info.xml": "d07c79fe302f583ac44a02491e699557d5782a78159a5abf4fcd91bccf329414",
+    "appinfo/info.xml": "56f750b270849e1dfbaabd7a75016aa55f4e659071eefa76d531e54e4f409cf8",
     "appinfo/routes.php": "0f43ef98c61cfdc70474c1b331090243db1ef2adc1aa2f571454a649e3f793d9",
     "composer.json": "55b8a70299a87a69b099539785c19c247314efbc3754671e6f96a0185be03a6b",
     "css/admin.css": "644893743769cbab35da574aebb77af4225d635a23d59e411553804c4fd9d0e3",
