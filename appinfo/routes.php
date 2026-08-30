@@ -332,6 +332,38 @@ return [
         ['name' => 'preferences#savePreferences', 'url' => '/api/v1/preferences', 'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
+        // Personal sidebar grouping of teams (v4.7.3) — oc_preferences.
+        // ----------------------------------------------------------------
+        // {groupId} only ever matches an id this app issued ('favorites' or
+        // 'g' + 12 hex); the service rejects anything else, so no literal
+        // segment can be shadowed by it.
+        ['name' => 'teamGroup#getGroups',   'url' => '/api/v1/team-groups',           'verb' => 'GET'],
+        ['name' => 'teamGroup#createGroup', 'url' => '/api/v1/team-groups',           'verb' => 'POST'],
+        ['name' => 'teamGroup#updateGroup', 'url' => '/api/v1/team-groups/{groupId}', 'verb' => 'PUT'],
+        ['name' => 'teamGroup#deleteGroup', 'url' => '/api/v1/team-groups/{groupId}', 'verb' => 'DELETE'],
+        // Which group a team sits in is a property of the (team, user) pair,
+        // so it lives under the team rather than beside the group list —
+        // which also keeps it clear of the {groupId} slot above.
+        ['name' => 'teamGroup#assignTeam',  'url' => '/api/v1/teams/{teamId}/group',  'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
+        // Nextcloud tags on teams (v4.7.17) — oc_systemtag_object_mapping.
+        // ----------------------------------------------------------------
+        // The tags themselves are created and managed in Settings →
+        // Administration → Basic settings; these routes only attach and
+        // detach existing ones. Read is gated on membership and both writes
+        // on admin level, inside TeamTagService — see its class docblock for
+        // why the DAV systemtags-relations entity is deliberately NOT
+        // registered.
+        // The picker's options — instance-wide, not team-scoped. Serves the
+        // same list /remote.php/dav/systemtags already does, narrowed to the
+        // tags the caller may actually assign.
+        ['name' => 'teamTag#getAvailableTags', 'url' => '/api/v1/tags',                  'verb' => 'GET'],
+        ['name' => 'teamTag#getTags',    'url' => '/api/v1/teams/{teamId}/tags',         'verb' => 'GET'],
+        ['name' => 'teamTag#addTag',     'url' => '/api/v1/teams/{teamId}/tags/{tagId}', 'verb' => 'POST'],
+        ['name' => 'teamTag#removeTag',  'url' => '/api/v1/teams/{teamId}/tags/{tagId}', 'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
         // In-app announcements (v4.4.17) — unlicensed instances only.
         // ----------------------------------------------------------------
         // filename passed as ?filename= / body param — NC's Symfony routing

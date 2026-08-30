@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Settings;
 
+use OCA\TeamHub\Service\DateContextService;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\Settings\IDelegatedSettings;
 
@@ -22,7 +23,13 @@ use OCP\Settings\IDelegatedSettings;
  */
 class AdminSettings implements IDelegatedSettings {
 
+    public function __construct(
+        private DateContextService $dateContext,
+    ) {}
+
     public function getForm(): TemplateResponse {
+        $this->dateContext->provideInitialState();
+
         return new TemplateResponse('teamhub', 'admin', []);
     }
 

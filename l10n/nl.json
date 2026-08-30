@@ -1,5 +1,8 @@
 {
     "translations": {
+        "People from groups and teams": "Personen uit groepen en teams",
+        "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well — they keep their group membership.": "Deze personen zijn lid via een groep of team. Wanneer je iemand een hogere rol geeft, wordt die persoon ook rechtstreeks lid van dit team — het groepslidmaatschap blijft behouden.",
+        "via {source}": "via {source}",
         "%1$s needs review": "%1$s moet worden beoordeeld",
         "%n event in this period": ["%n gebeurtenis in deze periode","%n gebeurtenissen in deze periode"],
         "Accepted": "Geaccepteerd",
@@ -125,48 +128,21 @@
         "  Proposed date": "  Voorgestelde datum",
         "Your proposal": "Jouw voorstel",
         "Your teams need nothing from you as their admin.": "Je teams hebben niets van je nodig als beheerder.",
-        "{n} overdue": [
-            "{n} verlopen",
-            "{n} verlopen"
-        ],
-        "{n} critical": [
-            "{n} kritiek",
-            "{n} kritiek"
-        ],
+        "{n} overdue": ["{n} verlopen","{n} verlopen"],
+        "{n} critical": ["{n} kritiek","{n} kritiek"],
         "{source} {count}, {critical} critical": "{source} {count}, {critical} kritiek",
         "{source} {count}": "{source} {count}",
         "{sources} items could not be refreshed. All other results are up to date.": "Items uit {sources} konden niet worden vernieuwd. Alle andere resultaten zijn actueel.",
         "{name} (unavailable)": "{name} (niet beschikbaar)",
         "{action}: {title}": "{action}: {title}",
         "%1$s · %2$s": "%1$s · %2$s",
-        "%n attendee": [
-            "%n deelnemer",
-            "%n deelnemers"
-        ],
-        "%n attendee will be invited": [
-            "%n deelnemer wordt uitgenodigd",
-            "%n deelnemers worden uitgenodigd"
-        ],
-        "%n could join online": [
-            "%n kan online deelnemen",
-            "%n kunnen online deelnemen"
-        ],
-        "%n has a calendar conflict": [
-            "%n heeft een agendaconflict",
-            "%n hebben een agendaconflict"
-        ],
-        "%n has a conflict": [
-            "%n heeft een conflict",
-            "%n hebben een conflict"
-        ],
-        "%n member selected": [
-            "%n lid geselecteerd",
-            "%n leden geselecteerd"
-        ],
-        "%n resource needs review.": [
-            "%n bron moet worden beoordeeld.",
-            "%n bronnen moeten worden beoordeeld."
-        ],
+        "%n attendee": ["%n deelnemer","%n deelnemers"],
+        "%n attendee will be invited": ["%n deelnemer wordt uitgenodigd","%n deelnemers worden uitgenodigd"],
+        "%n could join online": ["%n kan online deelnemen","%n kunnen online deelnemen"],
+        "%n has a calendar conflict": ["%n heeft een agendaconflict","%n hebben een agendaconflict"],
+        "%n has a conflict": ["%n heeft een conflict","%n hebben een conflict"],
+        "%n member selected": ["%n lid geselecteerd","%n leden geselecteerd"],
+        "%n resource needs review.": ["%n bron moet worden beoordeeld.","%n bronnen moeten worden beoordeeld."],
         "(completed)": "(voltooid)",
         "(current phase)": "(huidige fase)",
         "(list truncated)": "(lijst afgekapt)",
@@ -178,10 +154,7 @@
         "+ Connect team folder": "+ Teammap verbinden",
         "+ Create new": "+ Nieuwe aanmaken",
         "+ Create new team folder": "+ Nieuwe teammap aanmaken",
-        "+{n} other team": [
-            "+{n} ander team",
-            "+{n} andere teams"
-        ],
+        "+{n} other team": ["+{n} ander team","+{n} andere teams"],
         "1 hour": "1 uur",
         "1 month": "1 maand",
         "1 week": "1 week",
@@ -201,14 +174,8 @@
         "A team folder is now connected to this team": "Een teammap is nu verbonden met dit team",
         "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "Een kick-off-vergadering om het team op één lijn te brengen over scope, tijdlijn en rollen. Markeer als klaar zodra deze in de agenda staat.",
         "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "Er wordt een bericht geplaatst in de Talkruimte met een link naar de vergadernotities, waarin teamleden wordt gevraagd agendapunten toe te voegen.",
-        "A new message from TeamHub": [
-            "Een nieuw bericht van TeamHub",
-            "{n} nieuwe berichten van TeamHub"
-        ],
-        "A new message from TeamHub is waiting for you.": [
-            "Er wacht een nieuw bericht van TeamHub op je.",
-            "Er wachten {n} nieuwe berichten van TeamHub op je."
-        ],
+        "A new message from TeamHub": ["Een nieuw bericht van TeamHub","{n} nieuwe berichten van TeamHub"],
+        "A new message from TeamHub is waiting for you.": ["Er wacht een nieuw bericht van TeamHub op je.","Er wachten {n} nieuwe berichten van TeamHub op je."],
         "A notes file is created in the team Meetings folder and linked from the calendar event.": "Er wordt een notitiebestand aangemaakt in de teammap Meetings en gekoppeld vanuit de agenda-afspraak.",
         "A project-flavoured team with the familiar setup — no lifecycle tools.": "Een team met een projecttintje en de vertrouwde opzet — zonder levenscyclustools.",
         "A retro to look back on scope, timeline, budget, and what to carry into the next project. Optional — mark as done once it's on the calendar, or skip if you don't want to run one.": "Een retro om terug te kijken op scope, tijdlijn, budget en wat mee te nemen naar het volgende project. Optioneel — markeer als klaar zodra deze in de agenda staat, of sla over als je er geen wilt houden.",
@@ -435,6 +402,7 @@
         "Built-in status type": "Ingebouwd statustype",
         "Built-in status types cannot be deleted": "Ingebouwde statustypen kunnen niet worden verwijderd",
         "Bullet list": "Opsommingslijst",
+        "Numbered list": "Genummerde lijst",
         "Busy": "Bezet",
         "Buy a license": "Licentie kopen",
         "By": "Door",
@@ -450,14 +418,8 @@
         "Cancel superseding": "Vervanging annuleren",
         "Cancel — make team usable again": "Annuleren — team weer bruikbaar maken",
         "Cannot create page: team name not available": "Kan pagina niet aanmaken: teamnaam niet beschikbaar",
-        "Cannot delete: in use by {n} entry": [
-            "Verwijderen niet mogelijk: in gebruik door {n} item",
-            "Verwijderen niet mogelijk: in gebruik door {n} items"
-        ],
-        "Cannot delete: status type is in use by {n} entry": [
-            "Verwijderen niet mogelijk: statustype is in gebruik door {n} item",
-            "Verwijderen niet mogelijk: statustype is in gebruik door {n} items"
-        ],
+        "Cannot delete: in use by {n} entry": ["Verwijderen niet mogelijk: in gebruik door {n} item","Verwijderen niet mogelijk: in gebruik door {n} items"],
+        "Cannot delete: status type is in use by {n} entry": ["Verwijderen niet mogelijk: statustype is in gebruik door {n} item","Verwijderen niet mogelijk: statustype is in gebruik door {n} items"],
         "Cannot load this view": "Kan deze weergave niet laden",
         "Cannot upload — not logged in": "Kan niet uploaden — niet aangemeld",
         "Card #{id}": "Kaart #{id}",
@@ -775,10 +737,7 @@
         "Delete time entry": "Tijdvermelding verwijderen",
         "Delete {label}?": "{label} verwijderen?",
         "Delete {name}": "{name} verwijderen",
-        "Delete {n} event": [
-            "{n} gebeurtenis verwijderen",
-            "{n} gebeurtenissen verwijderen"
-        ],
+        "Delete {n} event": ["{n} gebeurtenis verwijderen","{n} gebeurtenissen verwijderen"],
         "Delete ‘{name}’ on {date}? Any holiday entries on that date will revert to each user's default week template.": "‘{name}’ op {date} verwijderen? Alle feestdagitems op die datum keren terug naar het standaardweeksjabloon van elke gebruiker.",
         "Delete “{description}”? This cannot be undone.": "“{description}” verwijderen? Dit kan niet ongedaan worden gemaakt.",
         "Deleted": "Verwijderd",
@@ -1230,10 +1189,7 @@
         "Ignore resource {id}": "Bron {id} negeren",
         "Image URL (https://…)": "Afbeeldings-URL (https://…)",
         "Image attachment": "Afbeeldingsbijlage",
-        "Image cache cleared (%n file removed)": [
-            "Afbeeldingscache geleegd (%n bestand verwijderd)",
-            "Afbeeldingscache geleegd (%n bestanden verwijderd)"
-        ],
+        "Image cache cleared (%n file removed)": ["Afbeeldingscache geleegd (%n bestand verwijderd)","Afbeeldingscache geleegd (%n bestanden verwijderd)"],
         "Image preview": "Afbeeldingsvoorbeeld",
         "Image too large. Maximum size is 2 MB.": "Afbeelding te groot. Maximale grootte is 2 MB.",
         "Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Afbeeldingen die vanuit persoonlijke bestanden zijn ingevoegd, worden gekopieerd naar een verborgen cachemap in de teammap zodat alle leden ze kunnen bekijken. Wissen toont gebroken afbeeldingen in bestaande berichten.",
@@ -1640,10 +1596,7 @@
         "Team name cannot consist only of dots.": "Teamnaam mag niet alleen uit punten bestaan.",
         "A team with this name already exists. Team names must be unique.": "Er bestaat al een team met deze naam. Teamnamen moeten uniek zijn.",
         "Only members of the selected groups can create teams. Leave empty to allow all users.": "Alleen leden van de geselecteerde groepen kunnen teams aanmaken. Laat leeg om alle gebruikers toe te staan.",
-        "Only proposals in the %n selected category will be added.": [
-            "Alleen voorstellen in de %n geselecteerde categorie worden toegevoegd.",
-            "Alleen voorstellen in de %n geselecteerde categorieën worden toegevoegd."
-        ],
+        "Only proposals in the %n selected category will be added.": ["Alleen voorstellen in de %n geselecteerde categorie worden toegevoegd.","Alleen voorstellen in de %n geselecteerde categorieën worden toegevoegd."],
         "Open": "Open",
         "Open {title}": "{title} openen",
         "Open Budget": "Open Budget",
@@ -1685,10 +1638,7 @@
         "Other": "Overig",
         "Over your licensed seats: {used} of {cap} used.": "Boven uw gelicentieerde plaatsen: {used} van {cap} gebruikt.",
         "Overdue": "Achterstallig",
-        "Overdue by {n} day": [
-            "{n} dag te laat",
-            "{n} dagen te laat"
-        ],
+        "Overdue by {n} day": ["{n} dag te laat","{n} dagen te laat"],
         "Overdue items are always Action required. Set this to 0 if only overdue work should count as actionable.": "Verlopen items zijn altijd Actie vereist. Zet dit op 0 als alleen verlopen werk als actie mag tellen.",
         "Owner": "Eigenaar",
         "Owner assigned successfully": "Eigenaar succesvol toegewezen",
@@ -1879,10 +1829,7 @@
         "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "{name} verwijderen uit het tijdbudget? Bestaande registraties blijven bewaard voor het audit-spoor.",
         "Remove {user} from all teams": "{user} uit alle teams verwijderen",
         "Remove {user} from {team}": "{user} uit {team} verwijderen",
-        "Removed from {n} team": [
-            "Verwijderd uit {n} team",
-            "Verwijderd uit {n} teams"
-        ],
+        "Removed from {n} team": ["Verwijderd uit {n} team","Verwijderd uit {n} teams"],
         "Removing…": "Verwijderen…",
         "Renew on the License tab to keep Advanced features available.": "Verleng op het tabblad Licentie om Geavanceerde functies beschikbaar te houden.",
         "Repair": "Herstel",
@@ -1922,10 +1869,7 @@
         "Resources pending review": "Bronnen die wachten op beoordeling",
         "Restore": "Herstellen",
         "Restore team {name}": "Team {name} herstellen",
-        "Restricted to {n} group": [
-            "Beperkt tot {n} groep",
-            "Beperkt tot {n} groepen"
-        ],
+        "Restricted to {n} group": ["Beperkt tot {n} groep","Beperkt tot {n} groepen"],
         "Result": "Resultaat",
         "Retention period": "Bewaarperiode",
         "Retention saved": "Bewaarperiode opgeslagen",
@@ -2005,14 +1949,10 @@
         "Searching…": "Zoeken…",
         "Seat cap exceeded — Advanced features locked: {used} of {cap} used (max {lockAt}).": "Maximum aantal plaatsen overschreden — Geavanceerde functies vergrendeld: {used} van {cap} gebruikt (max. {lockAt}).",
         "Seats": "Zetels",
-        "Select a board\\u2026": "Selecteer een bord…",
         "Select a board…": "Kies een bord…",
-        "Select a calendar\\u2026": "Selecteer een agenda…",
         "Select a calendar…": "Kies een agenda…",
-        "Select a conversation\\u2026": "Selecteer een gesprek…",
         "Select a conversation…": "Kies een gesprek…",
         "Select a folder to connect": "Kies een map om te koppelen",
-        "Select a folder\\u2026": "Selecteer een map…",
         "Select a folder…": "Selecteer een map…",
         "Select a room": "Selecteer een ruimte",
         "Select a status": "Selecteer een status",
@@ -2026,7 +1966,6 @@
         "Select an icon": "Een pictogram selecteren",
         "Select week": "Week selecteren",
         "Select {team}": "Selecteer {team}",
-        "Select\\u2026": "Selecteren…",
         "Select…": "Kiezen…",
         "Send": "Verzenden",
         "Send daily anonymous usage report": "Dagelijks anoniem gebruiksrapport verzenden",
@@ -2067,10 +2006,7 @@
         "Short note": "Korte notitie",
         "Short summary of your feedback": "Korte samenvatting van uw feedback",
         "Show": "Tonen",
-        "Show %n ignored resource": [
-            "%n genegeerde bron tonen",
-            "%n genegeerde bronnen tonen"
-        ],
+        "Show %n ignored resource": ["%n genegeerde bron tonen","%n genegeerde bronnen tonen"],
         "Show all {n}": "Bekijk alle ({n})",
         "Show Operational / Tactical / Strategic level on decisions. Useful for teams that work with strategic taxonomy.": "Toon het niveau Operationeel / Tactisch / Strategisch bij besluiten. Handig voor teams die met een strategische taxonomie werken.",
         "Show snoozed items": "Uitgestelde items tonen",
@@ -2299,16 +2235,10 @@
         "The team itself and every other resource are unaffected. Only Collectives is being removed.": "Het team zelf en alle andere bronnen blijven ongewijzigd. Alleen Collectives wordt verwijderd.",
         "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "Het team wordt direct verborgen en over 30 dagen definitief verwijderd. Een beheerder kan het team binnen die termijn herstellen. Er wordt geen archief gemaakt.",
         "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "Het team wordt direct verborgen en over 60 dagen definitief verwijderd. Een beheerder kan het team binnen die termijn herstellen. Er wordt geen archief gemaakt.",
-        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
-            "Het team wordt onmiddellijk verborgen en over {n} dag permanent verwijderd. Beheerders kunnen het vóór die deadline herstellen.",
-            "Het team wordt onmiddellijk verborgen en over {n} dagen permanent verwijderd. Beheerders kunnen het vóór die deadline herstellen."
-        ],
+        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": ["Het team wordt onmiddellijk verborgen en over {n} dag permanent verwijderd. Beheerders kunnen het vóór die deadline herstellen.","Het team wordt onmiddellijk verborgen en over {n} dagen permanent verwijderd. Beheerders kunnen het vóór die deadline herstellen."],
         "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "Het team wordt onmiddellijk na het aanmaken van het archief permanent verwijderd. Dit kan niet ongedaan worden gemaakt.",
         "The team will be permanently deleted immediately. No archive bundle is produced.": "Het team wordt direct permanent verwijderd. Er wordt geen archiefpakket gemaakt.",
-        "The team will be permanently deleted in {n} day. Administrators can restore it.": [
-            "Het team wordt over {n} dag permanent verwijderd. Beheerders kunnen het herstellen.",
-            "Het team wordt over {n} dagen permanent verwijderd. Beheerders kunnen het herstellen."
-        ],
+        "The team will be permanently deleted in {n} day. Administrators can restore it.": ["Het team wordt over {n} dag permanent verwijderd. Beheerders kunnen het herstellen.","Het team wordt over {n} dagen permanent verwijderd. Beheerders kunnen het herstellen."],
         "The team will be soft-deleted with a 30-day grace period during which administrators can restore it. No archive bundle is produced.": "Het team wordt zacht verwijderd met een respijtperiode van 30 dagen waarin beheerders het kunnen herstellen. Er wordt geen archiefpakket gemaakt.",
         "The team will be soft-deleted with a 60-day grace period during which administrators can restore it. No archive bundle is produced.": "Het team wordt zacht verwijderd met een respijtperiode van 60 dagen waarin beheerders het kunnen herstellen. Er wordt geen archiefpakket gemaakt.",
         "The vocabulary your organisation uses for presence — what people can pick to describe where they are. Built-in types cannot be deleted but their label, icon, and colour can be customised. Drag rows to reorder.": "De woordenschat die uw organisatie gebruikt voor aanwezigheid — wat mensen kunnen kiezen om te beschrijven waar ze zijn. Ingebouwde typen kunnen niet worden verwijderd, maar hun label, pictogram en kleur kunnen worden aangepast. Sleep rijen om de volgorde te wijzigen.",
@@ -2325,10 +2255,7 @@
         "Third-party integrations": "Integraties van derden",
         "This action cannot be easily undone.": "Deze actie kan niet eenvoudig ongedaan worden gemaakt.",
         "This action cannot be undone.": "Deze actie kan niet ongedaan worden gemaakt.",
-        "This building has {n} floor": [
-            "Dit gebouw heeft {n} verdieping",
-            "Dit gebouw heeft {n} verdiepingen"
-        ],
+        "This building has {n} floor": ["Dit gebouw heeft {n} verdieping","Dit gebouw heeft {n} verdiepingen"],
         "This card no longer exists.": "Deze kaart bestaat niet meer.",
         "This clears any corrupted bits set by older versions of TeamHub. The team owner will need to reconfigure its checkbox settings afterwards.": "Dit wist eventuele corrupte bits die door oudere versies van TeamHub zijn ingesteld. De teameigenaar moet daarna de selectievakje-instellingen opnieuw configureren.",
         "This comment is the marked answer. Deleting it will mark the question as unsolved.": "Deze reactie is het gemarkeerde antwoord. Door deze te verwijderen wordt de vraag als onopgelost gemarkeerd.",
@@ -2338,10 +2265,7 @@
         "This feature requires a license — ask your admin.": "Deze functie vereist een licentie — vraag je beheerder.",
         "This file no longer exists.": "Dit bestand bestaat niet meer.",
         "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "Dit bestandstype kan niet alleen-lezen worden bekeken in de browser. Download het om de inhoud te bekijken.",
-        "This floor has {n} room": [
-            "Deze verdieping heeft {n} ruimte",
-            "Deze verdieping heeft {n} ruimtes"
-        ],
+        "This floor has {n} room": ["Deze verdieping heeft {n} ruimte","Deze verdieping heeft {n} ruimtes"],
         "This hides the item from My Work until the moment you choose. It does not change the due date in the source application.": "Hiermee verberg je het item in Mijn werk tot het moment dat je kiest. De vervaldatum in de bronapplicatie verandert niet.",
         "This instance has already used its trial.": "Deze instantie heeft al een proefperiode gebruikt.",
         "This item opens in another app. You are leaving TeamHub.": "Dit item opent in een andere app. Je verlaat TeamHub.",
@@ -2375,10 +2299,7 @@
         "This version of the Approval app cannot be driven from My Work. Open the file to approve or reject it there.": "Deze versie van de Approval-app kan niet vanuit Mijn werk worden aangestuurd. Open het bestand om het daar goed te keuren of af te wijzen.",
         "This version of Deck does not support marking cards as done from outside the app. Open the card in Deck instead.": "Deze versie van Deck ondersteunt het afvinken van kaarten buiten de app niet. Open de kaart in plaats daarvan in Deck.",
         "This will export the project's decisions, budget, time and milestones to a folder in this team's Files. The files are plain markdown so they stay readable long after the team is archived.": "Dit exporteert de besluiten, het budget, de tijd en de mijlpalen van het project naar een map in de Bestanden van dit team. De bestanden zijn platte markdown zodat ze leesbaar blijven lang nadat het team is gearchiveerd.",
-        "This will overwrite {n} existing entry on this date.": [
-            "Dit overschrijft {n} bestaand item op deze datum.",
-            "Dit overschrijft {n} bestaande items op deze datum."
-        ],
+        "This will overwrite {n} existing entry on this date.": ["Dit overschrijft {n} bestaand item op deze datum.","Dit overschrijft {n} bestaande items op deze datum."],
         "This will permanently delete \"{name}\". This cannot be undone. All data in this {app} will be lost.": "Dit verwijdert \"{name}\" permanent. Dit kan niet ongedaan worden gemaakt. Alle gegevens in deze {app} gaan verloren.",
         "This will record your comment as the final wording, close the discussion (no more comments), and send the decision to its approver(s) for sign-off. This action cannot be undone.": "Dit legt uw opmerking vast als de definitieve bewoording, sluit de discussie (geen opmerkingen meer) en stuurt de beslissing naar de goedkeurder(s) ter ondertekening. Deze actie kan niet ongedaan worden gemaakt.",
         "Thread in Talk chat {room}": "Thread in Talk-chat {room}",
@@ -2594,15 +2515,9 @@
         "Yesterday": "Gisteren",
         "You approved this decision": "Je hebt dit besluit goedgekeurd",
         "You approved this file": "Je hebt dit bestand goedgekeurd",
-        "You are about to remove {user} from {n} team. This cannot be undone.": [
-            "Je staat op het punt {user} uit {n} team te verwijderen. Dit kan niet ongedaan worden gemaakt.",
-            "Je staat op het punt {user} uit {n} teams te verwijderen. Dit kan niet ongedaan worden gemaakt."
-        ],
+        "You are about to remove {user} from {n} team. This cannot be undone.": ["Je staat op het punt {user} uit {n} team te verwijderen. Dit kan niet ongedaan worden gemaakt.","Je staat op het punt {user} uit {n} teams te verwijderen. Dit kan niet ongedaan worden gemaakt."],
         "You are about to withdraw this decision and open a new proposal in its place.": "U staat op het punt om deze beslissing in te trekken en een nieuw voorstel in de plaats te openen.",
-        "You are an approver and this request has been waiting %n day": [
-            "Je bent fiatteur en dit verzoek wacht al %n dag",
-            "Je bent fiatteur en dit verzoek wacht al %n dagen"
-        ],
+        "You are an approver and this request has been waiting %n day": ["Je bent fiatteur en dit verzoek wacht al %n dag","Je bent fiatteur en dit verzoek wacht al %n dagen"],
         "You are an approver for this decision": "Je bent fiatteur voor dit besluit",
         "You are no longer a direct member, but you still have access to this team through a group or another team.": "U bent geen direct lid meer, maar u hebt nog steeds toegang tot dit team via een groep of een ander team.",
         "You are not an approver for this decision.": "Je bent geen fiatteur voor dit besluit.",
@@ -2635,10 +2550,7 @@
         "You’re all caught up": "Je bent helemaal bij",
         "You're getting the project off the ground. Here's what to focus on:": "Je start het project op. Waar je op moet focussen:",
         "You're setting up your project. Here's what to focus on:": "Je bent je project aan het opzetten. Dit zijn de aandachtspunten:",
-        "Your approval request has been waiting %n day": [
-            "Je goedkeuringsverzoek wacht al %n dag",
-            "Je goedkeuringsverzoek wacht al %n dagen"
-        ],
+        "Your approval request has been waiting %n day": ["Je goedkeuringsverzoek wacht al %n dag","Je goedkeuringsverzoek wacht al %n dagen"],
         "Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove the team, its files, and every TeamHub record attached to it — nothing can be restored.": "Je Nextcloud-beheerder heeft directe harde verwijdering ingesteld zonder archiefpakket. Doorgaan verwijdert het team, de bestanden en elke TeamHub-record er permanent — niets kan worden hersteld.",
         "Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove this team's collective, its page tree, and every attachment — nothing can be restored.": "Uw Nextcloud-beheerder heeft directe harde verwijdering zonder archiefbundel ingesteld. Als u doorgaat, worden het collectief van dit team, de paginaboom en alle bijlagen definitief verwijderd — niets kan worden hersteld.",
         "Your TeamHub Business license has lapsed. Renew to resume Budget, Time and Milestone updates on Advanced projects.": "Je TeamHub Business-licentie is verlopen. Vernieuw om budget-, tijd- en mijlpaalupdates op geavanceerde projecten te hervatten.",
@@ -2650,18 +2562,9 @@
         "Your rationale…": "Uw motivering…",
         "[Team Folder] {name}": "[Teammap] {name}",
         "[Shared folder] {name}": "[Gedeelde map] {name}",
-        "_{n} reply — open chat_::_{n} replies — open chat_": [
-            "{n} antwoord — open chat",
-            "{n} antwoorden — open chat"
-        ],
-        "_{n} vote_::_{n} votes_": [
-            "{n} stem",
-            "{n} stemmen"
-        ],
-        "_{n} voter_::_{n} voters_": [
-            "{n} stemmer",
-            "{n} stemmers"
-        ],
+        "_{n} reply — open chat_::_{n} replies — open chat_": ["{n} antwoord — open chat","{n} antwoorden — open chat"],
+        "_{n} vote_::_{n} votes_": ["{n} stem","{n} stemmen"],
+        "_{n} voter_::_{n} voters_": ["{n} stemmer","{n} stemmers"],
         "a single project-level role. A member sees the Budget tab when their team role is at or above this level. Any member who is a named additional editor on ANY workstream also automatically sees the tab, regardless of their role.": "één rol op projectniveau. Een lid ziet het Budget-tabblad als de teamrol op of boven dit niveau ligt. Elk lid dat als extra bewerker op ELKE willekeurige werkstroom is toegevoegd ziet het tabblad automatisch, ongeacht de rol.",
         "across the project": "over het hele project",
         "afternoon": "middag",
@@ -2702,8 +2605,7 @@
         "e.g. Weekly sync": "bijv. Wekelijkse sync",
         "e.g. en/teamhub": "bijv. nl/teamhub",
         "email address": "e-mailadres",
-        "grace: {n} day left": "respijt: {n} dag over",
-        "grace: {n} days left": "respijt: {n} dagen over",
+        "grace: {n} day left": ["respijt: {n} dag over","respijt: {n} dagen over"],
         "group": "groep",
         "h": "u",
         "https://example.com/photo.jpg": "https://example.com/photo.jpg",
@@ -2746,10 +2648,7 @@
         "{available} of {total} available, {count} at {room}": "{available} van {total} beschikbaar, {count} in {room}",
         "{cell}: not set. Click to set.": "{cell}: niet ingesteld. Klik om in te stellen.",
         "{cell}: {type}. Click to change.": "{cell}: {type}. Klik om te wijzigen.",
-        "{count} project member": [
-            "{count} projectlid",
-            "{count} projectleden"
-        ],
+        "{count} project member": ["{count} projectlid","{count} projectleden"],
         "{date} {half}: not set. Click to set.": "{date} {half}: niet ingesteld. Klik om in te stellen.",
         "{date} {half}: {type} (holiday, locked)": "{date} {half}: {type} (feestdag, vergrendeld)",
         "{date} {half}: {type}. Click to change.": "{date} {half}: {type}. Klik om te wijzigen.",
@@ -2765,116 +2664,42 @@
         "{name} has been approved": "{name} is goedgekeurd",
         "{name} is now the team owner. You are now a moderator.": "{name} is nu de teameigenaar. Jij bent nu moderator.",
         "{name} saved": "{name} opgeslagen",
-        "{n} altered file": [
-            "{n} gewijzigd bestand",
-            "{n} gewijzigde bestanden"
-        ],
-        "{n} app": [
-            "{n} app",
-            "{n} apps"
-        ],
-        "{n} boards": [
-            "{n} bord",
-            "{n} borden"
-        ],
-        "{n} calendars": [
-            "{n} agenda",
-            "{n} agenda's"
-        ],
-        "{n} comment": "{n} opmerking",
-        "{n} comments": "{n} opmerkingen",
-        "{n} day": "{n} dag",
-        "{n} day ago": "{n} dag geleden",
+        "{n} altered file": ["{n} gewijzigd bestand","{n} gewijzigde bestanden"],
+        "{n} app": ["{n} app","{n} apps"],
+        "{n} boards": ["{n} bord","{n} borden"],
+        "{n} calendars": ["{n} agenda","{n} agenda's"],
+        "{n} comment": ["{n} opmerking","{n} opmerkingen"],
+        "{n} day": ["{n} dag","{n} dagen"],
+        "{n} day ago": ["{n} dag geleden","{n} dagen geleden"],
         "{n} day left": ["{n} dag over","{n} dagen over"],
-        "{n} days ago": "{n} dagen geleden",
-        "{n} decision": [
-            "{n} besluit",
-            "{n} besluiten"
-        ],
-        "{n} deleted user found in team memberships.": [
-            "{n} verwijderde gebruiker gevonden in teamlidmaatschappen.",
-            "{n} verwijderde gebruikers gevonden in teamlidmaatschappen."
-        ],
-        "{n} event could not be deleted": [
-            "{n} gebeurtenis kon niet worden verwijderd",
-            "{n} gebeurtenissen konden niet worden verwijderd"
-        ],
-        "{n} event deleted": [
-            "{n} gebeurtenis verwijderd",
-            "{n} gebeurtenissen verwijderd"
-        ],
-        "{n} event selected": [
-            "{n} gebeurtenis geselecteerd",
-            "{n} gebeurtenissen geselecteerd"
-        ],
+        "{n} decision": ["{n} besluit","{n} besluiten"],
+        "{n} deleted user found in team memberships.": ["{n} verwijderde gebruiker gevonden in teamlidmaatschappen.","{n} verwijderde gebruikers gevonden in teamlidmaatschappen."],
+        "{n} event could not be deleted": ["{n} gebeurtenis kon niet worden verwijderd","{n} gebeurtenissen konden niet worden verwijderd"],
+        "{n} event deleted": ["{n} gebeurtenis verwijderd","{n} gebeurtenissen verwijderd"],
+        "{n} event selected": ["{n} gebeurtenis geselecteerd","{n} gebeurtenissen geselecteerd"],
         "{n} hour ago": "{n} uur geleden",
         "{n} hours ago": "{n} uur geleden",
-        "{n} item awaiting your approval": [
-            "{n} item wacht op uw goedkeuring",
-            "{n} items wachten op uw goedkeuring"
-        ],
-        "{n} lane over budget": [
-            "{n} werkstroom over budget",
-            "{n} werkstromen over budget"
-        ],
-        "{n} member invited": "{n} lid uitgenodigd",
-        "{n} member over hours": [
-            "{n} lid over uren",
-            "{n} leden over uren"
-        ],
-        "{n} members invited": "{n} leden uitgenodigd",
+        "{n} item awaiting your approval": ["{n} item wacht op uw goedkeuring","{n} items wachten op uw goedkeuring"],
+        "{n} lane over budget": ["{n} werkstroom over budget","{n} werkstromen over budget"],
+        "{n} member invited": ["{n} lid uitgenodigd","{n} leden uitgenodigd"],
+        "{n} member over hours": ["{n} lid over uren","{n} leden over uren"],
         "{n} min ago": "{n} min geleden",
-        "{n} missing file": [
-            "{n} ontbrekend bestand",
-            "{n} ontbrekende bestanden"
-        ],
+        "{n} missing file": ["{n} ontbrekend bestand","{n} ontbrekende bestanden"],
         "{n} of {total} votes": "{n} van {total} stemmen",
-        "{n} open decision": [
-            "{n} open besluit",
-            "{n} open besluiten"
-        ],
-        "{n} over": "{n} over",
+        "{n} open decision": ["{n} open besluit","{n} open besluiten"],
+        "{n} over": ["{n} over","{n} over"],
         "{n} per page": "{n} per pagina",
-        "{n} reply — open chat": [
-            "{n} reactie — chat openen",
-            "{n} reacties — chat openen"
-        ],
-        "{n} team": "{n} team",
-        "{n} team selected": [
-            "{n} team geselecteerd",
-            "{n} teams geselecteerd"
-        ],
-        "{n} teams": "{n} teams",
-        "{n} type allowed": [
-            "{n} type toegestaan",
-            "{n} typen toegestaan"
-        ],
-        "{n} unassigned card": [
-            "{n} niet-toegewezen kaart",
-            "{n} niet-toegewezen kaarten"
-        ],
-        "{n} unassigned card in {board} — open board": [
-            "{n} niet-toegewezen kaart in {board} — bord openen",
-            "{n} niet-toegewezen kaarten in {board} — bord openen"
-        ],
-        "{n} unexpected file": [
-            "{n} onverwacht bestand",
-            "{n} onverwachte bestanden"
-        ],
-        "{n} unsolved question": [
-            "{n} onopgeloste vraag",
-            "{n} onopgeloste vragen"
-        ],
-        "{n} user": "{n} gebruiker",
-        "{n} users": "{n} gebruikers",
-        "{n} vote": [
-            "{n} stem",
-            "{n} stemmen"
-        ],
-        "{n} voter": [
-            "{n} stemmer",
-            "{n} stemmers"
-        ],
+        "{n} reply — open chat": ["{n} reactie — chat openen","{n} reacties — chat openen"],
+        "{n} team": ["{n} team","{n} teams"],
+        "{n} team selected": ["{n} team geselecteerd","{n} teams geselecteerd"],
+        "{n} type allowed": ["{n} type toegestaan","{n} typen toegestaan"],
+        "{n} unassigned card": ["{n} niet-toegewezen kaart","{n} niet-toegewezen kaarten"],
+        "{n} unassigned card in {board} — open board": ["{n} niet-toegewezen kaart in {board} — bord openen","{n} niet-toegewezen kaarten in {board} — bord openen"],
+        "{n} unexpected file": ["{n} onverwacht bestand","{n} onverwachte bestanden"],
+        "{n} unsolved question": ["{n} onopgeloste vraag","{n} onopgeloste vragen"],
+        "{n} user": ["{n} gebruiker","{n} gebruikers"],
+        "{n} vote": ["{n} stem","{n} stemmen"],
+        "{n} voter": ["{n} stemmer","{n} stemmers"],
         "{n}d ago": "{n}d geleden",
         "{n}h ago": "{n}u geleden",
         "{n}m ago": "{n}m geleden",
@@ -2887,10 +2712,8 @@
         "{team} is ready": "{team} is klaar",
         "{title} disabled for this team": "{title} uitgeschakeld voor dit team",
         "{title} enabled for this team": "{title} ingeschakeld voor dit team",
-        "{total} total vote": "{total} stem totaal",
-        "{total} total vote \\u2013 Poll closed": "{total} stem totaal – Peiling gesloten",
-        "{total} total votes": "{total} stemmen totaal",
-        "{total} total votes \\u2013 Poll closed": "{total} stemmen totaal – Peiling gesloten",
+        "{total} total vote": ["{total} stem totaal","{total} stemmen totaal"],
+        "{total} total vote – Poll closed": ["{total} stem totaal – Peiling gesloten","{total} stemmen totaal – Peiling gesloten"],
         "{uid} appears {n} times in this team's membership. The highest-level row will be kept.": "{uid} verschijnt {n} keer in het lidmaatschap van dit team. De rij met het hoogste niveau wordt behouden.",
         "{user} added a calendar": "{user} heeft een agenda toegevoegd",
         "{user} added a label": "{user} heeft een label toegevoegd",
@@ -2990,10 +2813,7 @@
         "Write a reply…": "Schrijf een reactie…",
         "You cannot post in this conversation.": "Je kunt niet posten in dit gesprek.",
         "Your role in this team does not allow commenting.": "Je rol in dit team staat reageren niet toe.",
-        "{n} reply": [
-            "{n} reactie",
-            "{n} reacties"
-        ],
+        "{n} reply": ["{n} reactie","{n} reacties"],
         "Closed": "Gesloten",
         "Could not record your vote.": "Kon je stem niet registreren.",
         "Open in {team}": "Openen in {team}",
@@ -3008,10 +2828,7 @@
         "Try widening the period, or clearing a team or type selection.": "Probeer de periode te verruimen of een team- of typeselectie te wissen.",
         "Turn on at least one row under Show in the Feed control panel.": "Zet minstens één regel onder Tonen aan in het Feed-instellingen paneel.",
         "You’ve reached the end": "Je bent bij het einde",
-        "{n} item shown": [
-            "{n} item getoond",
-            "{n} items getoond"
-        ],
+        "{n} item shown": ["{n} item getoond","{n} items getoond"],
         "Earlier": "Eerder",
         "Mentions": "Vermeldingen",
         "Public message": "Openbaar bericht",
@@ -3035,10 +2852,7 @@
         "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Scant elk door gebruikers aangemaakt team op systeembits die nooit op een gebruikersteam mogen voorkomen (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles weigert elke configuratiewijziging op een team met een van deze bits, waardoor apps het niet meer kunnen aanpassen. Gebruik Herstellen om de configuratie van een team terug te zetten naar schone standaardwaarden.",
         "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it — enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "Deze teams dragen de CFG_APP-vlag, die een Nextcloud-app instelt om het team als door haar beheerd te markeren — het inschakelen van een Collective doet dit. Het is geen corruptie en hoeft niet hersteld te worden. De vlag blijft achter als de app die hem heeft ingesteld later wordt verwijderd.",
         "Current config: {config}. App flag: {appBits}": "Huidige configuratie: {config}. App-vlag: {appBits}",
-        "{n} team is claimed by another app": [
-            "{n} team is geclaimd door een andere app",
-            "{n} teams zijn geclaimd door een andere app"
-        ],
+        "{n} team is claimed by another app": ["{n} team is geclaimd door een andere app","{n} teams zijn geclaimd door een andere app"],
         "Allow comments on": "Reacties toestaan op",
         "Message types that can be commented on. When a type is off, its messages show no comment count and no comment section. Questions and decisions always allow comments.": "Berichttypen waarop gereageerd kan worden. Staat een type uit, dan tonen die berichten geen reactieteller en geen reactiegedeelte. Op vragen en beslissingen kan altijd gereageerd worden.",
         "Polls": "Peilingen",
@@ -3176,7 +2990,61 @@
         "Failed to withdraw the request": "Intrekken van de aanvraag mislukt",
         "Failed to withdraw the request: {error}": "Intrekken van de aanvraag mislukt: {error}",
         "Bulk team export requires an active TeamHub license. Add or renew a license in the License tab to unlock it.": "Bulk-teamexport vereist een actieve TeamHub-licentie. Voeg op het tabblad Licentie een licentie toe of verleng deze om de export te ontgrendelen.",
-        "That source link cannot be opened — only http and https addresses are allowed.": "Die bronlink kan niet worden geopend — alleen http- en https-adressen zijn toegestaan."
+        "That source link cannot be opened — only http and https addresses are allowed.": "Die bronlink kan niet worden geopend — alleen http- en https-adressen zijn toegestaan.",
+        "Could not create the group": "Kan de groep niet aanmaken",
+        "Could not delete the group": "Kan de groep niet verwijderen",
+        "Could not move the team": "Kan het team niet verplaatsen",
+        "Could not rename the group": "Kan de groep niet hernoemen",
+        "Could not save the group state": "Kan de groepsstatus niet opslaan",
+        "Group “{name}” created": "Groep “{name}” aangemaakt",
+        "You already have a group called “{name}”": "Je hebt al een groep met de naam “{name}”",
+        "Create group": "Groep aanmaken",
+        "Favorites": "Favorieten",
+        "Group name": "Groepsnaam",
+        "New group": "Nieuwe groep",
+        "Move to group…": "Naar groep verplaatsen…",
+        "Move {team} to a group": "{team} naar een groep verplaatsen",
+        "Ungrouped": "Niet gegroepeerd",
+        "Delete group": "Groep verwijderen",
+        "Expanded by default": "Standaard uitgeklapt",
+        "No teams in this group yet": "Nog geen teams in deze groep",
+        "Rename group": "Groep hernoemen",
+        "A team in this group has updates": "Een team in deze groep heeft updates",
+        "Minimum role to manage posts": "Minimale rol om berichten te beheren",
+        "Who can pin a message, and edit or delete a message or comment written by someone else. Authors can always edit and delete their own. Every edit is shown under the post with who made it.": "Wie een bericht kan vastzetten en een bericht of reactie van iemand anders kan bewerken of verwijderen. Auteurs kunnen hun eigen berichten altijd bewerken en verwijderen. Elke bewerking wordt onder het bericht getoond met wie hem heeft gemaakt.",
+        "Edited by {name} on {datetime}": "Bewerkt door {name} op {datetime}",
+        "Tags": "Tags",
+        "Classify this team with the same Nextcloud tags you use on files. An administrator manages the available tags under Settings → Administration → Basic settings.": "Classificeer dit team met dezelfde Nextcloud-tags die je op bestanden gebruikt. Een beheerder beheert de beschikbare tags onder Instellingen → Beheer → Basisinstellingen.",
+        "Remove tag {tag}": "Tag {tag} verwijderen",
+        "This team has no tags yet.": "Dit team heeft nog geen tags.",
+        "Add a tag": "Tag toevoegen",
+        "No tags available — an administrator adds them in Basic settings": "Geen tags beschikbaar — een beheerder voegt ze toe bij Basisinstellingen",
+        "Every available tag is already on this team": "Alle beschikbare tags staan al op dit team",
+        "Select a tag…": "Kies een tag…",
+        "Tag {tag} added": "Tag {tag} toegevoegd",
+        "Failed to add tag: {error}": "Toevoegen van tag mislukt: {error}",
+        "Failed to add tag": "Toevoegen van tag mislukt",
+        "Tag {tag} removed": "Tag {tag} verwijderd",
+        "Failed to remove tag: {error}": "Verwijderen van tag mislukt: {error}",
+        "Failed to remove tag": "Verwijderen van tag mislukt",
+        "Team classification": "Teamclassificatie",
+        "Team classification details": "Details teamclassificatie",
+        "Classification:": "Classificatie:",
+        "No teams tagged": "Geen teams getagd",
+        "{tagged} of {total} tagged": "{tagged} van {total} getagd",
+        "Teams carrying at least one Nextcloud tag. Tags are managed under Settings → Administration → Basic settings, and a team admin applies them in Manage Team.": "Teams met minstens één Nextcloud-tag. Tags worden beheerd onder Instellingen → Beheer → Basisinstellingen; een teambeheerder past ze toe in Team beheren.",
+        "ISO 27001: {controls}": "ISO 27001: {controls}",
+        "Audit log retention": "Bewaartermijn auditlogboek",
+        "Audit log retention details": "Details bewaartermijn auditlogboek",
+        "Audit log:": "Auditlogboek:",
+        "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Gebeurtenissen worden toegevoegd en na de bewaartermijn in bulk gewist. Geen enkel codepad werkt een afzonderlijke regel bij of verwijdert die, dus een record kan niet worden herschreven voordat het verloopt.",
+        "{n} day retention": ["{n} dag bewaren","{n} dagen bewaren"],
+        "No teams": "Geen teams",
+        "Intranet": "Intranet",
+        "Minimum role to comment": "Minimale rol om te reageren",
+        "Commenting is restricted for this team": "Reageren is beperkt voor dit team",
+        "Who can post comments on messages, questions, and polls. Indirect members (via a group or sub-team) count as members.": "Wie opmerkingen mag plaatsen bij berichten, vragen en peilingen. Indirecte leden (via een groep of subteam) tellen als lid.",
+        "Only a Nextcloud administrator can change this tag": "Alleen een Nextcloud-beheerder kan deze tag wijzigen"
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

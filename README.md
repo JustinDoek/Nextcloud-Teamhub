@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Nextcloud 32-34" src="https://img.shields.io/badge/Nextcloud-32%E2%80%9334-0082c9">
+  <img alt="Nextcloud 33-34" src="https://img.shields.io/badge/Nextcloud-33%E2%80%9334-0082c9">
   <img alt="PHP 8.1-8.4" src="https://img.shields.io/badge/PHP-8.1%E2%80%938.4-777bb4">
   <img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue">
 </p>
@@ -40,11 +40,12 @@ It started as a visual mock-up to discuss what team-based working could look lik
 - **Team management** — invite by user, group, email, or federated account; manage roles and pending requests.
 - **Open integration layer** — other Nextcloud apps can register their own sidebar widgets or sandboxed iframe tabs into a team's home. See [`developers.md`](developers.md).
 - **Bulk team import** — admins can roll out many teams at once from a CSV, one row per team. Each row names its template, its apps and modules, its members, and its owner — so imported teams come out identical to wizard-created ones, and each one lands with the right owner rather than the admin who ran the import. Upload gives you a dry run first: every row is checked, conflicts and errors are shown with reasons, and nothing is created until you confirm.
-- **Admin controls** — org-wide rollout settings, creation permissions, optional modules (Presence, IntraVox), audit and archive tooling.
+- **Team tags** — classify a team with the same Nextcloud tags you already use on files. Tags are created by an administrator under Settings → Administration → Basic settings, so one vocabulary covers Files and teams; a team admin applies them in Manage Team, and every change is recorded in the team's audit log. Restricted tags stay administrator-only, exactly as they do on files.
+- **Admin controls** — org-wide rollout settings, creation permissions, optional modules (Presence, IntraVox), audit and archive tooling. The Compliance tab reports the instance's state against the ISO/IEC 27001:2022 controls TeamHub can evidence, and exports it as a printable report — including the controls it cannot evidence.
 
 ## Requirements
 
-- Nextcloud **32 – 34**
+- Nextcloud **33 – 34**
 - PHP **8.1 – 8.4**
 - MySQL/MariaDB or PostgreSQL
 - The **Teams (Circles)** app, enabled

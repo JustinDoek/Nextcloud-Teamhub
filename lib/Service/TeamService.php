@@ -1438,6 +1438,35 @@ class TeamService {
                 unset($t);
             }
 
+            // v4.8.0 — Nextcloud tags, batch-loaded like the types above.
+            //
+            // Members only, the same boundary `image_url` draws two fields
+            // up. Browse lists teams the viewer is not in, and a tag is a
+            // classification of the team — "Confidential" on a team you
+            // cannot open tells you something about it that the team never
+            // chose to publish. A non-member gets an empty list, not null,
+            // so the card renders no chip row rather than a broken one.
+            //
+            // Resolved through the container rather than the constructor,
+            // the same way this method already reaches IDBConnection: it
+            // keeps TeamTagService -> MemberService out of TeamService's
+            // constructor graph.
+            if ($teams !== []) {
+                $visibleIds = array_values(array_map(
+                    static fn ($t) => (string)$t['id'],
+                    array_filter($teams, static fn ($t) => $t['isMember'] === true),
+                ));
+
+                $tagsByTeam = $visibleIds === []
+                    ? []
+                    : $this->container->get(TeamTagService::class)->getTagsForTeams($visibleIds);
+
+                foreach ($teams as &$t) {
+                    $t['tags'] = $tagsByTeam[$t['id']] ?? [];
+                }
+                unset($t);
+            }
+
             return $teams;
 
         } catch (\Exception $e) {

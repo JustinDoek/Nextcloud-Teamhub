@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\TeamAppResourceMapper;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCP\App\IAppManager;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -32,6 +33,15 @@ class ResourceService {
      *
      * Each entry is a 6-character hex string without '#'.  Callers that need
      * the CalDAV format (#RRGGBB) should prefix the string with '#'.
+     *
+     * v4.7.2 — grown from twelve to twenty-four. The first twelve are
+     * unchanged and still first in the list, so existing teams keep the
+     * colour they have. The twelve added below fill the gaps in the hue
+     * wheel; four of them (azure, forest, bright cyan, light rose) separate
+     * from an existing entry by lightness rather than hue, which is the
+     * honest ceiling — past roughly two dozen swatches at this saturation,
+     * further entries stop being reliably tellable apart, and adding more
+     * would trade a real distinction for a nominal one.
      */
     private const TEAM_COLOUR_PALETTE = [
         '0082c9', // Nextcloud blue
@@ -46,16 +56,178 @@ class ResourceService {
         '546e7a', // steel blue-grey
         '558b2f', // olive green
         '00838f', // dark cyan
+        '1565c0', // azure          (darker than NC blue)
+        '5e35b1', // deep violet
+        'a01a7d', // magenta
+        'e64a19', // vermilion
+        'c79100', // gold
+        '9e9d24', // yellow-olive
+        '00996b', // sea green
+        '2e7d32', // forest green   (darker than green)
+        '283593', // navy indigo
+        '00acc1', // bright cyan    (lighter than dark cyan)
+        '8d6e63', // taupe
+        'ec407a', // light rose     (lighter than raspberry)
     ];
 
     /**
-     * Pick a random colour from the shared palette.
-     * Each call is independent — board and calendar can receive different colours.
+     * Pick the palette colour least used by the team resources TeamHub has
+     * already created.
+     *
+     * Why not random. The previous implementation drew uniformly with
+     * `array_rand()` on every team creation, which collides by the birthday
+     * paradox rather than by exhausting the list: over twenty teams a
+     * twelve-colour palette yields about ten distinct colours, and merely
+     * enlarging it to twenty-four would still yield only about fourteen.
+     * A user in twenty teams saw the same handful of colours repeatedly in
+     * the Deck board list and the Calendar sidebar. Least-used selection
+     * gives twenty distinct colours for twenty teams as long as the palette
+     * is at least that long, which is the whole point of enlarging it.
+     *
+     * Ties — including the first run, when every count is zero — are broken
+     * by a hash of the team id rather than at random, so the same team
+     * provisioned twice lands on the same colour and a test is reproducible.
+     *
+     * Degrades to the hash alone if the usage tally cannot be read (Deck or
+     * Calendar not installed, or their schema not what we expect). That is
+     * the old behaviour minus the randomness, never an exception.
      *
      * @return string 6-char hex without '#'
      */
-    private static function randomTeamColour(): string {
-        return self::TEAM_COLOUR_PALETTE[array_rand(self::TEAM_COLOUR_PALETTE)];
+    private function pickTeamColour(string $teamId): string {
+        $counts = array_fill_keys(self::TEAM_COLOUR_PALETTE, 0);
+
+        foreach ($this->coloursInUse() as $hex) {
+            if (isset($counts[$hex])) {
+                $counts[$hex]++;
+            }
+        }
+
+        return self::leastUsed($counts, $teamId);
+    }
+
+    /**
+     * The least-used colour from a tally, ties broken by team id.
+     *
+     * Split out from pickTeamColour() so the decision can be exercised
+     * without a database: everything above it is a query, everything in it
+     * is the rule. scripts/check-team-colours.php drives this method
+     * directly by reflection.
+     *
+     * @param array<string, int> $counts palette hex => times already used
+     */
+    private static function leastUsed(array $counts, string $teamId): string {
+        $fewest = min($counts);
+        /** @var string[] $candidates */
+        $candidates = array_keys($counts, $fewest, true);
+
+        // crc32 is non-negative on 64-bit PHP and is used here as a spreader,
+        // not a checksum — any stable hash would do.
+        //
+        // The cast is load-bearing. array_fill_keys() turns a canonical decimal
+        // string into an *integer* key, and two palette entries are all digits
+        // ('795548', '283593'), so array_keys() can hand back an int here and
+        // the `: string` return type fatals. Lookups are unaffected — PHP
+        // normalises the key the same way on the way in — so the tally is
+        // correct and only the return value needs saying out loud.
+        return (string)$candidates[crc32($teamId) % count($candidates)];
+    }
+
+    /**
+     * Colours currently used by Deck boards and calendars that TeamHub
+     * created, lower-cased 6-char hex without '#'.
+     *
+     * Scoped through the resource registry rather than reading every board
+     * and calendar on the instance: a user's personal Deck boards and the
+     * Nextcloud default calendar colours are not ours to balance against,
+     * and counting them would bias the tally toward colours we never chose.
+     *
+     * @return string[]
+     */
+    private function coloursInUse(): array {
+        return array_merge(
+            $this->resourceColours('deck', 'deck_boards', 'color'),
+            $this->resourceColours('calendar', 'calendars', 'calendarcolor'),
+        );
+    }
+
+    /**
+     * Read one app's registered resource colours.
+     *
+     * Two queries rather than a join: `resource_id` is a varchar and the
+     * foreign key is an integer, and Postgres will not compare those
+     * implicitly. Casting in PHP keeps the query portable, which the
+     * cross-database rule requires.
+     *
+     * @param string $appId         registry app id ('deck' / 'calendar')
+     * @param string $table         foreign table, unprefixed
+     * @param string $colourColumn  colour column on that table
+     * @return string[]
+     */
+    private function resourceColours(string $appId, string $table, string $colourColumn): array {
+        try {
+            $columns = $this->dbIntrospection->getTableColumns($table);
+            if ($columns !== [] && !in_array($colourColumn, $columns, true)) {
+                // Table exists but not in the shape we expect — say nothing
+                // rather than guessing at a differently named column.
+                return [];
+            }
+
+            $db = $this->container->get(\OCP\IDBConnection::class);
+
+            $qb = $db->getQueryBuilder();
+            $qb->select('resource_id')
+                ->from('teamhub_team_app_resources')
+                ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
+                ->andWhere($qb->expr()->eq('origin', $qb->createNamedParameter('teamhub_create')))
+                ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('active')));
+
+            $res = $qb->executeQuery();
+            $ids = [];
+            foreach ($res->fetchAll() as $row) {
+                $id = (int)($row['resource_id'] ?? 0);
+                if ($id > 0) {
+                    $ids[] = $id;
+                }
+            }
+            $res->closeCursor();
+
+            if ($ids === []) {
+                return [];
+            }
+
+            // Chunked so a large instance cannot exceed the driver's bound-
+            // parameter limit (Postgres caps at 65535).
+            $colours = [];
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $cq = $db->getQueryBuilder();
+                $cq->select($colourColumn)
+                    ->from($table)
+                    ->where($cq->expr()->in(
+                        'id',
+                        $cq->createNamedParameter($chunk, IQueryBuilder::PARAM_INT_ARRAY),
+                    ));
+
+                $cres = $cq->executeQuery();
+                foreach ($cres->fetchAll() as $row) {
+                    $raw = strtolower(trim((string)($row[$colourColumn] ?? '')));
+                    $raw = ltrim($raw, '#');
+                    if ($raw !== '') {
+                        $colours[] = $raw;
+                    }
+                }
+                $cres->closeCursor();
+            }
+
+            return $colours;
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][ResourceService] colour tally unavailable', [
+                'appId'  => $appId,
+                'error'  => $e->getMessage(),
+                'app_id' => Application::APP_ID,
+            ]);
+            return [];
+        }
     }
 
     public function __construct(
@@ -389,7 +561,7 @@ class ResourceService {
         }
         $uid = $user->getUID();
 
-        $teamColour = self::randomTeamColour();
+        $teamColour = $this->pickTeamColour($teamId);
 
         $results = [];
         foreach ($apps as $app) {

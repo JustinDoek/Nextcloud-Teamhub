@@ -42,6 +42,19 @@ use Psr\Log\LoggerInterface;
  */
 class MemberService {
 
+    /**
+     * How many times to re-apply the group/circle auto-confirm before giving up
+     * and warning (v4.7.12, GitHub #87). Three is enough for the interleavings
+     * observed — the competing write is Circles' own insertOrUpdate() inside the
+     * same request, not a separate async one — and small enough that the worst
+     * case adds well under a second to an invite that was previously failing
+     * silently. Only the failure path ever waits.
+     */
+    private const CONFIRM_MAX_ATTEMPTS = 3;
+
+    /** Pause between auto-confirm attempts, microseconds. */
+    private const CONFIRM_RETRY_DELAY_US = 150000;
+
     public function __construct(
         private ResourceService      $resourceService,
         private TalkService          $talkService,
@@ -54,6 +67,9 @@ class MemberService {
         private PendingDeletionMapper $pendingMapper,
         // v4.6.26 — owns the "Mail or mailto:" question for the whole app.
         private MailClientService    $mailClientService,
+        // v4.7.9 — every membership change ends by asking this to bring the
+        // team's connected resources back in line. See GitHub #87.
+        private ResourceMembershipService $resourceMembership,
     ) {
     }
 
@@ -928,12 +944,112 @@ class MemberService {
             'app'             => Application::APP_ID,
         ]);
 
+        // ── people reached only through a group or nested team ────────────────
+        //
+        // v4.7.14 (GitHub #87) — until now this method returned each group and
+        // team as a name and a count, so "Marketing (2)" was all an admin ever
+        // saw. That is the visibility gap in the issue, and it is also why a
+        // promotion looked impossible: a level lives on a direct row, and there
+        // was no row in the list for somebody who has no direct row to click.
+        //
+        // Anyone already in $direct is skipped — they have their own entry, and
+        // its level is the higher of the two anyway (Circles takes the max
+        // across paths), so listing them twice would show a level that is not
+        // the one in force.
+        $directIds = array_column($direct, 'userId');
+        $inherited = [];
+
+        $iQb  = $db->getQueryBuilder();
+        $iRes = $iQb->selectDistinct(['m.user_id', 'ms.level', 'ms.inheritance_depth', 'ms.inheritance_first'])
+            ->from('circles_membership', 'ms')
+            ->innerJoin('ms', 'circles_member', 'm', $iQb->expr()->andX(
+                $iQb->expr()->eq('m.circle_id', 'ms.single_id'),
+                $iQb->expr()->eq('m.user_type', $iQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+            ))
+            ->where($iQb->expr()->eq('ms.circle_id', $iQb->createNamedParameter($teamId)))
+            // Highest level first, then the shortest route. One person can reach
+            // a team several ways at once — Lieke reads three rows for publicOne
+            // — and the level in force is the highest of them, so the first row
+            // per user has to be that one. The depth tiebreak just makes `via`
+            // name the most direct explanation.
+            ->orderBy('ms.level', 'DESC')
+            ->addOrderBy('ms.inheritance_depth', 'ASC')
+            ->executeQuery();
+
+        $seen = [];
+        while ($row = $iRes->fetch()) {
+            $userId = (string)$row['user_id'];
+            if ($userId === '' || in_array($userId, $directIds, true) || isset($seen[$userId])) {
+                continue;
+            }
+            $seen[$userId] = true;
+
+            $level = (int)$row['level'];
+            // Name the route in, so "why can this person see the team?" has an
+            // answer in the list rather than in a support conversation.
+            $viaId = (string)($row['inheritance_first'] ?? '');
+            $via   = $viaId !== '' ? ($this->resolveCircleDisplayName($db, $viaId) ?: $viaId) : '';
+
+            $inherited[] = [
+                'userId'      => $userId,
+                'displayName' => $this->userManager->get($userId)?->getDisplayName() ?: $userId,
+                'role'        => match (true) {
+                    $level >= 9 => 'Owner',
+                    $level >= 8 => 'Admin',
+                    $level >= 4 => 'Moderator',
+                    default     => 'Member',
+                },
+                'level'  => $level,
+                'via'    => $via,
+                'depth'  => (int)$row['inheritance_depth'],
+                'status' => 'Member',
+            ];
+        }
+        $iRes->closeCursor();
+
         return [
             'direct'          => $direct,
             'groups'          => $groups,
             'circles'         => $circles,
+            'inherited'       => $inherited,
             'effective_count' => $effectiveCount,
         ];
+    }
+
+    /**
+     * Human-readable name for a circle, given its unique_id (v4.7.14).
+     *
+     * Circles stores a group's circle as `group:<gid>` and a personal circle as
+     * `user:<uid>:<id>`, neither of which is a name anybody wants to read, so
+     * both prefixes are unwrapped. Returns '' when the circle is unknown.
+     */
+    private function resolveCircleDisplayName(\OCP\IDBConnection $db, string $singleId): string {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('name', 'display_name')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($singleId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+
+        if (!$row) {
+            return '';
+        }
+
+        $name = (string)($row['display_name'] ?? '');
+        if ($name === '') {
+            $name = (string)($row['name'] ?? '');
+        }
+        if (str_starts_with($name, 'group:')) {
+            return substr($name, 6);
+        }
+        if (str_starts_with($name, 'user:')) {
+            $parts = explode(':', $name);
+            return $parts[1] ?? $name;
+        }
+
+        return $name;
     }
 
     /**
@@ -964,14 +1080,18 @@ class MemberService {
 
         $db = $this->container->get(\OCP\IDBConnection::class);
 
-        // Look up caller's own level directly — no Circles session needed
-        $callerLevel = $this->getMemberLevelFromDb($db, $teamId, $caller->getUID());
+        // v4.7.13 (GitHub #87) — effective level, not direct level.
+        // getMemberLevelFromDb() reads circles_member, which holds direct rows
+        // only, so anyone reaching this team through a group or nested team
+        // reads 0 there. For the caller that meant an admin who inherits their
+        // adminship could not administer; for the target it meant an inherited
+        // member could not be promoted at all, because there was no row to find.
+        $callerLevel = $this->getEffectiveMemberLevel($db, $teamId, $caller->getUID());
         if ($callerLevel < 8) {
             throw new \Exception('Insufficient permissions. Admin or owner role required.');
         }
 
-        // Look up target member's current level
-        $targetLevel = $this->getMemberLevelFromDb($db, $teamId, $userId);
+        $targetLevel = $this->getEffectiveMemberLevel($db, $teamId, $userId);
         if ($targetLevel === 0) {
             throw new \Exception('Member not found in this team');
         }
@@ -984,6 +1104,17 @@ class MemberService {
             throw new \Exception('Only the team owner can promote members to Admin');
         }
 
+        // A level lives on a direct circles_member row. Somebody who is only an
+        // inherited member has none, so give them one before setting it. This is
+        // not a second admission — they are already in the team — it is the
+        // carrier for the level, and Circles is built for it: fillMemberships()
+        // keeps the HIGHEST level across every path to a team, so the direct row
+        // raises them and the group keeps reaching them.
+        $hasDirectRow = $this->getMemberLevelFromDb($db, $teamId, $userId) > 0;
+        if (!$hasDirectRow) {
+            $this->createDirectMemberRow($db, $teamId, $userId, $caller);
+        }
+
         // Write the new level directly to circles_member
         $qb = $db->getQueryBuilder();
         $qb->update('circles_member')
@@ -993,8 +1124,116 @@ class MemberService {
             ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
             ->executeStatement();
 
+        // A new direct row changes the effective membership, so the team's
+        // resources need to hear about it like any other membership change.
+        if (!$hasDirectRow) {
+            $this->resourceMembership->reconcileTeamMembership($teamId, 'member_promoted_from_inherited');
+        }
+
         // Return refreshed member list
         return $this->getTeamMembers($teamId);
+    }
+
+    /**
+     * The level a user actually has in a team, by any route (v4.7.13).
+     *
+     * The higher of their direct circles_member row and whatever the
+     * circles_membership cache credits them with through an attached group or
+     * nested team — which is the same "highest wins" rule Circles' own
+     * MembershipService::fillMemberships() applies when building that cache.
+     *
+     * Returns 0 when the user reaches the team by no route at all.
+     */
+    private function getEffectiveMemberLevel(\OCP\IDBConnection $db, string $teamId, string $userId): int {
+        $direct = $this->getMemberLevelFromDb($db, $teamId, $userId);
+
+        // circles_membership.single_id is the person's own principal, not a uid,
+        // so it is resolved by joining circles_member on m.circle_id = single_id
+        // — the same shape TalkService uses for effective Talk membership. MAX()
+        // because a user can reach one team by several paths at once.
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->selectAlias($qb->func()->max('ms.level'), 'lvl')
+            ->from('circles_membership', 'ms')
+            ->innerJoin('ms', 'circles_member', 'm', $qb->expr()->andX(
+                $qb->expr()->eq('m.circle_id', 'ms.single_id'),
+                $qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                $qb->expr()->eq('m.user_id', $qb->createNamedParameter($userId)),
+            ))
+            ->where($qb->expr()->eq('ms.circle_id', $qb->createNamedParameter($teamId)))
+            ->executeQuery();
+        // MAX() over no rows is NULL, which casts to the 0 this method promises.
+        $inherited = (int)$res->fetchOne();
+        $res->closeCursor();
+
+        return max($direct, $inherited);
+    }
+
+    /**
+     * Give a user a direct circles_member row in a team they already reach
+     * through a group or nested team (v4.7.13).
+     *
+     * Circles' own addMember() builds the row rather than an INSERT here, and
+     * that is the whole point: the row's `single_id` must be the user's personal
+     * circle unique_id, because that is what circles_membership joins on. A
+     * hand-made id produces a principal nothing can resolve, and
+     * MembershipService::onUpdate() then deletes the membership rows belonging
+     * to it — the phantom-principal damage recorded in HANDOFF §0b.
+     *
+     * v4.7.16 — takes the caller, because Circles' addMember() opens with
+     * `mustHaveCurrentUser()` and throws InitiatorNotFoundException('Invalid
+     * initiator') when nothing has set one. Between 4.7.13 and 4.7.15 this
+     * method never set it, so the addMember() branch threw every time it was
+     * reached; promoting an inherited member appeared to work only for someone
+     * who already had a direct row from some earlier route, where the branch is
+     * skipped. inviteMembers() has always done this correctly and is the
+     * pattern being matched here.
+     *
+     * @param \OCP\IUser $caller the acting admin, who becomes the Circles
+     *   initiator for the add — already checked for level >= 8 by the caller
+     */
+    private function createDirectMemberRow(\OCP\IDBConnection $db, string $teamId, string $userId, \OCP\IUser $caller): void {
+        // v4.7.14 — a direct row may already exist without being a membership.
+        // The caller only asked whether the user has a *Member* row; an admin who
+        // already tried to invite this person leaves an 'Invited' one behind, and
+        // calling addMember() on top of that throws MemberAlreadyExistsException.
+        // There is nothing to add in that case — only to confirm, which the
+        // UPDATE below does. Skipping straight to it is also what rescues an
+        // invite the user cannot accept themselves.
+        $existingStatus = $this->fetchAnyMemberStatus($db, $teamId, $userId);
+
+        if ($existingStatus === null) {
+            $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $circleMemberService  = $this->container->get(\OCA\Circles\Service\MemberService::class);
+
+            // Circles resolves the initiator off its own FederatedUserService,
+            // not from the NC session, so this has to be said explicitly —
+            // addMember() calls mustHaveCurrentUser() before anything else.
+            $federatedUserService->setLocalCurrentUser($caller);
+
+            $invitee = $federatedUserService->generateFederatedUser($userId, 1);
+            $circleMemberService->addMember($teamId, $invitee);
+        }
+
+        // On a team carrying CFG_INVITE the new row lands 'Invited' at level 0.
+        // That gate is there so nobody is admitted without accepting — but this
+        // person is already a member through their group, so there is nothing to
+        // accept; the row exists only to carry a level. Confirm it, exactly as an
+        // attached group is confirmed. The caller sets the real level next.
+        $qb = $db->getQueryBuilder();
+        $qb->update('circles_member')
+            ->set('status', $qb->createNamedParameter('Member'))
+            ->set('level',  $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Invited')))
+            ->executeStatement();
+
+        $this->logger->info('[TeamHub][MemberService] updateMemberLevel: created direct membership row for an inherited member', [
+            'teamId' => $teamId,
+            'userId' => $userId,
+            'app'    => Application::APP_ID,
+        ]);
     }
 
     /**
@@ -1329,12 +1568,17 @@ class MemberService {
                 'app'    => Application::APP_ID,
             ]);
 
-            // Remove the departing member from the team's Talk room so they
-            // lose access immediately. Talk does not watch for Circles changes.
-            $this->logger->debug('[TeamHub][MemberService] leaveTeam: removing uid from Talk room', [
-                'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
-            ]);
-            $this->talkService->removeUserFromTeamTalkRoom($teamId, $uid);
+            // Sync the departing member out of the team's connected resources.
+            // Talk does not watch for Circles changes, so this has to be told.
+            //
+            // v4.7.9 (GitHub #87) — was an unconditional removeUserFromTeamTalkRoom.
+            // That contradicted the $stillMember check immediately below: a user
+            // who leaves directly but remains reachable through an attached group
+            // was correctly told they still belong to the team, and just as
+            // correctly thrown out of its conversation. The reconcile diffs
+            // against the same effective membership $stillMember reads, so the
+            // two answers can no longer disagree.
+            $this->resourceMembership->reconcileTeamMembership($teamId, 'member_left');
 
             // Leaving drops the direct row only. A user who is ALSO in an
             // attached group (or sub-team) legitimately keeps access, and the
@@ -1438,18 +1682,6 @@ class MemberService {
                 ->executeStatement();
         }
 
-        // Rebuild the circles_membership cache for this team so users added via
-        // the removed group/circle disappear from share pickers. Non-fatal —
-        // the admin maintenance UI can also rebuild manually.
-        try {
-            $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
-            $membershipService->onUpdate($teamId);
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][MemberService] removeMember: cache rebuild failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-        }
-
         $this->logger->info('[TeamHub][MemberService] removeMember: removed via direct DB delete', [
             'teamId'   => $teamId,
             'targetId' => $targetId,
@@ -1457,28 +1689,25 @@ class MemberService {
             'app'      => Application::APP_ID,
         ]);
 
-        // Sync the Talk room to reflect the membership change.
-        // - Direct user (type 1): remove that one attendee row (handles both
-        //   actor_type='users' and actor_type='federated_users' for safety).
-        // - Group/circle (type 2/16): reconcile ALL attendees against the
-        //   effective membership because we don't know which individual UIDs
-        //   were reachable via the removed group. Uses the effective-aware
-        //   reconciler (not the legacy direct-only one) so users still reach-
-        //   able via another attached group are correctly preserved and any
-        //   federated attendees that drifted in are evicted. The reconcile
-        //   runs AFTER MembershipService::onUpdate() above, which has rebuilt
-        //   circles_membership to reflect the removal.
-        if ($userType === 1) {
-            $this->logger->debug('[TeamHub][MemberService] removeMember: removing user from Talk room', [
-                'targetId' => $targetId, 'teamId' => $teamId, 'app' => Application::APP_ID,
-            ]);
-            $this->talkService->removeUserFromTeamTalkRoom($teamId, $targetId);
-        } else {
-            $this->logger->debug('[TeamHub][MemberService] removeMember: reconciling Talk room after group/circle removal', [
-                'teamId' => $teamId, 'app' => Application::APP_ID,
-            ]);
-            $this->talkService->reconcileEffectiveTalkRoomMembers($teamId);
-        }
+        // v4.7.9 (GitHub #87) — one reconcile for every member type, replacing
+        // the type-1 branch that removed the attendee row unconditionally.
+        //
+        // That branch is the "dual membership" bug in #87: a user removed as an
+        // individual while still reachable through an attached group lost the
+        // conversation, because the eviction never asked whether another path
+        // to the team remained. The reconcile does ask — it diffs against the
+        // effective set — so such a user keeps the row untouched, which also
+        // preserves their read markers where an evict-then-re-add would not.
+        //
+        // One deliberate difference from the old direct path: the reconcile
+        // leaves room OWNER rows (participant_type=1) alone, so removing the
+        // Talk room's owner from the team no longer orphans the room. That is
+        // the reconciler's documented choice, not an oversight here.
+        //
+        // reconcileTeamMembership() rebuilds circles_membership before reading it, which
+        // is what the removed MembershipService::onUpdate() call above used to
+        // do at this point.
+        $this->resourceMembership->reconcileTeamMembership($teamId, 'member_removed');
     }
 
     /**
@@ -1601,10 +1830,30 @@ class MemberService {
                     $circleMemberService->addMember($teamId, $invitee);
                 } catch (\Throwable $addMemberEx) {
                     $msg = $addMemberEx->getMessage();
-                    $isAlreadyInvited = ($addMemberEx instanceof \OCA\Circles\Exceptions\FederatedItemBadRequestException)
+
+                    // v4.7.13 (GitHub #87) — match the exception that actually
+                    // means "already there", not its whole family.
+                    //
+                    // This used to accept any FederatedItemBadRequestException.
+                    // MemberAlreadyExistsException extends it, but so do the
+                    // other CIRCLE_JOIN refusals — 124 "circle is not open" among
+                    // them — so a genuine rejection was reported to the admin as
+                    // 'already_invited', i.e. as success. That is what silently
+                    // dropped a member during the 2026-08-07 bulk import
+                    // (HANDOFF §0) and what makes "Lieke is already added"
+                    // untrustworthy as a diagnosis today.
+                    //
+                    // The string checks stay as a fallback for Circles versions
+                    // that raise a plain bad-request with these messages. An
+                    // instanceof against a class that does not exist is simply
+                    // false, so no version guard is needed.
+                    $isAlreadyMember = ($addMemberEx instanceof \OCA\Circles\Exceptions\MemberAlreadyExistsException)
                         || str_contains($msg, 'Already invited')
                         || str_contains($msg, 'already a member');
-                    if (!$isAlreadyInvited) {
+                    if (!$isAlreadyMember) {
+                        // Rethrown, so the loop's own catch records it as
+                        // 'failed: <reason>' against this id. Louder than
+                        // before, and true.
                         throw $addMemberEx;
                     }
 
@@ -1683,24 +1932,89 @@ class MemberService {
                 // run this only after addMember() succeeds.
                 if ($memberType !== 1) {
                     try {
-                        $confirmQb = $db->getQueryBuilder();
-                        $updated   = $confirmQb->update('circles_member')
-                            ->set('status', $confirmQb->createNamedParameter('Member'))
-                            ->set('level',  $confirmQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                            ->where($confirmQb->expr()->eq('circle_id', $confirmQb->createNamedParameter($teamId)))
-                            ->andWhere($confirmQb->expr()->in(
-                                'user_type',
-                                $confirmQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
-                            ))
-                            ->andWhere($confirmQb->expr()->eq('status', $confirmQb->createNamedParameter('Invited')))
-                            ->executeStatement();
+                        // v4.7.12 (GitHub #87) — write, then CHECK, then rewrite.
+                        //
+                        // A single UPDATE here was silently losing. Circles' own
+                        // SingleMemberAdd::manage() calls memberService->insertOrUpdate()
+                        // from the queued event, whose Member object still carries
+                        // status 'Invited' — so depending on which side lands last,
+                        // Circles either writes the row after we looked for it, or
+                        // overwrites the 'Member' we just set. Either way the row
+                        // stays 'Invited', at level 0, and Circles' generateMemberships()
+                        // skips anything below LEVEL_MEMBER: no membership rows, no
+                        // flattened users, no MembershipsCreatedEvent, and therefore no
+                        // Talk attendees for anyone inside that group or team.
+                        //
+                        // Both orderings are inside this request — the adds observed on
+                        // 2026-08-29 produced no oc_circles_event row at all — so a
+                        // bounded re-apply is enough. It only costs anything on the
+                        // path that was previously failing outright.
+                        $confirmed = false;
+                        $updated   = 0;
+
+                        for ($attempt = 1; $attempt <= self::CONFIRM_MAX_ATTEMPTS; $attempt++) {
+                            $confirmQb = $db->getQueryBuilder();
+                            $updated  += $confirmQb->update('circles_member')
+                                ->set('status', $confirmQb->createNamedParameter('Member'))
+                                ->set('level',  $confirmQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                                ->where($confirmQb->expr()->eq('circle_id', $confirmQb->createNamedParameter($teamId)))
+                                ->andWhere($confirmQb->expr()->in(
+                                    'user_type',
+                                    $confirmQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                                ))
+                                ->andWhere($confirmQb->expr()->eq('status', $confirmQb->createNamedParameter('Invited')))
+                                ->executeStatement();
+
+                            // Read back rather than trusting the affected-row count:
+                            // 0 rows changed is the correct answer both when the row
+                            // was already 'Member' and when it has not appeared yet,
+                            // and those two need opposite responses.
+                            $checkQb  = $db->getQueryBuilder();
+                            $checkRes = $checkQb->select($checkQb->func()->count('*', 'cnt'))
+                                ->from('circles_member')
+                                ->where($checkQb->expr()->eq('circle_id', $checkQb->createNamedParameter($teamId)))
+                                ->andWhere($checkQb->expr()->in(
+                                    'user_type',
+                                    $checkQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                                ))
+                                ->andWhere($checkQb->expr()->eq('status', $checkQb->createNamedParameter('Invited')))
+                                ->executeQuery();
+                            $stillInvited = (int)$checkRes->fetchOne();
+                            $checkRes->closeCursor();
+
+                            if ($stillInvited === 0) {
+                                $confirmed = true;
+                                break;
+                            }
+
+                            if ($attempt < self::CONFIRM_MAX_ATTEMPTS) {
+                                usleep(self::CONFIRM_RETRY_DELAY_US);
+                            }
+                        }
+
+                        if (!$confirmed) {
+                            // Warning, not info: this is the state in which a group or
+                            // nested team is attached but nobody inside it can reach the
+                            // team's conversation, and until now it produced no log line
+                            // at all. The hourly reconcile cannot rescue it either —
+                            // an Invited member generates no memberships to reconcile
+                            // against — so somebody has to accept the invite by hand.
+                            $this->logger->warning('[TeamHub][MemberService] inviteMembers: group/circle stayed Invited after retries — members will have no resource access until it is accepted', [
+                                'id'       => $memberId,
+                                'type'     => $memberType,
+                                'teamId'   => $teamId,
+                                'attempts' => self::CONFIRM_MAX_ATTEMPTS,
+                                'app'      => Application::APP_ID,
+                            ]);
+                        }
 
                         $this->logger->info('[TeamHub][MemberService] inviteMembers: auto-confirmed group/circle membership', [
-                            'id'      => $memberId,
-                            'type'    => $memberType,
-                            'teamId'  => $teamId,
-                            'updated' => $updated,
-                            'app'     => Application::APP_ID,
+                            'id'        => $memberId,
+                            'type'      => $memberType,
+                            'teamId'    => $teamId,
+                            'updated'   => $updated,
+                            'confirmed' => $confirmed,
+                            'app'       => Application::APP_ID,
                         ]);
 
                         // Rebuild Circles membership cache so the group's users get
@@ -1779,6 +2093,22 @@ class MemberService {
                 ]);
             }
         }
+
+        // v4.7.9 (GitHub #87) — one reconcile for the whole batch, after the
+        // loop rather than inside it, so a ten-member invite does one pass.
+        //
+        // This is what carries a *group* or sub-team into Talk. The per-user
+        // syncUserToTeamTalkRoom() above only fires for memberType 1, so before
+        // this call a group's members joined the team and were never given a
+        // talk_attendees row — they opened the chat and were told the
+        // conversation does not exist. Deck, Files and Calendar needed nothing
+        // then and need nothing now; they resolve membership through Circles at
+        // read time.
+        //
+        // Runs even when every entry failed: the failure may have been a
+        // duplicate invite for somebody whose Talk row is missing anyway, and a
+        // reconcile that finds no drift costs two queries.
+        $this->resourceMembership->reconcileTeamMembership($teamId, 'members_invited');
 
         return $results;
     }
@@ -2025,6 +2355,11 @@ class MemberService {
                 // trigger sync are (a) direct Member on invite, (b) admin
                 // approves pending request, (c) here — open-circle self-join.
                 $this->talkService->syncUserToTeamTalkRoom($teamId, $uid);
+
+                // v4.7.9 (GitHub #87) — and the same reconcile every other
+                // membership change ends with, so one joiner cannot be the one
+                // case where the guarantee is "the targeted call worked".
+                $this->resourceMembership->reconcileTeamMembership($teamId, 'member_self_joined');
             } else {
                 // JOIN_REQUEST — the row stays `Requesting` and a moderator
                 // decides. (JOIN_CLOSED never reaches here: it is refused at
@@ -2494,6 +2829,10 @@ class MemberService {
                 'userId' => $userId, 'teamId' => $teamId, 'app' => Application::APP_ID,
             ]);
             $this->talkService->syncUserToTeamTalkRoom($teamId, $userId);
+
+            // v4.7.9 (GitHub #87) — see requestJoinTeam: every membership change
+            // ends the same way, whatever targeted call preceded it.
+            $this->resourceMembership->reconcileTeamMembership($teamId, 'join_approved');
         } catch (\Exception $e) {
             $this->logger->error('[TeamHub][MemberService] Error approving request', [
                 'teamId'    => $teamId,

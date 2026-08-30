@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Db;
 
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 class CommentMapper {
@@ -80,12 +81,29 @@ class CommentMapper {
         ];
     }
 
-    public function update(int $id, string $authorId, string $comment): array {
+    /**
+     * Update a comment's text and record who did it.
+     *
+     * v4.7.4 — **the authorisation moved out of this query.** It used to
+     * carry `AND author_id = :editorId`, which meant a non-author's update
+     * matched zero rows, and the method then re-fetched and returned the
+     * unchanged row — reporting success for a write that never happened.
+     * That was survivable while the author was the only one allowed to edit;
+     * it is not now that a moderator may, because a silent no-op is
+     * indistinguishable from a silent unauthorised write to anyone reading
+     * this code later. CommentController::updateComment holds the gate, and
+     * this method now does what its name says.
+     *
+     * `$editorId` is the person making the change, not necessarily the
+     * author.
+     */
+    public function update(int $id, string $editorId, string $comment): array {
         $qb = $this->db->getQueryBuilder();
         $qb->update('teamhub_comments')
             ->set('comment', $qb->createNamedParameter($comment))
+            ->set('edited_by', $qb->createNamedParameter($editorId))
+            ->set('edited_at', $qb->createNamedParameter(time(), IQueryBuilder::PARAM_INT))
             ->where($qb->expr()->eq('id', $qb->createNamedParameter($id)))
-            ->andWhere($qb->expr()->eq('author_id', $qb->createNamedParameter($authorId)))
             ->executeStatement();
 
         // Re-fetch to return the updated row

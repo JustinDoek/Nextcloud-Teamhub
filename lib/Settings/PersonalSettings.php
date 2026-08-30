@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Settings;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Controller\PreferencesController;
+use OCA\TeamHub\Service\DateContextService;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IConfig;
 use OCP\IUserSession;
@@ -28,11 +29,14 @@ use OCP\Settings\ISettings;
 class PersonalSettings implements ISettings {
 
     public function __construct(
-        private IConfig      $config,
-        private IUserSession $userSession,
+        private IConfig             $config,
+        private IUserSession        $userSession,
+        private DateContextService  $dateContext,
     ) {}
 
     public function getForm(): TemplateResponse {
+        $this->dateContext->provideInitialState();
+
         $enabled = $this->config->getAppValue('teamhub', 'presence_module_enabled', '1') === '1';
 
         $uid = $this->userSession->getUser()?->getUID();

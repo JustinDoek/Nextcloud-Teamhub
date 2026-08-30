@@ -1,5 +1,8 @@
 {
     "translations": {
+        "People from groups and teams": "Personer fra grupper og teams",
+        "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well — they keep their group membership.": "Disse personer er medlemmer via en gruppe eller et team. Når du giver nogen en højere rolle, bliver personen også medlem af dette team direkte — gruppemedlemskabet bevares.",
+        "via {source}": "via {source}",
         "%1$s needs review": "%1$s skal gennemgås",
         "%n event in this period": ["%n begivenhed i denne periode","%n begivenheder i denne periode"],
         "Accepted": "Accepteret",
@@ -125,48 +128,21 @@
         "  Proposed date": "  Foreslået dato",
         "Your proposal": "Dit forslag",
         "Your teams need nothing from you as their admin.": "Dine teams har ikke brug for noget fra dig som administrator.",
-        "{n} overdue": [
-            "{n} forsinket",
-            "{n} forsinkede"
-        ],
-        "{n} critical": [
-            "{n} kritisk",
-            "{n} kritiske"
-        ],
+        "{n} overdue": ["{n} forsinket","{n} forsinkede"],
+        "{n} critical": ["{n} kritisk","{n} kritiske"],
         "{source} {count}, {critical} critical": "{source} {count}, {critical} kritiske",
         "{source} {count}": "{source} {count}",
         "{sources} items could not be refreshed. All other results are up to date.": "Elementer fra {sources} kunne ikke opdateres. Alle andre resultater er aktuelle.",
         "{name} (unavailable)": "{name} (utilgængelig)",
         "{action}: {title}": "{action}: {title}",
         "%1$s · %2$s": "%1$s · %2$s",
-        "%n attendee": [
-            "%n deltager",
-            "%n deltagere"
-        ],
-        "%n attendee will be invited": [
-            "%n deltager bliver inviteret",
-            "%n deltagere bliver inviteret"
-        ],
-        "%n could join online": [
-            "%n kunne deltage online",
-            "%n kunne deltage online"
-        ],
-        "%n has a calendar conflict": [
-            "%n har en kalenderkonflikt",
-            "%n har en kalenderkonflikt"
-        ],
-        "%n has a conflict": [
-            "%n har en konflikt",
-            "%n har en konflikt"
-        ],
-        "%n member selected": [
-            "%n medlem valgt",
-            "%n medlemmer valgt"
-        ],
-        "%n resource needs review.": [
-            "%n ressource skal gennemgås.",
-            "%n ressourcer skal gennemgås."
-        ],
+        "%n attendee": ["%n deltager","%n deltagere"],
+        "%n attendee will be invited": ["%n deltager bliver inviteret","%n deltagere bliver inviteret"],
+        "%n could join online": ["%n kunne deltage online","%n kunne deltage online"],
+        "%n has a calendar conflict": ["%n har en kalenderkonflikt","%n har en kalenderkonflikt"],
+        "%n has a conflict": ["%n har en konflikt","%n har en konflikt"],
+        "%n member selected": ["%n medlem valgt","%n medlemmer valgt"],
+        "%n resource needs review.": ["%n ressource skal gennemgås.","%n ressourcer skal gennemgås."],
         "(completed)": "(afsluttet)",
         "(current phase)": "(aktuel fase)",
         "(list truncated)": "(liste afkortet)",
@@ -178,10 +154,7 @@
         "+ Connect team folder": "+ Forbind teammappe",
         "+ Create new": "+ Opret ny",
         "+ Create new team folder": "+ Opret ny teammappe",
-        "+{n} other team": [
-            "+{n} andet team",
-            "+{n} andre teams"
-        ],
+        "+{n} other team": ["+{n} andet team","+{n} andre teams"],
         "1 hour": "1 time",
         "1 month": "1 måned",
         "1 week": "1 uge",
@@ -201,14 +174,8 @@
         "A team folder is now connected to this team": "En teammappe er nu forbundet til dette team",
         "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "Et kickoff-møde for at afstemme teamet om omfang, tidsplan og roller. Marker som færdigt, når det står i kalenderen.",
         "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "En besked med et link til mødenotaterne vil blive postet i Talk-rummet og bede teammedlemmer om at tilføje dagsordenpunkter.",
-        "A new message from TeamHub": [
-            "En ny besked fra TeamHub",
-            "{n} nye beskeder fra TeamHub"
-        ],
-        "A new message from TeamHub is waiting for you.": [
-            "En ny besked fra TeamHub venter på dig.",
-            "{n} nye beskeder fra TeamHub venter på dig."
-        ],
+        "A new message from TeamHub": ["En ny besked fra TeamHub","{n} nye beskeder fra TeamHub"],
+        "A new message from TeamHub is waiting for you.": ["En ny besked fra TeamHub venter på dig.","{n} nye beskeder fra TeamHub venter på dig."],
         "A notes file is created in the team Meetings folder and linked from the calendar event.": "En notatfil oprettes i teamets Meetings-mappe og linkes fra kalenderbegivenheden.",
         "A project-flavoured team with the familiar setup — no lifecycle tools.": "Et team med et projektpræg og den velkendte opsætning — uden livscyklusværktøjer.",
         "A retro to look back on scope, timeline, budget, and what to carry into the next project. Optional — mark as done once it's on the calendar, or skip if you don't want to run one.": "En retro for at se tilbage på omfang, tidsplan, budget og hvad der skal med til det næste projekt. Valgfrit — marker som færdigt, når det står i kalenderen, eller spring det over, hvis du ikke vil holde et.",
@@ -435,6 +402,7 @@
         "Built-in status type": "Indbygget statustype",
         "Built-in status types cannot be deleted": "Indbyggede statustyper kan ikke slettes",
         "Bullet list": "Punktopstilling",
+        "Numbered list": "Nummereret liste",
         "Busy": "Optaget",
         "Buy a license": "Køb en licens",
         "By": "Af",
@@ -450,14 +418,8 @@
         "Cancel superseding": "Annuller erstatning",
         "Cancel — make team usable again": "Annuller — gør teamet brugbart igen",
         "Cannot create page: team name not available": "Kan ikke oprette side: teamnavn ikke tilgængeligt",
-        "Cannot delete: in use by {n} entry": [
-            "Kan ikke slettes: bruges af {n} post",
-            "Kan ikke slettes: bruges af {n} poster"
-        ],
-        "Cannot delete: status type is in use by {n} entry": [
-            "Kan ikke slettes: statustype bruges af {n} post",
-            "Kan ikke slettes: statustype bruges af {n} poster"
-        ],
+        "Cannot delete: in use by {n} entry": ["Kan ikke slettes: bruges af {n} post","Kan ikke slettes: bruges af {n} poster"],
+        "Cannot delete: status type is in use by {n} entry": ["Kan ikke slettes: statustype bruges af {n} post","Kan ikke slettes: statustype bruges af {n} poster"],
         "Cannot load this view": "Kan ikke indlæse denne visning",
         "Cannot upload — not logged in": "Kan ikke uploade — ikke logget ind",
         "Card #{id}": "Kort #{id}",
@@ -775,10 +737,7 @@
         "Delete time entry": "Slet tidsregistrering",
         "Delete {label}?": "Slet {label}?",
         "Delete {name}": "Slet {name}",
-        "Delete {n} event": [
-            "Slet {n} begivenhed",
-            "Slet {n} begivenheder"
-        ],
+        "Delete {n} event": ["Slet {n} begivenhed","Slet {n} begivenheder"],
         "Delete ‘{name}’ on {date}? Any holiday entries on that date will revert to each user's default week template.": "Slet ‘{name}’ den {date}? Alle helligdagsposter på den dato vil vende tilbage til hver brugers standardugeskabelon.",
         "Delete “{description}”? This cannot be undone.": "Slet “{description}”? Dette kan ikke fortrydes.",
         "Deleted": "Slettet",
@@ -1230,10 +1189,7 @@
         "Ignore resource {id}": "Ignorér ressource {id}",
         "Image URL (https://…)": "Billed-URL (https://…)",
         "Image attachment": "Billedvedhæftning",
-        "Image cache cleared (%n file removed)": [
-            "Billedcache ryddet (%n fil fjernet)",
-            "Billedcache ryddet (%n filer fjernet)"
-        ],
+        "Image cache cleared (%n file removed)": ["Billedcache ryddet (%n fil fjernet)","Billedcache ryddet (%n filer fjernet)"],
         "Image preview": "Billedeksempel",
         "Image too large. Maximum size is 2 MB.": "Billede for stort. Maksimal størrelse er 2 MB.",
         "Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Billeder indsat fra personlige filer kopieres til en skjult cache-mappe i holdmappen, så alle medlemmer kan se dem. Rydning viser ødelagte billeder i eksisterende indlæg.",
@@ -1640,10 +1596,7 @@
         "Team name cannot consist only of dots.": "Teamnavnet må ikke kun bestå af punktummer.",
         "A team with this name already exists. Team names must be unique.": "Der findes allerede et team med dette navn. Teamnavne skal være unikke.",
         "Only members of the selected groups can create teams. Leave empty to allow all users.": "Kun medlemmer af de valgte grupper kan oprette teams. Lad det stå tomt for at tillade alle brugere.",
-        "Only proposals in the %n selected category will be added.": [
-            "Kun forslag i den %n valgte kategori tilføjes.",
-            "Kun forslag i de %n valgte kategorier tilføjes."
-        ],
+        "Only proposals in the %n selected category will be added.": ["Kun forslag i den %n valgte kategori tilføjes.","Kun forslag i de %n valgte kategorier tilføjes."],
         "Open": "Åben",
         "Open {title}": "Åbn {title}",
         "Open Budget": "Åbn Budget",
@@ -1685,10 +1638,7 @@
         "Other": "Andet",
         "Over your licensed seats: {used} of {cap} used.": "Over dine licenserede pladser: {used} af {cap} brugt.",
         "Overdue": "Forfalden",
-        "Overdue by {n} day": [
-            "{n} dag forsinket",
-            "{n} dage forsinket"
-        ],
+        "Overdue by {n} day": ["{n} dag forsinket","{n} dage forsinket"],
         "Overdue items are always Action required. Set this to 0 if only overdue work should count as actionable.": "Forsinkede elementer er altid Handling påkrævet. Sæt til 0, hvis kun forsinket arbejde skal tælle som handling.",
         "Owner": "Ejer",
         "Owner assigned successfully": "Ejer tildelt",
@@ -1879,10 +1829,7 @@
         "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "Fjern {name} fra projektets tidsbudget? De eksisterende registreringer bevares som revisionsspor.",
         "Remove {user} from all teams": "Fjern {user} fra alle teams",
         "Remove {user} from {team}": "Fjern {user} fra {team}",
-        "Removed from {n} team": [
-            "Fjernet fra {n} team",
-            "Fjernet fra {n} teams"
-        ],
+        "Removed from {n} team": ["Fjernet fra {n} team","Fjernet fra {n} teams"],
         "Removing…": "Fjerner…",
         "Renew on the License tab to keep Advanced features available.": "Forny under fanen Licens for at bevare adgangen til Avancerede funktioner.",
         "Repair": "Reparér",
@@ -1922,10 +1869,7 @@
         "Resources pending review": "Ressourcer afventer gennemgang",
         "Restore": "Gendan",
         "Restore team {name}": "Gendan team {name}",
-        "Restricted to {n} group": [
-            "Begrænset til {n} gruppe",
-            "Begrænset til {n} grupper"
-        ],
+        "Restricted to {n} group": ["Begrænset til {n} gruppe","Begrænset til {n} grupper"],
         "Result": "Resultat",
         "Retention period": "Opbevaringsperiode",
         "Retention saved": "Opbevaring gemt",
@@ -2005,14 +1949,10 @@
         "Searching…": "Søger…",
         "Seat cap exceeded — Advanced features locked: {used} of {cap} used (max {lockAt}).": "Pladsgrænsen er overskredet — avancerede funktioner er låst: {used} af {cap} brugt (maks. {lockAt}).",
         "Seats": "Pladser",
-        "Select a board\\u2026": "Vælg et board…",
         "Select a board…": "Vælg et board…",
-        "Select a calendar\\u2026": "Vælg en kalender…",
         "Select a calendar…": "Vælg en kalender…",
-        "Select a conversation\\u2026": "Vælg en samtale…",
         "Select a conversation…": "Vælg en samtale…",
         "Select a folder to connect": "Vælg en mappe at forbinde",
-        "Select a folder\\u2026": "Vælg en mappe…",
         "Select a folder…": "Vælg en mappe…",
         "Select a room": "Vælg et lokale",
         "Select a status": "Vælg en status",
@@ -2026,7 +1966,6 @@
         "Select an icon": "Vælg et ikon",
         "Select week": "Vælg uge",
         "Select {team}": "Vælg {team}",
-        "Select\\u2026": "Vælg…",
         "Select…": "Vælg…",
         "Send": "Send",
         "Send daily anonymous usage report": "Send daglig anonym brugsrapport",
@@ -2067,10 +2006,7 @@
         "Short note": "Kort note",
         "Short summary of your feedback": "Kort sammenfatning af din feedback",
         "Show": "Vis",
-        "Show %n ignored resource": [
-            "Vis %n ignoreret ressource",
-            "Vis %n ignorerede ressourcer"
-        ],
+        "Show %n ignored resource": ["Vis %n ignoreret ressource","Vis %n ignorerede ressourcer"],
         "Show all {n}": "Vis alle {n}",
         "Show Operational / Tactical / Strategic level on decisions. Useful for teams that work with strategic taxonomy.": "Vis niveauet Operationel / Taktisk / Strategisk på beslutninger. Nyttigt for teams, der arbejder med strategisk taksonomi.",
         "Show snoozed items": "Vis udsatte elementer",
@@ -2299,16 +2235,10 @@
         "The team itself and every other resource are unaffected. Only Collectives is being removed.": "Selve teamet og alle andre ressourcer påvirkes ikke. Kun Collectives fjernes.",
         "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "Teamet skjules straks og slettes permanent om 30 dage. En administrator kan gendanne det inden da. Der produceres intet arkiv.",
         "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "Teamet skjules straks og slettes permanent om 60 dage. En administrator kan gendanne det inden da. Der produceres intet arkiv.",
-        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
-            "Teamet vil straks blive skjult og permanent slettet om {n} dag. Administratorer kan gendanne det inden den frist.",
-            "Teamet vil straks blive skjult og permanent slettet om {n} dage. Administratorer kan gendanne det inden den frist."
-        ],
+        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": ["Teamet vil straks blive skjult og permanent slettet om {n} dag. Administratorer kan gendanne det inden den frist.","Teamet vil straks blive skjult og permanent slettet om {n} dage. Administratorer kan gendanne det inden den frist."],
         "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "Teamet slettes permanent straks efter arkivet er oprettet. Dette kan ikke fortrydes.",
         "The team will be permanently deleted immediately. No archive bundle is produced.": "Teamet slettes permanent med det samme. Ingen arkivpakke produceres.",
-        "The team will be permanently deleted in {n} day. Administrators can restore it.": [
-            "Teamet vil blive permanent slettet om {n} dag. Administratorer kan gendanne det.",
-            "Teamet vil blive permanent slettet om {n} dage. Administratorer kan gendanne det."
-        ],
+        "The team will be permanently deleted in {n} day. Administrators can restore it.": ["Teamet vil blive permanent slettet om {n} dag. Administratorer kan gendanne det.","Teamet vil blive permanent slettet om {n} dage. Administratorer kan gendanne det."],
         "The team will be soft-deleted with a 30-day grace period during which administrators can restore it. No archive bundle is produced.": "Teamet slettes blødt med en frist på 30 dage, hvor administratorer kan gendanne det. Ingen arkivpakke produceres.",
         "The team will be soft-deleted with a 60-day grace period during which administrators can restore it. No archive bundle is produced.": "Teamet slettes blødt med en frist på 60 dage, hvor administratorer kan gendanne det. Ingen arkivpakke produceres.",
         "The vocabulary your organisation uses for presence — what people can pick to describe where they are. Built-in types cannot be deleted but their label, icon, and colour can be customised. Drag rows to reorder.": "Det ordforråd, din organisation bruger til tilstedeværelse — hvad folk kan vælge for at beskrive, hvor de er. Indbyggede typer kan ikke slettes, men deres etiket, ikon og farve kan tilpasses. Træk rækker for at omarrangere.",
@@ -2325,10 +2255,7 @@
         "Third-party integrations": "Tredjepartsintegrationer",
         "This action cannot be easily undone.": "Denne handling kan ikke nemt fortrydes.",
         "This action cannot be undone.": "Denne handling kan ikke fortrydes.",
-        "This building has {n} floor": [
-            "Denne bygning har {n} etage",
-            "Denne bygning har {n} etager"
-        ],
+        "This building has {n} floor": ["Denne bygning har {n} etage","Denne bygning har {n} etager"],
         "This card no longer exists.": "Dette kort findes ikke længere.",
         "This clears any corrupted bits set by older versions of TeamHub. The team owner will need to reconfigure its checkbox settings afterwards.": "Dette rydder eventuelle beskadigede bits sat af ældre versioner af TeamHub. Teamejeren skal derefter omkonfigurere sine afkrydsningsindstillinger.",
         "This comment is the marked answer. Deleting it will mark the question as unsolved.": "Denne kommentar er det markerede svar. Hvis du sletter den, markeres spørgsmålet som uløst.",
@@ -2338,10 +2265,7 @@
         "This feature requires a license — ask your admin.": "Denne funktion kræver en licens — spørg din administrator.",
         "This file no longer exists.": "Denne fil findes ikke længere.",
         "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "Denne filtype kan ikke forhåndsvises skrivebeskyttet i browseren. Download den for at se dens indhold.",
-        "This floor has {n} room": [
-            "Denne etage har {n} lokale",
-            "Denne etage har {n} lokaler"
-        ],
+        "This floor has {n} room": ["Denne etage har {n} lokale","Denne etage har {n} lokaler"],
         "This hides the item from My Work until the moment you choose. It does not change the due date in the source application.": "Dette skjuler elementet i Mit arbejde indtil det tidspunkt, du vælger. Det ændrer ikke forfaldsdatoen i kildeprogrammet.",
         "This instance has already used its trial.": "Denne instans har allerede brugt sin prøveperiode.",
         "This item opens in another app. You are leaving TeamHub.": "Dette element åbnes i en anden app. Du forlader TeamHub.",
@@ -2375,10 +2299,7 @@
         "This version of the Approval app cannot be driven from My Work. Open the file to approve or reject it there.": "Denne version af Approval-appen kan ikke styres fra Mit arbejde. Åbn filen for at godkende eller afvise den der.",
         "This version of Deck does not support marking cards as done from outside the app. Open the card in Deck instead.": "Denne version af Deck understøtter ikke at markere kort som fuldført uden for appen. Åbn i stedet kortet i Deck.",
         "This will export the project's decisions, budget, time and milestones to a folder in this team's Files. The files are plain markdown so they stay readable long after the team is archived.": "Dette eksporterer projektets beslutninger, budget, tid og milepæle til en mappe i dette teams Filer. Filerne er ren markdown og forbliver læsbare længe efter teamet er arkiveret.",
-        "This will overwrite {n} existing entry on this date.": [
-            "Dette overskriver {n} eksisterende post på denne dato.",
-            "Dette overskriver {n} eksisterende poster på denne dato."
-        ],
+        "This will overwrite {n} existing entry on this date.": ["Dette overskriver {n} eksisterende post på denne dato.","Dette overskriver {n} eksisterende poster på denne dato."],
         "This will permanently delete \"{name}\". This cannot be undone. All data in this {app} will be lost.": "Dette sletter \"{name}\" permanent. Dette kan ikke fortrydes. Alle data i denne {app} går tabt.",
         "This will record your comment as the final wording, close the discussion (no more comments), and send the decision to its approver(s) for sign-off. This action cannot be undone.": "Dette registrerer din kommentar som den endelige formulering, lukker diskussionen (ingen flere kommentarer) og sender beslutningen til dens godkender(e) til underskrift. Denne handling kan ikke fortrydes.",
         "Thread in Talk chat {room}": "Tråd i Talk-chatten {room}",
@@ -2594,15 +2515,9 @@
         "Yesterday": "I går",
         "You approved this decision": "Du godkendte denne beslutning",
         "You approved this file": "Du godkendte denne fil",
-        "You are about to remove {user} from {n} team. This cannot be undone.": [
-            "Du er ved at fjerne {user} fra {n} team. Dette kan ikke fortrydes.",
-            "Du er ved at fjerne {user} fra {n} teams. Dette kan ikke fortrydes."
-        ],
+        "You are about to remove {user} from {n} team. This cannot be undone.": ["Du er ved at fjerne {user} fra {n} team. Dette kan ikke fortrydes.","Du er ved at fjerne {user} fra {n} teams. Dette kan ikke fortrydes."],
         "You are about to withdraw this decision and open a new proposal in its place.": "Du er ved at trække denne beslutning tilbage og åbne et nyt forslag i dens sted.",
-        "You are an approver and this request has been waiting %n day": [
-            "Du er godkender, og denne anmodning har ventet i %n dag",
-            "Du er godkender, og denne anmodning har ventet i %n dage"
-        ],
+        "You are an approver and this request has been waiting %n day": ["Du er godkender, og denne anmodning har ventet i %n dag","Du er godkender, og denne anmodning har ventet i %n dage"],
         "You are an approver for this decision": "Du er godkender for denne beslutning",
         "You are no longer a direct member, but you still have access to this team through a group or another team.": "Du er ikke længere direkte medlem, men du har stadig adgang til dette team via en gruppe eller et andet team.",
         "You are not an approver for this decision.": "Du er ikke godkender for denne beslutning.",
@@ -2635,10 +2550,7 @@
         "You’re all caught up": "Du er helt ajour",
         "You're getting the project off the ground. Here's what to focus on:": "Du er i gang med at få projektet i gang. Her er, hvad du skal fokusere på:",
         "You're setting up your project. Here's what to focus on:": "Du er ved at sætte dit projekt op. Her er, hvad du bør fokusere på:",
-        "Your approval request has been waiting %n day": [
-            "Din godkendelsesanmodning har ventet i %n dag",
-            "Din godkendelsesanmodning har ventet i %n dage"
-        ],
+        "Your approval request has been waiting %n day": ["Din godkendelsesanmodning har ventet i %n dag","Din godkendelsesanmodning har ventet i %n dage"],
         "Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove the team, its files, and every TeamHub record attached to it — nothing can be restored.": "Din Nextcloud-administrator har konfigureret øjeblikkelig hård sletning uden arkivpakke. Fortsætter du, fjernes teamet, dets filer og enhver tilknyttet TeamHub-post permanent — intet kan gendannes.",
         "Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove this team's collective, its page tree, and every attachment — nothing can be restored.": "Din Nextcloud-administrator har konfigureret øjeblikkelig permanent sletning uden arkivpakke. Fortsætter du, fjernes dette teams kollektiv, dets sidetræ og alle vedhæftninger permanent — intet kan gendannes.",
         "Your TeamHub Business license has lapsed. Renew to resume Budget, Time and Milestone updates on Advanced projects.": "Din TeamHub Business-licens er udløbet. Forny for at genoptage budget-, tids- og milepælsopdateringer på avancerede projekter.",
@@ -2650,18 +2562,9 @@
         "Your rationale…": "Din begrundelse…",
         "[Team Folder] {name}": "[Teammappe] {name}",
         "[Shared folder] {name}": "[Delt mappe] {name}",
-        "_{n} reply — open chat_::_{n} replies — open chat_": [
-            "{n} svar — åbn chat",
-            "{n} svar — åbn chat"
-        ],
-        "_{n} vote_::_{n} votes_": [
-            "{n} stemme",
-            "{n} stemmer"
-        ],
-        "_{n} voter_::_{n} voters_": [
-            "{n} vælger",
-            "{n} vælgere"
-        ],
+        "_{n} reply — open chat_::_{n} replies — open chat_": ["{n} svar — åbn chat","{n} svar — åbn chat"],
+        "_{n} vote_::_{n} votes_": ["{n} stemme","{n} stemmer"],
+        "_{n} voter_::_{n} voters_": ["{n} vælger","{n} vælgere"],
         "a single project-level role. A member sees the Budget tab when their team role is at or above this level. Any member who is a named additional editor on ANY workstream also automatically sees the tab, regardless of their role.": "en enkelt rolle på projektniveau. Et medlem ser Budget-fanen, når teamrollen er på eller over dette niveau. Ethvert medlem, der er navngivet som ekstra redaktør på ENHVER arbejdsstrøm, ser også automatisk fanen, uanset rollen.",
         "across the project": "på tværs af projektet",
         "afternoon": "eftermiddag",
@@ -2702,8 +2605,7 @@
         "e.g. Weekly sync": "f.eks. Ugentlig sync",
         "e.g. en/teamhub": "f.eks. da/teamhub",
         "email address": "e-mailadresse",
-        "grace: {n} day left": "henstand: {n} dag tilbage",
-        "grace: {n} days left": "henstand: {n} dage tilbage",
+        "grace: {n} day left": ["henstand: {n} dag tilbage","henstand: {n} dage tilbage"],
         "group": "gruppe",
         "h": "t",
         "https://example.com/photo.jpg": "https://example.com/photo.jpg",
@@ -2746,10 +2648,7 @@
         "{available} of {total} available, {count} at {room}": "{available} af {total} tilgængelige, {count} i {room}",
         "{cell}: not set. Click to set.": "{cell}: ikke angivet. Klik for at angive.",
         "{cell}: {type}. Click to change.": "{cell}: {type}. Klik for at ændre.",
-        "{count} project member": [
-            "{count} projektmedlem",
-            "{count} projektmedlemmer"
-        ],
+        "{count} project member": ["{count} projektmedlem","{count} projektmedlemmer"],
         "{date} {half}: not set. Click to set.": "{date} {half}: ikke angivet. Klik for at angive.",
         "{date} {half}: {type} (holiday, locked)": "{date} {half}: {type} (helligdag, låst)",
         "{date} {half}: {type}. Click to change.": "{date} {half}: {type}. Klik for at ændre.",
@@ -2765,116 +2664,42 @@
         "{name} has been approved": "{name} er godkendt",
         "{name} is now the team owner. You are now a moderator.": "{name} er nu teamejer. Du er nu moderator.",
         "{name} saved": "{name} gemt",
-        "{n} altered file": [
-            "{n} ændret fil",
-            "{n} ændrede filer"
-        ],
-        "{n} app": [
-            "{n} app",
-            "{n} apps"
-        ],
-        "{n} boards": [
-            "{n} board",
-            "{n} boards"
-        ],
-        "{n} calendars": [
-            "{n} kalender",
-            "{n} kalendere"
-        ],
-        "{n} comment": "{n} kommentar",
-        "{n} comments": "{n} kommentarer",
-        "{n} day": "{n} dag",
-        "{n} day ago": "{n} dag siden",
+        "{n} altered file": ["{n} ændret fil","{n} ændrede filer"],
+        "{n} app": ["{n} app","{n} apps"],
+        "{n} boards": ["{n} board","{n} boards"],
+        "{n} calendars": ["{n} kalender","{n} kalendere"],
+        "{n} comment": ["{n} kommentar","{n} kommentarer"],
+        "{n} day": ["{n} dag","{n} dage"],
+        "{n} day ago": ["{n} dag siden","{n} dage siden"],
         "{n} day left": ["{n} dag tilbage","{n} dage tilbage"],
-        "{n} days ago": "{n} dage siden",
-        "{n} decision": [
-            "{n} beslutning",
-            "{n} beslutninger"
-        ],
-        "{n} deleted user found in team memberships.": [
-            "{n} slettet bruger fundet i teammedlemskaber.",
-            "{n} slettede brugere fundet i teammedlemskaber."
-        ],
-        "{n} event could not be deleted": [
-            "{n} begivenhed kunne ikke slettes",
-            "{n} begivenheder kunne ikke slettes"
-        ],
-        "{n} event deleted": [
-            "{n} begivenhed slettet",
-            "{n} begivenheder slettet"
-        ],
-        "{n} event selected": [
-            "{n} begivenhed valgt",
-            "{n} begivenheder valgt"
-        ],
+        "{n} decision": ["{n} beslutning","{n} beslutninger"],
+        "{n} deleted user found in team memberships.": ["{n} slettet bruger fundet i teammedlemskaber.","{n} slettede brugere fundet i teammedlemskaber."],
+        "{n} event could not be deleted": ["{n} begivenhed kunne ikke slettes","{n} begivenheder kunne ikke slettes"],
+        "{n} event deleted": ["{n} begivenhed slettet","{n} begivenheder slettet"],
+        "{n} event selected": ["{n} begivenhed valgt","{n} begivenheder valgt"],
         "{n} hour ago": "{n} time siden",
         "{n} hours ago": "{n} timer siden",
-        "{n} item awaiting your approval": [
-            "{n} element afventer din godkendelse",
-            "{n} elementer afventer din godkendelse"
-        ],
-        "{n} lane over budget": [
-            "{n} bane over budget",
-            "{n} baner over budget"
-        ],
-        "{n} member invited": "{n} medlem inviteret",
-        "{n} member over hours": [
-            "{n} medlem over timer",
-            "{n} medlemmer over timer"
-        ],
-        "{n} members invited": "{n} medlemmer inviteret",
+        "{n} item awaiting your approval": ["{n} element afventer din godkendelse","{n} elementer afventer din godkendelse"],
+        "{n} lane over budget": ["{n} bane over budget","{n} baner over budget"],
+        "{n} member invited": ["{n} medlem inviteret","{n} medlemmer inviteret"],
+        "{n} member over hours": ["{n} medlem over timer","{n} medlemmer over timer"],
         "{n} min ago": "{n} min siden",
-        "{n} missing file": [
-            "{n} manglende fil",
-            "{n} manglende filer"
-        ],
+        "{n} missing file": ["{n} manglende fil","{n} manglende filer"],
         "{n} of {total} votes": "{n} af {total} stemmer",
-        "{n} open decision": [
-            "{n} åben beslutning",
-            "{n} åbne beslutninger"
-        ],
-        "{n} over": "{n} over",
+        "{n} open decision": ["{n} åben beslutning","{n} åbne beslutninger"],
+        "{n} over": ["{n} over","{n} over"],
         "{n} per page": "{n} pr. side",
-        "{n} reply — open chat": [
-            "{n} svar — åbn chat",
-            "{n} svar — åbn chat"
-        ],
-        "{n} team": "{n} team",
-        "{n} team selected": [
-            "{n} team valgt",
-            "{n} teams valgt"
-        ],
-        "{n} teams": "{n} teams",
-        "{n} type allowed": [
-            "{n} type tilladt",
-            "{n} typer tilladt"
-        ],
-        "{n} unassigned card": [
-            "{n} ikke-tildelt kort",
-            "{n} ikke-tildelte kort"
-        ],
-        "{n} unassigned card in {board} — open board": [
-            "{n} ikke-tildelt kort i {board} — åbn board",
-            "{n} ikke-tildelte kort i {board} — åbn board"
-        ],
-        "{n} unexpected file": [
-            "{n} uventet fil",
-            "{n} uventede filer"
-        ],
-        "{n} unsolved question": [
-            "{n} uløst spørgsmål",
-            "{n} uløste spørgsmål"
-        ],
-        "{n} user": "{n} bruger",
-        "{n} users": "{n} brugere",
-        "{n} vote": [
-            "{n} stemme",
-            "{n} stemmer"
-        ],
-        "{n} voter": [
-            "{n} vælger",
-            "{n} vælgere"
-        ],
+        "{n} reply — open chat": ["{n} svar — åbn chat","{n} svar — åbn chat"],
+        "{n} team": ["{n} team","{n} teams"],
+        "{n} team selected": ["{n} team valgt","{n} teams valgt"],
+        "{n} type allowed": ["{n} type tilladt","{n} typer tilladt"],
+        "{n} unassigned card": ["{n} ikke-tildelt kort","{n} ikke-tildelte kort"],
+        "{n} unassigned card in {board} — open board": ["{n} ikke-tildelt kort i {board} — åbn board","{n} ikke-tildelte kort i {board} — åbn board"],
+        "{n} unexpected file": ["{n} uventet fil","{n} uventede filer"],
+        "{n} unsolved question": ["{n} uløst spørgsmål","{n} uløste spørgsmål"],
+        "{n} user": ["{n} bruger","{n} brugere"],
+        "{n} vote": ["{n} stemme","{n} stemmer"],
+        "{n} voter": ["{n} vælger","{n} vælgere"],
         "{n}d ago": "for {n}d siden",
         "{n}h ago": "for {n}t siden",
         "{n}m ago": "for {n}m siden",
@@ -2887,10 +2712,8 @@
         "{team} is ready": "{team} er klar",
         "{title} disabled for this team": "{title} deaktiveret for dette team",
         "{title} enabled for this team": "{title} aktiveret for dette team",
-        "{total} total vote": "{total} stemme i alt",
-        "{total} total vote \\u2013 Poll closed": "{total} stemme i alt – Afstemning lukket",
-        "{total} total votes": "{total} stemmer i alt",
-        "{total} total votes \\u2013 Poll closed": "{total} stemmer i alt – Afstemning lukket",
+        "{total} total vote": ["{total} stemme i alt","{total} stemmer i alt"],
+        "{total} total vote – Poll closed": ["{total} stemme i alt – Afstemning lukket","{total} stemmer i alt – Afstemning lukket"],
         "{uid} appears {n} times in this team's membership. The highest-level row will be kept.": "{uid} optræder {n} gange i dette teams medlemskab. Rækken på højeste niveau bevares.",
         "{user} added a calendar": "{user} tilføjede en kalender",
         "{user} added a label": "{user} tilføjede en etiket",
@@ -2990,10 +2813,7 @@
         "Write a reply…": "Skriv et svar…",
         "You cannot post in this conversation.": "Du kan ikke skrive i denne samtale.",
         "Your role in this team does not allow commenting.": "Din rolle i dette team tillader ikke at kommentere.",
-        "{n} reply": [
-            "{n} svar",
-            "{n} svar"
-        ],
+        "{n} reply": ["{n} svar","{n} svar"],
         "Closed": "Lukket",
         "Could not record your vote.": "Kunne ikke registrere din stemme.",
         "Open in {team}": "Åbn i {team}",
@@ -3008,10 +2828,7 @@
         "Try widening the period, or clearing a team or type selection.": "Prøv at udvide perioden, eller ryd et team- eller typevalg.",
         "Turn on at least one row under Show in the Feed control panel.": "Slå mindst én række til under Vis i Feed-styringspanelet.",
         "You’ve reached the end": "Du er nået til slutningen",
-        "{n} item shown": [
-            "{n} element vist",
-            "{n} elementer vist"
-        ],
+        "{n} item shown": ["{n} element vist","{n} elementer vist"],
         "Earlier": "Tidligere",
         "Mentions": "Omtaler",
         "Public message": "Offentlig besked",
@@ -3035,10 +2852,7 @@
         "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Scanner alle brugeroprettede teams for systembits, der aldrig bør forekomme på et brugerteam (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles afviser enhver konfigurationsopdatering på et team med en af disse bits, så apps ikke længere kan ændre det. Brug Reparér for at nulstille et teams konfiguration til rene standardværdier.",
         "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it — enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "Disse teams bærer CFG_APP-flaget, som en Nextcloud-app sætter for at markere teamet som administreret af den — at aktivere et Collective gør dette. Det er ikke en fejl og kræver ingen reparation. Flaget bliver tilbage, hvis den app, der satte det, senere fjernes.",
         "Current config: {config}. App flag: {appBits}": "Nuværende konfiguration: {config}. App-flag: {appBits}",
-        "{n} team is claimed by another app": [
-            "{n} team er gjort krav på af en anden app",
-            "{n} teams er gjort krav på af en anden app"
-        ],
+        "{n} team is claimed by another app": ["{n} team er gjort krav på af en anden app","{n} teams er gjort krav på af en anden app"],
         "Allow comments on": "Tillad kommentarer på",
         "Message types that can be commented on. When a type is off, its messages show no comment count and no comment section. Questions and decisions always allow comments.": "Beskedtyper, der kan kommenteres. Når en type er slået fra, viser dens beskeder hverken kommentartæller eller kommentarafsnit. Spørgsmål og beslutninger kan altid kommenteres.",
         "Polls": "Afstemninger",
@@ -3176,7 +2990,61 @@
         "Failed to withdraw the request": "Kunne ikke trække anmodningen tilbage",
         "Failed to withdraw the request: {error}": "Kunne ikke trække anmodningen tilbage: {error}",
         "Bulk team export requires an active TeamHub license. Add or renew a license in the License tab to unlock it.": "Masseeksport af teams kræver en aktiv TeamHub-licens. Tilføj eller forny en licens under fanen Licens for at låse den op.",
-        "That source link cannot be opened — only http and https addresses are allowed.": "Dette kildelink kan ikke åbnes — kun http- og https-adresser er tilladt."
+        "That source link cannot be opened — only http and https addresses are allowed.": "Dette kildelink kan ikke åbnes — kun http- og https-adresser er tilladt.",
+        "Could not create the group": "Gruppen kunne ikke oprettes",
+        "Could not delete the group": "Gruppen kunne ikke slettes",
+        "Could not move the team": "Teamet kunne ikke flyttes",
+        "Could not rename the group": "Gruppen kunne ikke omdøbes",
+        "Could not save the group state": "Gruppens tilstand kunne ikke gemmes",
+        "Group “{name}” created": "Gruppen “{name}” er oprettet",
+        "You already have a group called “{name}”": "Du har allerede en gruppe, der hedder “{name}”",
+        "Create group": "Opret gruppe",
+        "Favorites": "Favoritter",
+        "Group name": "Gruppenavn",
+        "New group": "Ny gruppe",
+        "Move to group…": "Flyt til gruppe…",
+        "Move {team} to a group": "Flyt {team} til en gruppe",
+        "Ungrouped": "Ikke grupperet",
+        "Delete group": "Slet gruppe",
+        "Expanded by default": "Udfoldet som standard",
+        "No teams in this group yet": "Ingen teams i denne gruppe endnu",
+        "Rename group": "Omdøb gruppe",
+        "A team in this group has updates": "Et team i denne gruppe har opdateringer",
+        "Minimum role to manage posts": "Minimumsrolle til at administrere opslag",
+        "Who can pin a message, and edit or delete a message or comment written by someone else. Authors can always edit and delete their own. Every edit is shown under the post with who made it.": "Hvem der kan fastgøre en besked og redigere eller slette en besked eller kommentar skrevet af en anden. Forfattere kan altid redigere og slette deres egne. Hver redigering vises under opslaget med hvem der foretog den.",
+        "Edited by {name} on {datetime}": "Redigeret af {name} den {datetime}",
+        "Tags": "Tags",
+        "Classify this team with the same Nextcloud tags you use on files. An administrator manages the available tags under Settings → Administration → Basic settings.": "Klassificér dette team med de samme Nextcloud-tags, du bruger på filer. En administrator styrer de tilgængelige tags under Indstillinger → Administration → Grundindstillinger.",
+        "Remove tag {tag}": "Fjern tag {tag}",
+        "This team has no tags yet.": "Dette team har endnu ingen tags.",
+        "Add a tag": "Tilføj et tag",
+        "No tags available — an administrator adds them in Basic settings": "Ingen tags tilgængelige — en administrator tilføjer dem under Grundindstillinger",
+        "Every available tag is already on this team": "Alle tilgængelige tags er allerede på dette team",
+        "Select a tag…": "Vælg et tag…",
+        "Tag {tag} added": "Tag {tag} tilføjet",
+        "Failed to add tag: {error}": "Kunne ikke tilføje tag: {error}",
+        "Failed to add tag": "Kunne ikke tilføje tag",
+        "Tag {tag} removed": "Tag {tag} fjernet",
+        "Failed to remove tag: {error}": "Kunne ikke fjerne tag: {error}",
+        "Failed to remove tag": "Kunne ikke fjerne tag",
+        "Team classification": "Teamklassificering",
+        "Team classification details": "Detaljer om teamklassificering",
+        "Classification:": "Klassificering:",
+        "No teams tagged": "Ingen teams tagget",
+        "{tagged} of {total} tagged": "{tagged} af {total} tagget",
+        "Teams carrying at least one Nextcloud tag. Tags are managed under Settings → Administration → Basic settings, and a team admin applies them in Manage Team.": "Teams med mindst ét Nextcloud-tag. Tags styres under Indstillinger → Administration → Grundindstillinger, og en teamadministrator anvender dem i Administrér team.",
+        "ISO 27001: {controls}": "ISO 27001: {controls}",
+        "Audit log retention": "Opbevaring af revisionslog",
+        "Audit log retention details": "Detaljer om opbevaring af revisionslog",
+        "Audit log:": "Revisionslog:",
+        "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Hændelser tilføjes og slettes samlet efter opbevaringsperioden. Ingen kodesti opdaterer eller sletter en enkelt række, så en post kan ikke omskrives, før den udløber.",
+        "{n} day retention": ["{n} dags opbevaring","{n} dages opbevaring"],
+        "No teams": "Ingen teams",
+        "Intranet": "Intranet",
+        "Minimum role to comment": "Minimumsrolle for at kommentere",
+        "Commenting is restricted for this team": "Kommentarer er begrænset for dette team",
+        "Who can post comments on messages, questions, and polls. Indirect members (via a group or sub-team) count as members.": "Hvem der må kommentere på beskeder, spørgsmål og afstemninger. Indirekte medlemmer (via en gruppe eller et underteam) tæller som medlemmer.",
+        "Only a Nextcloud administrator can change this tag": "Kun en Nextcloud-administrator kan ændre dette tag"
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

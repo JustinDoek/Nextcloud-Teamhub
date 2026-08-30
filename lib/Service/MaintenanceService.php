@@ -40,6 +40,9 @@ class MaintenanceService {
         private DeckService        $deckService,
         private TalkService        $talkService,
         private AuditService       $auditService,
+        // v4.7.9 — the single "make resources match membership" entry point,
+        // used by the admin member-removal path. See GitHub #87.
+        private ResourceMembershipService $resourceMembership,
         // v4.6.17 — for the Email owner subject and opening line. The viewer's
         // own language is the right one here: unlike a notification, this text
         // is drafted for the person clicking to read and edit in their own
@@ -284,6 +287,24 @@ class MaintenanceService {
                         $expiry[$r['_id']] ?? null,
                     ),
                 ];
+            }
+
+            // v4.8.0 — Nextcloud tags for the rows on this page.
+            //
+            // Two queries for the whole page rather than one per row, and only
+            // for the page: `$perPage` is clamped above, so this never walks
+            // the instance. Resolved through the container for the same reason
+            // the docblock above gives for injecting carefully — TeamTagService
+            // reaches MemberService, and this constructor is already the one
+            // with a cycle warning on it.
+            if ($teams !== []) {
+                $tagsByTeam = $this->container->get(TeamTagService::class)->getTagsForTeams(
+                    array_map(static fn ($t) => (string)$t['id'], $teams),
+                );
+                foreach ($teams as &$t) {
+                    $t['tags'] = $tagsByTeam[$t['id']] ?? [];
+                }
+                unset($t);
             }
 
             return [
@@ -1865,7 +1886,45 @@ class MaintenanceService {
                 'count'       => count($orphans),
                 'sample_name' => $orphans[0]['name'] ?? null,
             ],
+            // v4.8.0 — how much of the instance is classified, for the
+            // ISO 27001 A.5.12 / A.5.13 row on the Compliance tab.
+            'team_tags' => $this->getTeamTagCoverage(),
         ];
+    }
+
+    /**
+     * Teams carrying at least one Nextcloud tag, and how many teams exist.
+     *
+     * Two COUNTs, both indexed — `systag_objecttype` covers the first and the
+     * Circles table is small. It is deliberately a coverage ratio rather than
+     * a list: the Compliance tab reports whether classification is being
+     * applied at all, not which team carries what, and naming the classified
+     * teams in an admin summary would put the classification itself in a
+     * place that is easier to reach than the teams are.
+     *
+     * @return array{tagged: int, total: int}
+     */
+    private function getTeamTagCoverage(): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->selectAlias($qb->createFunction('COUNT(DISTINCT objectid)'), 'c')
+            ->from('systemtag_object_mapping')
+            ->where($qb->expr()->eq(
+                'objecttype',
+                $qb->createNamedParameter(TeamTagService::OBJECT_TYPE),
+            ));
+        $result = $qb->executeQuery();
+        $tagged = (int)($result->fetchOne() ?: 0);
+        $result->closeCursor();
+
+        $qb = $this->db->getQueryBuilder();
+        $qb->selectAlias($qb->createFunction('COUNT(*)'), 'c')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
+        $result = $qb->executeQuery();
+        $total = (int)($result->fetchOne() ?: 0);
+        $result->closeCursor();
+
+        return ['tagged' => $tagged, 'total' => $total];
     }
 
     /**
@@ -2447,15 +2506,15 @@ class MaintenanceService {
             ->andWhere($delQb->expr()->eq('user_type', $delQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->executeStatement();
 
-        // Rebuild the circles_membership cache so share pickers update.
-        try {
-            $membershipService = $this->container->get(\OCA\Circles\Service\MembershipService::class);
-            $membershipService->onUpdate($teamId);
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][MaintenanceService] adminRemoveUserFromTeam: cache rebuild failed', [
-                'teamId' => $teamId, 'userId' => $userId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-        }
+        // Rebuild the circles_membership cache so share pickers update, and push
+        // the result into the resources that store membership rather than
+        // resolving it.
+        //
+        // v4.7.9 (GitHub #87) — this path used to rebuild the cache and stop, so
+        // an NC admin removing somebody from a team left them sitting in the
+        // team's conversation until the hourly reconcile job caught up. The
+        // rebuild is now the first half of reconcileTeamMembership().
+        $this->resourceMembership->reconcileTeamMembership($teamId, 'admin_removed_user');
 
         // Audit log — surfaces in the per-team audit log shown elsewhere in this tab.
         $actor = $this->userSession->getUser();

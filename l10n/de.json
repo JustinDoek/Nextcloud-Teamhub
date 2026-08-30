@@ -1,5 +1,8 @@
 {
     "translations": {
+        "People from groups and teams": "Personen aus Gruppen und Teams",
+        "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well — they keep their group membership.": "Diese Personen sind über eine Gruppe oder ein Team Mitglied. Wenn Sie jemandem eine höhere Rolle geben, wird die Person zusätzlich direkt Mitglied dieses Teams — die Gruppenmitgliedschaft bleibt bestehen.",
+        "via {source}": "über {source}",
         "%1$s needs review": "%1$s muss geprüft werden",
         "%n event in this period": ["%n Termin in diesem Zeitraum","%n Termine in diesem Zeitraum"],
         "Accepted": "Zugesagt",
@@ -125,48 +128,21 @@
         "  Proposed date": "  Vorgeschlagenes Datum",
         "Your proposal": "Ihr Vorschlag",
         "Your teams need nothing from you as their admin.": "Ihre Teams benötigen nichts von Ihnen als Administrator.",
-        "{n} overdue": [
-            "{n} überfällig",
-            "{n} überfällig"
-        ],
-        "{n} critical": [
-            "{n} kritisch",
-            "{n} kritisch"
-        ],
+        "{n} overdue": ["{n} überfällig","{n} überfällig"],
+        "{n} critical": ["{n} kritisch","{n} kritisch"],
         "{source} {count}, {critical} critical": "{source} {count}, {critical} kritisch",
         "{source} {count}": "{source} {count}",
         "{sources} items could not be refreshed. All other results are up to date.": "Einträge aus {sources} konnten nicht aktualisiert werden. Alle anderen Ergebnisse sind aktuell.",
         "{name} (unavailable)": "{name} (nicht verfügbar)",
         "{action}: {title}": "{action}: {title}",
         "%1$s · %2$s": "%1$s · %2$s",
-        "%n attendee": [
-            "%n Teilnehmer/in",
-            "%n Teilnehmer/innen"
-        ],
-        "%n attendee will be invited": [
-            "%n Teilnehmer/in wird eingeladen",
-            "%n Teilnehmer/innen werden eingeladen"
-        ],
-        "%n could join online": [
-            "%n könnte online teilnehmen",
-            "%n könnten online teilnehmen"
-        ],
-        "%n has a calendar conflict": [
-            "%n hat einen Kalenderkonflikt",
-            "%n haben einen Kalenderkonflikt"
-        ],
-        "%n has a conflict": [
-            "%n hat einen Konflikt",
-            "%n haben einen Konflikt"
-        ],
-        "%n member selected": [
-            "%n Mitglied ausgewählt",
-            "%n Mitglieder ausgewählt"
-        ],
-        "%n resource needs review.": [
-            "%n Ressource muss überprüft werden.",
-            "%n Ressourcen müssen überprüft werden."
-        ],
+        "%n attendee": ["%n Teilnehmer/in","%n Teilnehmer/innen"],
+        "%n attendee will be invited": ["%n Teilnehmer/in wird eingeladen","%n Teilnehmer/innen werden eingeladen"],
+        "%n could join online": ["%n könnte online teilnehmen","%n könnten online teilnehmen"],
+        "%n has a calendar conflict": ["%n hat einen Kalenderkonflikt","%n haben einen Kalenderkonflikt"],
+        "%n has a conflict": ["%n hat einen Konflikt","%n haben einen Konflikt"],
+        "%n member selected": ["%n Mitglied ausgewählt","%n Mitglieder ausgewählt"],
+        "%n resource needs review.": ["%n Ressource muss überprüft werden.","%n Ressourcen müssen überprüft werden."],
         "(completed)": "(abgeschlossen)",
         "(current phase)": "(aktuelle Phase)",
         "(list truncated)": "(Liste gekürzt)",
@@ -178,10 +154,7 @@
         "+ Connect team folder": "+ Team-Ordner verbinden",
         "+ Create new": "+ Neu erstellen",
         "+ Create new team folder": "+ Neuen Team-Ordner erstellen",
-        "+{n} other team": [
-            "+{n} weiteres Team",
-            "+{n} weitere Teams"
-        ],
+        "+{n} other team": ["+{n} weiteres Team","+{n} weitere Teams"],
         "1 hour": "1 Stunde",
         "1 month": "1 Monat",
         "1 week": "1 Woche",
@@ -201,14 +174,8 @@
         "A team folder is now connected to this team": "Ein Team-Ordner ist jetzt mit diesem Team verbunden",
         "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "Ein Kickoff-Meeting, um das Team hinsichtlich Umfang, Zeitplan und Rollen abzustimmen. Als erledigt markieren, sobald es im Kalender steht.",
         "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "Im Talk-Raum wird eine Nachricht mit einem Link zu den Besprechungsnotizen gepostet, in der Teammitglieder gebeten werden, Tagesordnungspunkte hinzuzufügen.",
-        "A new message from TeamHub": [
-            "Eine neue Nachricht von TeamHub",
-            "{n} neue Nachrichten von TeamHub"
-        ],
-        "A new message from TeamHub is waiting for you.": [
-            "Eine neue Nachricht von TeamHub wartet auf Sie.",
-            "{n} neue Nachrichten von TeamHub warten auf Sie."
-        ],
+        "A new message from TeamHub": ["Eine neue Nachricht von TeamHub","{n} neue Nachrichten von TeamHub"],
+        "A new message from TeamHub is waiting for you.": ["Eine neue Nachricht von TeamHub wartet auf Sie.","{n} neue Nachrichten von TeamHub warten auf Sie."],
         "A notes file is created in the team Meetings folder and linked from the calendar event.": "Eine Notizdatei wird im Ordner Meetings des Teams erstellt und mit dem Kalendereintrag verknüpft.",
         "A project-flavoured team with the familiar setup — no lifecycle tools.": "Ein Team im Projekt-Stil mit der gewohnten Einrichtung — ohne Lebenszyklus-Werkzeuge.",
         "A retro to look back on scope, timeline, budget, and what to carry into the next project. Optional — mark as done once it's on the calendar, or skip if you don't want to run one.": "Eine Retrospektive, um auf Umfang, Zeitplan, Budget und Erkenntnisse für das nächste Projekt zurückzublicken. Optional — als erledigt markieren, sobald es im Kalender steht, oder überspringen, wenn Sie keine durchführen möchten.",
@@ -435,6 +402,7 @@
         "Built-in status type": "Integrierter Statustyp",
         "Built-in status types cannot be deleted": "Integrierte Statustypen können nicht gelöscht werden",
         "Bullet list": "Aufzählungsliste",
+        "Numbered list": "Nummerierte Liste",
         "Busy": "Beschäftigt",
         "Buy a license": "Lizenz kaufen",
         "By": "Von",
@@ -450,14 +418,8 @@
         "Cancel superseding": "Ersetzung abbrechen",
         "Cancel — make team usable again": "Abbrechen — Team wieder nutzbar machen",
         "Cannot create page: team name not available": "Seite kann nicht erstellt werden: Teamname nicht verfügbar",
-        "Cannot delete: in use by {n} entry": [
-            "Löschen nicht möglich: wird von {n} Eintrag verwendet",
-            "Löschen nicht möglich: wird von {n} Einträgen verwendet"
-        ],
-        "Cannot delete: status type is in use by {n} entry": [
-            "Löschen nicht möglich: Statustyp wird von {n} Eintrag verwendet",
-            "Löschen nicht möglich: Statustyp wird von {n} Einträgen verwendet"
-        ],
+        "Cannot delete: in use by {n} entry": ["Löschen nicht möglich: wird von {n} Eintrag verwendet","Löschen nicht möglich: wird von {n} Einträgen verwendet"],
+        "Cannot delete: status type is in use by {n} entry": ["Löschen nicht möglich: Statustyp wird von {n} Eintrag verwendet","Löschen nicht möglich: Statustyp wird von {n} Einträgen verwendet"],
         "Cannot load this view": "Diese Ansicht kann nicht geladen werden",
         "Cannot upload — not logged in": "Hochladen nicht möglich — nicht angemeldet",
         "Card #{id}": "Karte #{id}",
@@ -775,10 +737,7 @@
         "Delete time entry": "Zeiteintrag löschen",
         "Delete {label}?": "{label} löschen?",
         "Delete {name}": "{name} löschen",
-        "Delete {n} event": [
-            "{n} Ereignis löschen",
-            "{n} Ereignisse löschen"
-        ],
+        "Delete {n} event": ["{n} Ereignis löschen","{n} Ereignisse löschen"],
         "Delete ‘{name}’ on {date}? Any holiday entries on that date will revert to each user's default week template.": "‚{name}‘ am {date} löschen? Alle Feiertagseinträge an diesem Datum werden auf die Standard-Wochenvorlage jedes Benutzers zurückgesetzt.",
         "Delete “{description}”? This cannot be undone.": "„{description}“ löschen? Dies kann nicht rückgängig gemacht werden.",
         "Deleted": "Gelöscht",
@@ -1230,10 +1189,7 @@
         "Ignore resource {id}": "Ressource {id} ignorieren",
         "Image URL (https://…)": "Bild-URL (https://…)",
         "Image attachment": "Bildanhang",
-        "Image cache cleared (%n file removed)": [
-            "Bild-Cache geleert (%n Datei entfernt)",
-            "Bild-Cache geleert (%n Dateien entfernt)"
-        ],
+        "Image cache cleared (%n file removed)": ["Bild-Cache geleert (%n Datei entfernt)","Bild-Cache geleert (%n Dateien entfernt)"],
         "Image preview": "Bildvorschau",
         "Image too large. Maximum size is 2 MB.": "Bild zu groß. Maximale Größe ist 2 MB.",
         "Images inserted from personal files are copied to a hidden cache folder in the team folder so all members can view them. Clearing shows broken images in existing posts.": "Aus persönlichen Dateien eingefügte Bilder werden in einen versteckten Cache-Ordner im Team-Ordner kopiert, damit alle Mitglieder sie sehen können. Nach dem Leeren erscheinen defekte Bilder in bestehenden Beiträgen.",
@@ -1640,10 +1596,7 @@
         "Team name cannot consist only of dots.": "Teamname darf nicht nur aus Punkten bestehen.",
         "A team with this name already exists. Team names must be unique.": "Ein Team mit diesem Namen existiert bereits. Teamnamen müssen eindeutig sein.",
         "Only members of the selected groups can create teams. Leave empty to allow all users.": "Nur Mitglieder der ausgewählten Gruppen können Teams erstellen. Leer lassen, um alle Benutzer zuzulassen.",
-        "Only proposals in the %n selected category will be added.": [
-            "Nur Vorschläge in der %n ausgewählten Kategorie werden hinzugefügt.",
-            "Nur Vorschläge in den %n ausgewählten Kategorien werden hinzugefügt."
-        ],
+        "Only proposals in the %n selected category will be added.": ["Nur Vorschläge in der %n ausgewählten Kategorie werden hinzugefügt.","Nur Vorschläge in den %n ausgewählten Kategorien werden hinzugefügt."],
         "Open": "Offen",
         "Open {title}": "{title} öffnen",
         "Open Budget": "Budget öffnen",
@@ -1685,10 +1638,7 @@
         "Other": "Sonstiges",
         "Over your licensed seats: {used} of {cap} used.": "Über Ihren lizenzierten Plätzen: {used} von {cap} genutzt.",
         "Overdue": "Überfällig",
-        "Overdue by {n} day": [
-            "{n} Tag überfällig",
-            "{n} Tage überfällig"
-        ],
+        "Overdue by {n} day": ["{n} Tag überfällig","{n} Tage überfällig"],
         "Overdue items are always Action required. Set this to 0 if only overdue work should count as actionable.": "Überfällige Einträge sind immer Aktion erforderlich. Setze diesen Wert auf 0, wenn nur überfällige Arbeit als Aktion zählen soll.",
         "Owner": "Eigentümer",
         "Owner assigned successfully": "Eigentümer erfolgreich zugewiesen",
@@ -1879,10 +1829,7 @@
         "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "{name} aus dem Zeitbudget entfernen? Bestehende Einträge bleiben für die Prüfspur erhalten.",
         "Remove {user} from all teams": "{user} aus allen Teams entfernen",
         "Remove {user} from {team}": "{user} aus {team} entfernen",
-        "Removed from {n} team": [
-            "Aus {n} Team entfernt",
-            "Aus {n} Teams entfernt"
-        ],
+        "Removed from {n} team": ["Aus {n} Team entfernt","Aus {n} Teams entfernt"],
         "Removing…": "Wird entfernt…",
         "Renew on the License tab to keep Advanced features available.": "Verlängern Sie auf dem Reiter Lizenz, damit die erweiterten Funktionen verfügbar bleiben.",
         "Repair": "Reparieren",
@@ -1922,10 +1869,7 @@
         "Resources pending review": "Ressourcen, die auf Überprüfung warten",
         "Restore": "Wiederherstellen",
         "Restore team {name}": "Team {name} wiederherstellen",
-        "Restricted to {n} group": [
-            "Auf {n} Gruppe beschränkt",
-            "Auf {n} Gruppen beschränkt"
-        ],
+        "Restricted to {n} group": ["Auf {n} Gruppe beschränkt","Auf {n} Gruppen beschränkt"],
         "Result": "Ergebnis",
         "Retention period": "Aufbewahrungszeitraum",
         "Retention saved": "Aufbewahrungsdauer gespeichert",
@@ -2005,14 +1949,10 @@
         "Searching…": "Suchen…",
         "Seat cap exceeded — Advanced features locked: {used} of {cap} used (max {lockAt}).": "Platzobergrenze überschritten — erweiterte Funktionen gesperrt: {used} von {cap} genutzt (max. {lockAt}).",
         "Seats": "Plätze",
-        "Select a board\\u2026": "Ein Board auswählen…",
         "Select a board…": "Board auswählen…",
-        "Select a calendar\\u2026": "Einen Kalender auswählen…",
         "Select a calendar…": "Kalender auswählen…",
-        "Select a conversation\\u2026": "Eine Unterhaltung auswählen…",
         "Select a conversation…": "Gespräch auswählen…",
         "Select a folder to connect": "Ordner zum Verknüpfen auswählen",
-        "Select a folder\\u2026": "Einen Ordner auswählen…",
         "Select a folder…": "Einen Ordner auswählen…",
         "Select a room": "Einen Raum auswählen",
         "Select a status": "Einen Status auswählen",
@@ -2026,7 +1966,6 @@
         "Select an icon": "Ein Symbol auswählen",
         "Select week": "Woche auswählen",
         "Select {team}": "{team} auswählen",
-        "Select\\u2026": "Auswählen…",
         "Select…": "Auswählen…",
         "Send": "Senden",
         "Send daily anonymous usage report": "Täglichen anonymen Nutzungsbericht senden",
@@ -2067,10 +2006,7 @@
         "Short note": "Kurze Notiz",
         "Short summary of your feedback": "Kurze Zusammenfassung Ihres Feedbacks",
         "Show": "Anzeigen",
-        "Show %n ignored resource": [
-            "%n ignorierte Ressource anzeigen",
-            "%n ignorierte Ressourcen anzeigen"
-        ],
+        "Show %n ignored resource": ["%n ignorierte Ressource anzeigen","%n ignorierte Ressourcen anzeigen"],
         "Show all {n}": "Alle {n} anzeigen",
         "Show Operational / Tactical / Strategic level on decisions. Useful for teams that work with strategic taxonomy.": "Ebene Operativ / Taktisch / Strategisch bei Entscheidungen anzeigen. Nützlich für Teams, die mit einer strategischen Taxonomie arbeiten.",
         "Show snoozed items": "Zurückgestellte Einträge anzeigen",
@@ -2299,16 +2235,10 @@
         "The team itself and every other resource are unaffected. Only Collectives is being removed.": "Das Team selbst und alle anderen Ressourcen bleiben unverändert. Nur Collectives wird entfernt.",
         "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "Das Team wird sofort ausgeblendet und in 30 Tagen endgültig gelöscht. Eine Administratorin oder ein Administrator kann es bis dahin wiederherstellen. Es wird kein Archiv erstellt.",
         "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "Das Team wird sofort ausgeblendet und in 60 Tagen endgültig gelöscht. Eine Administratorin oder ein Administrator kann es bis dahin wiederherstellen. Es wird kein Archiv erstellt.",
-        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
-            "Das Team wird sofort ausgeblendet und in {n} Tag dauerhaft gelöscht. Administratoren können es vor diesem Termin wiederherstellen.",
-            "Das Team wird sofort ausgeblendet und in {n} Tagen dauerhaft gelöscht. Administratoren können es vor diesem Termin wiederherstellen."
-        ],
+        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": ["Das Team wird sofort ausgeblendet und in {n} Tag dauerhaft gelöscht. Administratoren können es vor diesem Termin wiederherstellen.","Das Team wird sofort ausgeblendet und in {n} Tagen dauerhaft gelöscht. Administratoren können es vor diesem Termin wiederherstellen."],
         "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "Das Team wird sofort nach der Erstellung des Archivs dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
         "The team will be permanently deleted immediately. No archive bundle is produced.": "Das Team wird sofort endgültig gelöscht. Kein Archivpaket wird erzeugt.",
-        "The team will be permanently deleted in {n} day. Administrators can restore it.": [
-            "Das Team wird in {n} Tag dauerhaft gelöscht. Administratoren können es wiederherstellen.",
-            "Das Team wird in {n} Tagen dauerhaft gelöscht. Administratoren können es wiederherstellen."
-        ],
+        "The team will be permanently deleted in {n} day. Administrators can restore it.": ["Das Team wird in {n} Tag dauerhaft gelöscht. Administratoren können es wiederherstellen.","Das Team wird in {n} Tagen dauerhaft gelöscht. Administratoren können es wiederherstellen."],
         "The team will be soft-deleted with a 30-day grace period during which administrators can restore it. No archive bundle is produced.": "Das Team wird soft-gelöscht mit einer Karenzfrist von 30 Tagen, in der Administratoren es wiederherstellen können. Kein Archivpaket wird erzeugt.",
         "The team will be soft-deleted with a 60-day grace period during which administrators can restore it. No archive bundle is produced.": "Das Team wird soft-gelöscht mit einer Karenzfrist von 60 Tagen, in der Administratoren es wiederherstellen können. Kein Archivpaket wird erzeugt.",
         "The vocabulary your organisation uses for presence — what people can pick to describe where they are. Built-in types cannot be deleted but their label, icon, and colour can be customised. Drag rows to reorder.": "Das Vokabular, das Ihre Organisation für die Anwesenheit verwendet — was Personen auswählen können, um zu beschreiben, wo sie sind. Integrierte Typen können nicht gelöscht werden, aber ihre Bezeichnung, ihr Symbol und ihre Farbe können angepasst werden. Ziehen Sie Zeilen, um die Reihenfolge zu ändern.",
@@ -2325,10 +2255,7 @@
         "Third-party integrations": "Drittanbieter-Integrationen",
         "This action cannot be easily undone.": "Diese Aktion kann nicht einfach rückgängig gemacht werden.",
         "This action cannot be undone.": "Diese Aktion kann nicht rückgängig gemacht werden.",
-        "This building has {n} floor": [
-            "Dieses Gebäude hat {n} Etage",
-            "Dieses Gebäude hat {n} Etagen"
-        ],
+        "This building has {n} floor": ["Dieses Gebäude hat {n} Etage","Dieses Gebäude hat {n} Etagen"],
         "This card no longer exists.": "Diese Karte existiert nicht mehr.",
         "This clears any corrupted bits set by older versions of TeamHub. The team owner will need to reconfigure its checkbox settings afterwards.": "Dies löscht alle fehlerhaften Bits, die von älteren Versionen von TeamHub gesetzt wurden. Der Teameigentümer muss anschließend seine Kontrollkästchen-Einstellungen neu konfigurieren.",
         "This comment is the marked answer. Deleting it will mark the question as unsolved.": "Dieser Kommentar ist die markierte Antwort. Durch das Löschen wird die Frage als ungelöst markiert.",
@@ -2338,10 +2265,7 @@
         "This feature requires a license — ask your admin.": "Diese Funktion erfordert eine Lizenz — bitten Sie Ihren Administrator.",
         "This file no longer exists.": "Diese Datei existiert nicht mehr.",
         "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "Dieser Dateityp kann nicht schreibgeschützt im Browser angezeigt werden. Laden Sie ihn herunter, um den Inhalt anzuzeigen.",
-        "This floor has {n} room": [
-            "Diese Etage hat {n} Raum",
-            "Diese Etage hat {n} Räume"
-        ],
+        "This floor has {n} room": ["Diese Etage hat {n} Raum","Diese Etage hat {n} Räume"],
         "This hides the item from My Work until the moment you choose. It does not change the due date in the source application.": "Damit wird der Eintrag in Meine Arbeit bis zum gewählten Zeitpunkt ausgeblendet. Das Fälligkeitsdatum in der Quellanwendung ändert sich nicht.",
         "This instance has already used its trial.": "Diese Instanz hat bereits eine Testphase genutzt.",
         "This item opens in another app. You are leaving TeamHub.": "Dieses Element wird in einer anderen App geöffnet. Du verlässt TeamHub.",
@@ -2375,10 +2299,7 @@
         "This version of the Approval app cannot be driven from My Work. Open the file to approve or reject it there.": "Diese Version der Approval-App lässt sich nicht aus Meine Arbeit heraus steuern. Öffne die Datei, um sie dort zu genehmigen oder abzulehnen.",
         "This version of Deck does not support marking cards as done from outside the app. Open the card in Deck instead.": "Diese Deck-Version unterstützt das Abschließen von Karten außerhalb der App nicht. Öffne die Karte stattdessen in Deck.",
         "This will export the project's decisions, budget, time and milestones to a folder in this team's Files. The files are plain markdown so they stay readable long after the team is archived.": "Dies exportiert die Entscheidungen, das Budget, die Zeit und die Meilensteine des Projekts in einen Ordner in den Dateien dieses Teams. Die Dateien sind einfaches Markdown und bleiben lange nach der Archivierung des Teams lesbar.",
-        "This will overwrite {n} existing entry on this date.": [
-            "Dies überschreibt {n} vorhandenen Eintrag an diesem Datum.",
-            "Dies überschreibt {n} vorhandene Einträge an diesem Datum."
-        ],
+        "This will overwrite {n} existing entry on this date.": ["Dies überschreibt {n} vorhandenen Eintrag an diesem Datum.","Dies überschreibt {n} vorhandene Einträge an diesem Datum."],
         "This will permanently delete \"{name}\". This cannot be undone. All data in this {app} will be lost.": "Dies löscht \"{name}\" dauerhaft. Dies kann nicht rückgängig gemacht werden. Alle Daten in diesem {app} gehen verloren.",
         "This will record your comment as the final wording, close the discussion (no more comments), and send the decision to its approver(s) for sign-off. This action cannot be undone.": "Dies zeichnet Ihren Kommentar als endgültige Formulierung auf, schließt die Diskussion (keine weiteren Kommentare) und sendet die Entscheidung zur Genehmigung an die Genehmiger. Diese Aktion kann nicht rückgängig gemacht werden.",
         "Thread in Talk chat {room}": "Thread im Talk-Chat {room}",
@@ -2594,15 +2515,9 @@
         "Yesterday": "Gestern",
         "You approved this decision": "Du hast diese Entscheidung genehmigt",
         "You approved this file": "Du hast diese Datei genehmigt",
-        "You are about to remove {user} from {n} team. This cannot be undone.": [
-            "Du bist im Begriff, {user} aus {n} Team zu entfernen. Dies kann nicht rückgängig gemacht werden.",
-            "Du bist im Begriff, {user} aus {n} Teams zu entfernen. Dies kann nicht rückgängig gemacht werden."
-        ],
+        "You are about to remove {user} from {n} team. This cannot be undone.": ["Du bist im Begriff, {user} aus {n} Team zu entfernen. Dies kann nicht rückgängig gemacht werden.","Du bist im Begriff, {user} aus {n} Teams zu entfernen. Dies kann nicht rückgängig gemacht werden."],
         "You are about to withdraw this decision and open a new proposal in its place.": "Sie sind dabei, diese Entscheidung zurückzuziehen und einen neuen Vorschlag an ihrer Stelle zu öffnen.",
-        "You are an approver and this request has been waiting %n day": [
-            "Du bist Genehmiger und diese Anfrage wartet seit %n Tag",
-            "Du bist Genehmiger und diese Anfrage wartet seit %n Tagen"
-        ],
+        "You are an approver and this request has been waiting %n day": ["Du bist Genehmiger und diese Anfrage wartet seit %n Tag","Du bist Genehmiger und diese Anfrage wartet seit %n Tagen"],
         "You are an approver for this decision": "Du bist Genehmiger für diese Entscheidung",
         "You are no longer a direct member, but you still have access to this team through a group or another team.": "Sie sind kein direktes Mitglied mehr, haben aber über eine Gruppe oder ein anderes Team weiterhin Zugriff auf dieses Team.",
         "You are not an approver for this decision.": "Du bist kein Genehmiger für diese Entscheidung.",
@@ -2635,10 +2550,7 @@
         "You’re all caught up": "Du bist auf dem neuesten Stand",
         "You're getting the project off the ground. Here's what to focus on:": "Sie bringen das Projekt in Gang. Darauf sollten Sie sich konzentrieren:",
         "You're setting up your project. Here's what to focus on:": "Sie richten Ihr Projekt ein. Darauf sollten Sie sich konzentrieren:",
-        "Your approval request has been waiting %n day": [
-            "Deine Genehmigungsanfrage wartet seit %n Tag",
-            "Deine Genehmigungsanfrage wartet seit %n Tagen"
-        ],
+        "Your approval request has been waiting %n day": ["Deine Genehmigungsanfrage wartet seit %n Tag","Deine Genehmigungsanfrage wartet seit %n Tagen"],
         "Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove the team, its files, and every TeamHub record attached to it — nothing can be restored.": "Ihre Nextcloud-Administration hat sofortiges hartes Löschen ohne Archivpaket konfiguriert. Fortfahren entfernt das Team, seine Dateien und jeden zugehörigen TeamHub-Datensatz dauerhaft — nichts kann wiederhergestellt werden.",
         "Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove this team's collective, its page tree, and every attachment — nothing can be restored.": "Ihre Nextcloud-Administration hat sofortiges endgültiges Löschen ohne Archivpaket konfiguriert. Wenn Sie fortfahren, werden das Kollektiv dieses Teams, sein Seitenbaum und alle Anhänge dauerhaft entfernt — nichts kann wiederhergestellt werden.",
         "Your TeamHub Business license has lapsed. Renew to resume Budget, Time and Milestone updates on Advanced projects.": "Ihre TeamHub-Business-Lizenz ist abgelaufen. Erneuern Sie, um Budget-, Zeit- und Meilenstein-Updates in erweiterten Projekten fortzusetzen.",
@@ -2650,18 +2562,9 @@
         "Your rationale…": "Ihre Begründung…",
         "[Team Folder] {name}": "[Team-Ordner] {name}",
         "[Shared folder] {name}": "[Geteilter Ordner] {name}",
-        "_{n} reply — open chat_::_{n} replies — open chat_": [
-            "{n} Antwort — Chat öffnen",
-            "{n} Antworten — Chat öffnen"
-        ],
-        "_{n} vote_::_{n} votes_": [
-            "{n} Stimme",
-            "{n} Stimmen"
-        ],
-        "_{n} voter_::_{n} voters_": [
-            "{n} Abstimmender",
-            "{n} Abstimmende"
-        ],
+        "_{n} reply — open chat_::_{n} replies — open chat_": ["{n} Antwort — Chat öffnen","{n} Antworten — Chat öffnen"],
+        "_{n} vote_::_{n} votes_": ["{n} Stimme","{n} Stimmen"],
+        "_{n} voter_::_{n} voters_": ["{n} Abstimmender","{n} Abstimmende"],
         "a single project-level role. A member sees the Budget tab when their team role is at or above this level. Any member who is a named additional editor on ANY workstream also automatically sees the tab, regardless of their role.": "eine einzige Rolle auf Projektebene. Ein Mitglied sieht den Budget-Tab, wenn seine Teamrolle mindestens dieses Niveau erreicht. Jedes Mitglied, das auf IRGENDEINEM Arbeitsstrang als zusätzlicher Bearbeiter genannt ist, sieht den Tab ebenfalls automatisch, unabhängig von der Rolle.",
         "across the project": "im gesamten Projekt",
         "afternoon": "Nachmittag",
@@ -2702,8 +2605,7 @@
         "e.g. Weekly sync": "z. B. Wöchentliche Synchronisation",
         "e.g. en/teamhub": "z. B. de/teamhub",
         "email address": "E-Mail-Adresse",
-        "grace: {n} day left": "Kulanz: {n} Tag übrig",
-        "grace: {n} days left": "Kulanz: {n} Tage übrig",
+        "grace: {n} day left": ["Kulanz: {n} Tag übrig","Kulanz: {n} Tage übrig"],
         "group": "Gruppe",
         "h": "h",
         "https://example.com/photo.jpg": "https://example.com/photo.jpg",
@@ -2746,10 +2648,7 @@
         "{available} of {total} available, {count} at {room}": "{available} von {total} verfügbar, {count} in {room}",
         "{cell}: not set. Click to set.": "{cell}: nicht festgelegt. Klicken zum Festlegen.",
         "{cell}: {type}. Click to change.": "{cell}: {type}. Klicken zum Ändern.",
-        "{count} project member": [
-            "{count} Projektmitglied",
-            "{count} Projektmitglieder"
-        ],
+        "{count} project member": ["{count} Projektmitglied","{count} Projektmitglieder"],
         "{date} {half}: not set. Click to set.": "{date} {half}: nicht festgelegt. Klicken zum Festlegen.",
         "{date} {half}: {type} (holiday, locked)": "{date} {half}: {type} (Feiertag, gesperrt)",
         "{date} {half}: {type}. Click to change.": "{date} {half}: {type}. Klicken zum Ändern.",
@@ -2765,116 +2664,42 @@
         "{name} has been approved": "{name} wurde genehmigt",
         "{name} is now the team owner. You are now a moderator.": "{name} ist jetzt Team-Eigentümer. Du bist jetzt Moderator.",
         "{name} saved": "{name} gespeichert",
-        "{n} altered file": [
-            "{n} geänderte Datei",
-            "{n} geänderte Dateien"
-        ],
-        "{n} app": [
-            "{n} App",
-            "{n} Apps"
-        ],
-        "{n} boards": [
-            "{n} Board",
-            "{n} Boards"
-        ],
-        "{n} calendars": [
-            "{n} Kalender",
-            "{n} Kalender"
-        ],
-        "{n} comment": "{n} Kommentar",
-        "{n} comments": "{n} Kommentare",
-        "{n} day": "{n} Tag",
-        "{n} day ago": "vor {n} Tag",
+        "{n} altered file": ["{n} geänderte Datei","{n} geänderte Dateien"],
+        "{n} app": ["{n} App","{n} Apps"],
+        "{n} boards": ["{n} Board","{n} Boards"],
+        "{n} calendars": ["{n} Kalender","{n} Kalender"],
+        "{n} comment": ["{n} Kommentar","{n} Kommentare"],
+        "{n} day": ["{n} Tag","{n} Tage"],
+        "{n} day ago": ["vor {n} Tag","vor {n} Tagen"],
         "{n} day left": ["{n} Tag übrig","{n} Tage übrig"],
-        "{n} days ago": "vor {n} Tagen",
-        "{n} decision": [
-            "{n} Entscheidung",
-            "{n} Entscheidungen"
-        ],
-        "{n} deleted user found in team memberships.": [
-            "{n} gelöschter Benutzer in Teammitgliedschaften gefunden.",
-            "{n} gelöschte Benutzer in Teammitgliedschaften gefunden."
-        ],
-        "{n} event could not be deleted": [
-            "{n} Ereignis konnte nicht gelöscht werden",
-            "{n} Ereignisse konnten nicht gelöscht werden"
-        ],
-        "{n} event deleted": [
-            "{n} Ereignis gelöscht",
-            "{n} Ereignisse gelöscht"
-        ],
-        "{n} event selected": [
-            "{n} Ereignis ausgewählt",
-            "{n} Ereignisse ausgewählt"
-        ],
+        "{n} decision": ["{n} Entscheidung","{n} Entscheidungen"],
+        "{n} deleted user found in team memberships.": ["{n} gelöschter Benutzer in Teammitgliedschaften gefunden.","{n} gelöschte Benutzer in Teammitgliedschaften gefunden."],
+        "{n} event could not be deleted": ["{n} Ereignis konnte nicht gelöscht werden","{n} Ereignisse konnten nicht gelöscht werden"],
+        "{n} event deleted": ["{n} Ereignis gelöscht","{n} Ereignisse gelöscht"],
+        "{n} event selected": ["{n} Ereignis ausgewählt","{n} Ereignisse ausgewählt"],
         "{n} hour ago": "vor {n} Std",
         "{n} hours ago": "vor {n} Std",
-        "{n} item awaiting your approval": [
-            "{n} Element wartet auf Ihre Freigabe",
-            "{n} Elemente warten auf Ihre Freigabe"
-        ],
-        "{n} lane over budget": [
-            "{n} Bereich über Budget",
-            "{n} Bereiche über Budget"
-        ],
-        "{n} member invited": "{n} Mitglied eingeladen",
-        "{n} member over hours": [
-            "{n} Mitglied über Stunden",
-            "{n} Mitglieder über Stunden"
-        ],
-        "{n} members invited": "{n} Mitglieder eingeladen",
+        "{n} item awaiting your approval": ["{n} Element wartet auf Ihre Freigabe","{n} Elemente warten auf Ihre Freigabe"],
+        "{n} lane over budget": ["{n} Bereich über Budget","{n} Bereiche über Budget"],
+        "{n} member invited": ["{n} Mitglied eingeladen","{n} Mitglieder eingeladen"],
+        "{n} member over hours": ["{n} Mitglied über Stunden","{n} Mitglieder über Stunden"],
         "{n} min ago": "vor {n} Min",
-        "{n} missing file": [
-            "{n} fehlende Datei",
-            "{n} fehlende Dateien"
-        ],
+        "{n} missing file": ["{n} fehlende Datei","{n} fehlende Dateien"],
         "{n} of {total} votes": "{n} von {total} Stimmen",
-        "{n} open decision": [
-            "{n} offene Entscheidung",
-            "{n} offene Entscheidungen"
-        ],
-        "{n} over": "{n} darüber",
+        "{n} open decision": ["{n} offene Entscheidung","{n} offene Entscheidungen"],
+        "{n} over": ["{n} darüber","{n} darüber"],
         "{n} per page": "{n} pro Seite",
-        "{n} reply — open chat": [
-            "{n} Antwort — Chat öffnen",
-            "{n} Antworten — Chat öffnen"
-        ],
-        "{n} team": "{n} Team",
-        "{n} team selected": [
-            "{n} Team ausgewählt",
-            "{n} Teams ausgewählt"
-        ],
-        "{n} teams": "{n} Teams",
-        "{n} type allowed": [
-            "{n} Typ erlaubt",
-            "{n} Typen erlaubt"
-        ],
-        "{n} unassigned card": [
-            "{n} nicht zugewiesene Karte",
-            "{n} nicht zugewiesene Karten"
-        ],
-        "{n} unassigned card in {board} — open board": [
-            "{n} nicht zugewiesene Karte in {board} — Board öffnen",
-            "{n} nicht zugewiesene Karten in {board} — Board öffnen"
-        ],
-        "{n} unexpected file": [
-            "{n} unerwartete Datei",
-            "{n} unerwartete Dateien"
-        ],
-        "{n} unsolved question": [
-            "{n} ungelöste Frage",
-            "{n} ungelöste Fragen"
-        ],
-        "{n} user": "{n} Benutzer",
-        "{n} users": "{n} Benutzer",
-        "{n} vote": [
-            "{n} Stimme",
-            "{n} Stimmen"
-        ],
-        "{n} voter": [
-            "{n} Abstimmende/r",
-            "{n} Abstimmende"
-        ],
+        "{n} reply — open chat": ["{n} Antwort — Chat öffnen","{n} Antworten — Chat öffnen"],
+        "{n} team": ["{n} Team","{n} Teams"],
+        "{n} team selected": ["{n} Team ausgewählt","{n} Teams ausgewählt"],
+        "{n} type allowed": ["{n} Typ erlaubt","{n} Typen erlaubt"],
+        "{n} unassigned card": ["{n} nicht zugewiesene Karte","{n} nicht zugewiesene Karten"],
+        "{n} unassigned card in {board} — open board": ["{n} nicht zugewiesene Karte in {board} — Board öffnen","{n} nicht zugewiesene Karten in {board} — Board öffnen"],
+        "{n} unexpected file": ["{n} unerwartete Datei","{n} unerwartete Dateien"],
+        "{n} unsolved question": ["{n} ungelöste Frage","{n} ungelöste Fragen"],
+        "{n} user": ["{n} Benutzer","{n} Benutzer"],
+        "{n} vote": ["{n} Stimme","{n} Stimmen"],
+        "{n} voter": ["{n} Abstimmende/r","{n} Abstimmende"],
         "{n}d ago": "vor {n}T",
         "{n}h ago": "vor {n}Std",
         "{n}m ago": "vor {n}Min",
@@ -2887,10 +2712,8 @@
         "{team} is ready": "{team} ist bereit",
         "{title} disabled for this team": "{title} für dieses Team deaktiviert",
         "{title} enabled for this team": "{title} für dieses Team aktiviert",
-        "{total} total vote": "{total} Stimme gesamt",
-        "{total} total vote \\u2013 Poll closed": "{total} Stimme gesamt – Umfrage geschlossen",
-        "{total} total votes": "{total} Stimmen gesamt",
-        "{total} total votes \\u2013 Poll closed": "{total} Stimmen gesamt – Umfrage geschlossen",
+        "{total} total vote": ["{total} Stimme gesamt","{total} Stimmen gesamt"],
+        "{total} total vote – Poll closed": ["{total} Stimme gesamt – Umfrage geschlossen","{total} Stimmen gesamt – Umfrage geschlossen"],
         "{uid} appears {n} times in this team's membership. The highest-level row will be kept.": "{uid} erscheint {n} Mal in der Mitgliedschaft dieses Teams. Die Zeile mit der höchsten Stufe wird beibehalten.",
         "{user} added a calendar": "{user} hat einen Kalender hinzugefügt",
         "{user} added a label": "{user} hat eine Bezeichnung hinzugefügt",
@@ -2990,10 +2813,7 @@
         "Write a reply…": "Antwort schreiben…",
         "You cannot post in this conversation.": "Du kannst in dieser Unterhaltung nichts schreiben.",
         "Your role in this team does not allow commenting.": "Deine Rolle in diesem Team erlaubt kein Kommentieren.",
-        "{n} reply": [
-            "{n} Antwort",
-            "{n} Antworten"
-        ],
+        "{n} reply": ["{n} Antwort","{n} Antworten"],
         "Closed": "Geschlossen",
         "Could not record your vote.": "Deine Stimme konnte nicht gespeichert werden.",
         "Open in {team}": "In {team} öffnen",
@@ -3008,10 +2828,7 @@
         "Try widening the period, or clearing a team or type selection.": "Erweitere den Zeitraum oder hebe eine Team- oder Typauswahl auf.",
         "Turn on at least one row under Show in the Feed control panel.": "Aktiviere mindestens eine Zeile unter „Anzeigen“ im Feed-Steuerungsbereich.",
         "You’ve reached the end": "Du hast das Ende erreicht",
-        "{n} item shown": [
-            "{n} Eintrag angezeigt",
-            "{n} Einträge angezeigt"
-        ],
+        "{n} item shown": ["{n} Eintrag angezeigt","{n} Einträge angezeigt"],
         "Earlier": "Früher",
         "Mentions": "Erwähnungen",
         "Public message": "Öffentliche Nachricht",
@@ -3035,10 +2852,7 @@
         "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Durchsucht jedes von Benutzern erstellte Team nach Systembits, die auf einem Benutzerteam niemals vorkommen dürfen (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles verweigert jede Konfigurationsänderung an einem Team mit einem dieser Bits, sodass Apps es nicht mehr ändern können. Verwenden Sie Reparieren, um die Konfiguration eines Teams auf saubere Standardwerte zurückzusetzen.",
         "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it — enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "Diese Teams tragen das CFG_APP-Flag, das eine Nextcloud-App setzt, um das Team als von ihr verwaltet zu kennzeichnen — das Aktivieren eines Collective tut dies. Es ist keine Beschädigung und erfordert keine Reparatur. Das Flag bleibt bestehen, wenn die App, die es gesetzt hat, später entfernt wird.",
         "Current config: {config}. App flag: {appBits}": "Aktuelle Konfiguration: {config}. App-Flag: {appBits}",
-        "{n} team is claimed by another app": [
-            "{n} Team wird von einer anderen App beansprucht",
-            "{n} Teams werden von einer anderen App beansprucht"
-        ],
+        "{n} team is claimed by another app": ["{n} Team wird von einer anderen App beansprucht","{n} Teams werden von einer anderen App beansprucht"],
         "Allow comments on": "Kommentare erlauben für",
         "Message types that can be commented on. When a type is off, its messages show no comment count and no comment section. Questions and decisions always allow comments.": "Nachrichtentypen, die kommentiert werden können. Ist ein Typ deaktiviert, zeigen dessen Nachrichten weder Kommentarzähler noch Kommentarbereich. Fragen und Entscheidungen können immer kommentiert werden.",
         "Polls": "Umfragen",
@@ -3176,7 +2990,61 @@
         "Failed to withdraw the request": "Anfrage konnte nicht zurückgezogen werden",
         "Failed to withdraw the request: {error}": "Anfrage konnte nicht zurückgezogen werden: {error}",
         "Bulk team export requires an active TeamHub license. Add or renew a license in the License tab to unlock it.": "Der Massen-Team-Export erfordert eine aktive TeamHub-Lizenz. Fügen Sie im Tab Lizenz eine Lizenz hinzu oder erneuern Sie sie, um ihn freizuschalten.",
-        "That source link cannot be opened — only http and https addresses are allowed.": "Dieser Quell-Link kann nicht geöffnet werden – nur http- und https-Adressen sind zulässig."
+        "That source link cannot be opened — only http and https addresses are allowed.": "Dieser Quell-Link kann nicht geöffnet werden – nur http- und https-Adressen sind zulässig.",
+        "Could not create the group": "Die Gruppe konnte nicht erstellt werden",
+        "Could not delete the group": "Die Gruppe konnte nicht gelöscht werden",
+        "Could not move the team": "Das Team konnte nicht verschoben werden",
+        "Could not rename the group": "Die Gruppe konnte nicht umbenannt werden",
+        "Could not save the group state": "Der Gruppenstatus konnte nicht gespeichert werden",
+        "Group “{name}” created": "Gruppe „{name}“ erstellt",
+        "You already have a group called “{name}”": "Sie haben bereits eine Gruppe namens „{name}“",
+        "Create group": "Gruppe erstellen",
+        "Favorites": "Favoriten",
+        "Group name": "Gruppenname",
+        "New group": "Neue Gruppe",
+        "Move to group…": "In Gruppe verschieben…",
+        "Move {team} to a group": "{team} in eine Gruppe verschieben",
+        "Ungrouped": "Nicht gruppiert",
+        "Delete group": "Gruppe löschen",
+        "Expanded by default": "Standardmäßig ausgeklappt",
+        "No teams in this group yet": "Noch keine Teams in dieser Gruppe",
+        "Rename group": "Gruppe umbenennen",
+        "A team in this group has updates": "Ein Team in dieser Gruppe hat Neuigkeiten",
+        "Minimum role to manage posts": "Mindestrolle zum Verwalten von Beiträgen",
+        "Who can pin a message, and edit or delete a message or comment written by someone else. Authors can always edit and delete their own. Every edit is shown under the post with who made it.": "Wer eine Nachricht anheften und eine Nachricht oder einen Kommentar einer anderen Person bearbeiten oder löschen kann. Autoren können ihre eigenen Beiträge immer bearbeiten und löschen. Jede Bearbeitung wird unter dem Beitrag mit dem Namen der bearbeitenden Person angezeigt.",
+        "Edited by {name} on {datetime}": "Bearbeitet von {name} am {datetime}",
+        "Tags": "Tags",
+        "Classify this team with the same Nextcloud tags you use on files. An administrator manages the available tags under Settings → Administration → Basic settings.": "Klassifiziere dieses Team mit denselben Nextcloud-Tags, die du für Dateien verwendest. Ein Administrator verwaltet die verfügbaren Tags unter Einstellungen → Verwaltung → Grundeinstellungen.",
+        "Remove tag {tag}": "Tag {tag} entfernen",
+        "This team has no tags yet.": "Dieses Team hat noch keine Tags.",
+        "Add a tag": "Tag hinzufügen",
+        "No tags available — an administrator adds them in Basic settings": "Keine Tags verfügbar – ein Administrator legt sie in den Grundeinstellungen an",
+        "Every available tag is already on this team": "Alle verfügbaren Tags sind bereits auf diesem Team",
+        "Select a tag…": "Tag auswählen…",
+        "Tag {tag} added": "Tag {tag} hinzugefügt",
+        "Failed to add tag: {error}": "Tag konnte nicht hinzugefügt werden: {error}",
+        "Failed to add tag": "Tag konnte nicht hinzugefügt werden",
+        "Tag {tag} removed": "Tag {tag} entfernt",
+        "Failed to remove tag: {error}": "Tag konnte nicht entfernt werden: {error}",
+        "Failed to remove tag": "Tag konnte nicht entfernt werden",
+        "Team classification": "Team-Klassifizierung",
+        "Team classification details": "Details zur Team-Klassifizierung",
+        "Classification:": "Klassifizierung:",
+        "No teams tagged": "Keine Teams getaggt",
+        "{tagged} of {total} tagged": "{tagged} von {total} getaggt",
+        "Teams carrying at least one Nextcloud tag. Tags are managed under Settings → Administration → Basic settings, and a team admin applies them in Manage Team.": "Teams mit mindestens einem Nextcloud-Tag. Tags werden unter Einstellungen → Verwaltung → Grundeinstellungen verwaltet; ein Team-Administrator wendet sie unter Team verwalten an.",
+        "ISO 27001: {controls}": "ISO 27001: {controls}",
+        "Audit log retention": "Aufbewahrung des Audit-Logs",
+        "Audit log retention details": "Details zur Aufbewahrung des Audit-Logs",
+        "Audit log:": "Audit-Log:",
+        "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Ereignisse werden angehängt und nach Ablauf der Aufbewahrungsfrist gesammelt gelöscht. Kein Codepfad ändert oder löscht einen einzelnen Eintrag, ein Datensatz kann also nicht vor seinem Ablauf umgeschrieben werden.",
+        "{n} day retention": ["{n} Tag Aufbewahrung","{n} Tage Aufbewahrung"],
+        "No teams": "Keine Teams",
+        "Intranet": "Intranet",
+        "Minimum role to comment": "Mindestrolle zum Kommentieren",
+        "Commenting is restricted for this team": "Kommentieren ist für dieses Team eingeschränkt",
+        "Who can post comments on messages, questions, and polls. Indirect members (via a group or sub-team) count as members.": "Wer Kommentare zu Nachrichten, Fragen und Umfragen schreiben darf. Indirekte Mitglieder (über eine Gruppe oder ein Unterteam) zählen als Mitglieder.",
+        "Only a Nextcloud administrator can change this tag": "Nur ein Nextcloud-Administrator kann dieses Tag ändern"
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

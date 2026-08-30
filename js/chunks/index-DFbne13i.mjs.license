@@ -11,6 +11,7 @@ SPDX-FileCopyrightText: Anthony Fu <https://github.com/antfu>
 SPDX-FileCopyrightText: Antoni Andre <antoniandre.web@gmail.com>
 SPDX-FileCopyrightText: Arnout Kazemier
 SPDX-FileCopyrightText: Borys Serebrov
+SPDX-FileCopyrightText: Christoph Wurst
 SPDX-FileCopyrightText: David Clark
 SPDX-FileCopyrightText: David Myers <hello@davidmyers.dev>
 SPDX-FileCopyrightText: Dr.-Ing. Mario Heiderich, Cure53 <mario@cure53.de> (https://cure53.de/)
@@ -82,6 +83,9 @@ This file is generated from multiple sources. Included packages:
 	- license: AGPL-3.0-or-later
 - @nextcloud/event-bus
 	- version: 3.3.3
+	- license: GPL-3.0-or-later
+- @nextcloud/initial-state
+	- version: 2.2.0
 	- license: GPL-3.0-or-later
 - @nextcloud/initial-state
 	- version: 3.0.0
@@ -327,7 +331,7 @@ This file is generated from multiple sources. Included packages:
 	- version: 6.4.0
 	- license: MIT
 - teamhub
-	- version: 4.7.1
+	- version: 4.8.0
 	- license: undefined
 - toastify-js
 	- version: 1.12.0

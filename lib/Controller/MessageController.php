@@ -671,8 +671,10 @@ class MessageController extends Controller {
 
     /**
      * GET /api/v1/teams/{teamId}/messages/settings
-     * Returns per-team message settings: pinMinLevel and postMinLevel.
-     * Accessible by any team member.
+     * Returns per-team message settings: manageMinLevel, postMinLevel,
+     * linkMinLevel, commentMinLevel, commentsEnabled, allowPublicMessages.
+     * Accessible by any team member — the stream needs the floor to decide
+     * which Edit and Delete affordances to render.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
@@ -690,14 +692,19 @@ class MessageController extends Controller {
     /**
      * POST /api/v1/teams/{teamId}/messages/settings
      * Saves per-team message settings. Requires team admin level (8).
-     * Body: { pinMinLevel: 'member'|'moderator'|'admin', postMinLevel: 'member'|'moderator'|'admin' }
+     * Body: { manageMinLevel: 'member'|'moderator'|'admin', postMinLevel: 'member'|'moderator'|'admin' }
+     *
+     * v4.7.4 — `pinMinLevel` was replaced by `manageMinLevel`, which governs
+     * pinning AND editing or deleting somebody else's message or comment.
+     * The default here is 'admin', matching the service: a client that omits
+     * the field gets the strict value, never the old permissive one.
      */
     #[NoAdminRequired]
     public function saveMessageSettings(string $teamId): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
             $body    = $this->request->getParams();
-            $pin     = trim((string)($body['pinMinLevel']     ?? 'moderator'));
+            $manage  = trim((string)($body['manageMinLevel']  ?? 'admin'));
             $post    = trim((string)($body['postMinLevel']    ?? 'member'));
             $link    = trim((string)($body['linkMinLevel']    ?? 'admin'));
             $comment = trim((string)($body['commentMinLevel'] ?? 'member'));
@@ -714,9 +721,9 @@ class MessageController extends Controller {
             // pre-4.5.38 client that PUTs the settings form it knows about must
             // not wipe a policy it never rendered.
             $commentsEnabled = $this->parseCommentsEnabled($body['commentsEnabled'] ?? null);
-            $this->messageService->saveMessageSettings($teamId, $pin, $post, $link, $allowPublic, $comment, $commentsEnabled);
+            $this->messageService->saveMessageSettings($teamId, $manage, $post, $link, $allowPublic, $comment, $commentsEnabled);
             $this->logger->debug('[TeamHub][MessageController] saveMessageSettings', [
-                'teamId' => $teamId, 'pin' => $pin, 'post' => $post, 'link' => $link, 'comment' => $comment,
+                'teamId' => $teamId, 'manage' => $manage, 'post' => $post, 'link' => $link, 'comment' => $comment,
                 'allowPublicMessages' => $allowPublic,
                 'commentsEnabled' => $commentsEnabled,
                 'app'    => Application::APP_ID,

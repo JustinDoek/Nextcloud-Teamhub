@@ -59,6 +59,12 @@ class CommentController extends Controller {
             if (!empty($r['author_id'])) {
                 $uids[(string)$r['author_id']] = true;
             }
+            // v4.7.4 — the editor too, for the "Edited by …" footer. Usually
+            // the same uid as the author, so this adds no lookup in the
+            // common case.
+            if (!empty($r['edited_by'])) {
+                $uids[(string)$r['edited_by']] = true;
+            }
         }
         $nameMap = [];
         foreach (array_keys($uids) as $uid) {
@@ -72,6 +78,10 @@ class CommentController extends Controller {
         foreach ($rows as &$r) {
             $uid = (string)($r['author_id'] ?? '');
             $r['author_display_name'] = $nameMap[$uid] ?? $uid;
+            // Null rather than a fallback: absent means "never edited", and
+            // the footer keys off that.
+            $editor = (string)($r['edited_by'] ?? '');
+            $r['edited_by_display_name'] = $editor !== '' ? ($nameMap[$editor] ?? $editor) : null;
         }
         unset($r);
 
@@ -124,7 +134,39 @@ class CommentController extends Controller {
                 return $lockError;
             }
 
-            $data = $this->commentMapper->update($commentId, $user->getUID(), $comment);
+            // v4.7.4 — the authorisation that used to live in the mapper's
+            // WHERE clause, made explicit and widened. The author may always
+            // edit their own; anybody else needs the team's moderation floor.
+            // This MUST stay here: CommentMapper::update no longer filters by
+            // author, so removing this check would let any member rewrite any
+            // comment in a team they belong to.
+            $uid = $user->getUID();
+            if ((string)$existing['author_id'] !== $uid
+                && !$this->messageService->canManageMessages((string)$message['team_id'], $uid)) {
+                return new JSONResponse(
+                    ['error' => 'You do not have permission to edit this comment'],
+                    Http::STATUS_FORBIDDEN,
+                );
+            }
+
+            $data = $this->commentMapper->update($commentId, $uid, $comment);
+
+            // v4.7.5 — audit, matching the message side. `comment.deleted`
+            // already existed; an edit did not need auditing while only the
+            // author could make one, and does now that a moderator can.
+            // Identifiers and flags only — never the comment text.
+            $this->auditService->log(
+                (string)$message['team_id'],
+                'comment.updated',
+                $uid,
+                'comment',
+                (string)$commentId,
+                [
+                    'message_id'   => (int)$existing['message_id'],
+                    'author_id'    => (string)$existing['author_id'],
+                    'by_moderator' => (string)$existing['author_id'] !== $uid,
+                ],
+            );
             return new JSONResponse($this->hydrateAuthorNames($data));
         } catch (AccessDeniedException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
@@ -310,13 +352,21 @@ class CommentController extends Controller {
                 );
             }
 
-            // Authorisation: author may always delete; otherwise require team admin.
+            // Authorisation: author may always delete; otherwise the caller
+            // must clear the team's moderation floor (v4.7.4 — was a
+            // hard-coded admin check; the floor defaults to admin, so a team
+            // that leaves the setting alone keeps the same behaviour).
+            //
+            // `deletedByAdmin` keeps its old meaning deliberately: it drives
+            // the audit trail and the notice shown to the author, and "an
+            // admin removed your comment" would be a false statement about a
+            // moderator on a team that lowered the floor.
             $deletedByAdmin = false;
             if (!$isAuthor) {
-                if (!$isAdmin) {
+                if (!$this->messageService->canManageMessages($teamId, $uid)) {
                     return new JSONResponse(['error' => 'Insufficient permissions'], Http::STATUS_FORBIDDEN);
                 }
-                $deletedByAdmin = true;
+                $deletedByAdmin = $isAdmin;
             }
 
             // Solved-question revert: if this comment was the marked answer,

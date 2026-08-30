@@ -5,6 +5,7 @@ namespace OCA\TeamHub\AppInfo;
 
 use OCA\TeamHub\Listener\AppDisabledListener;
 use OCA\TeamHub\Listener\CalendarObjectDeletedListener;
+use OCA\TeamHub\Listener\CircleMembershipChangedListener;
 use OCA\TeamHub\Listener\UserStatusListener;
 use OCA\TeamHub\Listener\UserDeletedListener;
 use OCA\TeamHub\Notification\Notifier;
@@ -70,6 +71,32 @@ class Application extends App implements IBootstrap {
                 \OCA\DAV\Events\CalendarObjectMovedToTrashEvent::class,
                 CalendarObjectDeletedListener::class,
             );
+        }
+
+        // v4.7.10 (GitHub #87) — reconcile a team's resources when Circles
+        // finishes changing its effective membership. This is the only hook
+        // that fires late enough for a direct member add: the join is completed
+        // in a separate async request, long after the one TeamHub handled. See
+        // CircleMembershipChangedListener for the full sequence.
+        //
+        // String class names and a class_exists guard, matching the DAV events
+        // below: Circles is a hard dependency in practice but not a declared
+        // one, and Application is loaded early enough that a missing class here
+        // would brick the app rather than degrade it.
+        // NO leading backslash in these strings. dispatchTyped() dispatches
+        // under get_class($event), which never has one, and Symfony matches
+        // listener keys by exact string — so '\OCA\…' registers the listener
+        // under a name nothing is ever dispatched to. class_exists() accepts
+        // either spelling, so the guard below passes and the wiring looks
+        // correct while silently doing nothing. Cost a deploy on 2026-08-29.
+        // The ::class form used for the DAV events above cannot have this bug.
+        foreach ([
+            'OCA\Circles\Events\MembershipsCreatedEvent',
+            'OCA\Circles\Events\MembershipsRemovedEvent',
+        ] as $circlesEvent) {
+            if (class_exists($circlesEvent)) {
+                $context->registerEventListener($circlesEvent, CircleMembershipChangedListener::class);
+            }
         }
 
         // Register TeamHub teams, messages, and decisions with NC unified search.

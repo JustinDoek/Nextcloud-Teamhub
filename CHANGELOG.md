@@ -3,6 +3,130 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.8.0] — 2026-08-30 — Session close: teams can be classified
+
+**A rebuild is required** (`npm run build`) — frontend and backend, no migration, no schema change. Closes the 4.7 line.
+
+### Added
+
+- **Teams can carry Nextcloud tags.** A team admin picks from the instance's own tag list in Manage Team → Tags; the chips render there, on the Browse Teams cards and under the team name in the admin All teams grid. Four routes: `GET /api/v1/tags` for the picker's options, and `GET`/`POST`/`DELETE` on `/api/v1/teams/{teamId}/tags[/{tagId}]`.
+
+  **TeamHub creates no tags.** The vocabulary is Nextcloud's own, managed under Settings → Administration → Basic settings, so one tag list covers Files and teams instead of two that drift. **There is also no new table and no migration**: a tag on a team is stored where a tag on a file is stored, `oc_systemtag_object_mapping` with `objecttype = 'teamhub_team'` — `ISystemTagObjectMapper` takes a free-form object type, the column is `varchar(64)`, and a Circles `unique_id` is 31 characters.
+
+  This is the mechanism behind Nextcloud Governance's Sensitivity Labels. `files_confidential` creates restricted system tags (`createTag($name, userVisible: true, userAssignable: false)`) and assigns them with `assignTags($nodeId, 'files', …)`; this generalises the assignment half off `files`. The rules layer — which tags count as classification labels, their precedence, automatic assignment — is deliberately not here.
+
+- **The Compliance tab and its printable report map ISO/IEC 27001:2022 controls.** Every check declares which control it evidences; the ids appear in each row's info menu and in a new column in the PDF. A second table in the report lists all eleven controls in scope with the checks behind each — including **A.5.9 and A.5.10 marked "Not evidenced"**, because nothing in the app observes asset inventory or acceptable use. A matrix that names its gaps is worth more to an auditor than one that fudges them.
+
+- **Two new compliance rows.** *Team classification* reports how much of the instance is classified — red when no team is tagged, amber for partial coverage, green when all are, and grey on an instance with no teams at all. *Audit log retention* reports the retention window and states that the audit service exposes only append and bulk purge, so a record cannot be rewritten before it expires.
+
+- **`team.tag_added` and `team.tag_removed` audit events**, which is what makes a classification evidenceable rather than decorative.
+
+- Twenty-seven strings, keyed in all seven locales, including one plural pair stored in the array shape `n()` requires.
+
+### Changed
+
+- **Minimum Nextcloud version raised from 32 to 33.** The supported range is now **33 – 34**, updated in `appinfo/info.xml`, the README badge and requirements, `INSTALL.md` and `developers.md`. Nothing in this release requires a 33+ API — the change narrows what is claimed to be supported, so an instance on 32 will refuse to enable the app rather than run untested.
+
+### Fixed
+
+- **Twenty-one strings rendered English for every reader regardless of their language.** Three separate causes, all invisible to `check:l10n`, which only ever asked whether a key existed in `en.json`:
+
+  1. **Nine plural pairs stored as two separate strings** instead of one `[singular, plural]` array. `n()` cannot select a plural from a string, so every locale fell back to the English plural — a Dutch reader with eight days left saw "8 days left". Catalogued by hand on 2026-08-12 as `HANDOFF.md` §00b; repaired now in all seven files.
+  2. **`{n} day` was a correct array in `en.json` and a bare string in `nl`, `de`, `fr` and `da`.** The original §00b audit read `en.json` only, so this class could not be seen at all.
+  3. **Seven keys stored a literal `–` / `…` where the runtime asks for the character.** `MessageCard.vue` wrote `'… – Poll closed'` and `ResourcePicker.vue` five `'Select a ……'` variants; JavaScript interprets those escapes, but whatever generated the locale files stored the six raw characters, so the key requested at runtime never matched the key on disk. English looked right only because gettext falls back to the msgid, which is why it went unnoticed. **Fixed at the source** — both components now use the literal `–` and `…`, so the extracted key, the runtime key and the stored key are the same string by construction.
+
+- **Four keys existed in `en.json` and in no other locale** — `Intranet`, `Minimum role to comment`, `Commenting is restricted for this team`, and the comment-role description. Present since the 4.3.1 commenting work. Now translated in all six.
+
+- **`scripts/check-l10n.js` gained the two passes that would have caught all of the above**: every `en.json` key is checked against all six locales, and every `n()` singular is checked for array shape in all seven files. Both are clean as of this release. The script's original single check is unchanged, so the 65 pre-existing untranslated strings in §00 still gate a release exactly as before.
+
+### Security
+
+- **The DAV systemtags entity is deliberately not registered.** Nextcloud offers `SystemTagsEntityEvent::EVENT_ENTITY` to make a custom object type taggable over WebDAV, and it would have been the obvious way to do this. Read against NC 34.0.2, `SystemTagsRelationsCollection` passes a real `PERMISSION_UPDATE` closure as `childWriteAccessFunction` for `files` and **`fn ($name) => true` for every app-registered entity**. Registering `teamhub_team` would have let any authenticated user write tag assignments on any team through `/remote.php/dav/systemtags-relations/teamhub_team/{id}`, with the existence closure as the only gate — and that closure gates reads too, so it cannot be overloaded into an authorisation check without also breaking read access. The OCP APIs are called from TeamHub's own gated routes instead. Reasoning in `DESIGN.md` §2.102.
+
+- **Reads are gated on membership, writes on `requireAdminLevel`, and both writes additionally defer to core's `canUserAssignTag()`.** Delegating that second check rather than reimplementing it means a *restricted* tag stays visible on a team but only an NC admin can set it, without TeamHub having to know what "restricted" means.
+
+- **A tag the reader cannot remove no longer offers a remove control.** The chip list rendered a remove button for every tag on the team without consulting `canAssign`, so a *restricted* tag — the shape Governance uses for a sensitivity label, set by a Nextcloud administrator — showed a team admin a control that could only ever answer 403. The button is now bound to `canAssign`, and a locked chip carries a lock affordance explaining why instead. This is SKILLS.md § Permissions applied to the exact path the restricted-tag design depends on; the server gate was always correct, the UI was not. **Found on a second pass after the first security review reported no findings** — the first pass checked that every route was gated and stopped there, without asking whether the UI only offers what the gate allows.
+
+- **A team's tags are sent only to its members.** `browseAllTeams()` lists teams the viewer is not in; those rows carry an empty tag list, the same boundary `image_url` has drawn since 4.6.25. A classification on a team you cannot open tells you something about it.
+
+- A tag colour is validated to six hex digits before it reaches a style binding. Nothing was exploitable — the value never enters markup and a browser rejects a malformed colour — but it is the one field that reaches a style attribute.
+
+### Notes
+
+- **PHP was executed for the first time in this repo's recent history.** `php` is not on the development machine's PATH, but the AIO container carries **PHP 8.3.32**, and `docker exec -i nextcloud-aio-nextcloud sh -c 'cat > /tmp/l.php && php -l /tmp/l.php' < <file>` lints a working-copy file without deploying it. All five changed PHP files pass, and `appinfo/routes.php` loads with 319 routes and no duplicate name+verb or url+verb. The `HANDOFF.md` note saying no interpreter is available is superseded.
+- Vue SFCs were checked with `@vue/compiler-sfc` (template and script blocks) rather than by building — the build stays Justin's.
+- `npm run check:l10n` is unchanged at **65**, exactly the pre-existing backlog in `HANDOFF.md` §00. Every string added this session is keyed in all seven locales.
+- The full Nextcloud security-guideline checklist was walked against the session's changes with no findings. Guideline 7 was traced by reading each route to its gate rather than grepped, per §00sec.
+
+### Known gaps
+
+- **4.7.1 – 4.7.14 have no CHANGELOG entry.** 4.7.15 – 4.7.18 do. This is the §3 pattern firing again across a third release line; the versions are provably real (4.7.13 added the group-promotion branch that 4.7.16 had to fix, 4.7.3 added personal team grouping, 4.7.9 added `ResourceMembershipService`).
+
+## [4.7.18] — 2026-08-30 — One toolbar implementation instead of three
+
+**A rebuild is required** (`npm run build`) — frontend only.
+
+Both defects below came out of the same thing: the composer, the comment box and message edit mode each carried their own copy of the toolbar's insertion logic, and the copies had drifted. They are one implementation now, in `src/lib/markdownToolbar.js`.
+
+### Fixed
+
+- **Building a list from a multi-line selection lost the break between the first two items.** `document.execCommand('insertText')` does not turn newlines into `<br>`; it wraps the trailing lines in `<div>`s, and `NcRichContenteditable`'s `parseContent()` maps `</div>` to `\n`, which puts the break at the end of each div rather than between the first line and the second. Three selected lines came back as `- a- b\n- c\n`. Multi-line insertions now build the fragment by hand — real text nodes and real `<br>` elements, the exact structure the component renders and reads back — and fire one `input` event rather than one per line. The same fault sat under the code-block button, which inserts newlines the same way.
+
+  Measured rather than reasoned: all three candidate implementations were run against a contenteditable driven by the component's own `renderContent()` / `parseContent()` pair, and only this one round-trips.
+
+- **In message edit mode the list buttons ignored the selection and appended a marker at the end.** That toolbar addressed its editor as a `<textarea>`, through `selectionStart` / `selectionEnd`. The edit body is an `NcRichContenteditable` and has neither property, so `el.selectionStart ?? this.editBody.length` resolved to "caret at the end of the text" on every press: no selection was ever seen, and every button appended. The `??` is what hid it — the buttons still did something, just never the right thing. It uses the shared implementation now, and the bold, italic, code, heading and link buttons in edit mode start honouring selections for the first time as a result.
+
+- **Inserting an image while editing a message threw.** `confirmImageDialog()` carried the same stale assumption and called `el.focus()` and `el.setSelectionRange()` on a component instance, neither of which is a function there, so its `$nextTick` callback failed every time. It now appends and focuses the editor, which is also the honest behaviour — confirming the dialog means focus is in the dialog and there is no caret to insert at.
+
+### Added
+
+- **`npm run check:markdown-list`** — eleven assertions pinning `buildList()`, including the two rules that are not obvious enough to re-derive: a blank line takes no marker, and a blank line does not consume a number. Committed rather than left in a scratch harness, which is what happened to the two earlier assertion tables recorded in `HANDOFF.md` §00sec. Dev-only; `scripts/` is outside the publishable file set.
+
+## [4.7.17] — 2026-08-30 — The formatting toolbar stops writing example text
+
+**A rebuild is required** (`npm run build`) — frontend only.
+
+All three copies of the Markdown toolbar are changed together: the composer (`PostMessageForm.vue`), the comment box (`CommentsSection.vue`) and message edit mode (`MessageCard.vue`). They are separate implementations of the same seven buttons, so a fix to one alone would have made the same button behave differently depending on where it was pressed.
+
+### Added
+
+- **A numbered-list button**, beside the bullet-list one. Blank lines inside the selection are left unnumbered — in Markdown they are what separates one list from the next, so numbering them would both read wrong and merge the two lists.
+
+### Changed
+
+- **The buttons insert the syntax and nothing else.** Pressing Bold with nothing selected wrote `**bold text**`; it now writes `****` and leaves the caret between the halves. Same for italic, inline code, code block, heading and link — the link is now `[]()` with the caret inside the brackets, or inside the parentheses when a selection supplied the label. The example text was never what anyone wanted to keep, so every use started by deleting it.
+
+### Fixed
+
+- **A list made from a multi-line selection marked only the first line.** The bullet button was `applyMarkdown('- ', '')`, which treats `- ` as a prefix for the insertion as a whole; selecting five lines produced one list item followed by four ordinary lines. Lists are a per-line construct and now have their own handler, which marks every non-blank line in the selection. In edit mode the rewritten block stays selected afterwards, so switching bullets to numbers is one more click rather than a re-selection.
+
+## [4.7.16] — 2026-08-30 — Promoting a member who is in the team through a group
+
+**A rebuild is not required for this entry** — PHP only. It ships alongside 4.7.15, which does need one.
+
+### Fixed
+
+- **Giving Moderator or Admin to someone who reaches the team through a group failed with "Invalid initiator".** `MemberService::createDirectMemberRow()` calls Circles' `MemberService::addMember()` to create the row that carries the level, and that method opens with `mustHaveCurrentUser()` — it resolves its initiator from Circles' own `FederatedUserService`, not from the Nextcloud session. Nothing set one, so `InitiatorNotFoundException('Invalid initiator')` was thrown before the add was attempted. It now calls `setLocalCurrentUser($caller)` first, the same way `inviteMembers()` always has.
+
+  **The branch had never worked since it was added in 4.7.13.** Promotion appeared to succeed for anyone who already had a direct `circles_member` row from some earlier route, because the branch is skipped there and only the level `UPDATE` runs. Removing such a member deletes that row and leaves them a member through the group alone, which is why the failure showed up on the *second* promotion of the same person and not the first.
+
+## [4.7.15] — 2026-08-30 — A team's group menu stops growing with the group list
+
+**A rebuild is required** (`npm run build`) — frontend only, no migration, no API change.
+
+### Changed
+
+- **Choosing a team's sidebar group moves out of the row menu into a dialog.** The radio list showed where a team is and where it can go in a single glance, which is right at two or three groups and wrong at ten — the menu grew by a line per group until the popover was mostly group list. The menu now carries one `Move to group…` button; the radios live in a small dialog, where they have room and are the right control again. New component: `TeamGroupPickerModal.vue`, mounted from `App.vue` because it is reached from any team's row, including teams the reader is not looking at.
+
+  A dropdown inside the menu was tried first and does not work: `NcActionInput`'s multiselect hard-codes `appendToBody: false` on its `NcSelect`, so the option list is drawn inside the popover and clipped by `.v-popper__inner`'s `overflow: auto`. Forcing `append-to-body` trades the clipping for a menu that dismisses when an option is clicked, because a teleported list is outside the popper. A native `<select>` escapes the clip but needs a raw `<li>`, and `NcActions` reads its children to choose the menu's ARIA semantics — one non-`NcAction*` child turns the whole menu from `menu` to `unknown`.
+
+- **`TeamNavItem` and `TeamNavGroup` no longer take a `groups` prop.** The list is passed straight to the dialog, so the two nav components carry only what they render. `TeamNavItem` emits `pick-group` where it used to emit `assign`; `App.vue`'s `onTeamAssignGroup` is unchanged and still receives `{ teamId, groupId }` with `null` for ungrouped.
+
+### Fixed
+
+- **The New group and Rename group fields had their label on a line of its own, which threw the icon out of alignment with the input.** `.action-input` lays its row out `align-items: flex-start` while the icon wrapper sets `align-self: center`, so the icon centred on label-plus-field rather than on the field. Both now pass `label-outside` — which also stops `NcInputField` reserving space for a floating label — and hide the label visually while leaving it in the DOM.
+- **Both fields had no accessible name.** They were relying on `NcActionInput`'s `aria-label` prop, which `@nextcloud/vue` 9.8.0 declares and documents but never renders — it is inert. The visually hidden `<label for>` is now the name, and the field text moves to the placeholder.
+
 ## [4.7.0] — 2026-08-12 — Session close
 
 Rolls up 4.6.1–4.6.28. No new migration since `Version000406020Date20260810000000`; **a rebuild is required** (`npm run build`) — both for the version bump, which invalidates the integrity manifest, and for the one source change below.

@@ -212,8 +212,20 @@ class MessageMapper {
 
     /**
      * Update a message.
+     *
+     * v4.7.4 — `$editorId` records who made the change, in its own pair of
+     * columns rather than on `updated_at`. `updated_at` moves for things
+     * that are not edits (pin, poll close, mark solved), so it cannot answer
+     * "was this text changed, and by whom" — which is the question the
+     * message footer now asks.
+     *
+     * **Null means "not a person's edit", and does not stamp the columns.**
+     * `DecisionService::…` rewrites a decision message's body when the
+     * decision reaches a terminal state; that is the app re-rendering its
+     * own text, not somebody editing a post, and labelling it "Edited by
+     * Inge" would be a false statement about a record people rely on.
      */
-    public function update(int $id, string $subject, string $message): array {
+    public function update(int $id, string $subject, string $message, ?string $editorId = null): array {
         $qb = $this->db->getQueryBuilder();
 
         $qb->update('teamhub_messages')
@@ -221,6 +233,11 @@ class MessageMapper {
             ->set('message', $qb->createNamedParameter($message))
             ->set('updated_at', $qb->createNamedParameter(time(), IQueryBuilder::PARAM_INT))
             ->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
+
+        if ($editorId !== null) {
+            $qb->set('edited_by', $qb->createNamedParameter($editorId))
+               ->set('edited_at', $qb->createNamedParameter(time(), IQueryBuilder::PARAM_INT));
+        }
 
         $qb->executeStatement();
 
@@ -785,6 +802,12 @@ class MessageMapper {
             'comment_count'   => (int)($row['comment_count'] ?? 0),
             'created_at'      => (int)$row['created_at'],
             'updated_at'      => (int)$row['updated_at'],
+            // v4.7.5 — edit provenance. This mapper whitelists columns, so a
+            // new column is invisible to the frontend until it is named here;
+            // the comment rows go out raw, which is why the footer worked
+            // there first and not on messages.
+            'edited_by'       => $row['edited_by'] ?? null,
+            'edited_at'       => isset($row['edited_at']) ? (int)$row['edited_at'] : null,
         ];
     }
 }

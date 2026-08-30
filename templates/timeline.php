@@ -2,9 +2,13 @@
 /**
  * Standalone visual timeline iframe page — HORIZONTAL layout.
  *
- * @var string      $teamId  Team unique ID (from controller)
- * @var string      $apiBase NC base URL, no trailing slash
- * @var string|null $error   Non-null when the user is not a team member
+ * @var string      $teamId    Team unique ID (from controller)
+ * @var string      $apiUrl    Timeline API path, front-controller aware (GitHub #91)
+ * @var string      $webRoot   NC web root, no trailing slash ('' at a domain root)
+ * @var string      $urlPrefix $webRoot, plus '/index.php' where the install needs it
+ * @var string|null $error     Non-null when the user is not a team member
+ * @var string      $locale    Reader's locale, canonical form (`nl-NL`)
+ * @var string      $timezone  Reader's IANA zone (`Europe/Amsterdam`)
  *
  * Layout model
  * ────────────
@@ -76,7 +80,12 @@ try {
     }
 }
 ?><!DOCTYPE html>
-<html lang="en">
+<!-- v4.7.6 — `teamhub` on <html> is the same admin-CSS hook AppEmbed adds to
+     the NC apps it embeds (see EMBED_MARKER_CLASS in AppEmbed.vue). This page
+     is served by TeamHub rather than embedded from another app, so it is
+     written in the markup instead of injected. The rule holds without
+     exception: every TeamHub iframe carries it. -->
+<html lang="en" class="teamhub">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -663,7 +672,7 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
 <?php if ($error): ?>
 <div id="root"><div id="overlay"><?= htmlspecialchars($error) ?></div></div>
 <?php else: ?>
-<div id="root" data-team-id="<?= htmlspecialchars($teamId) ?>" data-api-base="<?= htmlspecialchars($apiBase) ?>">
+<div id="root" data-team-id="<?= htmlspecialchars($teamId) ?>" data-api-url="<?= htmlspecialchars($apiUrl) ?>" data-web-root="<?= htmlspecialchars($webRoot) ?>" data-url-prefix="<?= htmlspecialchars($urlPrefix) ?>" data-locale="<?= htmlspecialchars($locale) ?>" data-timezone="<?= htmlspecialchars($timezone) ?>">
     <div id="scroll">
         <div id="canvas">
         </div>
@@ -677,8 +686,25 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
     var root = document.getElementById('root');
     if (!root) return;
 
-    var TEAM_ID  = root.dataset.teamId || '';
-    var API_BASE = root.dataset.apiBase || '';
+    // Built by the controller through IURLGenerator, so both already carry
+    // '/index.php' on an install without pretty URLs (GitHub #91). Never
+    // assemble an NC URL here from a bare '/apps/…' path.
+    var API_URL    = root.dataset.apiUrl || '';
+    var WEB_ROOT   = root.dataset.webRoot || '';
+    var URL_PREFIX = root.dataset.urlPrefix || '';
+
+    // Which locale writes a date, and which zone it is read in. Both come
+    // from DateContextService, the same source the Vue bundle reads through
+    // initial state — `lang` on <html> is Nextcloud's *language*, which is a
+    // different setting and formats dates wrongly for anyone whose UI
+    // language and locale differ.
+    //
+    // This surface cannot import src/lib/localDate.js: it is server-rendered
+    // vanilla JS with no module loader (the same constraint Track C5 records
+    // for its strings). The three helpers below mirror that module and must
+    // be changed with it.
+    var LOCALE = root.dataset.locale || undefined;
+    var TIMEZONE = root.dataset.timezone || '';
 
     var params       = new URLSearchParams(window.location.search);
     var viewMode     = params.get('view') || '1W';
@@ -767,7 +793,33 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
 
     var allEvents = [];
 
-    function fmtDate(d, opts) { return new Intl.DateTimeFormat(undefined, opts).format(d); }
+    /** opts + the reader's zone, without mutating the caller's object. */
+    function withZone(opts, zone) {
+        var out = {}, k;
+        for (k in opts) {
+            if (Object.prototype.hasOwnProperty.call(opts, k)) out[k] = opts[k];
+        }
+        if (zone) out.timeZone = zone;
+        return out;
+    }
+
+    /** An instant, in the reader's locale and zone. */
+    function fmtDate(d, opts) {
+        return new Intl.DateTimeFormat(LOCALE, withZone(opts, TIMEZONE)).format(d);
+    }
+
+    /**
+     * A floating calendar day, in the reader's locale but through UTC so no
+     * zone can move it. TimelineService emits `format('c')` for every event
+     * and flags all-day separately, so an all-day value arrives already
+     * pinned at midnight — its date part is the answer, and re-reading it in
+     * a zone west of Greenwich would report the previous day.
+     */
+    function fmtIsoDay(iso, opts) {
+        var ms = Date.parse(String(iso).slice(0, 10) + 'T00:00:00Z');
+        if (isNaN(ms)) return String(iso);
+        return new Intl.DateTimeFormat(LOCALE, withZone(opts, 'UTC')).format(new Date(ms));
+    }
     function esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -777,11 +829,20 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
     // popover hrefs. Everything else — javascript:, data:, vbscript:, and
     // protocol-relative //host — is dropped so a crafted event URL can never
     // execute script or navigate off-origin when a chip is activated.
+    //
+    // A surviving relative URL is web-root relative, not origin relative: the
+    // API hands back '/apps/deck/board/…'. Used as-is it lands at the domain
+    // root, which is the wrong host path on a sub-directory install and skips
+    // the front controller where pretty URLs are off (GitHub #91). '/index.php/…'
+    // is accepted too — IntegrationService documents it as a legal stored shape —
+    // and needs the web root only, since it carries the front controller itself.
     function safeHref(u) {
         if (u == null) return null;
         var s = String(u).trim();
         if (/^https?:\/\//i.test(s)) return s;
-        if (s.charAt(0) === '/' && s.charAt(1) !== '/') return s;
+        if (s.charAt(0) === '/' && s.charAt(1) !== '/') {
+            return (s.indexOf('/index.php/') === 0 ? WEB_ROOT : URL_PREFIX) + s;
+        }
         return null;
     }
     function trunc(s, n) { return s.length > n ? s.slice(0, n) + '…' : s; }
@@ -794,7 +855,7 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
         overlay.textContent = 'Loading…';
         overlay.style.display = '';
 
-        var url = API_BASE + '/apps/teamhub/api/v1/teams/' + TEAM_ID + '/timeline?from=' + from + '&to=' + to;
+        var url = API_URL + '?from=' + from + '&to=' + to;
         fetch(url, { credentials: 'same-origin' })
             .then(function (res) {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1511,7 +1572,7 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
 
         var timeLabel = '';
         if (showTime) {
-            timeLabel = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(ev.date));
+            timeLabel = fmtDate(new Date(ev.date), { hour: '2-digit', minute: '2-digit' });
         }
 
         var overdueHtml = (ev.source === 'deck' && ev.type === 'due' && ev.meta && ev.meta.overdue)
@@ -1796,14 +1857,16 @@ html, body { height: 100%; background: var(--nc-bg); color: var(--nc-text); font
         var dOpts = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
         var tOpts = { hour: '2-digit', minute: '2-digit' };
 
-        var startDate = start.toLocaleDateString(undefined, dOpts);
-        if (ev.allDay) return startDate;
+        // An all-day event is a calendar day, so it never goes through the
+        // reader's zone — see fmtIsoDay.
+        if (ev.allDay) return fmtIsoDay(ev.date, dOpts);
 
-        var startTime = start.toLocaleTimeString(undefined, tOpts);
+        var startDate = fmtDate(start, dOpts);
+        var startTime = fmtDate(start, tOpts);
         if (!end) return startDate + ' · ' + startTime;
 
-        var endDate = end.toLocaleDateString(undefined, dOpts);
-        var endTime = end.toLocaleTimeString(undefined, tOpts);
+        var endDate = fmtDate(end, dOpts);
+        var endTime = fmtDate(end, tOpts);
         if (startDate === endDate) {
             return startDate + ' · ' + startTime + ' – ' + endTime;
         }

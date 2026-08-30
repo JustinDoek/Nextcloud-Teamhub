@@ -1,6 +1,6 @@
 {
   "name": "teamhub",
-  "version": "4.7.1",
+  "version": "4.8.0",
   "description": "Team collaboration hub for Nextcloud",
   "scripts": {
     "clean:chunks": "node -e \"require('fs').rmSync('js/chunks',{recursive:true,force:true})\"",
@@ -11,6 +11,8 @@
     "watch": "vite build --mode development --watch",
     "integrity": "node scripts/generate-integrity.js",
     "check:l10n": "node scripts/check-l10n.js",
+    "check:dates": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-localdate.js",
+    "check:markdown-list": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-markdown-list.js",
     "deploy:aio": "npm run build && node scripts/deploy-to-aio.js",
     "publish:release": "npm run build && node scripts/publish-to-release.js"
   },

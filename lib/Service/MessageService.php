@@ -122,6 +122,9 @@ class MessageService {
         DecisionService $decisionService,
         \OCA\TeamHub\Db\MessageAttachmentMapper $attachmentMapper,
         TalkService $talkService,
+        // v4.7.5 — message create/edit/delete reach the team's audit stream.
+        // Promoted rather than assigned below, matching the newer services.
+        private AuditService $auditService,
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -232,9 +235,17 @@ class MessageService {
             if (!empty($m['author_id'])) {
                 $uids[$m['author_id']] = true;
             }
+            // v4.7.4 — the editor too, so the footer can name them. Usually
+            // the author, so this adds no lookup in the common case.
+            if (!empty($m['edited_by'])) {
+                $uids[$m['edited_by']] = true;
+            }
         }
         if ($pinned && !empty($pinned['author_id'])) {
             $uids[$pinned['author_id']] = true;
+        }
+        if ($pinned && !empty($pinned['edited_by'])) {
+            $uids[$pinned['edited_by']] = true;
         }
         $nameMap = [];
         foreach (array_keys($uids) as $uid) {
@@ -247,10 +258,19 @@ class MessageService {
         }
         foreach ($messages as &$m) {
             $m['author_display_name'] = $nameMap[$m['author_id'] ?? ''] ?? ($m['author_id'] ?? '');
+            // Null rather than a fallback: absent means "never edited", and
+            // the footer keys off that. An empty string would render a
+            // footer crediting nobody.
+            $m['edited_by_display_name'] = !empty($m['edited_by'])
+                ? ($nameMap[$m['edited_by']] ?? $m['edited_by'])
+                : null;
         }
         unset($m);
         if ($pinned) {
             $pinned['author_display_name'] = $nameMap[$pinned['author_id'] ?? ''] ?? ($pinned['author_id'] ?? '');
+            $pinned['edited_by_display_name'] = !empty($pinned['edited_by'])
+                ? ($nameMap[$pinned['edited_by']] ?? $pinned['edited_by'])
+                : null;
         }
 
         return [
@@ -418,6 +438,23 @@ class MessageService {
                 ]);
             }
 
+            // v4.7.5 — audit. Identifiers and flags only, never the subject or
+            // body: SKILLS.md § Security standards forbids user content in
+            // logs, and the audit stream is read by admins who are not
+            // necessarily members of the team. The message id is the handle.
+            $this->auditService->log(
+                $teamId,
+                'message.created',
+                $user->getUID(),
+                'message',
+                (string)($messageData['id'] ?? ''),
+                [
+                    'message_type' => $messageType,
+                    'priority'     => $priority,
+                    'is_public'    => $isPublic,
+                ],
+            );
+
             // v4.0.0 — include the author's display name so MessageStream
             // renders the fresh post with the same author label the listing
             // endpoint returns (avoids a flash of the raw UID before the
@@ -432,7 +469,14 @@ class MessageService {
     }
 
     /**
-     * Update an existing message
+     * Update an existing message.
+     *
+     * v4.7.4 — the author is no longer the only one who can. A member at or
+     * above the team's `manageMinLevel` may edit anybody's message, so an
+     * owner can correct a post whose author has left or is unreachable.
+     * The author keeps their own rights whatever the setting says: raising
+     * the floor grants moderation power, it does not take away the ability
+     * to fix your own typo.
      */
     public function updateMessage(string $teamId, int $messageId, string $subject, string $message): array {
         $user = $this->userSession->getUser();
@@ -447,10 +491,26 @@ class MessageService {
         if ((string)($existing['team_id'] ?? '') !== $teamId) {
             throw new NotFoundException('Message not found in this team');
         }
-        if ($existing['author_id'] !== $user->getUID()) {
-            throw new AccessDeniedException('Only the author can edit this message');
+        $uid = $user->getUID();
+        if ($existing['author_id'] !== $uid && !$this->canManageMessages($teamId, $uid)) {
+            throw new AccessDeniedException('You do not have permission to edit this message');
         }
-        $updated = $this->messageMapper->update($messageId, $subject, $message);
+        $updated = $this->messageMapper->update($messageId, $subject, $message, $uid);
+
+        // v4.7.5 — audit. `by_moderator` is the row that matters: an author
+        // fixing their own typo is routine, somebody else rewriting their
+        // post is the thing an admin reads this stream to find.
+        $this->auditService->log(
+            $teamId,
+            'message.updated',
+            $uid,
+            'message',
+            (string)$messageId,
+            [
+                'author_id'    => (string)($existing['author_id'] ?? ''),
+                'by_moderator' => ((string)($existing['author_id'] ?? '')) !== $uid,
+            ],
+        );
 
         // Re-send mention notifications for the updated body.
         // We don't re-notify the whole team — only newly mentioned users.
@@ -481,12 +541,33 @@ class MessageService {
         }
 
         // Author can always delete their own message.
-        // Team admin/owner can delete any message (moderation).
-        if ($existing['author_id'] !== $user->getUID()) {
-            $this->memberService->requireAdminLevel($teamId);
+        // v4.7.4 — moderation of somebody else's message is the team's
+        // `manageMinLevel` rather than a hard-coded admin check. The default
+        // is 'admin', so a team that never touches the setting keeps exactly
+        // the behaviour it had.
+        $uid = $user->getUID();
+        if ($existing['author_id'] !== $uid && !$this->canManageMessages($teamId, $uid)) {
+            throw new AccessDeniedException('You do not have permission to delete this message');
         }
 
         $this->messageMapper->delete($messageId);
+
+        // v4.7.5 — audit. Logged after the delete succeeds, so the stream
+        // never claims a removal that did not happen. The message id no
+        // longer resolves to a row, which is exactly why the author and the
+        // moderation flag are recorded here.
+        $this->auditService->log(
+            $teamId,
+            'message.deleted',
+            $uid,
+            'message',
+            (string)$messageId,
+            [
+                'author_id'    => (string)($existing['author_id'] ?? ''),
+                'message_type' => (string)($existing['messageType'] ?? ''),
+                'by_moderator' => ((string)($existing['author_id'] ?? '')) !== $uid,
+            ],
+        );
     }
 
     /**
@@ -813,7 +894,7 @@ class MessageService {
         }
 
         // Check caller's member level against the per-team (or global) threshold
-        $requiredLevel = $this->getPinMinLevel($teamId);
+        $requiredLevel = $this->getManageMinLevel($teamId);
         $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
         if ($callerLevel < $requiredLevel) {
             throw new \Exception('Insufficient permissions to pin messages');
@@ -838,7 +919,7 @@ class MessageService {
             throw new \Exception('Message does not belong to this team');
         }
 
-        $requiredLevel = $this->getPinMinLevel($teamId);
+        $requiredLevel = $this->getManageMinLevel($teamId);
         $callerLevel = $this->getMemberLevel($teamId, $user->getUID());
         if ($callerLevel < $requiredLevel) {
             throw new \Exception('Insufficient permissions to unpin messages');
@@ -855,22 +936,48 @@ class MessageService {
     }
 
     /**
-     * Return the minimum Circles level required to pin for a specific team.
-     * Reads per-team key first, falls back to global app-level setting.
+     * The minimum Circles level required to *moderate* a team's message
+     * stream: pin or unpin any message, and edit or delete a message or
+     * comment written by somebody else (v4.7.4).
+     *
      * Levels: member=1, moderator=4, admin=8.
+     *
+     * ── Why this replaced `pinMinLevel` rather than joining it ───────────
+     *
+     * Before 4.7.3 the two halves disagreed: pinning read `pinMinLevel_*`
+     * (default moderator), while deleting someone else's message was
+     * hard-coded to admin and editing it was impossible for anybody. Merging
+     * them under the *existing* key would have handed every team still on the
+     * moderator default the power to delete any message the moment they
+     * upgraded — a privilege escalation delivered by a version bump, which
+     * nobody would have been told about.
+     *
+     * So this is a new key with its own default of `admin`, and the old
+     * `pinMinLevel_*` values are deliberately not read. Deletion keeps
+     * exactly the gate it had; pinning tightens to admin until a team admin
+     * lowers this setting, and lowering it is then an informed act because
+     * the settings row says what it now covers. The stale `pinMinLevel_*`
+     * rows are left in `oc_appconfig` rather than deleted: they are inert,
+     * and keeping them makes a rollback to 4.7.2 lossless.
      */
-    private function getPinMinLevel(string $teamId = ''): int {
-        $setting = $teamId
-            ? $this->config->getAppValue(Application::APP_ID, 'pinMinLevel_' . $teamId, '')
-            : '';
-        if ($setting === '') {
-            $setting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
-        }
+    private function getManageMinLevel(string $teamId): int {
+        $setting = $this->config->getAppValue(Application::APP_ID, 'manageMinLevel_' . $teamId, 'admin');
         return match($setting) {
-            'member' => 1,
-            'admin'  => 8,
-            default  => 4,
+            'member'    => 1,
+            'moderator' => 4,
+            default     => 8,
         };
+    }
+
+    /**
+     * Does the current user clear this team's moderation floor?
+     *
+     * Public because CommentController needs the same answer for comments,
+     * and one implementation of "who may moderate here" is the whole point —
+     * HANDOFF §00sec records what six different gate idioms cost to audit.
+     */
+    public function canManageMessages(string $teamId, string $userId): bool {
+        return $this->getMemberLevel($teamId, $userId) >= $this->getManageMinLevel($teamId);
     }
 
     /**
@@ -894,15 +1001,15 @@ class MessageService {
      * post comments on a message. Default 'member' — any team member.
      */
     public function getMessageSettings(string $teamId): array {
-        $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel_' . $teamId, '');
-        if ($pinSetting === '') {
-            $pinSetting = $this->config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator');
-        }
+        // v4.7.4 — `manageMinLevel` replaces `pinMinLevel` in this payload.
+        // See getManageMinLevel() for why it is a new key with its own
+        // default rather than the old one widened.
+        $manageSetting  = $this->config->getAppValue(Application::APP_ID, 'manageMinLevel_'  . $teamId, 'admin');
         $postSetting    = $this->config->getAppValue(Application::APP_ID, 'postMinLevel_'    . $teamId, 'member');
         $linkSetting    = $this->config->getAppValue(Application::APP_ID, 'linkMinLevel_'    . $teamId, 'admin');
         $commentSetting = $this->config->getAppValue(Application::APP_ID, 'commentMinLevel_' . $teamId, 'member');
         return [
-            'pinMinLevel'         => $pinSetting,
+            'manageMinLevel'      => $manageSetting,
             'postMinLevel'        => $postSetting,
             'linkMinLevel'        => $linkSetting,
             'commentMinLevel'     => $commentSetting,
@@ -913,8 +1020,11 @@ class MessageService {
 
     /**
      * Save per-team message settings.
-     * Accepts pinMinLevel, postMinLevel, linkMinLevel, and commentMinLevel,
+     * Accepts manageMinLevel, postMinLevel, linkMinLevel, and commentMinLevel,
      * all as strings: 'member'|'moderator'|'admin'.
+     * v4.7.4 — `pinMinLevel` became `manageMinLevel`, which now also governs
+     * editing and deleting somebody else's message or comment. It is a new
+     * app-config key with its own 'admin' default; see getManageMinLevel().
      * v4.2.11 — also accepts allowPublicMessages (bool) — admin-only toggle
      * for whether the compose form exposes the Public checkbox.
      * v4.3.1 — added commentMinLevel to gate CommentController::createComment.
@@ -925,10 +1035,10 @@ class MessageService {
      *
      * @param array<string,bool>|null $commentsEnabled
      */
-    public function saveMessageSettings(string $teamId, string $pinMinLevel, string $postMinLevel, string $linkMinLevel = 'admin', bool $allowPublicMessages = false, string $commentMinLevel = 'member', ?array $commentsEnabled = null): void {
+    public function saveMessageSettings(string $teamId, string $manageMinLevel, string $postMinLevel, string $linkMinLevel = 'admin', bool $allowPublicMessages = false, string $commentMinLevel = 'member', ?array $commentsEnabled = null): void {
         $valid = ['member', 'moderator', 'admin'];
-        if (!in_array($pinMinLevel, $valid, true)) {
-            throw new \InvalidArgumentException('Invalid pinMinLevel: ' . $pinMinLevel);
+        if (!in_array($manageMinLevel, $valid, true)) {
+            throw new \InvalidArgumentException('Invalid manageMinLevel: ' . $manageMinLevel);
         }
         if (!in_array($postMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid postMinLevel: ' . $postMinLevel);
@@ -939,7 +1049,7 @@ class MessageService {
         if (!in_array($commentMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid commentMinLevel: ' . $commentMinLevel);
         }
-        $this->config->setAppValue(Application::APP_ID, 'pinMinLevel_'     . $teamId, $pinMinLevel);
+        $this->config->setAppValue(Application::APP_ID, 'manageMinLevel_'  . $teamId, $manageMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'postMinLevel_'    . $teamId, $postMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'linkMinLevel_'    . $teamId, $linkMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'commentMinLevel_' . $teamId, $commentMinLevel);
