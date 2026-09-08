@@ -113,6 +113,18 @@ class LicenseService {
     private const CFG_LAST_TELEMETRY_AT      = 'license_last_telemetry_at';
     private const CFG_LAST_TELEMETRY_PAYLOAD = 'license_last_telemetry_payload';
 
+    /**
+     * `getStatus()`'s result for the rest of this request (v4.8.31).
+     *
+     * It is not a cheap call — it verifies an RS256 signature and runs
+     * `countLicensedSeats()`, which is a database aggregate over
+     * `circles_membership` — and it is uncached, so every caller in a request
+     * paid the whole thing again. Nothing depended on that; the licence cannot
+     * change mid-request except through `saveKey()` / `clearKey()`, and both
+     * clear this.
+     */
+    private ?array $statusMemo = null;
+
     public function __construct(
         private IConfig          $config,
         private IDBConnection    $db,
@@ -157,6 +169,34 @@ class LicenseService {
      * }
      */
     public function getStatus(): array {
+        if ($this->statusMemo !== null) {
+            return $this->statusMemo;
+        }
+
+        return $this->statusMemo = $this->computeStatus();
+    }
+
+    /**
+     * True when a licence key is stored at all — one appconfig read, no
+     * signature check and no database query (v4.8.31).
+     *
+     * **Not an authorisation check and must never be used as one.** It says
+     * nothing about whether the key is valid, bound to this instance, or
+     * expired past its grace window; a soft-locked instance answers true.
+     *
+     * It exists for one job: letting a hot path skip `getStatus()` on the
+     * instances where the answer is certain. `FilesScriptsListener` runs on
+     * every Files-app page load for every user, including users in no team,
+     * and its contract is that an instance not using file reviews pays nothing
+     * for them. An instance with no key can be answered from a single config
+     * read; one with a key pays the real check, and is the only kind that could
+     * have the feature anyway.
+     */
+    public function hasLicenseKey(): bool {
+        return $this->config->getAppValue(Application::APP_ID, self::CFG_JWT, '') !== '';
+    }
+
+    private function computeStatus(): array {
         $now = time();
         $instanceUuid = $this->getInstanceUuid();
         $seatsUsed    = $this->countLicensedSeats();
@@ -255,9 +295,17 @@ class LicenseService {
     }
 
     /**
-     * Enforcement level as a short string. Cheap — reads from getStatus's
-     * result. Callers should treat 'grace' and 'none' the same for
-     * READ paths (both allow read) but distinct for the banner UI.
+     * Enforcement level as a short string.
+     *
+     * Callers should treat 'grace' and 'none' the same for READ paths (both
+     * allow read) but distinct for the banner UI.
+     *
+     * **This used to say "cheap".** It is not: it reads `getStatus()`, which
+     * verifies an RS256 signature and counts licensed seats through a database
+     * aggregate. Since v4.8.31 that result is memoised per request, so calling
+     * this more than once in a request is free — but the first call is not, and
+     * a hot path that runs on every page load of somebody else's app should
+     * gate on `hasLicenseKey()` before reaching for it.
      */
     public function getEnforcementLevel(): string {
         return $this->getStatus()['enforcementLevel'];
@@ -343,6 +391,9 @@ class LicenseService {
         $jwt = trim($jwt);
         $claims = $this->verifyJwt($jwt);  // throws on any failure
         $this->config->setAppValue(Application::APP_ID, self::CFG_JWT, $jwt);
+        // The request that saves a key goes on to render the admin panel from
+        // the new state; a memo from before the write would show the old one.
+        $this->statusMemo = null;
         return $claims;
     }
 
@@ -357,6 +408,7 @@ class LicenseService {
      */
     public function clearKey(): void {
         $this->config->deleteAppValue(Application::APP_ID, self::CFG_JWT);
+        $this->statusMemo = null;
     }
 
     /** Nextcloud's install-time immutable instance identifier. */

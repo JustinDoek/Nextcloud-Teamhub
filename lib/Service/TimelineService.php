@@ -1240,7 +1240,7 @@ class TimelineService {
      *
      * Undated milestones (milestoneDate === null) are never returned here
      * — there is no x-position to plot them at. They remain visible in
-     * Manage Team → Integration settings until an admin sets a date.
+     * Manage Team → Module settings until an admin sets a date.
      *
      * @return array<int, array<string, mixed>>
      */

@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace OCA\TeamHub\MyWork\Provider;
 
 use OCA\TeamHub\AppInfo\Application;
-use OCA\TeamHub\Db\TeamAppResourceMapper;
 use OCA\TeamHub\MyWork\ActionResult;
 use OCA\TeamHub\MyWork\ActionType;
 use OCA\TeamHub\MyWork\Category;
@@ -14,12 +13,11 @@ use OCA\TeamHub\MyWork\Priority;
 use OCA\TeamHub\MyWork\WorkItem;
 use OCA\TeamHub\MyWork\WorkItemPage;
 use OCA\TeamHub\MyWork\WorkQuery;
-use OCA\TeamHub\Service\GroupFolderService;
 use OCA\TeamHub\Service\MyWorkConfigService;
+use OCA\TeamHub\Service\TeamFileScopeService;
 use OCP\App\IAppManager;
 use OCP\Comments\ICommentsManager;
 use OCP\DB\QueryBuilder\IQueryBuilder;
-use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use OCP\IDBConnection;
@@ -108,8 +106,10 @@ class ApprovalWorkProvider implements IWorkProvider {
         private IUserManager $userManager,
         private IGroupManager $groupManager,
         private IRootFolder $rootFolder,
-        private TeamAppResourceMapper $resourceMapper,
-        private GroupFolderService $groupFolderService,
+        // v4.8.18 — replaces the TeamAppResourceMapper + GroupFolderService
+        // pair this class used to resolve team folders with directly. The
+        // resolution moved out wholesale; see TeamFileScopeService.
+        private TeamFileScopeService $fileScope,
         private MyWorkConfigService $config,
         private ICommentsManager $commentsManager,
         private ContainerInterface $container,
@@ -1045,127 +1045,17 @@ class ApprovalWorkProvider implements IWorkProvider {
      * is dropped — the source app's authorisation and TeamHub's team check
      * both have to pass, which is exactly the specification's rule.
      *
+     * v4.8.18 — the resolution itself moved to TeamFileScopeService, because
+     * file reviews need the same answer and a second copy of these rules would
+     * have drifted. Behaviour is unchanged, including the silent drop of a
+     * deleted or revoked resource. This method survives as the WorkQuery-shaped
+     * door onto the service so every call site in this class stays as it was.
+     *
      * @param int[] $fileIds
      * @return array<int, array{teamId:string, others:string[], node:Node}>
      */
     private function mapFilesToTeams(WorkQuery $query, array $fileIds): array {
-        if ($fileIds === []) {
-            return [];
-        }
-
-        try {
-            $userFolder = $this->rootFolder->getUserFolder($query->userId);
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][MyWork][Approval] No user folder', [
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return [];
-        }
-
-        // teamId => list of folder paths, resolved once.
-        $teamFolders = [];
-        foreach ($query->teamIds as $teamId) {
-            foreach ($this->teamFolderPaths($teamId, $query->userId, $userFolder) as $path) {
-                $teamFolders[$teamId][] = $path;
-            }
-        }
-        if ($teamFolders === []) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($fileIds as $fileId) {
-            try {
-                $node = $userFolder->getFirstNodeById($fileId);
-            } catch (\Throwable) {
-                $node = null;
-            }
-            if ($node === null) {
-                // Not reachable by this user: a deleted or revoked resource.
-                // Silently dropping it is the correct handling of the
-                // specification's "correctly handle deleted or revoked
-                // resources" requirement.
-                continue;
-            }
-
-            $path    = rtrim($node->getPath(), '/');
-            $primary = null;
-            $others  = [];
-
-            foreach ($teamFolders as $teamId => $paths) {
-                foreach ($paths as $folderPath) {
-                    if ($path === $folderPath || str_starts_with($path . '/', $folderPath . '/')) {
-                        if ($primary === null) {
-                            $primary = (string)$teamId;
-                        } elseif ($primary !== (string)$teamId && !in_array((string)$teamId, $others, true)) {
-                            $others[] = (string)$teamId;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if ($primary === null) {
-                continue;
-            }
-
-            $out[$fileId] = ['teamId' => $primary, 'others' => $others, 'node' => $node];
-        }
-
-        return $out;
-    }
-
-    /**
-     * Absolute paths of a team's registered Files resources, in the calling
-     * user's own view of the file tree.
-     *
-     * @return string[]
-     */
-    private function teamFolderPaths(string $teamId, string $userId, Folder $userFolder): array {
-        $paths = [];
-
-        try {
-            $rows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'files');
-        } catch (\Throwable) {
-            return [];
-        }
-
-        foreach ($rows as $row) {
-            $resourceId = (string)$row->getResourceId();
-
-            // Group folder: 'gf:{folderId}'. Resolve the mount point, then the
-            // node — group folders are mounted at the root of every member's
-            // tree under that name.
-            if (str_starts_with($resourceId, 'gf:')) {
-                $meta = $this->groupFolderService->resolveGroupFolderResourceId($resourceId);
-                if ($meta === null) {
-                    continue;
-                }
-                try {
-                    if ($userFolder->nodeExists($meta['mount_point'])) {
-                        $paths[] = rtrim($userFolder->get($meta['mount_point'])->getPath(), '/');
-                    }
-                } catch (\Throwable) {
-                    // Not mounted for this user — they are not in the folder.
-                }
-                continue;
-            }
-
-            $fileId = (int)$resourceId;
-            if ($fileId <= 0) {
-                continue;
-            }
-            try {
-                $node = $userFolder->getFirstNodeById($fileId);
-                if ($node !== null) {
-                    $paths[] = rtrim($node->getPath(), '/');
-                }
-            } catch (\Throwable) {
-                // Folder gone or not shared with this user.
-            }
-        }
-
-        return $paths;
+        return $this->fileScope->mapFilesToTeams($query->userId, $query->teamIds, $fileIds);
     }
 
     /**

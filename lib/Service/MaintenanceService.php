@@ -48,6 +48,17 @@ class MaintenanceService {
         // is drafted for the person clicking to read and edit in their own
         // compose window, not sent to somebody else.
         private IL10N              $l,
+        // v4.8.7 (GitHub #95) — the admin removal path drops the removed
+        // user's message subscriptions, same as the two MemberService paths.
+        // Injected directly rather than resolved from the container: it
+        // depends on MemberService, which does not depend back on this
+        // service, so there is no cycle to avoid here.
+        private MessageSubscriptionService $subscriptionService,
+        // v4.8.15 — the Compliance tab's profile-conformance row. PolicyService
+        // depends only on its four mappers, AuditService and framework
+        // interfaces, so this adds a leaf edge and no cycle; `npm run check:di`
+        // is what proves that rather than this comment.
+        private PolicyService      $policyService,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -255,6 +266,21 @@ class MaintenanceService {
                 ]);
             }
 
+            // ── Step 5c: template and profile, with conformance (v4.8.15) ────
+            // One batch for the page, on the same terms as the expiry block
+            // above and degrading the same way: this is governance metadata, and
+            // an admin who came here to reassign an owner should still get their
+            // table if the comparison fails. Cost is four reads for the page, not
+            // per row — see PolicyService::compareTeams().
+            $classification = [];
+            try {
+                $classification = $this->policyService->classificationForTeams($pageIds);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MaintenanceService] Policy classification lookup failed for teams grid', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
             // ── Step 6: assemble ──────────────────────────────────────────────
             $teams = [];
             foreach ($page_rows as $r) {
@@ -274,6 +300,13 @@ class MaintenanceService {
                     // Collaboration and Project yes, Department and legacy no.
                     'expiry_eligible'    => $expiryEligible[$r['_id']] ?? false,
                     'expiry_request_pending' => isset($pendingRequests[$r['_id']]),
+                    // v4.8.15 — { profileKey, profileLabel, profileSeeded,
+                    // compliant, driftedFields, templateKey, templateLabel,
+                    // templateSeeded }, or null for a team with neither. Labels
+                    // are the STORED ones; the frontend translates a seeded key
+                    // and shows a renamed label as the admin typed it, which is
+                    // the rule PolicyAdminPanel already applies.
+                    'classification'     => $classification[$r['_id']] ?? null,
                     // v4.6.17 — where the Email owner button goes, or null when
                     // the team has no owner or the owner has no address. The
                     // frontend hides the button on null rather than offering one
@@ -287,24 +320,6 @@ class MaintenanceService {
                         $expiry[$r['_id']] ?? null,
                     ),
                 ];
-            }
-
-            // v4.8.0 — Nextcloud tags for the rows on this page.
-            //
-            // Two queries for the whole page rather than one per row, and only
-            // for the page: `$perPage` is clamped above, so this never walks
-            // the instance. Resolved through the container for the same reason
-            // the docblock above gives for injecting carefully — TeamTagService
-            // reaches MemberService, and this constructor is already the one
-            // with a cycle warning on it.
-            if ($teams !== []) {
-                $tagsByTeam = $this->container->get(TeamTagService::class)->getTagsForTeams(
-                    array_map(static fn ($t) => (string)$t['id'], $teams),
-                );
-                foreach ($teams as &$t) {
-                    $t['tags'] = $tagsByTeam[$t['id']] ?? [];
-                }
-                unset($t);
             }
 
             return [
@@ -1866,9 +1881,19 @@ class MaintenanceService {
      * a first-hit sample string for the info popover. Called once per
      * Compliance-tab open.
      *
+     * v4.8.15 — carries `profile_compliance` too, so the tab's rows all arrive
+     * on one fetch and one refresh button. That block is the only part of this
+     * payload with a licence dimension: `TRACK-F2-DESIGN.md` §5.4 makes drift
+     * detection the licensed half of Track F. **The gate is the Compliance tab's
+     * existing one** — `complianceUnlocked` hides every check on the tab behind
+     * the licence banner, this block included — rather than a second gate on
+     * this endpoint, which would be the only per-block gate in the payload and
+     * would make an unlicensed instance see four checks and one error.
+     *
      * @return array{
-     *     ghost_memberships: array{count: int, sample_uid: string|null},
-     *     orphan_teams:      array{count: int, sample_name: string|null}
+     *     ghost_memberships:  array{count: int, sample_uid: string|null},
+     *     orphan_teams:       array{count: int, sample_name: string|null},
+     *     profile_compliance: array<string,mixed>
      * }
      */
     public function getComplianceSummary(): array {
@@ -1886,45 +1911,14 @@ class MaintenanceService {
                 'count'       => count($orphans),
                 'sample_name' => $orphans[0]['name'] ?? null,
             ],
-            // v4.8.0 — how much of the instance is classified, for the
-            // ISO 27001 A.5.12 / A.5.13 row on the Compliance tab.
-            'team_tags' => $this->getTeamTagCoverage(),
+            // Calls the gated reader rather than an ungated internal one, and
+            // that is safe here for the reason HANDOFF's 4.8.13 entry makes the
+            // exception for: both gates ask the *same* question (is the caller a
+            // Nextcloud administrator), so they cannot contradict each other.
+            // The failure that rule exists to prevent is two gates asking
+            // different questions inside one call.
+            'profile_compliance' => $this->policyService->complianceSummary(),
         ];
-    }
-
-    /**
-     * Teams carrying at least one Nextcloud tag, and how many teams exist.
-     *
-     * Two COUNTs, both indexed — `systag_objecttype` covers the first and the
-     * Circles table is small. It is deliberately a coverage ratio rather than
-     * a list: the Compliance tab reports whether classification is being
-     * applied at all, not which team carries what, and naming the classified
-     * teams in an admin summary would put the classification itself in a
-     * place that is easier to reach than the teams are.
-     *
-     * @return array{tagged: int, total: int}
-     */
-    private function getTeamTagCoverage(): array {
-        $qb = $this->db->getQueryBuilder();
-        $qb->selectAlias($qb->createFunction('COUNT(DISTINCT objectid)'), 'c')
-            ->from('systemtag_object_mapping')
-            ->where($qb->expr()->eq(
-                'objecttype',
-                $qb->createNamedParameter(TeamTagService::OBJECT_TYPE),
-            ));
-        $result = $qb->executeQuery();
-        $tagged = (int)($result->fetchOne() ?: 0);
-        $result->closeCursor();
-
-        $qb = $this->db->getQueryBuilder();
-        $qb->selectAlias($qb->createFunction('COUNT(*)'), 'c')
-            ->from('circles_circle')
-            ->where($qb->expr()->eq('source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)));
-        $result = $qb->executeQuery();
-        $total = (int)($result->fetchOne() ?: 0);
-        $result->closeCursor();
-
-        return ['tagged' => $tagged, 'total' => $total];
     }
 
     /**
@@ -2516,6 +2510,14 @@ class MaintenanceService {
         // rebuild is now the first half of reconcileTeamMembership().
         $this->resourceMembership->reconcileTeamMembership($teamId, 'admin_removed_user');
 
+        // v4.8.7 (GitHub #95) — drop the removed user's subscriptions to this
+        // team's non-public threads, matching the two MemberService paths.
+        // After the reconcile above, so the effective-membership test inside
+        // sees the final state: this method only removes a *direct* member
+        // row, and somebody who is also in the team through a group is still
+        // in it and keeps their subscriptions.
+        $this->subscriptionService->forgetTeamSubscriptions($teamId, $userId);
+
         // Audit log — surfaces in the per-team audit log shown elsewhere in this tab.
         $actor = $this->userSession->getUser();
         $this->auditService->log(
@@ -2667,5 +2669,184 @@ class MaintenanceService {
         ]);
 
         return true;
+    }
+
+    /**
+     * Levels the create-team wizard may hand out, below owner.
+     *
+     * Circles' ladder: 1 member, 4 moderator, 8 admin, 9 owner. Owner is absent
+     * on purpose — it is not set by writing a level, it is a transfer, and it
+     * goes through {@see self::assignOwner()}.
+     */
+    public const CREATION_LEVELS = [1, 4, 8];
+
+    /**
+     * Apply member roles, and hand the team over, at the end of creation.
+     *
+     * **Lives here, not on `MemberService`, and that is a dependency fact
+     * rather than a taste.** v4.8.7 first put it there and injected this
+     * service, which closed a cycle Nextcloud's DI container refuses to
+     * resolve: `MemberService → MaintenanceService → MessageSubscriptionService
+     * → MemberService`. The whole app failed to load. Both collaborators this
+     * method needs — `assignOwner()` and `adminSetMemberLevel()` — are already
+     * on this class, so the method belongs here and adds no edge at all.
+     *
+     * Two things happen, in this order and for a reason: levels first, then the
+     * transfer. `assignOwner()` demotes the outgoing owner to moderator, so
+     * running it first would have the level pass overwrite that.
+     *
+     * **The gate is "you own this team", not "you are an administrator"** —
+     * unlike everything else on this service. The creator holds level 9 because
+     * Circles made them owner, and handing over something you own is not an
+     * administrative act. It is also the only ownership-transfer path with
+     * real-world exercise behind it: HANDOFF records the one confirmed transfer
+     * as run by the outgoing owner, while the NC-admin path's impersonation is
+     * still unverified.
+     *
+     * **The appointed owner becomes a full member whether or not they accepted
+     * an invitation** (Justin, 2026-09-01). That needs no special code:
+     * `assignOwner()` already updates an existing row to `level 9, status
+     * Member` and inserts one for a user who has none, so an invitee still at
+     * `Invited` is carried through. It is called out because it quietly
+     * overrides the team's own join policy for exactly one person, and the
+     * audit row is the only place that shows.
+     *
+     * **The creator leaves the team when they hand it over** (Justin,
+     * 2026-09-02) — they are not demoted to moderator, their member row is
+     * deleted. Somebody provisioning teams to a company policy is not a member
+     * of the teams they set up, and demoting them leaves an administrator
+     * sitting in every team they ever created.
+     *
+     * The exception is the same one the CSV importer already applies: **unless
+     * they named themselves**. If the caller appears in `$roles` they asked to
+     * be on this team, so they stay. `TeamImportService` step 9 computes the
+     * identical flag from `adminIsNamed()`; this is that rule for the wizard,
+     * which is why `$roles` must carry **every** member and not only the ones
+     * being promoted — a creator who added themselves at plain Member level is
+     * still an intended member.
+     *
+     * No pending-deletion check: the team was created seconds ago by the caller
+     * asking for this, so it cannot be pending deletion.
+     *
+     * ⚠ **Ownership transfer is the most fragile path in this app.** HANDOFF
+     * §0000 documents a Circles/Talk bug live on the test instance that
+     * silently re-applies a stale membership event and undoes a level-9 write
+     * twenty minutes later. Nothing here can prevent that. Failures are
+     * reported per step rather than thrown, so a team is never left
+     * half-created because the handover did not stick.
+     *
+     * @param array<int, array{id: string, type?: string, level?: int}> $roles
+     *        **Every** member, not only the promoted ones — see the note on
+     *        the creator leaving. Level 1 entries are skipped for the write and
+     *        read only for that decision.
+     * @return array{levels: array<string,string>, owner: ?array{uid: string, status: string, creatorLeft?: bool, error?: string}}
+     */
+    public function applyCreationRoles(string $teamId, array $roles, string $newOwnerUid = ''): array {
+        $caller = $this->userSession->getUser();
+        if (!$caller) {
+            throw new \Exception('User not authenticated');
+        }
+        $callerUid = $caller->getUID();
+
+        // Owner check, read straight from Circles' own table — the same shape
+        // assignOwner() uses to find the outgoing owner a few lines up.
+        $lvlQb  = $this->db->getQueryBuilder();
+        $lvlRes = $lvlQb->select('level')
+            ->from('circles_member')
+            ->where($lvlQb->expr()->eq('circle_id', $lvlQb->createNamedParameter($teamId)))
+            ->andWhere($lvlQb->expr()->eq('user_id', $lvlQb->createNamedParameter($callerUid)))
+            ->andWhere($lvlQb->expr()->eq('user_type', $lvlQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $lvlRow = $lvlRes->fetch();
+        $lvlRes->closeCursor();
+
+        if (!$lvlRow || (int)$lvlRow['level'] < 9) {
+            throw new \Exception('Only the team owner can set roles while creating a team', 403);
+        }
+
+        $out = ['levels' => [], 'owner' => null];
+
+        // ── Levels ───────────────────────────────────────────────────────
+        foreach ($roles as $role) {
+            $id    = trim((string)($role['id'] ?? ''));
+            $type  = (string)($role['type'] ?? 'user');
+            $level = (int)($role['level'] ?? 1);
+
+            if ($id === '' || $level === 1) {
+                // Level 1 is what Circles already wrote on invite. Skipping it
+                // is not an optimisation — re-writing a level churns the row
+                // and the membership cache for no change.
+                continue;
+            }
+            if (!in_array($level, self::CREATION_LEVELS, true)) {
+                $out['levels'][$id] = 'invalid-level';
+                continue;
+            }
+            if ($type !== 'user') {
+                // Circles carries a level on a group row, but a group cannot
+                // act, so promoting one buys nothing and confuses the member
+                // list. Refused rather than silently ignored.
+                $out['levels'][$id] = 'not-a-user';
+                continue;
+            }
+
+            try {
+                $this->adminSetMemberLevel($teamId, $id, $level, false);
+                $out['levels'][$id] = 'ok';
+            } catch (\Throwable $e) {
+                $out['levels'][$id] = 'failed';
+                $this->logger->warning('[TeamHub][MaintenanceService] applyCreationRoles: level not set', [
+                    'teamId' => $teamId,
+                    'userId' => $id,
+                    'level'  => $level,
+                    'error'  => $e->getMessage(),
+                    'app'    => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // ── Handover ─────────────────────────────────────────────────────
+        $newOwnerUid = trim($newOwnerUid);
+        if ($newOwnerUid === '' || $newOwnerUid === $callerUid) {
+            return $out;
+        }
+
+        // Does the caller belong on this team in their own right? Only if they
+        // named themselves — as a member of any level, or as the new owner.
+        // Same question `TeamImportService::adminIsNamed()` asks.
+        $creatorIsIntendedMember = false;
+        foreach ($roles as $role) {
+            if ((string)($role['type'] ?? 'user') === 'user'
+                && trim((string)($role['id'] ?? '')) === $callerUid) {
+                $creatorIsIntendedMember = true;
+                break;
+            }
+        }
+        $removePreviousOwner = !$creatorIsIntendedMember;
+
+        try {
+            $this->assignOwner($teamId, $newOwnerUid, false, $removePreviousOwner);
+            $out['owner'] = [
+                'uid'    => $newOwnerUid,
+                'status' => 'transferred',
+                // The wizard needs this: once the creator has left, "Open team"
+                // would send them to a team they are no longer in.
+                'creatorLeft' => $removePreviousOwner,
+            ];
+        } catch (\Throwable $e) {
+            // Reported, never thrown: the team exists and is usable, and the
+            // creator is still its owner. Losing the whole creation because a
+            // handover failed would be the worse outcome.
+            $out['owner'] = ['uid' => $newOwnerUid, 'status' => 'failed', 'error' => $e->getMessage()];
+            $this->logger->error('[TeamHub][MaintenanceService] applyCreationRoles: ownership transfer failed', [
+                'teamId'   => $teamId,
+                'newOwner' => $newOwnerUid,
+                'error'    => $e->getMessage(),
+                'app'      => Application::APP_ID,
+            ]);
+        }
+
+        return $out;
     }
 }

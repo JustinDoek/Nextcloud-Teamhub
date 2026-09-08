@@ -5,10 +5,12 @@ namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
+use OCA\TeamHub\Constants\TeamApps;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Db\TeamAppMapper;
+use OCA\TeamHub\Db\TeamAppPresenceMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
@@ -54,6 +56,9 @@ class TeamService {
         private ActivityService      $activityService,
         private CollectivesService   $collectivesService,
         private TeamAppMapper        $teamAppMapper,
+        // v4.8.27 — the derived "which apps does this team have" reading behind
+        // getTeamAppPresence(). A DI leaf; it holds only IDBConnection.
+        private TeamAppPresenceMapper $appPresenceMapper,
         private IUserSession         $userSession,
         private IAppManager          $appManager,
         private ContainerInterface   $container,
@@ -64,6 +69,10 @@ class TeamService {
         private PendingDeletionMapper $pendingMapper,
         private GroupFolderService   $groupFolderService,
         private TeamTypeMapper       $teamTypeMapper,
+        // v4.8.4 — Track F2b. Read-only from here: PolicyService decides what a
+        // team's profile governs, this service owns the writes that apply it.
+        // Acyclic on purpose — PolicyService knows nothing about TeamService.
+        private PolicyService        $policyService,
     ) {
     }
 
@@ -1185,6 +1194,36 @@ class TeamService {
      * accepts TeamHub's own config changes while rejecting Collectives'. See
      * `CirclesConfig::SYSTEM_BITS_FORBIDDEN_ON_USER_TEAMS`.
      */
+    /**
+     * Write the team's profile into its Circles config (v4.8.4, Track F2b).
+     *
+     * Reads the team's current config and hands it straight back to
+     * `updateTeamConfig()`, whose overlay does the actual work. That looks
+     * redundant and is not: it means the governed bits are applied by exactly
+     * the same code path that enforces them on every later write, so there is
+     * one place that can be wrong instead of two.
+     *
+     * A no-op for an unclassified team — the overlay's mask is zero and the
+     * config is rewritten to what it already was.
+     */
+    public function applyPolicyConfig(string $teamId): void {
+        $db     = $this->container->get(\OCP\IDBConnection::class);
+        $qb     = $db->getQueryBuilder();
+        $result = $qb->select('config')
+            ->from('circles_circle')
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $result->fetch();
+        $result->closeCursor();
+
+        if ($row === false) {
+            return;
+        }
+
+        $this->updateTeamConfig($teamId, (int)$row['config'] & CirclesConfig::MANAGED_BITS);
+    }
+
     public function updateTeamConfig(string $teamId, int $config): void {
 
         $user = $this->userSession->getUser();
@@ -1213,6 +1252,25 @@ class TeamService {
 
         $currentConfig = (int)$row['config'];
         $newConfig     = ($currentConfig & ~$MANAGED_BITS) | ($config & $MANAGED_BITS);
+
+        // v4.8.4 — the team's profile wins, over every caller.
+        //
+        // This is the single choke point for the six MANAGED_BITS, which is why
+        // the overlay lives here rather than in each caller: the wizard, the
+        // Manage Team screen and the CSV importer all arrive through this
+        // method, and a governed bit has to stick for all three. Hiding the
+        // control in one of those UIs would produce no control at all —
+        // DESIGN §2.103 is the whole reason that sentence is in the product.
+        //
+        // Idempotent for the apply path itself: it passes the profile's own
+        // values, so overlaying them changes nothing and needs no bypass flag.
+        //
+        // Unclassified teams get a zero mask and are untouched, which is every
+        // team until an administrator assigns a profile.
+        $overlay = $this->policyService->configOverlayForTeam($teamId);
+        if ($overlay['mask'] !== 0) {
+            $newConfig = ($newConfig & ~$overlay['mask']) | ($overlay['value'] & $overlay['mask']);
+        }
 
         $updQb = $db->getQueryBuilder();
         $updQb->update('circles_circle')
@@ -1438,35 +1496,6 @@ class TeamService {
                 unset($t);
             }
 
-            // v4.8.0 — Nextcloud tags, batch-loaded like the types above.
-            //
-            // Members only, the same boundary `image_url` draws two fields
-            // up. Browse lists teams the viewer is not in, and a tag is a
-            // classification of the team — "Confidential" on a team you
-            // cannot open tells you something about it that the team never
-            // chose to publish. A non-member gets an empty list, not null,
-            // so the card renders no chip row rather than a broken one.
-            //
-            // Resolved through the container rather than the constructor,
-            // the same way this method already reaches IDBConnection: it
-            // keeps TeamTagService -> MemberService out of TeamService's
-            // constructor graph.
-            if ($teams !== []) {
-                $visibleIds = array_values(array_map(
-                    static fn ($t) => (string)$t['id'],
-                    array_filter($teams, static fn ($t) => $t['isMember'] === true),
-                ));
-
-                $tagsByTeam = $visibleIds === []
-                    ? []
-                    : $this->container->get(TeamTagService::class)->getTagsForTeams($visibleIds);
-
-                foreach ($teams as &$t) {
-                    $t['tags'] = $tagsByTeam[$t['id']] ?? [];
-                }
-                unset($t);
-            }
-
             return $teams;
 
         } catch (\Exception $e) {
@@ -1479,8 +1508,49 @@ class TeamService {
     // Team apps
     // =========================================================================
 
+    /**
+     * The raw `teamhub_team_apps` rows — stored toggles only.
+     *
+     * **Not the answer to "which apps does this team have."** Resource-backed
+     * apps stopped being written here when resources became registry-driven, so
+     * on most teams this returns nothing at all. Use `getTeamAppPresence()` for
+     * anything a person will read, and this only when you need the stored row
+     * itself (its `config` blob, or to preserve it across a write).
+     */
     public function getTeamApps(string $teamId): array {
         return $this->teamAppMapper->findByTeamId($teamId);
+    }
+
+    /**
+     * Which apps the team actually has, one row per canonical app (v4.8.27).
+     *
+     * Same row shape as `getTeamApps()` so the Manage Team screen keeps
+     * working, but **every** canonical app is present with a real `enabled`
+     * rather than only the ones carrying a stored toggle. That difference is
+     * the bug this fixes: the screen read the stored rows, found none, and fell
+     * back to `enabled = true` — so it showed every installed app as switched
+     * on for every team, whatever the team actually had.
+     *
+     * @return list<array{app_id: string, enabled: bool, config: mixed}>
+     */
+    public function getTeamAppPresence(string $teamId): array {
+        $present = $this->appPresenceMapper->presenceForTeams([$teamId])[$teamId] ?? [];
+
+        $configs = [];
+        foreach ($this->teamAppMapper->findByTeamId($teamId) as $row) {
+            $configs[TeamApps::canonical((string)$row['app_id'])] = $row['config'] ?? null;
+        }
+
+        $out = [];
+        foreach (TeamApps::CANONICAL as $appId) {
+            $out[] = [
+                'app_id'  => $appId,
+                'enabled' => in_array($appId, $present, true),
+                'config'  => $configs[$appId] ?? null,
+            ];
+        }
+
+        return $out;
     }
 
     public function updateTeamApps(string $teamId, array $apps): void {
@@ -1567,6 +1637,12 @@ class TeamService {
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',
             // Decisions module — default ON (v3.75.4). Same rationale as above.
             'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1',
+            // File reviews are no longer an administrator switch (v4.8.31).
+            // Whether they exist follows the licence, because a review's whole
+            // working life happens in My Work and My Work is licensed — a
+            // switched-on unlicensed instance could create reviews nobody could
+            // ever see. `FileReviewService::isEnabledGlobally()` is the one
+            // answer; there is deliberately no stored value to report here.
             // RoomVox API token: never return the token value itself, only a
             // boolean indicating whether one is configured. The admin can
             // overwrite it (write field) but can't read it back (read field).
@@ -1734,6 +1810,10 @@ class TeamService {
                 $settings['decisionsModuleEnabled'] ? '1' : '0'
             );
         }
+        // `fileReviewsModuleEnabled` was written here until v4.8.31. It is
+        // ignored now rather than accepted-and-discarded: an older admin bundle
+        // still posting the field gets the same answer as a current one, which
+        // is that the licence decides.
         if (isset($settings['onboardingChecklistDismissed'])) {
             $config->setAppValue(
                 Application::APP_ID,

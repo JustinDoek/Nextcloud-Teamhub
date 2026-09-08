@@ -55,6 +55,35 @@ class TeamTypeMapper {
     }
 
     /**
+     * Every team made from one template (v4.8.27).
+     *
+     * The propagation plan's population: when a template changes, these are the
+     * teams a deployment report has to account for, compliant or not.
+     *
+     * Unbounded, for the same reason `TeamPolicyMapper::findAllAssignments()`
+     * is: the count is the number of teams of that kind, and a `LIMIT` would
+     * silently under-report the population the report exists to enumerate.
+     *
+     * @return list<string> team ids
+     */
+    public function findTeamsByType(string $type): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('team_id')
+            ->from('teamhub_team_type')
+            ->where($qb->expr()->eq('type', $qb->createNamedParameter($type)))
+            ->orderBy('team_id', 'ASC');
+
+        $result = $qb->executeQuery();
+        $out = [];
+        while ($row = $result->fetch()) {
+            $out[] = (string)$row['team_id'];
+        }
+        $result->closeCursor();
+
+        return $out;
+    }
+
+    /**
      * Insert-or-update. team_id is PK so we do a DELETE-then-INSERT rather
      * than a portable upsert (NC apps target both MariaDB and Postgres; a
      * REPLACE INTO isn't portable and ON CONFLICT syntax differs between

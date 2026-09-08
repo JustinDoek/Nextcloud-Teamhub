@@ -247,6 +247,171 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            // v4.8.7 (GitHub #95) — a comment landed on a thread this
+            // recipient subscribed to. Rendered through $languageCode like the
+            // expiry cases above, rather than in hard-coded English like the
+            // older cases in this file: SKILLS.md § Translation standards
+            // requires a backend string sent to a specific user to be looked
+            // up in *that user's* language, and this is a new surface, so it
+            // starts correct rather than inheriting the gap.
+            case 'message_comment': {
+                $params     = $notification->getSubjectParameters();
+                $l          = $this->l10nFactory->get('teamhub', $languageCode);
+                $authorName = $params['author'] ?? $l->t('Someone');
+                $teamName   = $params['team']   ?? $l->t('a team');
+                $subject    = (string)($params['subject'] ?? '');
+
+                $richParams = [
+                    'author' => [
+                        'type' => 'user',
+                        'id'   => $params['authorId'] ?? $authorName,
+                        'name' => $authorName,
+                    ],
+                    'team' => [
+                        'type' => 'highlight',
+                        'id'   => $params['teamId'] ?? $teamName,
+                        'name' => $teamName,
+                    ],
+                ];
+
+                // `subject` is notnull on teamhub_messages, so the second
+                // branch should be unreachable — it exists because a
+                // notification that renders "commented on" with a blank space
+                // after it is worse than one that names the team instead.
+                if ($subject !== '') {
+                    $richParams['message'] = [
+                        'type' => 'highlight',
+                        'id'   => (string)($params['messageId'] ?? $subject),
+                        'name' => $subject,
+                    ];
+                    // TRANSLATORS: {author} is a person, {message} is the title of the team message they commented on
+                    $notification->setRichSubject($l->t('{author} commented on {message}'), $richParams);
+                    $notification->setParsedSubject(
+                        $l->t('%1$s commented on %2$s', [$authorName, $subject]),
+                    );
+                    // The team is the context that makes the title mean
+                    // something when two teams both have a "Weekly update".
+                    $notification->setRichMessage('{team}', [
+                        'team' => $richParams['team'],
+                    ]);
+                    $notification->setParsedMessage($teamName);
+                } else {
+                    // TRANSLATORS: shown when the team message has no title; {author} is a person, {team} is the team name
+                    $notification->setRichSubject($l->t('{author} commented on a message in {team}'), $richParams);
+                    $notification->setParsedSubject(
+                        $l->t('%1$s commented on a message in %2$s', [$authorName, $teamName]),
+                    );
+                }
+
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                // MessageSubscriptionService sets a ?team=…&message=… link so
+                // the bell lands on the thread rather than the team's home.
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+                return $notification;
+            }
+
+            // v4.8.18 — file reviews. Four subjects, all rendered through
+            // $languageCode like `message_comment` above rather than in
+            // hard-coded English like the oldest cases in this file.
+            //
+            // `file_review_closed` is the one that carries weight beyond
+            // courtesy: a reviewer who never completed loses the item from
+            // My Work the moment the requester closes, and this is the only
+            // thing that tells them it happened. See FileReviewWorkProvider.
+            case 'file_review_requested':
+            case 'file_review_completed':
+            case 'file_review_all_done':
+            case 'file_review_closed': {
+                $params    = $notification->getSubjectParameters();
+                $l         = $this->l10nFactory->get('teamhub', $languageCode);
+                $actorName = $params['actor'] ?? $l->t('Someone');
+                $fileName  = (string)($params['file'] ?? '');
+                $teamName  = $params['team'] ?? $l->t('a team');
+
+                // A review always has a file name — it is snapshotted on the
+                // row precisely so it survives the file being deleted — but a
+                // notification that renders an empty gap would be worse than
+                // one that says "a file", so the fallback stays.
+                if ($fileName === '') {
+                    $fileName = $l->t('a file');
+                }
+
+                $richParams = [
+                    'actor' => [
+                        'type' => 'user',
+                        'id'   => $params['actorId'] ?? $actorName,
+                        'name' => $actorName,
+                    ],
+                    'file' => [
+                        'type' => 'highlight',
+                        'id'   => (string)($params['fileId'] ?? $fileName),
+                        'name' => $fileName,
+                    ],
+                    'team' => [
+                        'type' => 'highlight',
+                        'id'   => $params['teamId'] ?? $teamName,
+                        'name' => $teamName,
+                    ],
+                ];
+
+                switch ($notification->getSubject()) {
+                    case 'file_review_requested':
+                        // TRANSLATORS: {actor} is a person, {file} is a file name — they want you to review that file
+                        $notification->setRichSubject($l->t('{actor} asked you to review {file}'), $richParams);
+                        $notification->setParsedSubject(
+                            $l->t('%1$s asked you to review %2$s', [$actorName, $fileName]),
+                        );
+                        break;
+
+                    case 'file_review_completed':
+                        // TRANSLATORS: {actor} is a person who finished reviewing {file}, a file name
+                        $notification->setRichSubject($l->t('{actor} completed the review of {file}'), $richParams);
+                        $notification->setParsedSubject(
+                            $l->t('%1$s completed the review of %2$s', [$actorName, $fileName]),
+                        );
+                        break;
+
+                    case 'file_review_all_done':
+                        // TRANSLATORS: every reviewer has now finished; {file} is a file name
+                        $notification->setRichSubject($l->t('All reviews of {file} are complete'), $richParams);
+                        $notification->setParsedSubject(
+                            $l->t('All reviews of %s are complete', [$fileName]),
+                        );
+                        break;
+
+                    default:
+                        // TRANSLATORS: {actor} is the person who asked for the review and has now ended it; {file} is a file name
+                        $notification->setRichSubject($l->t('{actor} closed the review of {file}'), $richParams);
+                        $notification->setParsedSubject(
+                            $l->t('%1$s closed the review of %2$s', [$actorName, $fileName]),
+                        );
+                        break;
+                }
+
+                // The team is the context that makes a file name mean
+                // something when two teams both have a "Budget.xlsx".
+                $notification->setRichMessage('{team}', ['team' => $richParams['team']]);
+                $notification->setParsedMessage($teamName);
+
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                // FileReviewService sets a ?mywork link so the bell lands on
+                // the queue the item lives in.
+                if (!$notification->getLink()) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'teamhub.page.index'
+                    ));
+                }
+                return $notification;
+            }
+
             case 'license_over_seats':
                 // Fired by LicenseExpiryNotificationJob when unique-team-member
                 // count first crosses the licensed seat cap. Same notification

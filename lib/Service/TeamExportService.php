@@ -4,14 +4,11 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
-use OCA\TeamHub\Constants\TeamTemplateProfiles;
 use OCA\TeamHub\Db\ProjectMapper;
-use OCA\TeamHub\Db\TeamAppMapper;
-use OCA\TeamHub\Db\TeamAppResourceMapper;
+use OCA\TeamHub\Db\TeamPolicyMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\ValidationException;
-use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCP\IUserSession;
@@ -35,12 +32,20 @@ use Psr\Log\LoggerInterface;
  * member on re-import. The sample CSV looks like it uses display names only
  * because Nextcloud uids routinely contain capitals and spaces.
  *
- * **`apps` and `modules` are written explicitly, never left blank.** An empty
- * cell means "use the template's default" to the importer, not "none" — so
- * exporting a Project team that had Deck removed would silently put Deck back
- * on re-import. Every row therefore carries the full resolved list, or the
- * literal `none` when the team has nothing enabled. This is the one place the
- * export is deliberately more verbose than a hand-written file would be.
+ * **`apps` and `modules` are not written, because they are not columns any
+ * more (v4.8.25).** They were, and every row carried the full resolved list
+ * precisely so a re-import could not put back an app the team had removed.
+ * `TeamImportService` now takes both from the template, so there is nothing for
+ * the export to say: a re-imported team is provisioned from its template and
+ * filtered by its policy, which is what creating it through the wizard would
+ * have done too.
+ *
+ * **What replaced them is `policy`.** A re-import that dropped the
+ * classification would hand the team back its template's *default* profile
+ * rather than the one it carries — a team deliberately moved from Internal to
+ * Confidential would come back Internal, quietly. The cell is empty for an
+ * unclassified team, which is the state every team is in until an administrator
+ * assigns one, and which re-imports as unclassified.
  *
  * **Order carries meaning in `admin`.** The first name becomes the level-9
  * owner and the rest become level-8 admins, so the owner is written first and
@@ -68,9 +73,6 @@ class TeamExportService {
     /** Hard ceiling on teams per export. */
     public const MAX_TEAMS = 1000;
 
-    /** Written into `apps` / `modules` when a team has none enabled. */
-    public const NONE_TOKEN = 'none';
-
     /** Audit event written once per exported team. */
     public const AUDIT_EVENT = 'team.exported';
 
@@ -86,15 +88,12 @@ class TeamExportService {
         // Only for assertValidTeamName() — the authoritative name rule, asked
         // rather than mirrored.
         private TeamService           $teamService,
-        private TeamAppResourceMapper $resourceMapper,
-        private TeamAppMapper         $teamAppMapper,
         private ProjectMapper         $projectMapper,
         private TeamExpiryService     $expiryService,
-        private PresenceTeamService   $presenceTeamService,
-        private DecisionTeamService   $decisionTeamService,
-        private CollectivesService    $collectivesService,
+        // v4.8.25 — the team's classification, for the `policy` column. A leaf
+        // in the DI graph (IDBConnection only), so it adds no cycle risk.
+        private TeamPolicyMapper      $teamPolicyMapper,
         private AuditService          $auditService,
-        private IConfig               $config,
         private IDBConnection         $db,
         private IUserSession          $userSession,
         private IGroupManager         $groupManager,
@@ -307,6 +306,10 @@ class TeamExportService {
         $types       = $this->teamTypeMapper->findTypesByTeams($ids);
         $expiries    = $this->expiryService->getExpiryForTeams($ids);
         $descriptions = $this->descriptions($ids);
+        // v4.8.25 — one query for the whole export, like the three above it.
+        // Teams with no assignment are absent from the map, which is what makes
+        // `?? ''` below mean "unclassified" rather than "lookup failed".
+        $policies    = $this->teamPolicyMapper->findByTeams($ids);
         $now         = time();
 
         $out = [];
@@ -380,9 +383,8 @@ class TeamExportService {
                     'project_mode' => $this->projectMode($teamId, $template),
                     'admin'        => implode(';', $people['admins']),
                     'members'      => implode(';', $people['members']),
-                    'apps'         => $this->apps($teamId),
-                    'modules'      => $this->modules($teamId),
                     'expires'      => $expires,
+                    'policy'       => $policies[$teamId] ?? '',
                 ],
             ];
         }
@@ -462,109 +464,21 @@ class TeamExportService {
     }
 
     /**
-     * Connected app resources, as the importer's `apps` tokens.
+     * `apps()` and `modules()` lived here until v4.8.25 (they were written by
+     * every export up to and including 4.8.24).
      *
-     * Only the four apps the importer can provision. A team may legitimately
-     * have others connected (Collectives arrives through the module column),
-     * and writing a token the parser does not know would produce a warning on
-     * every re-import.
+     * They read six services to answer "what does this team have enabled", and
+     * every one of them was a query per exported team — the only per-team reads
+     * left in a method that otherwise batches. They went with their columns:
+     * `TeamImportService` takes apps and modules from the template now, so the
+     * cells they filled are no longer read by anything.
      *
-     * Returns the literal `none` rather than an empty string — see the class
-     * docblock: empty means "template default" to the importer, which is not
-     * what a team with no apps means.
+     * That also removed `TeamAppResourceMapper`, `TeamAppMapper`,
+     * `PresenceTeamService`, `DecisionTeamService`, `CollectivesService` and
+     * `IConfig` from this service's constructor. If a future column needs one
+     * back, take the batched shape: this method's cost was linear in teams and
+     * the export ceiling is 1000.
      */
-    private function apps(string $teamId): string {
-        $found = [];
-        try {
-            foreach ($this->resourceMapper->findAllByTeam($teamId) as $resource) {
-                $appId = $resource->getAppId();
-                if (in_array($appId, TeamTemplateProfiles::APPS, true)
-                    && $resource->getStatus() === 'active'
-                ) {
-                    $found[$appId] = true;
-                }
-            }
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][TeamExportService] Resource lookup failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-        }
-
-        // Emitted in TeamTemplateProfiles::APPS order rather than discovery
-        // order, so the cell is stable across exports.
-        $ordered = array_values(array_filter(
-            TeamTemplateProfiles::APPS,
-            static fn (string $app): bool => isset($found[$app]),
-        ));
-
-        return $ordered === [] ? self::NONE_TOKEN : implode(';', $ordered);
-    }
-
-    /**
-     * Enabled modules, as the importer's `modules` tokens.
-     *
-     * Each key is read from wherever `TeamImportService::applyModules()` writes
-     * it, so the two stay symmetric:
-     *   presence / decisions — their own per-team config tables
-     *   timeline / messages  — appconfig, default '1' (enabled unless switched off)
-     *   pages                — the `intravox` row in teamhub_team_apps
-     *   wiki                 — CollectivesService
-     */
-    private function modules(string $teamId): string {
-        $enabled = [];
-
-        try {
-            if (($this->decisionTeamService->getConfig($teamId)['decisions_enabled'] ?? false) === true) {
-                $enabled['decisions'] = true;
-            }
-        } catch (\Throwable) {
-            // A module whose config cannot be read is reported as off rather
-            // than guessed at — a wrong `on` would switch something on for a
-            // team that never had it.
-        }
-
-        try {
-            if (($this->presenceTeamService->getConfig($teamId)['presence_enabled'] ?? false) === true) {
-                $enabled['presence'] = true;
-            }
-        } catch (\Throwable) {
-        }
-
-        if ($this->config->getAppValue(Application::APP_ID, 'timeline_enabled_' . $teamId, '1') === '1') {
-            $enabled['timeline'] = true;
-        }
-        if ($this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1') {
-            $enabled['messages'] = true;
-        }
-
-        try {
-            foreach ($this->teamAppMapper->findByTeamId($teamId) as $row) {
-                $appId = (string)($row['app_id'] ?? '');
-                if ($appId === 'intravox' && !empty($row['enabled'])) {
-                    $enabled['pages'] = true;
-                }
-            }
-        } catch (\Throwable $e) {
-            $this->logger->debug('[TeamHub][TeamExportService] team_apps lookup failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-        }
-
-        try {
-            if ($this->collectivesService->isEnabledForTeam($teamId)) {
-                $enabled['wiki'] = true;
-            }
-        } catch (\Throwable) {
-        }
-
-        $ordered = array_values(array_filter(
-            TeamTemplateProfiles::MODULES,
-            static fn (string $module): bool => isset($enabled[$module]),
-        ));
-
-        return $ordered === [] ? self::NONE_TOKEN : implode(';', $ordered);
-    }
-
     /** `advanced` / `basic`, and empty for anything that is not a project. */
     private function projectMode(string $teamId, string $template): string {
         if ($template !== 'project') {

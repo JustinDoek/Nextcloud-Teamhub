@@ -1143,8 +1143,15 @@ class MemberService {
      * MembershipService::fillMemberships() applies when building that cache.
      *
      * Returns 0 when the user reaches the team by no route at all.
+     *
+     * v4.8.35 — public. `TeamController::transferOwner()` gates on it: it used
+     * the direct-only reader, so an owner could not hand the team to somebody
+     * who reaches it through a group, even though that person is a member of
+     * it. "Is this user a member of this team" has exactly one correct answer
+     * and this is the method that gives it; the direct reader answers a
+     * narrower question and should only be used where that is the question.
      */
-    private function getEffectiveMemberLevel(\OCP\IDBConnection $db, string $teamId, string $userId): int {
+    public function getEffectiveMemberLevel(\OCP\IDBConnection $db, string $teamId, string $userId): int {
         $direct = $this->getMemberLevelFromDb($db, $teamId, $userId);
 
         // circles_membership.single_id is the person's own principal, not a uid,
@@ -1595,6 +1602,16 @@ class MemberService {
                 ]);
             }
 
+            // v4.8.7 (GitHub #95) — drop subscriptions to this team's
+            // non-public threads. The helper re-tests effective membership, so
+            // the `stillMember` case (out of the direct row, still in through a
+            // group or sub-team) correctly keeps them.
+            $this->forgetMessageSubscriptions($teamId, $uid);
+            // v4.8.18 — and the file reviews they were asked for. Same
+            // re-tested-membership rule: still in through a group means the
+            // obligation is still theirs.
+            $this->forgetFileReviews($teamId, $uid);
+
             return ['stillMember' => $stillMember];
         } catch (\Exception $e) {
             $this->logger->error('[TeamHub][MemberService] Error leaving team', [
@@ -1708,6 +1725,75 @@ class MemberService {
         // is what the removed MembershipService::onUpdate() call above used to
         // do at this point.
         $this->resourceMembership->reconcileTeamMembership($teamId, 'member_removed');
+
+        // v4.8.7 (GitHub #95) — a member who is out of the team has no use for
+        // subscriptions to its threads. Runs after the reconcile above, so the
+        // membership test inside sees the final state rather than the one
+        // mid-removal. Type 1 only: a group or sub-team removal has no single
+        // uid to forget, and the users behind it may each still be in the team
+        // another way.
+        if ($userType === 1) {
+            $this->forgetMessageSubscriptions($teamId, $targetId);
+            // v4.8.18 — same treatment for outstanding file reviews.
+            $this->forgetFileReviews($teamId, $targetId);
+        }
+    }
+
+    /**
+     * Drop someone's message subscriptions for a team they have left.
+     *
+     * The service decides whether they are genuinely out — both callers here
+     * can leave somebody in the team through a group or sub-team — and skips
+     * public messages. This wrapper exists only to resolve it lazily.
+     *
+     * `MessageSubscriptionService` is resolved from the container rather than
+     * injected: it depends on this service, so a constructor injection here
+     * would close a cycle the container cannot build. Same lazy idiom this
+     * file already uses for `CirclesManager`, `IAccountManager` and
+     * `IUserStatusManager`.
+     *
+     * Best-effort — a leave or a removal must never fail because a cleanup
+     * query did.
+     */
+    private function forgetMessageSubscriptions(string $teamId, string $userId): void {
+        try {
+            $this->container
+                ->get(\OCA\TeamHub\Service\MessageSubscriptionService::class)
+                ->forgetTeamSubscriptions($teamId, $userId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] could not drop message subscriptions after departure', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+        }
+    }
+
+    /**
+     * Drop the file reviews somebody was asked for in a team they have left
+     * (v4.8.18).
+     *
+     * Resolved from the container for exactly the reason above:
+     * `FileReviewService` injects this service, so a constructor injection here
+     * would close a cycle. Best-effort for the same reason too — a removal must
+     * not fail because a cleanup query did.
+     *
+     * The service re-tests effective membership, so somebody who is out of the
+     * direct row but still in through a group keeps their obligations. Reviews
+     * they *requested* are never touched.
+     */
+    private function forgetFileReviews(string $teamId, string $userId): void {
+        try {
+            $this->container
+                ->get(\OCA\TeamHub\Service\FileReviewService::class)
+                ->dropTeamMember($teamId, $userId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] could not drop file reviews after departure', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+        }
     }
 
     /**
@@ -1826,6 +1912,7 @@ class MemberService {
                 // groups/circles the auto-confirm block below handles it.
                 $alreadyInvited = false;
                 $resent         = false;
+
                 try {
                     $circleMemberService->addMember($teamId, $invitee);
                 } catch (\Throwable $addMemberEx) {
@@ -3182,4 +3269,67 @@ class MemberService {
 
         return false;
     }
+
+    /**
+     * May the current user create teams in bulk? (v4.8.7)
+     *
+     * **Deliberately stricter than `canCurrentUserCreateTeam()`**, and the
+     * difference is the point: that method returns true for everybody when no
+     * creator group is configured, which is the right default for making one
+     * team and the wrong one for making forty. Justin's rule, 2026-09-01:
+     *
+     *   - a creator group is configured → its members, and NC admins
+     *   - no creator group is configured → **NC admins only**
+     *
+     * So an instance that has not thought about who may create teams does not
+     * silently hand every user a bulk provisioning tool.
+     *
+     * Licence gating is a separate question and is not asked here — the
+     * controller pairs this with the licence check, the same way the export
+     * routes do.
+     */
+    public function canCurrentUserBulkCreateTeams(): bool {
+        $user = $this->userSession->getUser();
+
+        return $user !== null && $this->canUserBulkCreateTeams($user->getUID());
+    }
+
+    /**
+     * The same rule, asked about a uid rather than the session (v4.8.14).
+     *
+     * `TeamImportJob` has no session — it adopts a run whose browser went away
+     * and impersonates its creator — so it needs to ask this about a stored
+     * uid. It previously asked `isAdmin()` outright, which was correct while
+     * only administrators could create runs and became wrong the moment bulk
+     * create opened to the team-creator group: every bulk run the job picked up
+     * was skipped as "no longer an admin", so a batch whose tab closed could
+     * never resume.
+     */
+    public function canUserBulkCreateTeams(string $uid): bool {
+        if ($uid === '') {
+            return false;
+        }
+
+        $groupManager = $this->container->get(\OCP\IGroupManager::class);
+        if ($groupManager->isAdmin($uid)) {
+            return true;
+        }
+
+        $config   = $this->container->get(\OCP\IConfig::class);
+        $rawGroup = trim($config->getAppValue(Application::APP_ID, 'createTeamGroup', ''));
+        if ($rawGroup === '') {
+            // No group set: administrators only. Note this is the opposite of
+            // canCurrentUserCreateTeam()'s "no restriction set → everyone".
+            return false;
+        }
+
+        foreach (array_filter(array_map('trim', explode(',', $rawGroup))) as $gid) {
+            if ($groupManager->isInGroup($uid, $gid)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 }

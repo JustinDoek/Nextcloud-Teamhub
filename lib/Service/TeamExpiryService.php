@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\TeamExpiryMapper;
 use OCA\TeamHub\Db\TeamExpiryRequest;
 use OCA\TeamHub\Db\TeamExpiryRequestMapper;
+use OCA\TeamHub\Db\TeamTemplateMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\NotFoundException;
 use OCA\TeamHub\Exception\ValidationException;
@@ -76,7 +77,19 @@ use Psr\Log\LoggerInterface;
  */
 class TeamExpiryService {
 
-    /** Templates that may carry an expiry. Departments are deliberately absent. */
+    /**
+     * Templates that may carry an expiry, when the template table cannot say.
+     *
+     * **v4.8.3 — this is now the fallback, not the rule.** Eligibility is a
+     * per-template setting an administrator controls on Admin → TeamHub →
+     * Policy ("Enable team expiration"), stored in `teamhub_template`. These
+     * two are what the migration seeds it to, and what is used if the row is
+     * missing — which on a seeded instance means never.
+     *
+     * The constant stays public because `TeamImportService` and the admin
+     * settings payload still name it, and because "what it defaults to" is
+     * worth being able to read.
+     */
     public const ELIGIBLE_TYPES = ['collaboration', 'project'];
 
     /** appconfig key for the warning window, in days. */
@@ -113,6 +126,9 @@ class TeamExpiryService {
         private TeamExpiryMapper        $expiryMapper,
         private TeamExpiryRequestMapper $requestMapper,
         private TeamTypeService         $teamTypeService,
+        // v4.8.3 — expiry eligibility is a per-template setting an admin
+        // controls, not a hard-coded pair. See isEligibleTemplate().
+        private TeamTemplateMapper      $templateMapper,
         private MemberService           $memberService,
         private AuditService            $auditService,
         private IUserSession            $userSession,
@@ -172,16 +188,38 @@ class TeamExpiryService {
 
     /** True when this team's template may carry an expiry. */
     public function isEligible(string $teamId): bool {
-        return in_array($this->teamTypeService->getType($teamId) ?? '', self::ELIGIBLE_TYPES, true);
+        return $this->isEligibleTemplate($this->teamTypeService->getType($teamId));
     }
 
-    /** True when this template name may carry an expiry. */
-    public static function isEligibleType(?string $type): bool {
-        return in_array($type ?? '', self::ELIGIBLE_TYPES, true);
+    /**
+     * True when this template may carry an expiry.
+     *
+     * **v4.8.3 — reads `teamhub_template.offer_expiry`**, which an
+     * administrator controls on the Policy tab, rather than the hard-coded
+     * pair. The create-team wizard asks the same row, so enabling expiration on
+     * the Department template now shows the field *and* has the server accept
+     * the date — before this, the two disagreed and the server won silently.
+     *
+     * Falls back to `ELIGIBLE_TYPES` when the template has no row, which on a
+     * seeded instance does not happen.
+     */
+    public function isEligibleTemplate(?string $type): bool {
+        if ($type === null || $type === '') {
+            return false;
+        }
+        $row = $this->templateMapper->find($type);
+        if ($row === null) {
+            return in_array($type, self::ELIGIBLE_TYPES, true);
+        }
+
+        return (bool)$row['expiryEnabled'];
     }
 
     /**
      * Batch eligibility for a page of teams.
+     *
+     * One template lookup per distinct type rather than per team: the admin
+     * grid renders up to 100 rows and there are three templates.
      *
      * @param string[] $teamIds
      * @return array<string,bool> [teamId => eligible]
@@ -191,9 +229,15 @@ class TeamExpiryService {
             return [];
         }
         $types = $this->teamTypeService->getTypesForTeams($teamIds);
-        $out   = [];
+
+        $byType = [];
+        foreach (array_unique(array_filter($types)) as $type) {
+            $byType[$type] = $this->isEligibleTemplate($type);
+        }
+
+        $out = [];
         foreach ($teamIds as $teamId) {
-            $out[$teamId] = self::isEligibleType($types[$teamId] ?? null);
+            $out[$teamId] = $byType[$types[$teamId] ?? ''] ?? false;
         }
         return $out;
     }
@@ -617,7 +661,10 @@ class TeamExpiryService {
         if ($expiresOn === null || trim($expiresOn) === '') {
             return;
         }
-        if (!self::isEligibleType($type)) {
+        // v4.8.3 — the template row, not the static pair, so a Department
+        // template an admin has enabled expiration on actually keeps the date
+        // the wizard collected.
+        if (!$this->isEligibleTemplate($type)) {
             return;
         }
 

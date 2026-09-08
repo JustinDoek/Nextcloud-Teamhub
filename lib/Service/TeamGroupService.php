@@ -394,11 +394,6 @@ class TeamGroupService {
 	 * @param array{groups: list<array{id: string, name: ?string, expanded: bool, builtin: bool}>, assignments: array<string, string>} $state
 	 */
 	private function write(string $uid, array $state): void {
-		error_log('[TeamHub][TeamGroupService] Saving groups for ' . $uid . ': ' . json_encode([
-			'groups'      => count($state['groups']),
-			'assignments' => count($state['assignments']),
-		]));
-
 		$this->config->setUserValue(
 			$uid,
 			Application::APP_ID,

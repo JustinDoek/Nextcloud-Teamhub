@@ -174,7 +174,7 @@ class GroupFolderService {
      * Queries group_folders + group_folders_groups directly via QB (no FolderManager needed).
      *
      * Returns null if none found, or:
-     *   [ 'folder_id' => int, 'mount_point' => string ]
+     *   [ 'folder_id' => int, 'mount_point' => string, 'root_id' => int ]
      */
     public function findGroupFolderForCircle(string $circleUniqueId): ?array {
         if (!$this->appManager->isInstalled('groupfolders')) {
@@ -183,7 +183,7 @@ class GroupFolderService {
 
         try {
             $qb = $this->db->getQueryBuilder();
-            $qb->select('gf.folder_id', 'gf.mount_point')
+            $qb->select('gf.folder_id', 'gf.mount_point', 'gf.root_id')
                 ->from('group_folders', 'gf')
                 ->innerJoin('gf', 'group_folders_groups', 'gfg',
                     $qb->expr()->eq('gf.folder_id', 'gfg.folder_id')
@@ -192,6 +192,14 @@ class GroupFolderService {
                     'gfg.circle_id',
                     $qb->createNamedParameter($circleUniqueId)
                 ))
+                // v4.8.24 — a circle can be attached to more than one group
+                // folder and this took whatever the engine returned first, which
+                // is not stable. `PolicyObservationMapper::teamFolderRootsByTeam()`
+                // reads the same relationship in bulk for the compliance scan;
+                // without a shared, deterministic rule the two could pick
+                // different folders for one team and the tag would be applied to
+                // one and read from the other.
+                ->orderBy('gf.folder_id', 'ASC')
                 ->setMaxResults(1);
 
             $r = $qb->executeQuery();
@@ -212,6 +220,12 @@ class GroupFolderService {
             return [
                 'folder_id'   => (int) $row['folder_id'],
                 'mount_point' => (string) $row['mount_point'],
+                // v4.8.24 — the fileid of the folder's `files` node, which is
+                // what a system tag is assigned to. GroupFolders stores it on
+                // the folder row, so no `filecache` lookup is needed; verified
+                // on the test instance (root_id 195 → storage 10, path `files`).
+                // 0 when GroupFolders has not materialised the folder yet.
+                'root_id'     => (int) ($row['root_id'] ?? 0),
             ];
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][GroupFolderService] findGroupFolderForCircle failed', [

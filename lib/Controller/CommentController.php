@@ -11,6 +11,7 @@ use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
+use OCA\TeamHub\Service\MessageSubscriptionService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -31,6 +32,7 @@ class CommentController extends Controller {
         private MessageService $messageService,
         private AuditService $auditService,
         private DecisionService $decisionService,
+        private MessageSubscriptionService $subscriptionService,
         private IUserSession $userSession,
         private IUserManager $userManager,
         private LoggerInterface $logger,
@@ -193,7 +195,22 @@ class CommentController extends Controller {
             } catch (\Throwable $e) {
                 return new JSONResponse(['error' => 'Message not found'], Http::STATUS_NOT_FOUND);
             }
-            $this->memberService->requireMemberLevel((string)$message['team_id']);
+
+            // v4.8.7 — a public message's thread is public too. Publishing a
+            // message publishes the discussion under it; a public post whose
+            // replies only its own team can read is half a conversation, and
+            // the reader cannot tell there is a rest of it.
+            //
+            // **This widens a disclosure boundary**, so it is worth being
+            // precise about how far: only `is_public = 1` rows, which a team
+            // admin has to enable per team (`allowPublicMessages`) and an
+            // author has to opt into per message, and which `createMessage`
+            // refuses for every type except `normal`. Everything else still
+            // requires membership, and *writing* a comment still does — see
+            // `createComment`, which is deliberately not changed.
+            if (empty($message['isPublic'])) {
+                $this->memberService->requireMemberLevel((string)$message['team_id']);
+            }
 
             $comments = $this->commentMapper->findByMessageId($messageId);
             return new JSONResponse($this->hydrateAuthorNames($comments));
@@ -265,6 +282,20 @@ class CommentController extends Controller {
                 (int)($data['id'] ?? 0),
                 $user->getUID(),
                 $comment,
+            );
+
+            // v4.8.7 (GitHub #95) — tell the thread's subscribers. Runs after
+            // the row is committed and cannot throw: DESIGN §2.56 is explicit
+            // that a post-commit side effect must never retroactively fail a
+            // write that succeeded, which is the shape of the v4.0.5 bug where
+            // a notification TypeError turned a stored message into a 400.
+            // The service swallows and logs its own failures; this call site
+            // deliberately adds no try/catch of its own, because a second one
+            // would suggest the first is not trusted.
+            $this->subscriptionService->notifyNewComment(
+                $message,
+                (int)($data['id'] ?? 0),
+                $user->getUID(),
             );
 
             return new JSONResponse($this->hydrateAuthorNames($data), Http::STATUS_CREATED);

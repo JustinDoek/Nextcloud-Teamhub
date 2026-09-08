@@ -6,6 +6,7 @@ namespace OCA\TeamHub\AppInfo;
 use OCA\TeamHub\Listener\AppDisabledListener;
 use OCA\TeamHub\Listener\CalendarObjectDeletedListener;
 use OCA\TeamHub\Listener\CircleMembershipChangedListener;
+use OCA\TeamHub\Listener\FilesScriptsListener;
 use OCA\TeamHub\Listener\UserStatusListener;
 use OCA\TeamHub\Listener\UserDeletedListener;
 use OCA\TeamHub\Notification\Notifier;
@@ -17,6 +18,7 @@ use OCP\AppFramework\Bootstrap\IBootstrap;
 use OCA\TeamHub\MyWork\Provider\ApprovalWorkProvider;
 use OCA\TeamHub\MyWork\Provider\DeckWorkProvider;
 use OCA\TeamHub\MyWork\Provider\DecisionWorkProvider;
+use OCA\TeamHub\MyWork\Provider\FileReviewWorkProvider;
 use OCA\TeamHub\MyWork\Provider\MeetingWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryAdminWorkProvider;
@@ -97,6 +99,21 @@ class Application extends App implements IBootstrap {
             if (class_exists($circlesEvent)) {
                 $context->registerEventListener($circlesEvent, CircleMembershipChangedListener::class);
             }
+        }
+
+        // v4.8.18 — the "Request review" entry in a file's ⋯ menu. String
+        // class name behind a class_exists guard, matching the DAV and Circles
+        // wiring above: the Files app is a hard dependency in practice but not
+        // a declared one, and Application is loaded early enough that a missing
+        // class here would brick the app rather than degrade it.
+        //
+        // NO leading backslash — see the Circles comment above for the deploy
+        // this cost.
+        if (class_exists('OCA\Files\Event\LoadAdditionalScriptsEvent')) {
+            $context->registerEventListener(
+                'OCA\Files\Event\LoadAdditionalScriptsEvent',
+                FilesScriptsListener::class,
+            );
         }
 
         // Register TeamHub teams, messages, and decisions with NC unified search.
@@ -186,6 +203,13 @@ class Application extends App implements IBootstrap {
                 // the provider's own for the authorisation it owes in return.
                 TeamExpiryTeamWorkProvider::class,
                 TeamExpiryAdminWorkProvider::class,
+                // v4.8.18 — file review requests. TeamHub's own module again,
+                // and the first provider whose items can *leave* a queue
+                // without the viewer having done anything: closing a review
+                // withdraws it from everybody who had not answered. That rule
+                // lives entirely in the provider — see its docblock — which is
+                // the extension point working as advertised.
+                FileReviewWorkProvider::class,
             ];
 
             foreach ($builtIn as $providerClass) {

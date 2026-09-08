@@ -34,6 +34,22 @@ class AuditService {
      */
     public const METADATA_VALUE_CAP = 500;
 
+    /**
+     * Reserved `team_id` for events that are about the instance rather than a
+     * team — profile and template definitions, the drift sweep's own run
+     * record (v4.8.2, Track F2).
+     *
+     * `teamhub_audit_log.team_id` is NOT NULL and every existing reader queries
+     * `WHERE team_id = ?` with a real Circles `unique_id`, which is 31
+     * alphanumeric characters. A sentinel starting with `_` can never match
+     * one, so instance rows are invisible to every current reader **with no
+     * reader change at all** — only a query that asks for this id sees them.
+     *
+     * Do not use it for anything that has a team. An event filed here is one
+     * the team audit stream will never show.
+     */
+    public const INSTANCE_SCOPE = '_instance';
+
     public function __construct(
         private AuditLogMapper $mapper,
         private LoggerInterface $logger,

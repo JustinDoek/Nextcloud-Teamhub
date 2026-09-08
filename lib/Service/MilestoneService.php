@@ -14,7 +14,7 @@ use Psr\Log\LoggerInterface;
  * A milestone is a team-admin-authored label with an optional date,
  * rendered on the Timeline tab as a full-height red marker line. All
  * CRUD operations are admin-gated — milestones are managed exclusively
- * from Manage Team → Integration settings, which is itself only reachable
+ * from Manage Team → Module settings, which is itself only reachable
  * by team admins/owners. Read access for the *Timeline display* (regular
  * members viewing the rendered line) goes through TimelineService /
  * TeamController::getTimeline instead, not through this service.

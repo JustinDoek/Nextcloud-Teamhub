@@ -84,12 +84,28 @@ final class ActionType {
      * says what it is for, which is what Justin reported against v4.6.13.
      */
     public const REQUEST_EXTENSION = 'request_extension';
+    /**
+     * v4.8.18 — the person who asked for a file review ending it.
+     *
+     * Not `COMPLETE`, for the same shape of reason `FINALIZE` is not: COMPLETE
+     * reads as "this task is done" and belongs to the reviewer, who has just
+     * finished their own part. The requester's verb finishes something else —
+     * the whole request, including the parts nobody answered.
+     *
+     * v4.8.20 — it no longer deletes a conversation. The discussion lives in
+     * the file's own chat now, which TeamHub does not own and never removes.
+     * It still confirms before firing, because the remaining consequence is
+     * invisible and unasked-for: every reviewer who had not answered loses the
+     * request from their queue without having answered it.
+     */
+    public const CLOSE           = 'close';
 
     public const ALL = [
         self::OPEN, self::COMPLETE, self::APPROVE, self::REJECT,
         self::REQUEST_CHANGES, self::COMMENT, self::DELEGATE,
         self::SNOOZE, self::UNSNOOZE, self::FINALIZE,
         self::JOIN, self::AGENDA, self::EMAIL, self::REQUEST_EXTENSION,
+        self::CLOSE,
     ];
 
     /** Handled by TeamHub itself; a provider never sees these. */
@@ -118,6 +134,9 @@ final class ActionType {
         // administrator then has to decide. Restrictable and audited for the
         // same reason the rest of this list is.
         self::REQUEST_EXTENSION,
+        // v4.8.18 — closes a file review, which withdraws it from the queues
+        // of everyone who had not answered. State-changing and worth auditing.
+        self::CLOSE,
     ];
 
     public static function isValid(string $action): bool {

@@ -935,6 +935,127 @@ class TalkService {
      * Delete a specific Talk room by token (multi-resource-aware).
      * Looks up the room_id from the token then deletes attendees + room.
      */
+    /**
+     * The conversation attached to a file — Talk's own, the one that opens in
+     * the Files sidebar — creating it if nobody has opened it yet (v4.8.20).
+     *
+     * This is what file reviews discuss in. TeamHub used to create a room of
+     * its own per review; Justin's reading on 2026-09-07 is the better one:
+     * the file already has a chat, it is the chat reviewers will be looking at
+     * because it opens with the file, and a second conversation about the same
+     * document is a place for half the discussion to get lost.
+     *
+     * Mirrors `FilesIntegrationController::getRoomByFileId()` exactly, verified
+     * against Talk 24.0.4 in the running container:
+     *
+     *  - the room is looked up by object, `('file', <fileId>)`;
+     *  - when absent it is created as `TYPE_PUBLIC` with **no owner** and that
+     *    object pair, which is what makes it the file's conversation rather
+     *    than somebody's room about the file;
+     *  - `prepareConversationName()` does the trimming Talk expects.
+     *
+     * Returns null — never throws — when Talk is absent, when an administrator
+     * has switched file conversations off (`spreed`/`conversations_files`), or
+     * when anything else goes wrong. Every caller treats that as "no chat for
+     * this review", which is a working review.
+     */
+    public function fileConversationToken(int $fileId, string $fileName): ?string {
+        if (!$this->appManager->isInstalled('spreed')) {
+            return null;
+        }
+
+        // An administrator can switch file conversations off instance-wide.
+        // Creating one anyway would put a conversation somewhere the Files
+        // sidebar will not show it.
+        try {
+            $config = $this->container->get(\OCP\IConfig::class);
+            if ($config->getAppValue('spreed', 'conversations_files', '1') !== '1') {
+                $this->logger->info('[TeamHub][TalkService] file conversations are disabled in Talk', [
+                    'app' => Application::APP_ID,
+                ]);
+                return null;
+            }
+        } catch (\Throwable) {
+            // Unreadable config is not a reason to refuse; fall through.
+        }
+
+        try {
+            $manager = $this->container->get(\OCA\Talk\Manager::class);
+
+            try {
+                return $manager->getRoomByObject('file', (string)$fileId)->getToken();
+            } catch (\Throwable) {
+                // Not created yet — nobody has opened the file's chat.
+            }
+
+            $roomService = $this->container->get(\OCA\Talk\Service\RoomService::class);
+            $name        = $roomService->prepareConversationName($fileName);
+
+            // TYPE_PUBLIC (3) and OBJECT_TYPE_FILE ('file'), spelled as
+            // literals for the same reason createTalkRoom() spells its type:
+            // Talk is not a declared dependency, so the class constants must
+            // not be referenced where a missing class would be fatal.
+            $room = $roomService->createConversation(3, $name, null, 'file', (string)$fileId);
+
+            $this->logger->info('[TeamHub][TalkService] created the file conversation', [
+                'fileId' => $fileId, 'app' => Application::APP_ID,
+            ]);
+
+            return $room->getToken();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] fileConversationToken failed', [
+                'fileId' => $fileId, 'error' => $e->getMessage(),
+                'class' => get_class($e), 'app' => Application::APP_ID,
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Post as a user who may not be in the conversation yet (v4.8.20).
+     *
+     * A file conversation has no fixed membership: people become participants
+     * when they *open* it. So a reviewer completing from My Work — who may
+     * never have opened the file's chat — has no attendee row, and
+     * `postChatMessage()` alone would resolve no participant and silently do
+     * nothing. This joins them first, which is what opening the sidebar would
+     * have done, and is why completing posts reliably rather than only for
+     * people who happened to have the chat open.
+     *
+     * Best-effort throughout: a failure to post must never fail the completion
+     * it is reporting.
+     */
+    public function postAsParticipant(string $token, string $uid, string $message): bool {
+        if (!$this->appManager->isInstalled('spreed') || $token === '' || $message === '') {
+            return false;
+        }
+
+        try {
+            $manager = $this->container->get(\OCA\Talk\Manager::class);
+            $room    = $manager->getRoomByToken($token);
+
+            if ($this->resolveParticipant($room, $token, $uid) === null) {
+                $userManager = $this->container->get(\OCP\IUserManager::class);
+                $user        = $userManager->get($uid);
+                if ($user !== null) {
+                    // Reuses the add path createProposalRoom() uses, including
+                    // its direct-insert fallback for Talk versions whose
+                    // addUsers() descriptor keys differ.
+                    $this->addUsersToRoom($room, [$uid], $user);
+                }
+            }
+
+            return $this->postChatMessage($token, $uid, $message);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] postAsParticipant failed', [
+                'token' => $token, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+
+            return false;
+        }
+    }
+
     public function deleteRoomById(string $token, \OCP\IDBConnection $db): array {
         try {
             $qb  = $db->getQueryBuilder();

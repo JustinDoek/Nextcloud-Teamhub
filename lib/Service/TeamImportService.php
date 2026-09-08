@@ -4,8 +4,9 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
-use OCA\TeamHub\Constants\TeamTemplateProfiles;
+use OCA\TeamHub\Constants\TeamTemplates;
 use OCA\TeamHub\Db\TeamImportMapper;
+use OCA\TeamHub\Db\TeamTemplateMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
 use OCP\IConfig;
 use OCP\IDBConnection;
@@ -51,16 +52,34 @@ use Psr\Log\LoggerInterface;
  * job is a safety net for an abandoned run, not the normal path — see the
  * session note on `TeamImportJob`.
  *
+ * ## What a row decides, and what it does not (v4.8.25)
+ *
+ * **A row names a `template` and a `policy`. It does not name apps or modules.**
+ * Those two were columns from v4.6.6 until v4.8.24 and are gone: what a team is
+ * provisioned with is a property of the kind of team it is, and what it is
+ * permitted to have is a property of its classification. A CSV that could name
+ * a third answer made the template a suggestion and the profile's
+ * `integrations_allowed` a filter over an arbitrary list — so a row could ask
+ * for Deck, the preview could promise it, and `ResourceService` could drop it
+ * on the way past without anybody being told.
+ *
+ * The two sources are now the only sources: `templateApps()` and
+ * `templateModules()` read `teamhub_template`, and the profile filters what the
+ * template proposed inside `ResourceService::createTeamResources()`. That is
+ * the same resolution the create-team wizard performs, and the same one the
+ * bulk-create table has performed since v4.8.9 — which is what this change
+ * brings the CSV path in line with.
+ *
  * ## Row outcomes
  *
- * - **error**  — the row never runs. Bad name, unknown template, or the first
- *                name in the `admin` column resolving to no account (or to
- *                several).
+ * - **error**  — the row never runs. Bad name, unknown template, unknown
+ *                policy, or the first name in the `admin` column resolving to
+ *                no account (or to several).
  * - **skip**   — the row is valid but its team already exists (in the file, or
  *                on the instance). Recorded, not attempted.
  * - **warning** — the row runs with something adjusted: an advanced project
  *                downgraded because the licence does not allow it, an unknown
- *                member dropped, an unrecognised app or module token ignored.
+ *                member dropped, a value in a retired column ignored.
  *                One typo in a member list must not cost a whole team.
  */
 class TeamImportService {
@@ -85,9 +104,27 @@ class TeamImportService {
      * and a column nobody sends is simply absent.
      */
     public const COLUMNS = [
-        'name', 'description', 'template', 'project_mode', 'admin', 'members', 'apps', 'modules',
-        'expires',
+        'name', 'description', 'template', 'project_mode', 'admin', 'members',
+        // v4.8.9 — the classification. Optional, and an absent column falls
+        // back to the template's default exactly as the wizard does, so every
+        // CSV written before this version still imports unchanged.
+        'expires', 'policy',
     ];
+
+    /**
+     * Columns this importer used to read and no longer does (v4.8.25).
+     *
+     * A file written for 4.8.24 still imports — the header is matched by name,
+     * so an extra column is simply not looked at. What it must not do is import
+     * *silently*: an author who wrote `apps: talk;files` asked for something,
+     * and the row now provisions whatever the template says instead. A row
+     * carrying a value in either column gets a warning naming it.
+     *
+     * An empty cell asked for nothing and produces no warning — that is the
+     * common shape of an exported file, and warning on every row of one would
+     * bury the rows that really did lose something.
+     */
+    public const RETIRED_COLUMNS = ['apps', 'modules'];
 
     /** Header aliases, alias => canonical. Matched case-insensitively. */
     public const HEADER_ALIASES = ['team_type' => 'template'];
@@ -112,6 +149,13 @@ class TeamImportService {
         private ResourceService     $resourceService,
         private MaintenanceService  $maintenanceService,
         private TeamTypeMapper      $teamTypeMapper,
+        // v4.8.3 — templates are admin-editable rows now, not PHP constants.
+        // The importer and the create-team wizard read the same table, which is
+        // what retired the TeamTemplates ↔ CreateTeamView mirror.
+        private TeamTemplateMapper  $templateMapper,
+        // v4.8.9 — the row's classification, and the template's default when
+        // the row does not name one. Same resolution the wizard uses.
+        private PolicyService       $policyService,
         // v4.6.13 — the optional `expires` column. Validated at preview time
         // and written after the team type, which is what decides eligibility.
         private TeamExpiryService   $expiryService,
@@ -128,6 +172,121 @@ class TeamImportService {
         private IDBConnection       $db,
         private LoggerInterface     $logger,
     ) {}
+
+    // -------------------------------------------------------------------------
+    // Template lookups (v4.8.3)
+    //
+    // Templates are admin-editable rows in `teamhub_template`, seeded from
+    // `TeamTemplates`' constants by Version000408002. The constants remain the
+    // seed and the *vocabulary* (`APPS`, `MODULES` — which keys exist at all);
+    // what each template starts with is read from the table, so an admin's edit
+    // on Admin → TeamHub → Policy reaches a CSV import the same way it reaches
+    // the wizard.
+    //
+    // A missing row is an anomaly, not a fallback path: since v4.8.25
+    // `$template` is validated against the table's own keys before it gets
+    // here, so a row can only be missing if it disappeared between the two
+    // reads. When one is missing the row is imported with no template defaults
+    // and says so, rather than quietly reading the constants — a silent second
+    // source is exactly what the table replaced.
+    // -------------------------------------------------------------------------
+
+    /** @var array<string, array<string,mixed>|null> one lookup per template per run */
+    private array $templateCache = [];
+
+    /** @var list<string>|null the live template keys, read once per run */
+    private ?array $templateKeysCache = null;
+
+    /** @return array<string,mixed>|null */
+    private function templateRow(string $template): ?array {
+        if (!array_key_exists($template, $this->templateCache)) {
+            $this->templateCache[$template] = $this->templateMapper->find($template);
+        }
+
+        return $this->templateCache[$template];
+    }
+
+    /**
+     * The template keys a row may name, read from the table (v4.8.25).
+     *
+     * `TeamTypeService::ALLOWED` was the list until now, and it is a constant.
+     * Since v4.8.3 the table is what the wizard renders and what
+     * `templateApps()` / `templateModules()` read, so validating against the
+     * constant meant the importer could accept a key the rest of the app no
+     * longer had a row for — and reject one it did.
+     *
+     * **The constant is still the floor.** An empty table means the seed
+     * migration has not run; failing every row of every file with "Allowed: "
+     * and nothing after it would be a worse answer than the three keys the
+     * instance is about to be seeded with. The keys are also cached for the
+     * whole run: `validate()` calls this once per row and the table has three.
+     *
+     * @return list<string>
+     */
+    private function templateKeys(): array {
+        if ($this->templateKeysCache === null) {
+            $keys = array_values(array_filter(array_map(
+                static fn (array $row): string => (string)($row['templateKey'] ?? ''),
+                $this->templateMapper->findAll(),
+            )));
+
+            $this->templateKeysCache = $keys === [] ? TeamTypeService::ALLOWED : $keys;
+        }
+
+        return $this->templateKeysCache;
+    }
+
+    /**
+     * Apps the template provisions.
+     *
+     * @param list<string> $warnings mutated
+     * @return list<string>
+     */
+    private function templateApps(string $template, array &$warnings): array {
+        $row = $this->templateRow($template);
+        if ($row === null) {
+            $warnings[] = 'Template "' . $template . '" is not configured on this server; no apps were created.';
+            return [];
+        }
+
+        // Filter to the known vocabulary: the column is free text, and an app
+        // key that no longer exists must not reach createTeamResources().
+        return array_values(array_intersect($row['apps'], TeamTemplates::APPS));
+    }
+
+    /**
+     * Module toggles for the template, as the full on/off map the caller expects.
+     *
+     * @param list<string> $warnings mutated
+     * @return array<string,bool>
+     */
+    private function templateModules(string $template, array &$warnings): array {
+        $allOff = array_fill_keys(TeamTemplates::MODULES, false);
+        $row    = $this->templateRow($template);
+        if ($row === null) {
+            $warnings[] = 'Template "' . $template . '" is not configured on this server; no modules were enabled.';
+            return $allOff;
+        }
+
+        foreach ($row['modules'] as $module) {
+            if (array_key_exists($module, $allOff)) {
+                $allOff[$module] = true;
+            }
+        }
+
+        return $allOff;
+    }
+
+    /**
+     * The template's Circles privacy bitmask.
+     *
+     * Masked to `MANAGED_BITS` on the way in by `PolicyService::updateTemplate`,
+     * and masked again by `TeamService::updateTeamConfig`. 0 for a missing row,
+     * which leaves the team on Circles' own defaults.
+     */
+    private function templateConfigBitmask(string $template): int {
+        return (int)($this->templateRow($template)['preselectConfig'] ?? 0);
+    }
 
     // -------------------------------------------------------------------------
     // Authorisation
@@ -191,15 +350,27 @@ class TeamImportService {
         // same default the create wizard's picker opens on.
         $sampleExpiry = $this->expiryService->defaultPickerDate();
 
+        // v4.8.25 — `policy` is read off the instance for the same reason the
+        // date is computed. The seeded keys can be renamed, replaced or deleted
+        // by an administrator, so writing `internal` as a literal would hand
+        // somebody a sample file whose every row fails with "Unknown policy" —
+        // the same trap in a different column. Empty when no profile exists,
+        // which is a legal cell meaning "the template's default".
+        $samplePolicy = $this->samplePolicyKey();
+
         $rows = [
             self::COLUMNS,
             // Project row carries a date; the collaboration row leaves it blank
             // to show that blank is legal and means "no end date"; the
             // department row leaves it blank because a department cannot have
             // one at all.
-            ['Website Redesign', 'Rebuild of the public website', 'project',       'advanced', 'Jane Doe;Bob Jones', 'Alice Smith;group:marketing', '',           '',                    $sampleExpiry],
-            ['Design Guild',     'Cross-team design practice',    'collaboration', '',         'Alice Smith',        'Bob Jones;Renée Muñoz',       '',           '',                    ''],
-            ['Human Resources',  'HR department team',            'department',    '',         'hr-lead',            'group:HR staff',              'talk;files', 'decisions;presence',  ''],
+            //
+            // Only the last row names a policy. Two rows leaving it empty is
+            // the more important half of the lesson: empty is not "no policy",
+            // it is the one the template carries.
+            ['Website Redesign', 'Rebuild of the public website', 'project',       'advanced', 'Jane Doe;Bob Jones', 'Alice Smith;group:marketing', $sampleExpiry, ''],
+            ['Design Guild',     'Cross-team design practice',    'collaboration', '',         'Alice Smith',        'Bob Jones;Renée Muñoz',       '',            ''],
+            ['Human Resources',  'HR department team',            'department',    '',         'hr-lead',            'group:HR staff',              '',            $samplePolicy],
         ];
 
         $handle = fopen('php://temp', 'r+');
@@ -217,6 +388,32 @@ class TeamImportService {
         return "\xEF\xBB\xBF" . $csv;
     }
 
+    /**
+     * A policy key that exists on this instance, for the sample's one filled
+     * cell — or '' when the instance has no profiles (v4.8.25).
+     *
+     * `creationContext()` rather than `listProfiles()`: it is the same read the
+     * wizard's policy picker makes, it is not administrator-gated, and it
+     * returns the profiles in the order an administrator sorted them, so the
+     * sample names the first one they would see rather than an arbitrary row.
+     */
+    private function samplePolicyKey(): string {
+        try {
+            $profiles = $this->policyService->creationContext()['profiles'] ?? [];
+        } catch (\Throwable $e) {
+            // The sample is a convenience; it must not fail to download because
+            // the policy tables could not be read.
+            $this->logger->debug('[TeamHub][TeamImportService] Sample policy lookup failed', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+
+            return '';
+        }
+
+        return (string)($profiles[0]['profileKey'] ?? '');
+    }
+
     // -------------------------------------------------------------------------
     // Validation (dry run)
     // -------------------------------------------------------------------------
@@ -232,6 +429,117 @@ class TeamImportService {
      *                                   as a whole (too big, too many rows, no
      *                                   header, missing required columns).
      */
+    /**
+     * Validate rows typed into the bulk-create table (v4.8.9).
+     *
+     * **The GUI's rows and a CSV go through the same validator.** Each row is
+     * turned into the header/cells shape `normaliseRow()` already takes, so
+     * there is exactly one place that decides what a valid row is — the CSV
+     * becomes one wire format of two rather than the only one. A second
+     * validator would have drifted the first time either grew a column.
+     *
+     * The gate is the bulk one, not `requireNcAdmin()`: the licence plus
+     * `MemberService::canCurrentUserBulkCreateTeams()`. The CSV upload keeps
+     * its administrator-only gate.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array The same shape `getImport()` returns.
+     */
+    public function validateRows(array $rows, string $label = 'Bulk create'): array {
+        $actorUid = $this->requireBulkActor();
+
+        if ($rows === []) {
+            throw new \InvalidArgumentException('There are no rows to create.');
+        }
+        if (count($rows) > self::MAX_ROWS) {
+            throw new \InvalidArgumentException('Too many rows. The maximum is ' . self::MAX_ROWS . ' teams at once.');
+        }
+
+        $header = self::COLUMNS;
+
+        $existingNames  = $this->existingTeamNamesLower();
+        $allowedInvites = $this->memberService->getAllowedInviteTypes();
+        $advancedOk     = $this->licenseService->allowsAdvancedCreation();
+        $seenNames      = [];
+
+        $prepared = [];
+        foreach (array_values($rows) as $index => $row) {
+            // Flatten to the positional shape the shared validator reads. A
+            // key the caller omits becomes an empty cell, which is exactly how
+            // an absent CSV column already behaves.
+            $cells = [];
+            foreach ($header as $column) {
+                $value = $row[$column] ?? '';
+                $cells[] = is_array($value) ? implode(';', $value) : (string)$value;
+            }
+
+            // Row 1 is the first team here — there is no header line to skip,
+            // and the number has to match what the table shows the user.
+            $prepared[] = $this->normaliseRow(
+                $header, $cells, $index + 1, $existingNames, $seenNames, $allowedInvites, $advancedOk
+            );
+        }
+
+        $importId = $this->mapper->createImport($actorUid, $label, count($prepared));
+        foreach ($prepared as $row) {
+            $this->mapper->insertRow(
+                $importId,
+                $row['row_num'],
+                $row['payload'],
+                $row['status'],
+                $row['message'],
+            );
+        }
+
+        $this->logger->info('[TeamHub][TeamImportService] Bulk rows validated', [
+            'importId' => $importId,
+            'rows'     => count($prepared),
+            'app'      => Application::APP_ID,
+        ]);
+
+        return $this->getImport($importId, false);
+    }
+
+    /**
+     * The gate for the bulk-create table: licence **and** permission.
+     *
+     * Deliberately not `requireNcAdmin()`. `canCurrentUserBulkCreateTeams()`
+     * carries the rule — the team-creator group, or administrators where no
+     * such group is configured — and it is stricter than ordinary team
+     * creation, which permits everyone when no group is set.
+     *
+     * @return string the acting uid
+     */
+    private function requireBulkActor(): string {
+        $user = $this->userSession->getUser();
+        if ($user === null) {
+            throw new \RuntimeException('Not authenticated');
+        }
+        if (!$this->licenseService->allowsAdvancedCreation()) {
+            throw new \RuntimeException('Creating teams in bulk requires a license.');
+        }
+        if (!$this->memberService->canCurrentUserBulkCreateTeams()) {
+            throw new \RuntimeException('You do not have permission to create teams in bulk.');
+        }
+
+        return $user->getUID();
+    }
+
+    /**
+     * The run must belong to the caller (v4.8.9).
+     *
+     * Bulk runs are not administrator-owned, so "you may use the feature" is
+     * not the same question as "this run is yours". Without this a permitted
+     * user could drive somebody else's import by guessing an id.
+     */
+    private function requireOwnBulkRun(int $importId): void {
+        $actorUid = $this->requireBulkActor();
+        $import   = $this->mapper->findImport($importId);
+        if (!$import || (string)($import['created_by'] ?? '') !== $actorUid) {
+            throw new \RuntimeException('No such import.');
+        }
+    }
+
     public function validate(string $raw, string $filename): array {
         $adminUid = $this->requireNcAdmin();
 
@@ -342,11 +650,16 @@ class TeamImportService {
         }
 
         // ── template ─────────────────────────────────────────────────────
-        $template = mb_strtolower($get('template'));
+        // v4.8.25 — the live table, not TeamTypeService::ALLOWED. The template
+        // decides everything this row provisions, so the set it is checked
+        // against has to be the same one the wizard offers and the same one
+        // templateApps()/templateModules() will read. See templateKeys().
+        $allowedTemplates = $this->templateKeys();
+        $template         = mb_strtolower($get('template'));
         if ($template === '') {
-            $errors[] = 'Template is required. Allowed: ' . implode(', ', TeamTypeService::ALLOWED) . '.';
-        } elseif (!in_array($template, TeamTypeService::ALLOWED, true)) {
-            $errors[] = 'Unknown template "' . $template . '". Allowed: ' . implode(', ', TeamTypeService::ALLOWED) . '.';
+            $errors[] = 'Template is required. Allowed: ' . implode(', ', $allowedTemplates) . '.';
+        } elseif (!in_array($template, $allowedTemplates, true)) {
+            $errors[] = 'Unknown template "' . $template . '". Allowed: ' . implode(', ', $allowedTemplates) . '.';
         }
 
         // ── project_mode ─────────────────────────────────────────────────
@@ -382,8 +695,11 @@ class TeamImportService {
             if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $expires, $dm) || !checkdate((int)$dm[2], (int)$dm[3], (int)$dm[1])) {
                 $errors[] = 'Expires must be a real date in YYYY-MM-DD format.';
                 $expires  = '';
-            } elseif (!TeamExpiryService::isEligibleType($template)) {
-                $warnings[] = 'Only collaboration and project teams can expire — the expiration date was ignored.';
+            } elseif (!$this->expiryService->isEligibleTemplate($template)) {
+                // v4.8.3 — reads the template's own "Enable team expiration"
+                // rather than the static pair, so the preview agrees with what
+                // setAtCreation() will actually do.
+                $warnings[] = 'The "' . $template . '" template does not allow an expiration date — the date was ignored.';
                 $expires    = '';
             } else {
                 // Parsed again by the service on the write path, which is also
@@ -396,6 +712,18 @@ class TeamImportService {
                     $expires  = '';
                 }
             }
+        }
+
+        // ── policy (v4.8.9) ──────────────────────────────────────────────
+        // Empty means "the template's default", the same fallback the wizard
+        // applies when the creator leaves the preselection alone. An unknown
+        // key is an error rather than a warning: silently creating a team under
+        // a different classification than the one asked for is the failure this
+        // whole track exists to prevent.
+        $policy = trim(mb_strtolower($get('policy')));
+        if ($policy !== '' && !$this->policyService->profileExists($policy)) {
+            $errors[] = 'Unknown policy "' . $policy . '".';
+            $policy   = '';
         }
 
         // ── admin ────────────────────────────────────────────────────────
@@ -489,41 +817,27 @@ class TeamImportService {
             $warnings[] = 'Matched accounts: ' . implode(', ', $rewritten) . '.';
         }
 
-        // ── apps ─────────────────────────────────────────────────────────
-        // Empty cell = template default; the literal token `none` = create
-        // nothing. Anything else is read as an explicit subset.
-        $appTokens = $this->splitMulti(mb_strtolower($get('apps')));
-        if ($appTokens === []) {
-            $apps = $template === '' ? [] : TeamTemplateProfiles::appsToCreate($template);
-        } elseif (count($appTokens) === 1 && $appTokens[0] === 'none') {
-            $apps = [];
-        } else {
-            $apps = [];
-            foreach ($appTokens as $token) {
-                if (in_array($token, TeamTemplateProfiles::APPS, true)) {
-                    $apps[] = $token;
-                } else {
-                    $warnings[] = 'Unknown app "' . $token . '" ignored.';
-                }
-            }
-            $apps = array_values(array_unique($apps));
-        }
+        // ── apps and modules (v4.8.25) ───────────────────────────────────
+        // Both come from the template, and neither is a column any more — see
+        // the class docblock for why a row cannot name a third answer.
+        //
+        // The profile filters the apps afterwards, inside
+        // `ResourceService::createTeamResources()`, which is the one method
+        // every creation path reaches. Deliberately not repeated here: two
+        // copies of an allow-list can disagree, and the copy that runs is the
+        // one that provisions.
+        $apps    = $template === '' ? [] : $this->templateApps($template, $warnings);
+        $modules = $template === ''
+            ? array_fill_keys(TeamTemplates::MODULES, false)
+            : $this->templateModules($template, $warnings);
 
-        // ── modules ──────────────────────────────────────────────────────
-        $moduleTokens = $this->splitMulti(mb_strtolower($get('modules')));
-        $allOff       = array_fill_keys(TeamTemplateProfiles::MODULES, false);
-        if ($moduleTokens === []) {
-            $modules = $template === '' ? $allOff : TeamTemplateProfiles::modules($template);
-        } elseif (count($moduleTokens) === 1 && $moduleTokens[0] === 'none') {
-            $modules = $allOff;
-        } else {
-            $modules = $allOff;
-            foreach ($moduleTokens as $token) {
-                if (isset($modules[$token])) {
-                    $modules[$token] = true;
-                } else {
-                    $warnings[] = 'Unknown module "' . $token . '" ignored.';
-                }
+        // A file written for 4.8.24 still imports — an unread column is simply
+        // not looked at. A row that put something *in* one is told it was not
+        // used, because that row asked for a team it is not going to get.
+        foreach (self::RETIRED_COLUMNS as $retired) {
+            if ($get($retired) !== '') {
+                $warnings[] = 'The "' . $retired . '" column is no longer read — apps and modules '
+                    . 'come from the template and its policy. The value was ignored.';
             }
         }
 
@@ -558,6 +872,11 @@ class TeamImportService {
             // '' when absent, ignored or invalid — the provisioning step treats
             // empty as "no expiration date" without re-deciding why.
             'expires'      => $expires,
+            // v4.8.9 — '' means "use the template's default policy", which is
+            // what the wizard does when the creator does not change the
+            // preselection. Resolved at provisioning time, not here, so one
+            // place decides it.
+            'policy'       => $policy,
             'warnings'     => $warnings,
         ];
 
@@ -814,8 +1133,12 @@ class TeamImportService {
      * @return array<string,mixed>
      * @throws \RuntimeException when the import does not exist.
      */
-    public function getImport(int $importId): array {
-        $this->requireNcAdmin();
+    public function getImport(int $importId, bool $enforceNcAdmin = true): array {
+        // v4.8.9 — $enforceNcAdmin false is the bulk-create table: the
+        // licence plus canCurrentUserBulkCreateTeams(), and the run must belong
+        // to the caller. Same flag idiom assignOwner()/adminSetMemberLevel()
+        // already use. The CSV upload path keeps the administrator gate.
+        if ($enforceNcAdmin) { $this->requireNcAdmin(); } else { $this->requireOwnBulkRun($importId); }
 
         return $this->buildImportPayload($importId);
     }
@@ -900,8 +1223,8 @@ class TeamImportService {
      *
      * @return array<string,mixed>
      */
-    public function start(int $importId): array {
-        $this->requireNcAdmin();
+    public function start(int $importId, bool $enforceNcAdmin = true): array {
+        if ($enforceNcAdmin) { $this->requireNcAdmin(); } else { $this->requireOwnBulkRun($importId); }
 
         $import = $this->mapper->findImport($importId);
         if ($import === null) {
@@ -914,7 +1237,18 @@ class TeamImportService {
             ]);
         }
 
-        return $this->getImport($importId);
+        // v4.8.13 — `buildImportPayload()`, not `getImport()`. The gate ran at
+        // the top of this method; `getImport()` defaults to the administrator
+        // gate, so calling it here re-checked the caller against the *wrong*
+        // rule and threw "administrator privilege required" at somebody who had
+        // just passed the bulk one. Worse, it threw *after* `startImport()` had
+        // already flipped the run to running, so the run existed and the
+        // browser was told it had failed.
+        //
+        // Any method that has already established who is asking must use the
+        // ungated reader. Re-gating a second time inside one call is not
+        // defence in depth when the two gates ask different questions.
+        return $this->buildImportPayload($importId);
     }
 
     /**
@@ -927,8 +1261,8 @@ class TeamImportService {
      *
      * @return array<string,mixed>
      */
-    public function processNextChunk(int $importId, int $limit = self::DEFAULT_CHUNK): array {
-        $this->requireNcAdmin();
+    public function processNextChunk(int $importId, int $limit = self::DEFAULT_CHUNK, bool $enforceNcAdmin = true): array {
+        if ($enforceNcAdmin) { $this->requireNcAdmin(); } else { $this->requireOwnBulkRun($importId); }
 
         return $this->runChunk($importId, $limit);
     }
@@ -1047,8 +1381,8 @@ class TeamImportService {
      *
      * @return array{cancelled: bool, deleted: bool}
      */
-    public function discard(int $importId): array {
-        $this->requireNcAdmin();
+    public function discard(int $importId, bool $enforceNcAdmin = true): array {
+        if ($enforceNcAdmin) { $this->requireNcAdmin(); } else { $this->requireOwnBulkRun($importId); }
 
         $import = $this->mapper->findImport($importId);
         if ($import === null) {
@@ -1136,9 +1470,24 @@ class TeamImportService {
             throw new \RuntimeException('Team was created but no id was returned.');
         }
 
+        // ── 1b. Classification (v4.8.9) ──────────────────────────────────
+        //
+        // Before the privacy bitmask, deliberately: `updateTeamConfig()`
+        // overlays whatever the team's policy governs on top of the caller's
+        // value, so the assignment has to exist first or the template's
+        // preselection would win over the policy. The wizard has the same
+        // ordering for the same reason.
+        //
+        // `assignAtCreation()` falls back to the template's default when the
+        // row names no policy, which is the one resolution rule.
+        $policy = (string)($payload['policy'] ?? '');
+        $this->bestEffort($notes, 'policy', function () use ($teamId, $policy, $template) {
+            $this->policyService->assignAtCreation($teamId, $policy, $template);
+        });
+
         // ── 2. Privacy bitmask from the template ─────────────────────────
         $this->bestEffort($notes, 'privacy settings', function () use ($teamId, $template) {
-            $this->teamService->updateTeamConfig($teamId, TeamTemplateProfiles::configBitmask($template));
+            $this->teamService->updateTeamConfig($teamId, $this->templateConfigBitmask($template));
         });
 
         // ── 3. Description ───────────────────────────────────────────────
@@ -1324,7 +1673,7 @@ class TeamImportService {
         // than a wizard-created one, not an equal one.
         if ($ownerAssigned) {
             $this->bestEffort($notes, 'privacy settings', function () use ($teamId, $template) {
-                $this->teamService->updateTeamConfig($teamId, TeamTemplateProfiles::configBitmask($template));
+                $this->teamService->updateTeamConfig($teamId, $this->templateConfigBitmask($template));
             });
         }
 

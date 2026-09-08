@@ -17,6 +17,24 @@ return [
         // Non-member view of a team, for a shared team link. See TeamController.
         ['name' => 'team#getTeamPreview',         'url' => '/api/v1/teams/{teamId}/preview',                  'verb' => 'GET'],
         ['name' => 'team#createTeam',             'url' => '/api/v1/teams',                                    'verb' => 'POST'],
+        // v4.8.7 — the last step of creation: member roles, and the handover
+        // when somebody else was appointed owner. Gated on owning the team.
+        ['name' => 'team#applyCreationRoles',     'url' => '/api/v1/teams/{teamId}/creation-roles',             'verb' => 'POST'],
+        // v4.8.7 — may this user see the bulk create tab? Licence + creator group.
+        ['name' => 'team#bulkCreateEntitlement',  'url' => '/api/v1/teams-bulk-entitlement',                    'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
+        // Bulk team creation from the GUI table (v4.8.9).
+        //
+        // A second front end onto TeamImportService — same validation, same
+        // durable run, same provisioning — with the bulk gate rather than the
+        // CSV importer's administrator gate. See BulkTeamController.
+        // ----------------------------------------------------------------
+        ['name' => 'bulkTeam#validateRows', 'url' => '/api/v1/teams/bulk/validate',              'verb' => 'POST'],
+        ['name' => 'bulkTeam#show',         'url' => '/api/v1/teams/bulk/{importId}',            'verb' => 'GET'],
+        ['name' => 'bulkTeam#start',        'url' => '/api/v1/teams/bulk/{importId}/start',      'verb' => 'POST'],
+        ['name' => 'bulkTeam#process',      'url' => '/api/v1/teams/bulk/{importId}/process',    'verb' => 'POST'],
+        ['name' => 'bulkTeam#destroy',      'url' => '/api/v1/teams/bulk/{importId}',            'verb' => 'DELETE'],
         ['name' => 'team#updateTeam',             'url' => '/api/v1/teams/{teamId}',                          'verb' => 'PUT'],
         ['name' => 'team#deleteTeam',             'url' => '/api/v1/teams/{teamId}',                          'verb' => 'DELETE'],
         ['name' => 'team#transferOwner',          'url' => '/api/v1/teams/{teamId}/transfer-owner',           'verb' => 'POST'],
@@ -102,6 +120,7 @@ return [
         ['name' => 'team#saveCollectivesConfig',   'url' => '/api/v1/teams/{teamId}/collectives/config',           'verb' => 'PUT'],
         ['name' => 'team#getCollectivesTeamRow',   'url' => '/api/v1/teams/{teamId}/collectives/team-collective',  'verb' => 'GET'],
         ['name' => 'team#getCollectivesSubPages',  'url' => '/api/v1/teams/{teamId}/collectives/subpages',         'verb' => 'GET'],
+        ['name' => 'team#getCollectivesPageTree',  'url' => '/api/v1/teams/{teamId}/collectives/page-tree',        'verb' => 'GET'],
         ['name' => 'team#invalidateCollectivesCache', 'url' => '/api/v1/teams/{teamId}/collectives/subpages/cache', 'verb' => 'DELETE'],
         ['name' => 'team#createCollectivesPage',   'url' => '/api/v1/teams/{teamId}/collectives/pages',            'verb' => 'POST'],
 
@@ -291,6 +310,14 @@ return [
         ['name' => 'comment#deleteComment',       'url' => '/api/v1/comments/{commentId}',                   'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
+        // v4.8.7 — comment-notification subscriptions (GitHub #95).
+        // No GET: the current state ships on every message row, and both
+        // writes answer with the state they produced.
+        // ----------------------------------------------------------------
+        ['name' => 'messageSubscription#subscribe',   'url' => '/api/v1/messages/{messageId}/subscription',  'verb' => 'PUT'],
+        ['name' => 'messageSubscription#unsubscribe', 'url' => '/api/v1/messages/{messageId}/subscription',  'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
         // v4.5.26 — "What's new" Talk interaction. Reply inside a thread and
         // vote on a poll without leaving the feed.
         //
@@ -345,23 +372,6 @@ return [
         // so it lives under the team rather than beside the group list —
         // which also keeps it clear of the {groupId} slot above.
         ['name' => 'teamGroup#assignTeam',  'url' => '/api/v1/teams/{teamId}/group',  'verb' => 'PUT'],
-
-        // ----------------------------------------------------------------
-        // Nextcloud tags on teams (v4.7.17) — oc_systemtag_object_mapping.
-        // ----------------------------------------------------------------
-        // The tags themselves are created and managed in Settings →
-        // Administration → Basic settings; these routes only attach and
-        // detach existing ones. Read is gated on membership and both writes
-        // on admin level, inside TeamTagService — see its class docblock for
-        // why the DAV systemtags-relations entity is deliberately NOT
-        // registered.
-        // The picker's options — instance-wide, not team-scoped. Serves the
-        // same list /remote.php/dav/systemtags already does, narrowed to the
-        // tags the caller may actually assign.
-        ['name' => 'teamTag#getAvailableTags', 'url' => '/api/v1/tags',                  'verb' => 'GET'],
-        ['name' => 'teamTag#getTags',    'url' => '/api/v1/teams/{teamId}/tags',         'verb' => 'GET'],
-        ['name' => 'teamTag#addTag',     'url' => '/api/v1/teams/{teamId}/tags/{tagId}', 'verb' => 'POST'],
-        ['name' => 'teamTag#removeTag',  'url' => '/api/v1/teams/{teamId}/tags/{tagId}', 'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
         // In-app announcements (v4.4.17) — unlicensed instances only.
@@ -614,6 +624,79 @@ return [
         ['name' => 'license#getStatus',    'url' => '/api/v1/admin/license',         'verb' => 'GET'],
         ['name' => 'license#saveKey',      'url' => '/api/v1/admin/license',         'verb' => 'PUT'],
         ['name' => 'license#entitlements', 'url' => '/api/v1/license/entitlements',  'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
+        // Templates and policy profiles (v4.8.2, Track F2a). Admin-only,
+        // gated with #[AuthorizedAdminSetting] on the controller AND
+        // requireNcAdmin() in the service.
+        //
+        // Definitions only — nothing here assigns a profile to a team or
+        // writes a team's settings. Assignment is F2b, the drift scan F2c,
+        // reclassification F2d.
+        // ----------------------------------------------------------------
+        ['name' => 'policy#fields',         'url' => '/api/v1/admin/policy/fields',                    'verb' => 'GET'],
+        // v4.8.15 — counts for the Team-creation tab's setup checklist. Must
+        // stay ABOVE the {profileKey} route below: /profiles/{profileKey} would
+        // otherwise be a candidate for nothing here, but keeping the literal
+        // segments together is the same ordering discipline the import block
+        // documents at line 264.
+        ['name' => 'policy#summary',        'url' => '/api/v1/admin/policy/summary',                   'verb' => 'GET'],
+        ['name' => 'policy#listProfiles',   'url' => '/api/v1/admin/policy/profiles',                  'verb' => 'GET'],
+        ['name' => 'policy#createProfile',  'url' => '/api/v1/admin/policy/profiles',                  'verb' => 'POST'],
+        ['name' => 'policy#showProfile',    'url' => '/api/v1/admin/policy/profiles/{profileKey}',     'verb' => 'GET'],
+        ['name' => 'policy#updateProfile',  'url' => '/api/v1/admin/policy/profiles/{profileKey}',     'verb' => 'PUT'],
+        ['name' => 'policy#destroyProfile', 'url' => '/api/v1/admin/policy/profiles/{profileKey}',     'verb' => 'DELETE'],
+        ['name' => 'policy#listTemplates',  'url' => '/api/v1/admin/policy/templates',                 'verb' => 'GET'],
+        // v4.8.3 — member-callable. The create-team wizard fetches the whole
+        // template set once on mount, which is what retires the
+        // TeamTemplates ↔ CreateTeamView mirror.
+        ['name' => 'policy#templatesForCreation', 'url' => '/api/v1/templates',                       'verb' => 'GET'],
+        // v4.8.4 — the wizard's classification context. Member-callable, and
+        // what it returns depends on whether the caller is an NC admin.
+        ['name' => 'policy#creationContext',   'url' => '/api/v1/policy/creation',                    'verb' => 'GET'],
+        // `policy#setDefaultProfile` was here in v4.8.4. Removed in v4.8.5 —
+        // the default policy is per template now and rides updateTemplate.
+        ['name' => 'policy#updateTemplate', 'url' => '/api/v1/admin/policy/templates/{templateKey}',   'verb' => 'PUT'],
+        ['name' => 'policy#conflicts',      'url' => '/api/v1/admin/policy/conflicts',                 'verb' => 'GET'],
+
+        // v4.8.27 — rolling a saved change out to the teams that carry it. The
+        // plan comes back from the PUT above, because compliance is measured
+        // against the definition's previous values and those are gone once it
+        // is stored; these two apply the teams the administrator picked.
+        ['name' => 'policy#propagateProfile',  'url' => '/api/v1/admin/policy/profiles/{profileKey}/propagate',   'verb' => 'POST'],
+        ['name' => 'policy#propagateTemplate', 'url' => '/api/v1/admin/policy/templates/{templateKey}/propagate', 'verb' => 'POST'],
+        // v4.8.16 (Track F2b) — assignment to an EXISTING team. Unlike everything
+        // above, these write the team's own settings: TRACK-F2-DESIGN §4.3 makes
+        // assignment a write rather than a label. The preview is a GET and
+        // changes nothing; the other two are state-changing and stay
+        // CSRF-protected.
+        ['name' => 'policy#previewAssignment', 'url' => '/api/v1/admin/policy/teams/{teamId}/preview', 'verb' => 'GET'],
+        ['name' => 'policy#applyProfile',      'url' => '/api/v1/admin/policy/teams/{teamId}',        'verb' => 'POST'],
+        ['name' => 'policy#clearProfile',      'url' => '/api/v1/admin/policy/teams/{teamId}',        'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
+        // File reviews (v4.8.17) — FILE-REVIEW-PLAN.md §3.2
+        // ----------------------------------------------------------------
+        // The first two are called from the Nextcloud Files app, by the file
+        // action TeamHub registers there, rather than from a TeamHub page.
+        // They are gated exactly like the rest: `scopes` answers only about the
+        // caller's own teams, and `review-context` refuses a file the caller
+        // cannot read before it returns anybody's name.
+        ['name' => 'fileReview#getScopes',     'url' => '/api/v1/file-reviews/scopes',          'verb' => 'GET'],
+        ['name' => 'fileReview#reviewContext', 'url' => '/api/v1/files/{fileId}/review-context', 'verb' => 'GET'],
+        // Team-scoped. The team id is part of the path on the single-review
+        // verbs too, and is checked against the review's own team — see the
+        // controller's docblock for why that is not redundant.
+        // Per-team switch: read by any member, written by team admins.
+        // Declared before the {reviewId} routes so `config` is never parsed as
+        // a review id.
+        ['name' => 'fileReview#getConfig',  'url' => '/api/v1/teams/{teamId}/file-reviews/config',              'verb' => 'GET'],
+        ['name' => 'fileReview#saveConfig', 'url' => '/api/v1/teams/{teamId}/file-reviews/config',              'verb' => 'PUT'],
+        ['name' => 'fileReview#index',    'url' => '/api/v1/teams/{teamId}/file-reviews',                       'verb' => 'GET'],
+        ['name' => 'fileReview#create',   'url' => '/api/v1/teams/{teamId}/file-reviews',                       'verb' => 'POST'],
+        ['name' => 'fileReview#show',     'url' => '/api/v1/teams/{teamId}/file-reviews/{reviewId}',            'verb' => 'GET'],
+        ['name' => 'fileReview#complete', 'url' => '/api/v1/teams/{teamId}/file-reviews/{reviewId}/complete',   'verb' => 'POST'],
+        ['name' => 'fileReview#close',    'url' => '/api/v1/teams/{teamId}/file-reviews/{reviewId}/close',      'verb' => 'POST'],
     ],
 ];
 // Note: just checking structure

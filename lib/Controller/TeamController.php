@@ -10,11 +10,13 @@ use OCA\TeamHub\Service\CollectivesService;
 use OCA\TeamHub\Service\DeckService;
 use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
+use OCA\TeamHub\Service\LicenseService;
 use OCA\TeamHub\Service\MailClientService;
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\MilestoneService;
+use OCA\TeamHub\Service\PolicyService;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TaskService;
@@ -55,6 +57,11 @@ class TeamController extends Controller {
         private TaskService $taskService,
         private TimelineService $timelineService,
         private TeamTypeService $teamTypeService,
+        // v4.8.4 — Track F2b. Assigns the classification a new team is created
+        // under, and re-checks that only an NC admin may pick one.
+        private PolicyService $policyService,
+        // v4.8.7 — bulk create is a licensed feature; see bulkCreateEntitlement().
+        private LicenseService $licenseService,
         // v4.6.13 — the create wizard's optional expiration date rides
         // saveTeamType(), because an expiry is only meaningful next to the
         // template that decides whether it is allowed at all.
@@ -143,14 +150,97 @@ class TeamController extends Controller {
         }
     }
 
+    /**
+     * POST /api/v1/teams
+     *
+     * `profileKey` is the policy the creator picked — a **required** field in
+     * the wizard since v4.8.5, and **any creator may pick** (Justin,
+     * 2026-09-01; DESIGN §2.110 for what that reverses and what it costs).
+     *
+     * `templateKey` is the fallback: a caller that is not the wizard and sends
+     * no policy gets the template's default rather than an unclassified team.
+     * Both are optional on the wire so an older client keeps working.
+     */
     #[NoAdminRequired]
-    public function createTeam(string $name, string $description = ''): JSONResponse {
+    public function createTeam(
+        string $name,
+        string $description = '',
+        string $profileKey = '',
+        string $templateKey = '',
+    ): JSONResponse {
         try {
-            $team = $this->teamService->createTeam($name);
+            $team   = $this->teamService->createTeam($name);
+            $teamId = (string)($team['id'] ?? '');
+
+            if ($teamId !== '') {
+                // Assignment writes the row and returns what it governs; the
+                // config bits are applied through TeamService, which owns that
+                // write and masks it to MANAGED_BITS.
+                $governed = $this->policyService->assignAtCreation($teamId, $profileKey, $templateKey);
+                if ($governed !== []) {
+                    // Value ignored — updateTeamConfig overlays the governed
+                    // bits itself. Passing the team's current config back in is
+                    // what makes them land without a second code path.
+                    $this->teamService->applyPolicyConfig($teamId);
+                }
+            }
+
             return new JSONResponse($team, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to create team');
         }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/creation-roles
+     * Body: { roles: [ { id, type?, level } ], newOwner?: "uid" }
+     *
+     * The last step of team creation (v4.8.7): give the invited members their
+     * roles, and hand the team over if somebody else was appointed owner.
+     *
+     * Gated on **owning this team**, not on being an administrator — the check
+     * is in the service, where it reads the caller's own level. Handing over
+     * something you just created is not an administrative act, and it is the
+     * one transfer path with real-world exercise behind it (HANDOFF).
+     *
+     * Never throws on a failed handover: the team exists and is usable, so the
+     * result reports per-step status and the wizard renders it. Losing a
+     * created team because ownership did not move would be the worse outcome.
+     *
+     * @param array<int, array<string,mixed>> $roles
+     */
+    #[NoAdminRequired]
+    public function applyCreationRoles(string $teamId, array $roles = [], string $newOwner = ''): JSONResponse {
+        try {
+            return new JSONResponse(
+                $this->maintenanceService->applyCreationRoles($teamId, $roles, $newOwner),
+            );
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to apply member roles', ['teamId' => $teamId]);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/bulk-entitlement
+     *
+     * Whether this user may use the bulk create tab. Two gates, both real:
+     * the licence, and membership of the team-creator group — or, when no such
+     * group is configured, being a Nextcloud administrator.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function bulkCreateEntitlement(): JSONResponse {
+        $licensed = $this->licenseService->allowsAdvancedCreation();
+        $allowed  = $this->memberService->canCurrentUserBulkCreateTeams();
+
+        return new JSONResponse([
+            'canBulkCreate' => $licensed && $allowed,
+            // Split so the UI can say *which* gate closed rather than hiding
+            // the tab with no explanation — an unlicensed instance and an
+            // unprivileged user are different problems with different fixes.
+            'licensed'      => $licensed,
+            'permitted'     => $allowed,
+        ]);
     }
 
     #[NoAdminRequired]
@@ -360,7 +450,11 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getTeamApps(string $teamId): JSONResponse {
         try {
-            $apps = $this->teamService->getTeamApps($teamId);
+            // v4.8.27 — the derived reading, not the stored toggles. This
+            // returned `teamhub_team_apps` rows, which are absent for every
+            // resource-backed app, so Manage Team's `row ? row.enabled : true`
+            // fallback showed every installed app as switched on for every team.
+            $apps = $this->teamService->getTeamAppPresence($teamId);
             return new JSONResponse($apps);
         } catch (\Exception $e) {
             $this->logger->error('[TeamHub][TeamController] getTeamApps failed', [
@@ -657,6 +751,27 @@ class TeamController extends Controller {
             }
             return new JSONResponse($this->collectivesService->getSubPages($teamId, $uid));
         } catch (\Exception $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * The team collective's page tree, for the rail beside the Collectives
+     * tab (v4.8.8). Gated at team-member level like every other read on this
+     * collective; Collectives' own ACL is what decides which pages come back,
+     * because the tree is built from a findAll() run as the calling user.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getCollectivesPageTree(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            if ($uid === '') {
+                return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+            }
+            return new JSONResponse($this->collectivesService->getPageTree($teamId, $uid));
+        } catch (Exception $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
         }
     }
@@ -1971,14 +2086,48 @@ class TeamController extends Controller {
         }
     }
 
+    /**
+     * GET /api/v1/teams/{teamId}/config
+     *
+     * v4.8.17 — two changes.
+     *
+     * **A membership gate was added.** This method checked authentication only:
+     * `TeamService::getTeamConfig()` verifies a user is logged in and then reads
+     * `circles_circle.config` for any team id handed to it. Any authenticated
+     * user could therefore read any team's privacy bitmask. The gate is the
+     * project's own standard — SKILLS.md § Security standards, "membership check
+     * on every team-scoped endpoint" — and this endpoint had exactly one caller,
+     * `ManageTeamView.vue`, which is a team screen, so nothing legitimate loses
+     * access. See HANDOFF for the pre-existing finding this closes.
+     *
+     * **The team's classification travels with it.** Manage Team renders six
+     * Circles config toggles from this one payload and has to know which of them
+     * the team's profile fixes — TRACK-F2-DESIGN §4.4 requires our own screens be
+     * read-only for a governed field. Riding this response rather than adding a
+     * second request is the rule HANDOFF states for the project fact.
+     *
+     * `policy` is null for an unclassified team, which is every team until an
+     * administrator assigns one.
+     *
+     * The catch now goes through `ExceptionResponseTrait` rather than answering
+     * every failure with a hand-rolled 400 — the membership check raises
+     * `AccessDeniedException`, which means 403, and HANDOFF logs the 13
+     * hand-rolled blocks in this file as an open issue rather than a pattern to
+     * copy.
+     */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getTeamConfig(string $teamId): JSONResponse {
         try {
-            $config = $this->teamService->getTeamConfig($teamId);
-            return new JSONResponse(['config' => $config]);
+            $this->memberService->requireMemberLevel($teamId);
+            return new JSONResponse([
+                'config' => $this->teamService->getTeamConfig($teamId),
+                'policy' => $this->policyService->governanceSummaryFor($teamId),
+            ]);
         } catch (\Throwable $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->exceptionResponse($e, 'Failed to load team config', [
+                'teamId' => $teamId,
+            ]);
         }
     }
 
@@ -2038,7 +2187,18 @@ class TeamController extends Controller {
 
             // Verify the target is already a member of this team. Team owners can only
             // transfer to existing members; promoting outsiders is an NC-admin action.
-            $targetLevel = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $userId);
+            //
+            // v4.8.35 — by ANY route. This was the direct-only reader, so a user
+            // who reaches the team through an attached group or nested team was
+            // refused as "not a member of this team" while the Members tab listed
+            // them as one. The boundary being defended here is member vs outsider,
+            // and an inherited member is on the member side of it.
+            //
+            // `assignOwner()` gives them the direct circles_member row as part of
+            // the transfer — the same INSERT branch, verified against a live
+            // group-only member on 2026-09-08 — so no separate promotion step is
+            // needed here.
+            $targetLevel = $this->memberService->getEffectiveMemberLevel($this->db, $teamId, $userId);
             if ($targetLevel === 0) {
                 return new JSONResponse(
                     ['error' => 'Target user is not a member of this team'],

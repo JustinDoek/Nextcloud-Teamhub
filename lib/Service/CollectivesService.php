@@ -77,6 +77,15 @@ class CollectivesService {
     private const CFG_ENABLED       = 'collectives_enabled_';
     private const CFG_COLLECTIVE_ID = 'collectives_collective_id_';
 
+    /**
+     * Whole-tree caps for getPageTree(). A collective is a filesystem, so a
+     * cycle is not reachable and the depth cap is pure belt-and-braces; the
+     * page cap is the real one, and it is reported rather than silent —
+     * `truncated` is what stops a partial tree reading as a complete one.
+     */
+    private const MAX_TREE_PAGES = 500;
+    private const MAX_TREE_DEPTH = 12;
+
     public function __construct(
         private IUserSession        $userSession,
         private IAppManager         $appManager,
@@ -996,23 +1005,7 @@ class CollectivesService {
                     continue;
                 }
 
-                $pageLink = '';
-                try {
-                    $pageLink = (string)$pageSvc->getPageLink($collectiveSlug, $p, true);
-                } catch (\Throwable) {}
-                if ($pageLink !== '') {
-                    if (str_starts_with($pageLink, '/apps/collectives/')) {
-                        $url = $pageLink;
-                    } elseif (str_starts_with($pageLink, 'apps/collectives/')) {
-                        $url = '/' . $pageLink;
-                    } else {
-                        $url = '/apps/collectives/' . ltrim($pageLink, '/');
-                    }
-                } else {
-                    // Fallback for a Collectives version without getPageLink.
-                    $titleSlug = rawurlencode(trim((string)preg_replace('/\s+/', '-', $title)));
-                    $url = rtrim($baseUrl, '/') . '/' . $titleSlug . '?fileId=' . $id;
-                }
+                $url = $this->pageUrlFor($pageSvc, $collectiveSlug, $p, $baseUrl, $title, $id);
 
                 $out[] = [
                     'id'    => $id,
@@ -1031,6 +1024,216 @@ class CollectivesService {
         return $out;
     }
 
+
+    /**
+     * Build a page's app-relative URL. Extracted from getSubPages (v4.8.8) so
+     * the flat widget list and the tab's page tree cannot drift on how a page
+     * is addressed — the `{slug}-{id}` segment rule in serializeCollective was
+     * got wrong once already (v4.6.4), and one copy is enough.
+     *
+     * Two shapes come back from Collectives' own getPageLink(), and anything
+     * matching a URL back to a page has to tolerate both: with a page slug it
+     * returns a slug path and NO `?fileId=`; without one it returns the file
+     * path plus `?fileId=` for every page except the landing page. Neither
+     * form carries the `/apps/collectives/` prefix.
+     */
+    private function pageUrlFor(object $pageSvc, string $collectiveSlug, object $p, string $baseUrl, string $title, int $id): string {
+        $pageLink = '';
+        try {
+            $pageLink = (string)$pageSvc->getPageLink($collectiveSlug, $p, true);
+        } catch (\Throwable) {}
+        if ($pageLink !== '') {
+            if (str_starts_with($pageLink, '/apps/collectives/')) {
+                return $pageLink;
+            }
+            if (str_starts_with($pageLink, 'apps/collectives/')) {
+                return '/' . $pageLink;
+            }
+            return '/apps/collectives/' . ltrim($pageLink, '/');
+        }
+        // Fallback for a Collectives version without getPageLink.
+        $titleSlug = rawurlencode(trim((string)preg_replace('/\s+/', '-', $title)));
+        return rtrim($baseUrl, '/') . '/' . $titleSlug . '?fileId=' . $id;
+    }
+
+    /**
+     * The team collective's page tree, ordered the way Collectives orders it.
+     * Drives the page rail beside the Collectives tab's iframe (v4.8.8).
+     *
+     * Kept separate from getSubPages() rather than replacing it: that method
+     * stays flat, title-sorted and capped at 20 because that is what the Pages
+     * widget wants from it.
+     *
+     * **The parentId rule, verified against Collectives 4.6.1 rather than
+     * assumed.** `PageInfoTreeBuilder::build($folderId, $parentPageId)` is
+     * seeded with parent `0`, so the landing page carries `parentId === 0` and
+     * every other page carries its parent *page's* id — not the enclosing
+     * folder's fileId, which is what the v4.3.9 note on getSubPages still
+     * claims. Collectives' own page store agrees (`p.parentId === parent.id`).
+     * That note is left where it is because getSubPages' flat behaviour does
+     * not depend on it either way; do not carry the claim into new code.
+     *
+     * Ordering mirrors Collectives' default `byOrder`: pages the parent's
+     * `subpageOrder` names come first, in that order, and everything it does
+     * not name follows sorted by title. Collectives also honours a per-user
+     * sort setting in `oc_collectives_u_settings`; we deliberately do not read
+     * it — one predictable order in our own surface beats a second place for
+     * that preference to be half-applied.
+     *
+     * @return array{collective: ?array, root: ?array, truncated: bool, maxPages: int}
+     */
+    public function getPageTree(string $teamId, string $userId): array {
+        $empty = ['collective' => null, 'root' => null, 'truncated' => false, 'maxPages' => self::MAX_TREE_PAGES];
+        if (!$this->isInstalled() || !$this->isEnabledForTeam($teamId)) {
+            return $empty;
+        }
+
+        $collective = $this->getTeamCollective($teamId, $userId);
+        if ($collective === null) {
+            return $empty;
+        }
+        $collectiveId = (int)$collective['id'];
+        if ($collectiveId <= 0) {
+            return $empty;
+        }
+
+        try {
+            $pageSvc = $this->container->get(\OCA\Collectives\Service\PageService::class);
+            $pages   = $pageSvc->findAll($collectiveId, $userId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][CollectivesService] getPageTree findAll failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(),
+                'app'    => Application::APP_ID,
+            ]);
+            return ['collective' => $collective, 'root' => null, 'truncated' => false, 'maxPages' => self::MAX_TREE_PAGES];
+        }
+
+        $baseUrl        = $collective['url'];
+        $collectiveSlug = $collective['urlSegment']
+            ?? rawurldecode(ltrim(str_replace('/apps/collectives/', '', $baseUrl), '/'));
+
+        // Index every readable page by its parent, keeping the PageInfo around
+        // for the URL builder and the subpage order. Trashed pages sit in a
+        // hidden `.trash` folder the tree builder already skips, so the
+        // timestamp guard is defensive rather than load-bearing.
+        $byParent = [];
+        $root     = null;
+        foreach ($pages as $p) {
+            // __call-safe getters (v4.3.10 — see serializeCollective).
+            $id = 0;
+            try { $id = (int)$p->getId(); } catch (\Throwable) {}
+            if ($id <= 0) {
+                continue;
+            }
+            try {
+                if ($p->getTrashTimestamp() !== null) {
+                    continue;
+                }
+            } catch (\Throwable) {}
+            $parentId = -1;
+            try { $parentId = (int)$p->getParentId(); } catch (\Throwable) {}
+            if ($parentId < 0) {
+                continue;
+            }
+            $title = '';
+            try { $title = (string)$p->getTitle(); } catch (\Throwable) {}
+
+            $entry = ['id' => $id, 'title' => $title, 'info' => $p];
+            if ($parentId === 0) {
+                // The landing page. Its title is the index file's name rather
+                // than something a user chose, so Collectives renders the
+                // collective's name in its place and so do we.
+                $root = $entry;
+                continue;
+            }
+            $byParent[$parentId][] = $entry;
+        }
+
+        if ($root === null) {
+            // Nothing carrying parentId 0 means findAll returned no usable
+            // page — an empty collective, or a Collectives version that seeds
+            // its tree builder differently. Either way there is no tree.
+            return ['collective' => $collective, 'root' => null, 'truncated' => false, 'maxPages' => self::MAX_TREE_PAGES];
+        }
+
+        $budget   = self::MAX_TREE_PAGES;
+        $children = $this->buildPageChildren($root, $byParent, $pageSvc, $collectiveSlug, $baseUrl, 1, $budget);
+
+        return [
+            'collective' => $collective,
+            'root'       => [
+                'id'       => $root['id'],
+                'title'    => (string)($collective['name'] ?? $root['title']),
+                'emoji'    => $collective['emoji'] ?? null,
+                'url'      => $baseUrl,
+                'children' => $children,
+            ],
+            'truncated' => $budget <= 0,
+            'maxPages'  => self::MAX_TREE_PAGES,
+        ];
+    }
+
+    /**
+     * One level of getPageTree()'s recursion.
+     *
+     * `$budget` is by reference on purpose: the cap is a whole-tree limit, not
+     * a per-level one, so a collective that reaches it stops wherever the walk
+     * happens to be and the caller reports `truncated` rather than drawing a
+     * partial tree as though it were the whole thing.
+     *
+     * @param array<string, mixed> $parent
+     * @param array<int, array<int, array<string, mixed>>> $byParent
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildPageChildren(array $parent, array $byParent, object $pageSvc, string $collectiveSlug, string $baseUrl, int $depth, int &$budget): array {
+        if ($depth > self::MAX_TREE_DEPTH || $budget <= 0) {
+            return [];
+        }
+        $children = $byParent[$parent['id']] ?? [];
+        if ($children === []) {
+            return [];
+        }
+
+        // `subpageOrder` is a JSON array of page ids, stored on the PARENT.
+        $order = [];
+        try {
+            $raw = $parent['info']->getSubpageOrder();
+            if (is_string($raw) && $raw !== '') {
+                $decoded = json_decode($raw, true);
+                if (is_array($decoded)) {
+                    $order = array_map('intval', array_values($decoded));
+                }
+            }
+        } catch (\Throwable) {}
+        $rank = array_flip($order);
+
+        usort($children, static function (array $a, array $b) use ($rank) {
+            $ra = $rank[$a['id']] ?? PHP_INT_MAX;
+            $rb = $rank[$b['id']] ?? PHP_INT_MAX;
+            if ($ra !== $rb) {
+                return $ra <=> $rb;
+            }
+            return strnatcasecmp($a['title'], $b['title']);
+        });
+
+        $out = [];
+        foreach ($children as $child) {
+            if ($budget <= 0) {
+                break;
+            }
+            $budget--;
+            $emoji = null;
+            try { $emoji = $child['info']->getEmoji(); } catch (\Throwable) {}
+            $out[] = [
+                'id'       => $child['id'],
+                'title'    => $child['title'],
+                'emoji'    => ($emoji !== null && (string)$emoji !== '') ? (string)$emoji : null,
+                'url'      => $this->pageUrlFor($pageSvc, $collectiveSlug, $child['info'], $baseUrl, $child['title'], $child['id']),
+                'children' => $this->buildPageChildren($child, $byParent, $pageSvc, $collectiveSlug, $baseUrl, $depth + 1, $budget),
+            ];
+        }
+        return $out;
+    }
     /**
      * Create a new page in the team's collective (v4.3.9).
      *

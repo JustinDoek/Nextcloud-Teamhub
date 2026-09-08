@@ -244,7 +244,72 @@ class ResourceService {
         private TeamAppResourceMapper $resourceMapper,
         private ResourceDiscoveryService $discoveryService,
         private GroupFolderService $groupFolderService,
+        // v4.8.4 — Track F2b. Read-only: the profile's integration allow-list
+        // is applied here, at the one place resources are actually created.
+        private PolicyService $policyService,
+        // v4.8.24 — the profile's classification tag, applied when the team
+        // folder it belongs on is created. A DI leaf.
+        private ConfidentialFilesService $confidentialFiles,
     ) {}
+
+    /**
+     * Put the team's governed classification tag on its team folder (v4.8.24).
+     *
+     * Called immediately after a group folder is created and attached to the
+     * circle. Resolves the folder through
+     * `GroupFolderService::findGroupFolderForCircle()` rather than from the id
+     * just created, deliberately: that method and the compliance scan share one
+     * rule for which folder is *the* team folder, so tagging through it
+     * guarantees the tag lands on the folder the scan will later read.
+     *
+     * **Group folders only.** The shared-folder fallback below is not tagged,
+     * because `PolicyObservationMapper::teamFolderRootsByTeam()` reads group
+     * folders alone — tagging a shared folder would produce a classification the
+     * scan can never see and therefore reports as permanently missing.
+     *
+     * Best-effort throughout. A team is not left half-created because a tag did
+     * not stick; the failure is logged and the scan reports the folder as
+     * unclassified, which is true.
+     */
+    private function applyGovernedClassification(string $teamId): void {
+        try {
+            $tagId = $this->policyService->confidentialTagForTeam($teamId);
+            if ($tagId === null) {
+                return;
+            }
+
+            $folder = $this->groupFolderService->findGroupFolderForCircle($teamId);
+            $rootId = (int)($folder['root_id'] ?? 0);
+
+            if ($rootId <= 0) {
+                // The folder row exists but GroupFolders has not recorded its
+                // root fileid yet. Warned rather than passed over in silence:
+                // the profile governs a tag, so somebody expects one, and a
+                // classification that never lands must not be invisible.
+                $this->logger->warning('[TeamHub][ResourceService] classification tag not applied — no folder root', [
+                    'teamId' => $teamId,
+                    'tagId'  => $tagId,
+                    'app_id' => Application::APP_ID,
+                ]);
+                return;
+            }
+
+            if ($this->confidentialFiles->applyTag($rootId, $tagId)) {
+                $this->logger->info('[TeamHub][ResourceService] classification tag applied to team folder', [
+                    'teamId' => $teamId,
+                    'rootId' => $rootId,
+                    'tagId'  => $tagId,
+                    'app_id' => Application::APP_ID,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ResourceService] applyGovernedClassification failed', [
+                'teamId' => $teamId,
+                'error'  => $e->getMessage(),
+                'app_id' => Application::APP_ID,
+            ]);
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Resource lookup
@@ -563,6 +628,29 @@ class ResourceService {
 
         $teamColour = $this->pickTeamColour($teamId);
 
+        // v4.8.4 — the team's profile filters what may be provisioned.
+        //
+        // Enforced here rather than in the wizard because this is the method
+        // every creation path reaches: the wizard, the CSV importer and the
+        // Manage Team → Integrations screen. A profile that permits Talk and
+        // Files but not Deck must mean it for all three.
+        //
+        // Null means ungoverned — no profile, or a profile whose allow-list is
+        // empty, which is that field's own inert setting. Every team is in that
+        // state until an administrator assigns a profile.
+        $allowed = $this->policyService->allowedIntegrationsForTeam($teamId);
+        if ($allowed !== null) {
+            $refused = array_values(array_diff($apps, $allowed));
+            if ($refused !== []) {
+                $this->logger->info('[TeamHub][ResourceService] Policy refused resource creation', [
+                    'teamId'  => $teamId,
+                    'refused' => $refused,
+                    'app'     => 'teamhub',
+                ]);
+            }
+            $apps = array_values(array_intersect($apps, $allowed));
+        }
+
         $results = [];
         foreach ($apps as $app) {
             // Use per-app name if provided, fall back to teamName.
@@ -609,6 +697,15 @@ class ResourceService {
                                 $this->upsertResourceRow(
                                     $teamId, 'files', 'gf:' . $folderId, 'teamhub_create', $uid
                                 );
+                                // v4.8.24 — the classification tag, if the team's
+                                // profile governs one. It has to happen here and
+                                // not where the profile is assigned: both
+                                // creation paths assign the policy long before
+                                // resources exist, so at assignment time there is
+                                // no folder to tag. Hooking the folder's creation
+                                // instead also covers a team that enables Files
+                                // months later.
+                                $this->applyGovernedClassification($teamId);
                             } catch (\Throwable $gfEx) {
                                 $this->logger->error('[TeamHub][ResourceService] createTeamResources — GroupFolder creation failed, falling back to shared folder', [
                                     'teamId'    => $teamId,
@@ -749,6 +846,12 @@ class ResourceService {
                     }
                     // Always upsert the resource row so the team has an active files resource.
                     $this->upsertResourceRow($teamId, 'files', 'gf:' . $folderId, 'teamhub_connect', $uid);
+                    // v4.8.24 — a connected folder is the team folder for every
+                    // other purpose, including the compliance scan, so it
+                    // carries the classification for the same reason a created
+                    // one does. Leaving it out would report the team as missing
+                    // a tag that no path ever applies.
+                    $this->applyGovernedClassification($teamId);
                     $result = ['success' => true, 'folder_id' => $folderId, 'folder_type' => 'group'];
                 } else {
                     $result = $this->filesService->connectExistingFolder($teamId, (int)$resourceId, $uid);

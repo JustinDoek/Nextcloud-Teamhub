@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\PolicyField;
 use OCA\TeamHub\Db\MessageMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\NotFoundException;
@@ -90,6 +91,20 @@ class MessageService {
      */
     public const COMMENTS_ALWAYS_ON_TYPES = ['question', 'decision'];
 
+    /**
+     * App-config key prefix for the per-team "members may post publicly" switch.
+     * The team id is appended.
+     *
+     * Public (v4.8.15) because `PolicyService`'s compliance sweep reads the same
+     * value as the observed side of `PolicyField::PUBLIC_MESSAGES`. A **constant**
+     * rather than an injected getter deliberately: referencing the class constant
+     * adds no constructor edge, and `MessageService` is exactly the kind of
+     * heavily-connected service that `npm run check:di` exists to keep out of new
+     * dependency chains. Same shape as `TeamExpiryService::CONFIG_WARNING_DAYS`,
+     * which `TeamService` reads for the admin payload.
+     */
+    public const CONFIG_ALLOW_PUBLIC_PREFIX = 'allowPublicMessages_';
+
     private MessageMapper $messageMapper;
     private IUserSession $userSession;
     private $circlesManager;
@@ -125,6 +140,17 @@ class MessageService {
         // v4.7.5 — message create/edit/delete reach the team's audit stream.
         // Promoted rather than assigned below, matching the newer services.
         private AuditService $auditService,
+        // v4.8.7 — stamps `subscribed` onto each message row. The dependency
+        // runs one way only: MessageSubscriptionService resolves its own team
+        // names rather than calling back into this service, which is what
+        // keeps the container able to build both.
+        private MessageSubscriptionService $subscriptionService,
+        // v4.8.17 — the §4.4 write-path refusal for `public_messages`. Safe to
+        // inject here: PolicyService takes mappers, AuditService and framework
+        // interfaces only, so it closes no cycle. `npm run check:di` is the
+        // check, not this comment — see HANDOFF on why one-hop grepping misses
+        // the shape that took the app down in 4.8.7.
+        private PolicyService $policyService,
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -271,6 +297,22 @@ class MessageService {
             $pinned['edited_by_display_name'] = !empty($pinned['edited_by'])
                 ? ($nameMap[$pinned['edited_by']] ?? $pinned['edited_by'])
                 : null;
+        }
+
+        // v4.8.7 (GitHub #95) — whether this viewer follows each thread, in
+        // one query for the page. The pinned message rides along in the same
+        // batch rather than costing a second query: it is a message like any
+        // other and the card renders the same toggle on it.
+        if ($viewerUid !== '') {
+            $toStamp = $messages;
+            if ($pinned !== null) {
+                $toStamp[] = $pinned;
+            }
+            $this->subscriptionService->stampSubscriptionState($toStamp, $viewerUid);
+            if ($pinned !== null) {
+                $pinned = array_pop($toStamp);
+            }
+            $messages = $toStamp;
         }
 
         return [
@@ -1015,6 +1057,41 @@ class MessageService {
             'commentMinLevel'     => $commentSetting,
             'commentsEnabled'     => $this->getCommentsEnabledMap($teamId),
             'allowPublicMessages' => $this->getAllowPublicMessages($teamId),
+            // v4.8.17 — null unless a profile governs this switch. The team's
+            // own screen renders the control read-only from it and names the
+            // classification, which TRACK-F2-DESIGN §4.4 requires be *visible*
+            // rather than hidden: an administrator who cannot see why a control
+            // is dead learns nothing from it being dead.
+            'publicMessagesPolicy' => $this->publicMessagesPolicy($teamId),
+        ];
+    }
+
+    /**
+     * The profile governing this team's public-messages switch, or null (v4.8.17).
+     *
+     * Null covers both "unclassified" and "classified, but this profile does not
+     * govern the field" — they mean the same thing to every caller, which is why
+     * `PolicyService::governanceFor()` collapses them too.
+     *
+     * The label travels raw with an `isSeeded` flag rather than translated: a
+     * seeded profile's name is translated by `profileDisplayName()` in
+     * `src/constants/policy.js`, and a PHP label would sit outside
+     * `check:l10n`'s reach — the pipeline gap that left every `lib/MyWork/`
+     * string English for months.
+     *
+     * @return array{profileKey: string, label: string, isSeeded: bool, value: bool}|null
+     */
+    private function publicMessagesPolicy(string $teamId): ?array {
+        $governed = $this->policyService->governanceFor($teamId, PolicyField::PUBLIC_MESSAGES);
+        if ($governed === null) {
+            return null;
+        }
+
+        return [
+            'profileKey' => $governed['profileKey'],
+            'label'      => $governed['label'],
+            'isSeeded'   => $governed['isSeeded'],
+            'value'      => (bool)$governed['value'],
         ];
     }
 
@@ -1049,6 +1126,47 @@ class MessageService {
         if (!in_array($commentMinLevel, $valid, true)) {
             throw new \InvalidArgumentException('Invalid commentMinLevel: ' . $commentMinLevel);
         }
+
+        // v4.8.17 — TRACK-F2-DESIGN §4.4, the write-path refusal.
+        //
+        // `public_messages` is the one ENFORCED field in `PolicyField`: no route
+        // writes it but ours, so a governed value is genuinely locked rather
+        // than merely asserted like the Circles config bits. Until this, the
+        // apply engine set the value and a team admin could set it straight
+        // back, which made the product's one enforceable claim untrue.
+        //
+        // **Only a differing value is refused.** A team admin editing the four
+        // level floors while leaving this switch where the profile put it is
+        // attempting nothing, and failing that save would let one governed field
+        // lock the entire settings form. The frontend sends the whole block on
+        // every change, so the common case is a payload that merely echoes the
+        // governed value back.
+        //
+        // The refusal is thrown *before* any write, so a rejected save leaves
+        // all six settings untouched rather than half-applied.
+        $governed = $this->policyService->governanceFor($teamId, PolicyField::PUBLIC_MESSAGES);
+        if ($governed !== null && (bool)$governed['value'] !== $allowPublicMessages) {
+            // §8.1 — a blocked change is the only place a *prevented* write gets
+            // an actor, which is exactly what makes it worth auditing.
+            $this->auditService->log(
+                $teamId,
+                'team.policy_write_refused',
+                $this->userSession->getUser()?->getUID(),
+                'policy',
+                $governed['profileKey'],
+                [
+                    'field'     => PolicyField::PUBLIC_MESSAGES,
+                    'expected'  => (bool)$governed['value'],
+                    'attempted' => $allowPublicMessages,
+                ],
+            );
+
+            throw new AccessDeniedException(
+                'Public messages are set by the "' . $governed['label']
+                . '" classification and cannot be changed for this team.',
+            );
+        }
+
         $this->config->setAppValue(Application::APP_ID, 'manageMinLevel_'  . $teamId, $manageMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'postMinLevel_'    . $teamId, $postMinLevel);
         $this->config->setAppValue(Application::APP_ID, 'linkMinLevel_'    . $teamId, $linkMinLevel);
@@ -1058,7 +1176,7 @@ class MessageService {
         }
         $this->config->setAppValue(
             Application::APP_ID,
-            'allowPublicMessages_' . $teamId,
+            self::CONFIG_ALLOW_PUBLIC_PREFIX . $teamId,
             $allowPublicMessages ? '1' : '0',
         );
     }
@@ -1217,7 +1335,31 @@ class MessageService {
      * composing normal messages. Default off — public visibility is opt-in.
      */
     public function getAllowPublicMessages(string $teamId): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'allowPublicMessages_' . $teamId, '0') === '1';
+        return $this->config->getAppValue(Application::APP_ID, self::CONFIG_ALLOW_PUBLIC_PREFIX . $teamId, '0') === '1';
+    }
+
+    /**
+     * Set that switch on its own (v4.8.16).
+     *
+     * `saveMessageSettings()` takes the whole settings block, so a caller that
+     * wants to change this one field has to read and re-send five others it does
+     * not care about — and any it gets wrong it silently overwrites. The policy
+     * apply engine needs exactly this field, `public_messages` being the one
+     * ENFORCED field in `PolicyField`.
+     *
+     * **Ungated.** Every caller is already gated: `saveMessageSettings()` runs
+     * behind the team-admin check in `MessageController`, and
+     * `PolicyApplyService` behind its Nextcloud-administrator one. A gate here
+     * would ask a different question from the one the caller already answered,
+     * which is the shape HANDOFF's 4.8.13 entry records as a guaranteed
+     * contradiction rather than defence in depth.
+     */
+    public function setAllowPublicMessages(string $teamId, bool $allow): void {
+        $this->config->setAppValue(
+            Application::APP_ID,
+            self::CONFIG_ALLOW_PUBLIC_PREFIX . $teamId,
+            $allow ? '1' : '0',
+        );
     }
 
     /**
@@ -2325,11 +2467,20 @@ class MessageService {
 
             $isMember = $teamId !== '' && isset($teamIdSet[$teamId]);
 
+            // v4.8.7 — a public message's thread is readable by anyone the
+            // feed shows the message to. Publishing a message publishes the
+            // discussion under it: a public post whose replies only its own
+            // team can read is half a conversation, and the reader has no way
+            // to tell there is a rest of it.
+            $isPublicRow = !empty($row['isPublic']);
+
             // v4.5.38 — the team may have switched this message type's thread
-            // off entirely. Only resolved for teams the viewer is in, so the
-            // cache is not built for rows that are about to be cut anyway.
+            // off entirely. Resolved for teams the viewer is in and for public
+            // rows, which since 4.8.7 are readable too — the switch is the
+            // team's answer to "is there a thread here at all", and that
+            // answer is the same for a member and a passer-by.
             $typeAllowed = true;
-            if ($isMember) {
+            if ($isMember || $isPublicRow) {
                 if (!array_key_exists($teamId, $disabledTypeCache)) {
                     $disabledTypeCache[$teamId] = $this->getCommentDisabledTypes($teamId);
                 }
@@ -2349,18 +2500,33 @@ class MessageService {
             // its own right.
             $row['can_open_team'] = $isMember;
 
-            $row['can_view_comments'] = $isMember && $typeAllowed;
+            $row['can_view_comments'] = ($isMember || $isPublicRow) && $typeAllowed;
 
-            if (!$isMember || !$typeAllowed) {
-                // Either a public post from a team you are not in — the thread
-                // is not readable — or a type this team takes no comments on.
-                // Neither advertises a count: the card ends at its body.
+            if (!$row['can_view_comments']) {
+                // A type this team takes no comments on, or a non-public post
+                // from a team you are not in. Neither advertises a count: the
+                // card ends at its body.
                 $row['can_comment']   = false;
                 $row['comment_count'] = 0;
                 continue;
             }
 
             $readableMessageIds[] = (int)($row['id'] ?? 0);
+
+            // v4.8.7 — reading a public thread is open; writing to it is not.
+            // A non-member has no member level to test against the team's
+            // comment floor, and `CommentController::createComment` refuses
+            // them whatever this flag says — so offering the box would only
+            // produce a 403 on submit.
+            //
+            // Nothing is skipped by returning early here: a public message is
+            // always `messageType = 'normal'` (createMessage strips
+            // `is_public` from every other type), so the decision-lock branch
+            // below cannot apply to one.
+            if (!$isMember) {
+                $row['can_comment'] = false;
+                continue;
+            }
 
             if (!array_key_exists($teamId, $minLevelCache)) {
                 $minLevelCache[$teamId] = $this->getCommentMinLevel($teamId);

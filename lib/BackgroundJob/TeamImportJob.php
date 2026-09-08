@@ -5,10 +5,10 @@ namespace OCA\TeamHub\BackgroundJob;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\TeamImportMapper;
+use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\TeamImportService;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
-use OCP\IGroupManager;
 use OCP\IUserManager;
 use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
@@ -37,8 +37,8 @@ use Psr\Log\LoggerInterface;
  *
  * `IUserSession::setUser()` for the duration of the drain, restored afterwards
  * in a `finally`. Before impersonating, the import's `created_by` account is
- * re-checked twice: it must still exist, and `IGroupManager::isAdmin()` must
- * still hold. An admin who has since been demoted or deleted does not get their
+ * re-checked twice: it must still exist, and `canUserBulkCreateTeams()` must
+ * still hold. An account since demoted or deleted does not get its
  * queued import finished under their name — the run is left `running` and the
  * next tick re-evaluates, so restoring the account resumes it.
  *
@@ -65,7 +65,7 @@ class TeamImportJob extends TimedJob {
         private TeamImportMapper  $mapper,
         private TeamImportService $importService,
         private IUserManager      $userManager,
-        private IGroupManager     $groupManager,
+        private MemberService     $memberService,
         private IUserSession      $userSession,
         private LoggerInterface   $logger,
     ) {
@@ -113,9 +113,23 @@ class TeamImportJob extends TimedJob {
                 ]);
                 continue;
             }
-            if (!$this->groupManager->isAdmin($actorUid)) {
-                $this->logger->warning('[TeamHub][TeamImportJob] Skipping import — account is no longer an admin', [
-                    'importId' => $importId, 'app' => Application::APP_ID,
+            // v4.8.14 — "may this account still create teams in bulk", not
+            // "is it an administrator".
+            //
+            // The admin check was right while `TeamImportService` was
+            // administrator-only. Bulk create (v4.8.9) opened runs to the
+            // team-creator group, and this line then skipped **every** bulk run
+            // it adopted — logged as "no longer an admin" about somebody who
+            // never was one — so a batch whose browser closed could never
+            // resume. `canUserBulkCreateTeams()` is the same rule the endpoints
+            // enforce, asked about a stored uid because the job has no session.
+            //
+            // Still a re-check, not a formality: the run may have been created
+            // days ago and the account since removed from the group. Refusing to
+            // impersonate somebody who has lost the right is the point.
+            if (!$this->memberService->canUserBulkCreateTeams($actorUid)) {
+                $this->logger->warning('[TeamHub][TeamImportJob] Skipping import — account may no longer create teams in bulk', [
+                    'importId' => $importId, 'actor' => $actorUid, 'app' => Application::APP_ID,
                 ]);
                 continue;
             }

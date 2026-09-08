@@ -3,6 +3,910 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.9.0] — 2026-09-08
+
+Release of the 4.8.x line. No functional change over 4.8.35 — this is the version that ships.
+
+### Removed
+
+- **The bulk-invite diagnostic is gone.** `MemberService::inviteMembers()` carried a temporary block that logged what Circles resolves the initiator to before each `addMember()`, added in 4.8.35 to settle the "first member added, every one after refused" bug. It was never run, and a release does not ship warning-level logging of member state on every invite. The block and the hypothesis it was built to test are recorded in `HANDOFF.md` §0 so it can be restored in one edit when there is a run to observe.
+
+  It re-asserted the current user (`setLocalCurrentUser()`) as part of the experiment, so removing it also reverts that — the bug is unchanged and still open, not fixed and not worsened.
+
+- **A debug `error_log()` in `TeamGroupService::write()`** that logged a user's uid and their group counts on every save of the sidebar group state. Never gated, so it wrote to the server log for every user on every write.
+
+## [4.8.35] — 2026-09-08
+
+**A rebuild is required** (`npm run build`). No migration. No new strings.
+
+### Fixed
+
+- **Ownership could not be transferred to somebody who is a member through a group.** Manage Team → Transfer ownership searched `manageMembers.direct` client-side, so on a team whose members all arrive via an attached group the field matched nothing and issued no request — an empty network log, by construction, which reads like a broken control rather than an empty list.
+
+  Both halves were wrong. The picker now searches direct **and** inherited members, deduped with direct winning so somebody holding both routes is offered once with their real role, and an inherited candidate is labelled **`via <group>`** so it is clear before choosing that this person arrives through a group. The backend gate ([`TeamController::transferOwner()`](lib/Controller/TeamController.php)) used `getMemberLevelFromDb()` — direct rows only — and would have refused the transfer with "Target user is not a member of this team" even after the picker offered them. It now uses `MemberService::getEffectiveMemberLevel()`, which takes the higher of the direct row and what the `circles_membership` cache credits through a group.
+
+  The boundary being defended is **member vs outsider**, and an inherited member is on the member side of it; genuine outsiders are still refused, and promoting one stays an NC-admin action. `assignOwner()` writes the direct member row as part of the transfer, so the promotion happens in the same call rather than as a separate step the owner has to know about.
+
+  **Owner deliberately stays out of the Members tab's role picker.** That is a long list where a mis-click is an accident; this control is behind a search, an explicit selection and a confirmation dialog.
+
+- **The bulk-create results table showed `—` for every team name.** It read `r.payload?.name`, which never exists — the API sends `name` at the top level of each row. Fixed at both sites, preview and results.
+
+- **A bulk-create expiry cell opened on today instead of the template's default period.** First focus of an empty cell now fills in today plus the template's default, which is what the single-team wizard's `onExpiryFocus()` has done since 4.8.3; this table had no default at all, so an admin who set "90 days" on the Project template got none of it. On focus rather than in the row model, for the wizard's reason: a date written into the model would give every team a deadline nobody chose, and an untouched cell has to keep meaning "no end date".
+
+- **The admin owner picker rendered nothing when it failed.** A 403, a 404 and a genuine no-match were one indistinguishable blank, so "I type a name and nothing happens" could not be told apart from "that name does not match". Both states are named now, and the status code is carried into the message — it is the difference between "the route is not there" and "you may not".
+
+- **The account dropdown grew a horizontal scrollbar.** `overflow-y: auto` on its own leaves `overflow-x` at `visible`, which the spec computes to `auto`, so a row one pixel too wide scrolled sideways. Both axes are stated now and the rows are made to fit.
+
+- **The Policy tab had no left padding and its "New profile" button sat most of a screen from the table it belongs to.** The panel had no width bound at all, so the section head stretched to the viewport while the grid below stayed at its content width. It is now bounded at 980px like `.team-import` and `.team-export`, with inline padding matching the tab bar above so content starts on the same line as the tab labels.
+
+## [4.8.34] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration. No new strings.
+
+### Fixed
+
+- **"Everyone in this team" could not be ticked with the mouse** in the review request modal — only with the spacebar. `NcCheckboxRadioSwitch` renders its own `<input>` plus a `<label for>` pointing at it, and the whole thing sat inside an outer `<label>`. A click landed on the inner label, which fired a synthetic click on the input, which bubbled to the outer label, which fired a **second** synthetic click on the same input. Two toggles, net nothing. The spacebar works because it goes straight to the focused input and never involves a label.
+
+  The outer element is now a `div` with `role="group"` and `aria-labelledby`, which is also what it should have been regardless: a `<label>` points at exactly one control, and this one wrapped a checkbox *and* a reviewer multiselect.
+
+  **The rule worth carrying:** never put `NcCheckboxRadioSwitch` inside a `<label>`. A bare `<input type="checkbox">` in a label is fine — that is implicit labelling and toggles once — but any NC control that brings its own label will double-toggle. A sweep of every `.vue` file found this was the only instance.
+
+## [4.8.33] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Changed
+
+- **One word each: what we built is a module, what somebody else built is an integration.** The app had been using both for both — "internal integrations" for our own features, an Integrations tab holding modules, and an "Integration settings" tab whose entire contents (Messages, Decisions, Timeline) are ours. A user told to "enable the module under the Integrations tab" could not tell whether those were two things or one.
+
+  - *Internal integrations* → **Modules**
+  - *Third-party integrations* → **Integrations**
+  - *Integration settings* tab → **Module settings**
+  - *Integrations* tab → **Modules & integrations**, because it genuinely holds both
+
+  Every pointer string that named a tab was updated with it, and the stale names in code comments went too — that is where the drift had been quietly reproducing.
+
+  The rule is now written down in `SKILLS.md` § "Modules vs integrations" so it does not have to be re-derived.
+
+- **Stored values are deliberately untouched.** The `integrations` tab key, `integrations_allowed`, and the `teamhub_team_apps` columns keep their names: they are data and routing, not labels. Renaming them would break a bookmarked tab and a stored policy field to make a word match, which is the wrong trade.
+
+## [4.8.32] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration. No new strings.
+
+### Fixed
+
+- **No internal module could be enabled on a template.** Ticking Decisions, Presence, Timeline or Messages and saving failed with `Unknown app: presence`. `resourceGroupOf()` decided which of the template's two arrays a key belongs in with `RESOURCE_MODULES.includes(key) ? 'modules' : 'apps'` — and `RESOURCE_MODULES` is only `pages` and `wiki`, the two modules that *render* under Apps. Every other module fell through to `apps`, was posted in the apps array, and was rejected against the app vocabulary.
+
+  It was a display-grouping rule used for storage routing; the two agreed for `pages` and `wiki` by coincidence and for nothing else. It now asks the server's own vocabulary which array a key belongs to.
+
+### Added
+
+- **Feature modules propagate with the template.** Enabling Decisions on a template now offers the same rollout as adding an app, and switching it on for the teams that carry that template — which is the point of putting it on the template. Previously a modules-only edit produced no rollout offer at all, because the change detection only looked at resources.
+
+  Each module has its own per-team storage and its own default, so this is four cases rather than one loop: `presence` and `decisions` are config rows where absent means *off*; `timeline` and `messages` are appconfig where absent means **on**. Switching the latter two on **deletes** the stored `0` rather than writing a `1` — a stored `1` would work, but it turns an inherited default into a recorded decision and would silently exempt those teams if the default ever changed.
+
+  Both directions apply, without the origin bound the resource half needs: these are switches, so nothing is created or destroyed. They are written after the `teamhub_team_apps` write and deliberately not folded into it — a `presence` row in that table would be a fifth answer to "which apps does this team have", which is what 4.8.27 spent a version removing.
+
+- **`integrationLabel()`** renders apps and modules in one column, so the rollout report says "Presence" instead of the bare key. `appLabel()` also learned the registry's own spellings (`intravox`, `collectives`) alongside the template's (`pages`, `wiki`), so a label no longer depends on which layer the key came from.
+
+## [4.8.31] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+File reviews follow the license instead of an administrator switch.
+
+### Changed
+
+- **The File reviews switch is gone from Admin → TeamHub → Modules.** A review is requested from the Files app and then lives entirely in My Work — that is where a reviewer finds it, completes it, and where the requester closes it. My Work is license-gated, so an unlicensed instance with the switch on could create reviews **nobody could ever see**: the feature was not partly available, it was broken, and it took an administrator opting in to reach that state. The row now reports *Available* or *Needs a license* and there is nothing to toggle.
+
+  Deliberately not a disabled switch — a greyed toggle invites an administrator to hunt for the permission that would let them flip it, and there is no such permission.
+
+- **The per-team switch is unchanged.** It already hides itself when the module is off, so it now hides when unlicensed and reappears when a license is added. No team's stored choice is touched.
+
+- **Grace counts as licensed**, matching `MyWorkController` exactly. A lapsed license inside its 30-day window keeps My Work working, so it keeps file reviews working — otherwise a customer renewing would find half their outstanding reviews unreachable.
+
+### Security
+
+- **File review endpoints had no license gate at all.** Every method carried a membership check and nothing else, so on an unlicensed instance a review could be created, completed and closed through the API even though no surface would show it. `FileReviewController` now gates all nine methods, `getScopes` included. Hiding the Files-app menu entry without this would have been exactly the "the frontend won't call this" reasoning SKILLS.md § Security standards rules out.
+
+### Fixed
+
+- **`LicenseService::getStatus()` was uncached and is not cheap** — it verifies an RS256 signature and runs `countLicensedSeats()`, a database aggregate over `circles_membership`, and it did that on every call. It is now memoized per request and invalidated by `saveKey()` / `clearKey()`. `getEnforcementLevel()`'s docblock claimed it was cheap; it now says what it costs.
+
+- **The Files-app listener still pays nothing on an unlicensed instance.** `isEnabledGlobally()` checks `hasLicenseKey()` first — one appconfig read, no signature check and no query — because that listener runs on every Files page load for every user, including users in no team, and its contract is that an instance not using file reviews pays nothing for them. Only an instance that has a key pays for the real check, and it is the only kind that could have the feature.
+
+## [4.8.30] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration. No new strings.
+
+### Fixed
+
+- **"Membership requests must be approved by a Moderator" was editable on a team where it does nothing.** Circles reads `CFG_OPEN` as the gate and `CFG_REQUEST` only modulates what happens once you are through it, so with "Anyone can join" off the team is simply closed and this setting is never read. The profile editor has greyed it out with that reason since 4.8.17; Manage Team never learned the same rule, so a team admin saw a tick-box that changed nothing.
+
+  It is now greyed on Manage Team whenever "Anyone can join" is off, carrying the same sentence the profile editor uses — one wording, no new string.
+
+  **On a classified team this read as a hole in the classification**, which is how it was found: every other Invitations control was locked by the Confidential profile and this one was not. It was not a hole. A profile cannot govern `cfg_request` while it forces `cfg_open` off, because `normaliseValues()` drops a field whose dependency is unmet — the setting was ungoverned *and* inert, and only the second of those was visible.
+
+  Deliberately independent of any profile: a team with "Anyone can join" off by its own choice is in the same position as one that has it off because a profile says so. Most teams in the app are in that position.
+
+## [4.8.29] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Fixed
+
+- **A team folder could end up carrying two classifications.** Applying a profile removed only the tag the *outgoing profile* governed, so a classification tag left by a profile that no longer governs one — or applied by hand — survived every reassignment. Found on `collab_confidential`, whose folder carried `confidential` and `Internal` at once. **Two classifications is worse than the wrong one**: an access-control rule keyed on the weaker tag still matches, so the classification the profile just applied narrows nothing.
+
+  Applying now supersedes the whole classification set: every tag any profile governs, plus every tag a Confidential files label names. Bounded by that definition — a tag outside it is somebody's own and is never touched.
+
+### Added
+
+- **A tag the scheme does not account for is now reported rather than left silent.** The apply dialog names any tag on the folder that no profile governs and no label names, and says what to do about it: govern it from a profile or name it from a label, and it is replaced on the next apply. This is the answer to "why is there still an `Internal` tag on this folder" — nothing had told TeamHub that `Internal` was a classification. It stays in place, because deciding somebody's own tag is a classification is not TeamHub's call to make silently.
+
+## [4.8.28] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+Three defects found by rolling a template out on the instance.
+
+### Fixed
+
+- **Half the teams failed with "Team not found or access denied".** The apply pass resolved team names through `TeamService::getTeam()`, which gates on **membership** — and a Nextcloud administrator rolling a template out is not a member of most teams. Every one of those came back as a failure having done nothing. Names now come from `PolicyObservationMapper::circlesByTeam()`, the ungated reader the plan was already using; the apply pass simply had not been given it.
+
+- **Rolling a template out did not actually add or remove anything.** Removing an app wrote `enabled = 0` to `teamhub_team_apps` and left the resource in place, so the Talk room, board or calendar was still there — the team read as "off" while carrying the thing it was off about. It now calls `ResourceService::deleteTeamResource()`, the same path Manage Team's disable toggle uses, and the stored toggle follows the resource rather than standing in for it.
+
+- **Collectives was reported as "needs adding by hand" instead of being added.** It has its own provisioning path rather than the resource switch, and the rollout reported that rather than calling it. It now goes through `CollectivesService::enableForTeam()` / `disableForTeam()` like everything else.
+
+### Changed
+
+- **The team folder is the one thing a rollout will not delete.** `deleteTeamResource(…, 'files')` deletes the group folder **and every file in it**, so a template dropping `files` would have destroyed the documents of every team of that kind from one form submission. Those teams are listed in the report instead, for removal from Manage Team where the consequence is stated per team. Everything else — Talk, Calendar, Deck, Intravox, Collectives — is really deleted, which is what applying a template has to mean.
+
+- **The confirm step states what will be destroyed before the click**, naming the apps and saying it cannot be undone, rather than the report saying so afterwards. The plan now carries `adds` and `removes` for that.
+
+- **The rollout report is a grid.** One row per team with a status mark — applied, needs attention, not applied — sorted so the ones needing a human come first, and every row names what changed. Failures show the team's name; they showed the raw circle id, which is unreadable and was the point of the report.
+
+## [4.8.27] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+Saving a profile or template can now roll the change out to the teams that carry it — and three surfaces stopped disagreeing about which apps a team has.
+
+### Fixed
+
+- **Manage Team showed every installed app as switched on, for every team.** It read `teamhub_team_apps` and fell back to `enabled = true` when a team had no row — and since resources became registry-driven, that table is only written for toggle-driven apps, so most teams have no rows at all. The screen was rendering a default and presenting it as the team's state. It now reads the same derived presence everything else does.
+
+- **The policy integration allow-list never detected anything.** `PolicyObservationMapper::enabledAppsByTeam()` read that same empty table, so a profile forbidding Deck reported a team with a Deck board as conformant. Shipped in 4.8.15 and never once produced a finding.
+
+- **Applying a profile never switched an integration off.** The disable step iterated the rows that happened to exist in `teamhub_team_apps` and wrote back only those, so with no rows it wrote nothing. It is now driven by the list of apps to disable and upserts the row whether or not one existed — which is what makes 4.8.16's destructive half real for the first time.
+
+### Added
+
+- **One reader for "which apps does this team have."** `TeamAppPresenceMapper` derives it from active `teamhub_team_app_resources` rows plus `teamhub_team_apps` for toggle-only apps, with an explicit `enabled = 0` overriding a live resource row. Manage Team, the policy allow-list and template propagation all use it. `lib/Constants/TeamApps.php` is the single vocabulary behind it — `spreed`/`talk`, `wiki`/`collectives`, `pages`/`intravox` were five names for three apps, translated privately in one controller and nowhere else.
+
+- **Rolling a saved change out, with the choice left to the administrator.** Saving a profile or template whose substance changed returns a plan naming every team that carries it, split into the ones that still match what the definition said *before* and the ones that have drifted. A dialog offers: apply to the compliant ones, force it to all of them, or not now. Then a report says per team what happened.
+
+  The plan is computed **inside the save**, between reading the old values and writing the new ones — the only moment both exist. Compliance means "does this team still match what the profile said before", and after the write there is nothing left to ask it against.
+
+  Applying reuses `PolicyApplyService::apply()` unchanged, so a rollout is the same write an administrator makes by hand, done to several teams. Audited as `team.policy_reapplied` per team plus one `policy.profile_propagated` / `policy.template_propagated` for the run.
+
+- **Templates have a compliance question for the first time.** DESIGN §2.112 said a template "leaves nothing on the team to check afterwards", which was true while the only reader of a team's apps was a table nothing writes. The registry does record what a team was given, so the question is answerable — for apps. Expiry defaults and the default profile are consumed once at creation and leave no state, so they propagate to nobody.
+
+  **Compliant means the team has not *lost* anything the template gave it**, not that its apps match exactly. Extra apps are not drift: on the test instance they arrive through auto-discovery, and treating that as working around the template would stop a team receiving changes forever for having done nothing. Exact matching would have reached 2 of 14 teams; this reaches 4 and grows.
+
+  Removals are bounded to resources TeamHub created (`origin = 'teamhub_create'`). A discovered Deck board is never taken away by a template edit.
+
+### Changed
+
+- **`GET /api/v1/teams/{teamId}/apps` returns derived presence**, one row per canonical app with a real `enabled`, instead of the stored toggle rows. Manage Team's app ids moved from `spreed` to `talk` to match.
+
+- **`PUT` on a profile or template returns a `propagation` plan** when the change would affect a team that carries it. Absent otherwise, so a rename never raises the dialog.
+
+## [4.8.26] — 2026-09-07
+
+**No rebuild required** — one PHP file. No migration.
+
+### Fixed
+
+- **A policy profile could not be saved with a classification tag**, refusing every valid tag with *"That tag is not used by any Confidential files classification label."* `ConfidentialFilesService::cleanIds()` deduplicated the label tag ids through array keys (`$seen[$id] = true` then `array_keys()`), and **PHP silently casts a numeric string array key to an integer** — so the label list came back as `[1]` where the caller needed `['1']`. `isSelectableTag('1')` was therefore `in_array('1', [1], true)`, which is false for every tag that exists.
+
+  Deduplication is now by value, which keeps the strings intact.
+
+  Worth knowing because of *where* it did and did not fail: the picker resolved and displayed the tag correctly throughout, because `ISystemTagManager::getTagsByIds()` accepts integers and returns string ids either way. Only the strict comparison on save could see the difference, so the feature looked entirely healthy up to the moment it refused to save. `ResourceService` already carries a comment about this exact `array_keys()` coercion — the trap was documented in the codebase and walked into anyway.
+
+## [4.8.25] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+The CSV importer names a template and a policy, and nothing else decides what a team is made of.
+
+### Removed
+
+- **The `apps` and `modules` columns are gone from the CSV importer.** What a team is provisioned with is a property of its template; what it is permitted to have is a property of its policy. A third answer in a spreadsheet cell made the template a suggestion and let a row promise something the profile would silently drop: `ResourceService::createTeamResources()` has filtered app creation against `integrations_allowed` since 4.8.4, so a row asking for Deck under a profile that does not allow it produced a preview promising a board and a team without one.
+
+  A file written for 4.8.24 still imports — an unread column is simply not looked at. A row with a **value** in either column gets a warning saying it was ignored, because that row asked for a team it is not going to get. The *Several teams* table has worked this way since 4.8.9; this brings the CSV path in line with it rather than the other way round.
+
+- **The export stopped writing them too**, and `TeamExportService::apps()` / `::modules()` went with them — the only per-team reads left in a method that otherwise batches, and with them six constructor dependencies (`TeamAppResourceMapper`, `TeamAppMapper`, `PresenceTeamService`, `DecisionTeamService`, `CollectivesService`, `IConfig`).
+
+### Added
+
+- **The export writes `policy`.** Without it a round trip quietly reclassified: a team deliberately moved from *Internal* to *Confidential* came back on its template's default. One batched query for the whole file, like the three lookups beside it. Empty means unclassified, which re-imports as unclassified.
+
+- **The sample CSV carries a policy key read off the instance**, and two rows that leave it empty. A literal `internal` would be the same trap as a hard-coded expiry date — the seeded profiles can be renamed or deleted, and the sample would hand an administrator a file whose every row fails with "Unknown policy".
+
+### Changed
+
+- **`template` is validated against `teamhub_template`, not `TeamTypeService::ALLOWED`.** The table has been what the wizard renders and what the importer's own `templateApps()` / `templateModules()` read since 4.8.3; validating against a constant meant the importer could accept a key nothing else had a row for. The constant remains the floor for an instance whose seed migration has not run.
+
+- **The column reference and the preview name what this instance actually offers.** The help table lists the live template and policy keys, and the preview shows a template's admin-edited label rather than a hard-coded English one. Both are read from endpoints the create-team wizard already calls; if either fetch fails the table falls back to a description without keys and nothing else on the panel is affected.
+
+- **The sample CSV is rectangular again.** Its header has carried ten columns since 4.8.9 while every data row wrote nine — `policy` was never in the sample at all, which is why nobody could learn the column existed from the file meant to teach it.
+
+### Fixed
+
+- **The `expires` help text named the wrong rule.** It said "only read for collaboration and project rows"; eligibility has come from the template's own *Enable team expiration* setting since 4.8.3, so a template an administrator had switched it on for read as ineligible in the documentation while working in the code. It is also the last string in `TeamImportPanel.vue` that had no translation key — the file is now clean, and `npm run check:l10n` is down from 61 to 59.
+
+## [4.8.24] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+A policy profile can now classify the team folder, through the Confidential files app.
+
+### Added
+
+- **A profile can name a classification tag, and applying it tags the team folder.** New governed field *Team folder classification*, offered only when the **Confidential files** app is installed and has classification labels configured. The picker lists exactly the system tags those labels point at — not every system tag on the instance — because a tag no label classifies against is a tag no rule is keyed on, and offering one would let an administrator believe they had classified a team when they had only coloured it.
+
+  The tag lands on the team's group folder root (`group_folders.root_id`, the fileid of the folder's `files` node). It is applied when a profile is applied to an existing team, and when a team folder is created for a team already carrying such a profile — the second case matters because both creation paths assign the policy long before any resource exists, so there is no folder to tag at assignment time.
+
+- **What this actually buys, stated because it is easy to get wrong.** Nextcloud has no tag inheritance: the files inside the folder are *not* tagged and show nothing in the Files app. But the workflow engine's `FileSystemTags` check walks a file's parent folders before evaluating, so a Files Access Control, retention or automated-tagging rule keyed on the tag **does** match every file in the team folder. TeamHub sets the classification; the administrator's own rules decide what it costs. The app does not claim to enforce anything.
+
+- **Three availability states, not two.** App absent, app present with no labels configured, and app usable are told apart on screen with different messages, because the fix differs: install an app, or go and define some labels. An app that is enabled and cannot do the thing being asked of it is the shape of the v4.6.16 Mail bug, and the test instance is in exactly that state today.
+
+### Changed
+
+- **Removing a profile from a team now removes the tag it put on the folder.** Clearing still writes no other setting — the team keeps every value it has and simply stops being compared. The tag is the exception because it is the only governed value that exists *solely* because a profile put it there and that keeps working after declassification: an access-control rule keyed on it would go on restricting the folder of a team nobody is classifying any more. Only the tag the cleared profile governed is removed, and only if the folder is carrying it.
+
+- **Reassigning a profile replaces the classification rather than adding to it.** The outgoing profile's tag is taken off and the incoming one put on, so a folder reassigned three times carries one classification instead of three. A tag that Confidential files assigned by content, or that somebody applied by hand, is never touched — TeamHub only ever removes what it put there.
+
+- **A team with no team folder is reported as not applicable, never as non-compliant.** The apply preview says so before the administrator confirms; the compliance scan stays silent about it. Flagging it would turn a classification control into pressure to create group folders, which is a different decision and not one a profile should make on an administrator's behalf.
+
+- **`GET /api/v1/admin/policy/fields` carries a `confidentialFiles` object** alongside `fields` — availability, whether labels are configured, and the selectable tags. Additive; `fields` is unchanged.
+
+### Fixed
+
+- **`findGroupFolderForCircle()` picked a nondeterministic folder** when a circle was attached to more than one group folder — it took whatever the engine returned first. It and the new bulk read now share an explicit `ORDER BY folder_id`, so the folder the tag is applied to is always the folder the compliance scan reads. Without that the two could disagree about the same team and report drift against a tag that had been correctly applied elsewhere.
+
+## [4.8.23] — 2026-09-07
+
+**No rebuild required** — templates only. No migration.
+
+### Fixed
+
+- **Every widget lost its styling.** Adding the fourth build entry in 4.8.18 changed how Rollup splits shared CSS: `src/styles/widget-tokens.css` — imported by `main.js`, `admin.js` and `personal.js` alike — was hoisted out of each entry's own chunk into a shared `vite-widget-tokens.chunk.css`. Nothing loaded it, so every `--th-font-*`, `--th-space-*` and `--th-radius-*` variable resolved to nothing and the widgets rendered as unstyled stacks.
+
+  `templates/main.php`, `admin.php` and `personal.php` now load that chunk alongside the two they already did.
+
+  **`css/<entry>.css` is the manifest.** It is the `@import` stub the css-entry-points-plugin writes, it is bypassed at runtime because Nextcloud does not resolve its relative imports, and it names exactly the chunks that entry needs. All four entries now match their stub. The templates carry a note to diff against it after any change to the entry list — this failure is silent, instant and total, and the stub is the one place that says what went where.
+
+## [4.8.22] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Fixed
+
+- **A review that reached its due date could not be closed.** `file_review_due` shipped in 4.8.21 and was not added to the status list in `getAvailableActions()`, so the requester's row became a task in Action required with **no Close action on it** — the one row that most needed the action was the only one without it.
+
+  The gate is now keyed off `permissions.canClose` / `canComplete` rather than a list of statuses. The permission is what actually decides — `buildFor()` sets `canClose` on every open row the requester owns — and the status list was a second copy of that rule that had to be kept in step by hand and was not. It cannot drift again, because there is nothing left to forget.
+
+  This is also the authorisation path: `MyWorkService` re-reads every item through `getItem()` before executing an action, so those permissions are always server-derived.
+
+- **`waitingFor` was missing on a due row** for the same reason, so the row lost the avatar of the person it was waiting on exactly when that mattered most.
+
+### Changed
+
+- **"Close review" is ranked first in the row's menu.** It is the requester's only action, and they were looking for it. Ranked rather than promoted to a button: since 4.5.25 the row shows Open and nothing else as a button, and that stays true.
+
+## [4.8.21] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+Three things the requester could not see or do.
+
+### Added
+
+- **The requester's row says how far the review has got, and who it is on.** The reason column now reads `2 of 4 reviewed — waiting for Jaap Tel, Inge NC`, in every layout and with nothing to expand.
+
+  The roster panel added in 4.8.19 already held this, but only once opened, and a disclosure is one more thing to find. Two names then "+N more": the column is ~200px and a reason that ellipses in the middle of the third name answers nothing. The full roster, with completion times and remarks, is still one click away.
+
+- **A due date turns the requester's row into a task.** New status `file_review_due`: once the review is inside the action window or past its date with reviewers still outstanding, the requester's row moves to **Action required** — HIGH before the date, URGENT after — carrying the review's own due date.
+
+  `MyWorkService` will not do this itself: it exempts *Waiting for others* from due-date promotion, on the sound rule that a deadline on somebody else's step is not your task. File reviews are the exception that proves it — the requester has a step of their own the whole time, and a review that has run out of time with people still silent is exactly when they need to decide whether to chase or to close. A review with **no** due date never escalates and stays in *Waiting for others*.
+
+  It is a separate status rather than a reuse of `file_review_awaiting` so an administrator can map "running out of time" and "simply in progress" to different categories.
+
+- **The opening post in the file's chat carries the due date** — "Please review by 14 September 2026". The chat is where the reviewers are; a request that does not say when it is wanted is one people get to eventually.
+
+  Localised in the requester's language and timezone using the pattern proven in `MilestoneAutoPostService::formatDate()`, including its fix: `IL10N::l()` hands the DateTime to the formatter without touching its zone, so the zone has to be set first or the date reads one day early west of Greenwich.
+
+## [4.8.20] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration — `teamhub_file_review.talk_token` is reused with new meaning.
+
+**A review discusses the file in the file's own chat.** TeamHub no longer creates a conversation per review.
+
+### Changed
+
+- **No dedicated Talk room.** A file already has a conversation — the one that opens beside it in the Files sidebar — and that is the one reviewers are looking at, because it opens with the file. A second conversation about the same document is where half the discussion goes missing.
+
+  TeamHub now **resolves** that conversation (creating it only if nobody has opened it yet, exactly as Talk's own `FilesIntegrationController` does), posts the request into it, and never deletes it.
+
+- **Completing a review posts it in the file's chat**, with the reviewer's remark. That is the point of the remark: "the figures on page 3 are stale" belongs beside the document where the team can see it, not only in the requester's queue row.
+
+  A reviewer who has never opened the file's chat has no participant row, so `TalkService::postAsParticipant()` joins them first — which is what opening the sidebar would have done. Without it the post silently did nothing for exactly the people most likely to be completing from My Work.
+
+- **Closing a review destroys nothing.** The conversation belongs to the file and outlives the review. `ActionType::CLOSE` still confirms, because the remaining consequence is still invisible: every reviewer who had not answered loses the request from their queue. The dialog says that and no longer threatens the chat.
+
+- **`talk_token` now holds the file's conversation token** — a convenience handle to somebody else's conversation, not a room TeamHub owns. No migration: the column is reused.
+
+### Fixed
+
+- **The `2 of 4 reviewed` disclosure was hidden in compact density.** Compact mode hides the row's whole second line, which is right for context and wrong for a control — it was also the only route to the reviewer names. The disclosure now survives compact; everything else on that line still collapses.
+
+### Removed
+
+- `TalkService::deleteRoomViaTalk()`, added in 4.8.19 — file reviews no longer delete conversations, and it had no other caller. **The defect it fixed is still live in `deleteRoomById()`** for team-room deletion; see HANDOFF for the two-line fix.
+
+## [4.8.19] — 2026-09-07
+
+**A rebuild is required** (`npm run build`). No migration.
+
+Four defects found by testing 4.8.18 on the instance.
+
+### Fixed
+
+- **The Talk room was literally named `Review: {file}`.** `IL10N::t()` interpolates with `vsprintf` and does not understand `{placeholder}` — that form belongs to the frontend `t()` and to notification rich subjects, neither of which was in play. The room name and the conversation's opening post now use `%s` / `%1$s`. The two translation keys were renamed in all seven locales, keeping their existing translations.
+
+- **The Talk room survived being closed, for everyone but the requester.** `TalkService::deleteRoomById()` deletes the `talk_rooms` and `talk_attendees` rows directly, which empties the database but tells Talk nothing: no `BeforeRoomDeletedEvent`, no share-access cache clear, no signal to connected clients, so the conversation stayed in every participant's sidebar until a hard reload.
+
+  New **`TalkService::deleteRoomViaTalk()`** goes through Talk's own `RoomService::deleteRoom()` — verified against Talk 24.0.4 in the running container — which dispatches the events, clears the caches, and cascades breakout rooms. **No raw-SQL fallback**: if Talk's API is not callable it reports that instead of reaching around it.
+
+  `deleteRoomById()` is left in place and marked deprecated. **The same defect applies wherever it is still used** — team-room deletion — and that is a separate change.
+
+- **Nothing rendered the reviewer roster.** The provider had been sending it in `metadata.reviewers` since 4.8.18, so "Waiting for others" could not say *which* others, and a reviewer's completion remark was recorded and never shown.
+
+  My Work rows now carry a **`2 of 4 reviewed` disclosure** that expands to the full roster: each person, whether they have completed and when, and their remark in their own words. Driven off `metadata.reviewers` generically rather than a file-review branch — the next source that attaches a roster gets the panel for free.
+
+- **`formatAbsolute` was not exposed in `methods`**, so the roster panel's timestamps would have thrown at render. Options API: a helper is only callable from a template if it is listed there.
+
+## [4.8.18] — 2026-09-06
+
+**A rebuild is required** (`npm run build`). **A migration runs**: `Version000408018Date20260906000000` — two new tables, additive, nothing dropped.
+
+**Ask your teammates to review a file, from the file's own menu.** A new module: request, discuss, complete, close. Design and the decisions behind it are in `FILE-REVIEW-PLAN.md`; `DESIGN.md` §2.114 records why each one went the way it did.
+
+### Added
+
+- **"Request review" in a file's ⋯ menu in the Files app.** Pick one, several, or all teammates; add an optional message and due date. TeamHub opens a Talk conversation containing the requester and the chosen reviewers, and notifies each of them.
+
+  The entry appears **only for files inside a TeamHub team folder** — where the reviewers provably have access — and never for folders or a multi-selection. It works identically in the plain Files app and inside the iframe on a team's Files tab, because it is the same page and the same script in both.
+
+- **A fourth build entry, `src/filesactions.js`**, loaded into the Files app by `FilesScriptsListener` on `LoadAdditionalScriptsEvent`. The listener checks the global switch **before adding a single byte**, so an instance that does not want file reviews pays nothing for them.
+
+  The action's `enabled()` callback is synchronous, so the script fetches the caller's team-folder prefixes once on boot (`GET /api/v1/file-reviews/scopes`) and answers every subsequent file with a string-prefix test.
+
+- **`FileReviewWorkProvider`** — the sixth My Work source. Reviewers see *Action required*; the requester sees *Waiting for others*, and **Action required once everybody has answered**, because they are then the only person who can move it on. The row carries the full roster with who completed and when.
+
+- **Four notifications**: you were asked; a reviewer completed; everyone has completed; the review was closed.
+
+- **`ActionType::CLOSE`** — the requester's verb, and the first in the vocabulary that destroys something. Deliberately not `COMPLETE`: that belongs to the reviewer and means "my part is done", while this ends the whole request, deletes the Talk conversation, and withdraws the item from the queue of anybody who had not answered. It confirms first, naming all three consequences and the people who had not finished.
+
+- **`metadata.allowsReason`** — the optional sibling of `requiresReason`. A reviewer may add a remark when completing; it is kept with the review, and it is the only part of their reasoning that survives the Talk room being deleted at close.
+
+- **`TeamFileScopeService`** — "which team does this file belong to", extracted from `ApprovalWorkProvider::mapFilesToTeams()` rather than copied. Two copies of those rules would have answered differently within a release or two.
+
+- **A global switch** (Admin → TeamHub) and a **per-team switch** (Manage team → Integrations), both defaulting to on. Both store only the *off* state, so the feature is true for every existing team with no migration and no write.
+
+### Changed
+
+- **`ApprovalWorkProvider`** delegates its file→team resolution to `TeamFileScopeService`. Behaviour is unchanged, including the silent drop of a deleted or revoked resource; the provider's constructor swaps `TeamAppResourceMapper` + `GroupFolderService` for the one service.
+
+- **Leaving or being removed from a team** now also drops the file reviews that person was asked for, alongside their message subscriptions — and re-tests effective membership first, so somebody still in through a group keeps their obligations. Reviews they *requested* are never touched.
+
+- **`@nextcloud/files`** is declared in `package.json`. It was already present transitively; the file action's registration API comes from it, and relying on a hoisted dependency for that would be one `npm install` away from a broken build.
+
+## [4.8.17] — 2026-09-06
+
+**A rebuild is required** (`npm run build`). No migration.
+
+**The profile editor says what it does, and the one enforced field is finally enforced.** Track F2b is complete: `TRACK-F2-DESIGN.md` §4.4's write-path refusal was the last piece.
+
+### Added
+
+- **`public_messages` is now genuinely locked** — §4.4. A team administrator whose profile governs the switch sees it greyed out on **Manage Team → Integration settings**, with a note naming the classification, and `POST /api/v1/teams/{teamId}/messages/settings` answers **403** to a differing value with a `team.policy_write_refused` audit row.
+
+  Until this version the apply engine set the value and the team could set it straight back, with nothing refusing and nothing recorded. `public_messages` is the only `ENFORCED` field in `PolicyField` — expiry moved to templates in 4.8.3 — so the product's one claim of a genuinely locked setting was untrue while this was missing.
+
+  **Read-only, never hidden.** A team admin has to be able to see what their classification is doing; a control that disappears reads as a setting that does not exist, and the 403 behind it would then arrive unexplained.
+
+  **Only a differing value is refused.** Editing the four level floors while leaving the switch where the profile put it attempts nothing, and failing that save would let one governed field lock the whole settings form. The refusal fires before any write, so a rejected save leaves all six settings untouched.
+
+- **`publicMessagesPolicy`** on `GET /api/v1/teams/{teamId}/messages/settings` — `null`, or the profile key, label, `isSeeded` flag and governed value. Member-readable, per §4.1.
+
+- **`PolicyService::governanceFor()`** — how one field is governed for one team, with the profile that governs it. `governedForTeam()` answers only *what* the value is; a refusal and a read-only control both have to name the classification as well.
+
+- **`PolicyService::governanceSummaryFor()`** and a **`policy`** object on `GET /api/v1/teams/{teamId}/config` — the all-fields twin, for a screen that renders six governed toggles from one payload. It rides the request Manage Team already makes rather than adding a second one.
+
+### Changed
+
+- **One control per setting in the profile editor, in words.** *Team decides* / *Always on* / *Always off* replaces a pair of identical checkboxes — an outer one for "is this field governed" and an inner wordless one labelled "On" for the value.
+
+  The two states they encoded are both real and both needed: **ungoverned is not the same as governed-and-off**, and absence is the common case. But two identical widgets, one of them wordless, is not how to say so — it read as one checkbox too many to the administrator using it. The stored shape is unchanged (absent, `1`, `0` are still the three states), so this is a UI change with no migration and no server edit.
+
+  **Not collapsed to a single checkbox**, which was the first instinct and would have cost *Always on*: `cfg_invite`, `cfg_request`, `cfg_protected` and `cfg_root` are hardening bits where ON is the safe direction, and a profile that can only forbid them could never say "this team must require approval to join".
+
+  Fields with a list value (`integrations_allowed`) get two states rather than three — *Team decides* and *Restrict to the ticked items* — because on and off are not what a list chooses between.
+
+- **Governed Circles settings are greyed out on Manage Team → Settings.** A team whose profile fixes *Visible to everyone*, *Anyone can join*, *Members can invite others*, *Membership requests must be approved*, *password protection* or *Prevent this team from being a member of another team* now shows those toggles disabled, with a lock beside each and one notice naming the classification.
+
+  **This closes a silent no-op rather than adding a restriction.** `TeamService::updateTeamConfig()` has masked governed bits through the profile's overlay since 4.8.4, so a team admin could already move one of these toggles and watch the value not change. The control and the outcome now agree.
+
+  **The notice does not claim a lock, because there is not one.** These six fields are `ASSERTED`: Contacts and the Teams app write `circles_circle.config` directly and Nextcloud offers no way for one app to prevent another from doing it. So the notice reads *"cannot be changed **here**"* — one word doing the work `TRACK-F2-DESIGN.md` §7 requires, claiming only what this screen actually does. Where the change *can* still be made, and that TeamHub reports it, belongs in the docs and the drift report rather than over a settings panel.
+
+- **A failed message-settings save now shows the server's reason** instead of the generic failure toast. A §4.4 refusal explains itself and names the profile; the generic message would tell an administrator nothing about why the save failed.
+
+- **The profile editor is a grid rather than a stack.** Nine settings against three states is a table; laid out as stacked blocks it was nine little forms with nothing for the eye to run down. Column headings carry the state names, so each row is a setting and three aligned radios. Below 680px it collapses back to a stack with every label restored (WCAG 1.4.10).
+
+  Separator rules between settings are back, reversing the 4.8.3 note that removed them — that held for a short stacked list, and a nine-row grid is exactly the ledger it was worried about.
+
+### Security
+
+- **`GET /api/v1/teams/{teamId}/config` now requires team membership.** It checked authentication only: `TeamService::getTeamConfig()` verifies a user is logged in and then reads `circles_circle.config` for any team id handed to it, so any authenticated user could read any team's privacy bitmask. Pre-existing, found while adding the `policy` field to the same response. The endpoint's one caller is a team screen, so nothing legitimate loses access.
+
+- **The message-settings request body forces `allowPublicMessages` back to the governed value** when a profile governs it. The switch is disabled, so the form already holds that value ordinarily — this covers a profile applied in another tab since the form loaded, and a team whose stored value predates the profile being applied. Without it either case would make *every* save on that team a 403.
+
+## [4.8.16] — 2026-09-06
+
+**A rebuild is required** (`npm run build`). No migration.
+
+**A policy profile can be applied to a team that already exists** — Track F2b's remaining half, and the piece every other F2 item was waiting on. `TRACK-F2-DESIGN.md` §4.3 is the specification.
+
+### Added
+
+- **Apply a policy profile to an existing team**, from **Admin → TeamHub → Maintenance → All teams**. A shield button on each row opens a profile picker; choosing one shows the field-by-field diff — *Visible to everyone: On → Off* — and only then offers Apply.
+
+  **Assignment is a write, not a label.** An administrator who applies *Confidential* to a team that is visible to everyone expects that team to stop being visible. Uniform rollout across an existing estate is most of the value of the track and was unreachable while profiles only ever applied to teams created after the feature shipped.
+
+  **The preview is not skippable.** The Apply button stays disabled until the diff is on screen — §4.3 makes it mandatory, because "a silent bulk state change to somebody's teams is not acceptable even when it is correct".
+
+  **Only a Nextcloud administrator can do it, and only from admin settings.** Nothing was added to Manage Team: a team admin who could reclassify their own team could lift every restriction placed on it, which is the bypass `DESIGN.md` §2.103 records as the reason tags were removed. The button is only half of that — `PolicyApplyService::requireNcAdmin()` is the boundary.
+
+- **Removing a profile**, in the same dialog. It writes **no** team setting: the team keeps every value it has and simply stops being compared. Reverting on declassification would be a second silent state change, and reverting to *what* has no answer — the values before the profile was applied are recorded nowhere, and the team may have been created under it.
+
+- **`GET /api/v1/admin/policy/teams/{teamId}/preview`**, **`POST /api/v1/admin/policy/teams/{teamId}`** and **`DELETE /api/v1/admin/policy/teams/{teamId}`**. The preview writes nothing; the other two are state-changing and stay CSRF-protected. Audited as `team.policy_applied` / `team.policy_reapplied` / `team.policy_cleared` per §8.1, with the per-field before/after as metadata — the evidence the rollout happened, and unlike scan-detected drift it has a real actor.
+
+- **`MessageService::setAllowPublicMessages()`** — the one governed field TeamHub solely owns, settable on its own instead of through the whole message-settings block a caller would otherwise have to read and re-send.
+
+### Changed
+
+- **Two governed fields behave differently under apply, and the preview says which.**
+
+  **Integrations outside the profile's allow-list are switched off** for the team. The app's own data is untouched — a Deck board is not deleted, it stops being a team resource, which is what `enabled = 0` has always meant here. The preview names the apps before you confirm.
+
+  **External members are never removed.** The other eight governed fields are settings; that one is a statement about who is in the team, and enforcing it would mean evicting people — destructive, and not what "override the current team settings" asks for. So a profile forbidding external members, applied to a team that has some, leaves them in place and the team is **reported as non-conformant immediately**. The preview says so before you confirm, so a red chip straight after an apply is never a surprise.
+
+- **Circles config bits go through `TeamService::updateTeamConfig()`**, not a second `circles_circle` writer, per §4.3 step 3. The assignment row is written **first** so that method's existing policy overlay is the new profile's; the config write then passes the team's current value and lets the overlay force the governed bits. No new write path, and no target bitmask computed anywhere.
+
+- **§4.3 step 4 — "open drift findings are resolved" — is satisfied by construction**, not implemented. There is no findings table yet (F2c); conformance is computed live, so a team that has just been made conformant reads as conformant on the next look.
+
+### Fixed
+
+- **`PolicyApplyService` is its own service because the obvious home could not work.** Putting apply on `PolicyService` would need `TeamService` injected there, and `TeamService` already injects `PolicyService` — closing `TeamService → PolicyService → TeamService`, which is not a lint failure but the whole app failing to construct on every route. v4.8.7 shipped exactly that shape. Nothing injects the new service but its controller, so no cycle is reachable through it. `npm run check:di` clean across 319 classes.
+
+## [4.8.15] — 2026-09-06
+
+**A rebuild is required** (`npm run build`). No migration.
+
+Templates and profiles reach the two admin surfaces that had no idea they existed: the first-run setup checklist, and the Compliance tab.
+
+### Added
+
+- **Two setup-checklist rows — Team templates and Policy profiles.** The checklist on the Team creation tab derives every row from live configuration, and until now it said nothing about Track F at all. Templates report how many of them an administrator has adjusted; profiles report how many are defined **and how many teams actually carry one**, because a profile nothing carries governs nothing.
+
+  Neither row is a warning. Both ship seeded and both work untouched — that is Track F's inertness rule — so "not adjusted" renders as `•`, the state reserved for a fact worth knowing, never as the `⚠` that "Who can create teams" uses for a default with consequences.
+
+- **A Team profiles row on the Compliance tab**, comparing every classified team against the profile it carries. The pill counts **drifted** teams, matching every other row on that tab where the number is always what needs attention; the info menu carries the classified and still-matching figures, an example team and the setting it differs on.
+
+  **The pill has a fourth state.** Where no team carries a profile it reads *No teams classified*, not a green zero. `TRACK-F2-DESIGN.md` §5.3 names a drift count of zero on an instance that classified nothing as the most dangerous statement this feature can make — it reads as "no deviations" to exactly the person who would act on it.
+
+- **Template and profile chips on the Maintenance tab's All teams grid.** Each team shows the template it was made from and the profile it carries, under its name. **The profile chip is green when the team's settings still match the profile and red when they no longer do.**
+
+  **A red chip is a button, and clicking it opens the detail**: one row per setting that no longer matches, with what the profile defines beside what the team actually has. Read-only — every route to changing it back is somewhere else, and a "fix it" button here would be the bulk re-apply `TRACK-F2-DESIGN.md` §5.3 keeps deliberately out of scope. A difference on `public_messages` is called out separately, because that is the one enforced setting and a difference there cannot be somebody editing around us in Contacts.
+
+  **The template chip is never coloured**, and that is the honest reading rather than an omission: a template decides what a new team is *made of* and leaves nothing on the team to compare against afterwards. A green template chip would assert a check that does not exist — the failure `DESIGN.md` §2.104 records for calling asserted fields "locked".
+
+  Colour is never the only signal (WCAG 1.4.1): each profile chip carries a ✓ or ⚠ glyph and an `aria-label` stating the result in words.
+
+  It reuses the row under the team name that the v4.8.0 tag chips occupied and 4.8.1 emptied — the grid is a fixed seven-column template, and an eighth column would re-tune every width for a field many rows leave blank. `.maint-team-tag__dot` went with the `<li>` that had been guarded by a `team.tags` the payload stopped carrying in 4.8.1.
+
+- **`classification` on each row of `GET /api/v1/admin/maintenance/teams`.** One batch per page on the same terms as the expiry block beside it, degrading to no chips rather than failing the grid — an admin who came to reassign an owner should still get their table.
+
+- **`GET /api/v1/admin/policy/summary`** — five counts for the checklist. Its own endpoint rather than the Policy tab's list calls, which return every profile's value set and every template's app list; the checklist loads on mount and needed five integers.
+
+- **`profile_compliance` on `GET /api/v1/admin/compliance/summary`**, so the new row rides the fetch and the refresh button the tab already has.
+
+- **The compliance report answers A.5.12 and A.5.13.** Both ISO 27001 controls have read "Not evidenced" in every printed report since 4.8.1 removed tags. A policy profile is a classification applied to a team and a label carried by it, so the new check is what evidences them — together with A.8.16, because the answer is produced by monitoring rather than by prevention.
+
+### Changed
+
+- **The Compliance row's info menu points at Maintenance instead of explaining itself.** It now reads *"Teams whose settings no longer match the policy profile they have applied. Check the maintenance tab for the non-compliant teams."* and no longer shows one example finding — the grid shows every team's own state on its own row, which is both more use and the place an admin can act. The "detected, not prevented, and cannot name who made it" caveat moved to where it is needed: the drift dialog, and the printed compliance report, which still carries it in full for an auditor.
+
+### Fixed
+
+- **`PolicyField`'s `public_messages` named a table that has never existed.** Its `source` read `teamhub_team_config.public_messages` from 4.8.2; the setting is per-team app-config, written by `MessageService::saveMessageSettings` and read back by `getAllowPublicMessages()`. Documentation only — nothing read the field until the compliance sweep went looking for the column. The key prefix is now the shared constant `MessageService::CONFIG_ALLOW_PUBLIC_PREFIX` rather than a literal in three places.
+
+### Changed
+
+- **`MaintenanceService` gained `PolicyService`**, and `PolicyService` gained `PolicyObservationMapper` (the observed side of the comparison, kept in a mapper because the queries reach into `circles_circle` and `circles_member`, which the policy layer otherwise never touches) and `TeamTypeMapper` (the per-team template key). `npm run check:di` is clean across 318 classes.
+
+  The sweep is **four reads for whatever set it is given** — three set queries and one app-config load — never one per team, which is `TRACK-F2-DESIGN.md` §5.2's requirement that cadence not be bounded by instance size. The Compliance tab passes it every classified team; the Maintenance grid passes it one page. **Both go through the same `compareTeams()`**: two readings of "is this team conformant" that could disagree would put a green chip on one tab beside a drift count on another, with no way to tell which was lying.
+
+- **The seeded-label rule has one home.** `profileDisplayName()` / `templateDisplayName()` in `src/constants/policy.js` — a seeded key is translated, a renamed one is shown as the admin typed it. `PolicyAdminPanel` now delegates to them rather than carrying its own copy, which stops a third caller becoming a third implementation.
+
+## [4.8.7] — 2026-09-04
+
+**A rebuild is required** (`npm run build`). **A migration runs** (`Version000408007`): creates `teamhub_msg_subscription`.
+
+Notifications when somebody comments on a team message — [GitHub #95](https://github.com/JustinDoek/Nextcloud-Teamhub/issues/95).
+
+### Added
+
+- **Comment notifications, per message, through the Nextcloud bell.** A bell button in each message header turns them on and off. **The author of a message is subscribed by default** and can unsubscribe like anyone else; everybody else starts off and can subscribe to any thread they can read.
+
+  Neither default is stored. `teamhub_msg_subscription` holds only explicit overrides, and "subscribed" is derived as `override ?? (viewer is the author)` — which is what makes the rule true for every message that already existed, with no backfill and no rows written on upgrade.
+
+  One notification per comment, linking to `?team=…&message=…` so the bell lands on the thread rather than the team's home page.
+
+- **`subscribed` on every message row** returned by `GET /api/v1/teams/{teamId}/messages`, including the pinned slot. One batched query per page, not one per card.
+
+- **`PUT` / `DELETE /api/v1/messages/{messageId}/subscription`.** Member of the message's team required, CSRF-protected, both answering `{ messageId, subscribed }`. No `GET` — the state already ships on the message row.
+
+### Fixed
+
+- **A deep link to a message never actually opened it.** Clicking a message in the "What's new" feed switched to the team's stream but never loaded the page holding that message, scrolled to it, or highlighted it. `App.vue` passed `SET_MESSAGE_TARGET` a bare number while both consumers — `MessageStream`'s `focusMessage` watcher and `TeamWidgetGrid`'s expand-the-widget watcher — read `target?.messageId`, so both silently resolved `undefined` and did nothing. Present since the mechanism was introduced in 4.5.26. Found while wiring the notification's own deep link onto the same rails.
+
+### Changed
+
+- **A public message's comments are now readable by everyone**, not only by the team that posted it. Publishing a message publishes the discussion under it; until now a public post's replies were visible only to its own team, so a reader outside it saw a card that ended at the body with no sign there was a thread at all. In "What's new" the thread renders read-only for a non-member.
+
+  **Writing is unchanged.** Commenting still requires membership of the team, and the composer stays hidden for everyone else rather than offering a box the server would refuse. The widening is bounded to `is_public = 1` rows, which a team admin enables per team and an author opts into per message, and which are always type `normal`.
+
+### Security
+
+- **Subscriptions are dropped when membership ends.** Leaving a team, being removed by a team admin, or being removed by a Nextcloud admin deletes that user's subscriptions to the team's **non-public** messages. Public-message subscriptions are kept, because a public message and its thread stay readable. Nothing is dropped if the user is still in the team through a group or sub-team.
+
+- **Membership is also re-checked when a notification is sent**, not trusted from the subscription row. The two are not redundant: the deletion is hygiene, and the send-time check is what holds when membership ends by a route that runs none of the three removal methods — a group membership change, or the stuck Circles event in HANDOFF §0000.
+
+## [4.8.14] — 2026-09-06
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Fixed
+
+- **`TeamImportJob` skipped every bulk run.** The job that finishes a run whose browser closed re-checked the creator with `IGroupManager::isAdmin()` before impersonating them. That was right while imports were administrator-only; bulk create opened runs to the team-creator group, so from 4.8.9 the job logged *"account is no longer an admin"* about people who never were one, and **a bulk batch whose tab closed could never resume**.
+
+  It now asks `MemberService::canUserBulkCreateTeams($uid)` — the same rule the endpoints enforce, asked about a stored uid because the job has no session. Still a genuine re-check: a run created days ago whose account has since left the group is still refused.
+
+  `canCurrentUserBulkCreateTeams()` now delegates to the new uid-based method, so the two can't drift.
+
+### Added
+
+- **A temporary diagnostic in `inviteMembers()`**, logging the initiator's `circles_member` row and `circles_membership` count immediately before each `addMember()`. **Remove at session end** — it is a `warning`-level line per invited member.
+
+  It exists to settle HANDOFF §0. On the next bulk run the log will show whether the initiator's membership cache is emptied between the first add (which succeeds) and the second (which does not), which is the difference between a Circles cache-rebuild fault and something else entirely.
+
+### Notes
+
+- **The §0 "Initiator must be a member of the Team" failure is not fixed and was not worked around.** New evidence narrowed it considerably — see HANDOFF §0.
+
+## [4.8.13] — 2026-09-02
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Fixed
+
+- **Bulk create failed with "administrator privilege required" for a permitted non-admin.** `TeamImportService::start()` gated correctly on entry — the licence, the team-creator group, and the run belonging to the caller — and then ended with `return $this->getImport($importId);`, which **defaults to the administrator gate**. So the caller was checked twice against two different rules, passed the right one and failed the wrong one.
+
+  Worse than a plain refusal: `startImport()` had already flipped the run to `running` by then, so the teams were queued and the browser was told it had failed.
+
+  It now returns `buildImportPayload()`, the ungated reader that exists for exactly this. **A method that has already established who is asking must not re-gate**; a second check inside one call is not defence in depth when the two checks ask different questions. `validate()` (CSV, administrator-only) is the one remaining internal caller and is correct.
+
+### Changed
+
+- **The bulk tab is greyed out with a reason instead of hidden.** It used to vanish entirely for anyone not entitled, so somebody who needed it had no way to learn it existed or what it wanted from them — which is how the permission rule went undiscovered. On a licensed instance the tab is always shown, disabled when the caller cannot use it, with a line naming the gate that is closed: the team creation group, or a licence. Same rule as the profile editor's dependent settings.
+
+  Unlicensed instances still see nothing, because there the feature does not exist to be told about.
+
+## [4.8.12] — 2026-09-02
+
+**A rebuild is required** (`npm run build`). No migration.
+
+Bulk create, after using it.
+
+### Changed
+
+- **Owner and Team admins are separate columns.** One "Administrator" field where the first name silently became the owner and the rest became team admins was a rule you had to be told rather than one you could see. The wire format is unchanged — the server's `admin` column is still "owner first, then admins" — so the CSV importer is untouched.
+
+- **Accounts resolve as you type, and the Check step is gone.** Each of the three people columns is now a search-and-pick cell with chips: you cannot select an account that does not exist, which is most of what the separate check existed to catch. Chips also make it obvious that Team admins and Members take more than one person, which the old free-text field never did.
+
+  Pressing **Create teams** validates and starts in one go. Anything only the server can know — a name already taken, a date the template refuses — comes back **annotated on the row that caused it**, not on a separate screen where you have to count rows to find yours. The old preview screen remains only as a fallback for a run that failed to start.
+
+- **The table opens with five rows**, was three.
+
+- **Rows with no name are ignored** rather than being an error, so spare rows can be left empty. The intro line now says so.
+
+### Added
+
+- `BulkUserCell.vue` — the search-and-pick cell, shared by all three people columns. Single-select for Owner (its input disappears once filled, rather than offering a second box that would silently replace the first pick), multi-select for the other two, and groups are offered only for Members because a group cannot own or administer a team.
+
+## [4.8.11] — 2026-09-02
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Changed
+
+- **The team creation view is as wide as Browse Teams** — `max-width: 1200px` instead of 680px, matching `.browse-teams-view`. The two sit in the same shell and should not disagree about how wide the content area is; more to the point, a bulk row carrying name, template, policy, expiry and owner had nowhere to go at 680.
+
+  **The one-column form keeps a readable measure.** `.ctv__section` — which wraps only the single-team steps — is capped at 760px, because a 1100px-wide "Team name" field is not a form. `BulkCreateTeams` mounts outside that element, so the table gets the full width. The footer follows `.ctv__inner` so it stays aligned with the body above it.
+
+- The bulk tab is now **Multiple teams**, was "Several teams".
+
+## [4.8.10] — 2026-09-02
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Changed
+
+- **The creator now leaves the team when they hand it over.** Appointing somebody else as owner used to demote the creator to moderator, leaving them on the team. Somebody provisioning teams to a company policy is not a member of the teams they set up — and demoting means an administrator ends up sitting in every team they ever created.
+
+  This is `assignOwner()`'s existing `removePreviousOwner` path, which the CSV importer has used since 4.6.6 for exactly this reason. The wizard now applies **the same rule the importer does**: the creator leaves *unless they named themselves*. Adding yourself to the member list is how you stay on the team.
+
+  For that rule to work the wizard now sends **every** member to `creation-roles`, not only the promoted ones — the server skips the level-1 writes itself, but it needs the full list to tell a creator who added themselves at plain Member level from one who did not. `owner.creatorLeft` comes back in the response.
+
+- **The success screen no longer offers actions that would fail.** Open team, Invite people and Review team apps all need membership, so once the creator has left they are replaced with a single Done button and a line saying the new owner can take it from here. Offering three buttons that 403 would be worse than offering none.
+
+- **The members step says what will actually happen** — "{name} becomes the owner at the end and you leave the team. Add yourself to the list above if you want to stay on it." — rather than the previous "you stay on the team as a moderator", which is no longer true.
+
+### Notes
+
+- `creatorLeft` is read from the server's answer rather than recomputed in the browser: a transfer can fail, and a failed transfer leaves the creator as owner. The screen must not claim they left when they did not.
+- HANDOFF §0c records that `assignOwner()`'s `removePreviousOwner` delete path has **never been cleanly observed** — it ran once on 2026-08-07, but only because of the uid-case bug, and the row it wrote was broken for unrelated reasons. This change makes the wizard the first everyday user of that path.
+
+## [4.8.9] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Added
+
+- **Bulk team creation from one page.** A **Several teams** tab in **+ New team** opens a table: one row per team, with name, template, policy, administrator, members and expiry. Check → preview with per-row verdicts → create, with live progress and a per-row result. For people who want the GUI rather than writing a CSV.
+
+  **Licence-gated**, and open to the **team-creator group** — or to Nextcloud administrators where no such group is configured. That rule is deliberately stricter than ordinary team creation, which permits everyone when no group is set: the right default for making one team is the wrong one for making forty. The tab is hidden entirely when either gate closes, so an instance without it sees exactly the wizard it saw before.
+
+- **`policy` column on the row model**, for the bulk table *and* the CSV importer. Empty means the template's default, the same fallback the wizard applies. An unknown key is an error, not a warning — silently creating a team under a different classification than the one asked for is the failure this whole track exists to prevent. Every CSV written before this version still imports unchanged.
+
+- **Five endpoints under `/api/v1/teams/bulk`** on a new `BulkTeamController`, plus `GET /api/v1/teams-bulk-entitlement`.
+
+### Changed
+
+- **`TeamImportService` grew a rows-in entry, not a second importer.** `validateRows()` turns each GUI row into the header/cells shape `normaliseRow()` already reads, so **the table and a CSV go through the same validator, the same durable run, the same chunked provisioning and the same per-row results.** A CSV is now one wire format of two rather than the only one.
+
+  This is the whole reason the feature took a design decision rather than an afternoon. A separate provisioning loop would have been a **third** creation path — beside the wizard and the importer — that has to stay in step with both, and that shape has already cost this codebase repeatedly (`TeamTemplates` ↔ `CreateTeamView`, the My Work vocabulary, `uiTokens.js` ↔ `widget-tokens.css`).
+
+- **`getImport`, `start`, `processNextChunk` and `discard` take `$enforceNcAdmin`**, the same flag idiom `assignOwner()` and `adminSetMemberLevel()` already use. `false` swaps the administrator gate for the bulk one **and requires the run to belong to the caller** — "you may use this feature" and "this run is yours" are different questions, and without the second a permitted user could drive somebody else's run by guessing an id. The CSV upload path is untouched and stays administrator-only.
+
+- **The policy is assigned before the privacy bitmask** in `provisionRow()`. `updateTeamConfig()` overlays whatever the team's policy governs on top of the caller's value, so the assignment has to exist first or the template's preselection would win. The wizard has the same ordering for the same reason.
+
+## [4.8.8] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Fixed
+
+- **The app would not load at all on 4.8.7.** Every request died with *"Tried to query `MemberService`, but it is already in the chain"*. 4.8.7 injected `MaintenanceService` into `MemberService`, closing a cycle Nextcloud's DI container refuses to resolve:
+
+  `MemberService → MaintenanceService → MessageSubscriptionService → MemberService`
+
+  The check that missed it followed one hop: `MaintenanceService` mentions `MemberService` only in comments, so it looked clean. The cycle runs through `MessageSubscriptionService`, two hops out.
+
+  `applyCreationRoles()` moved to `MaintenanceService`, where **both of its collaborators — `assignOwner()` and `adminSetMemberLevel()` — already live**, so it adds no dependency edge at all. That is where it should have gone in the first place; injecting the service into the caller was the wrong direction. The owner-level check is now a direct `circles_member` read, the same shape `assignOwner()` uses a few lines above it.
+
+### Added
+
+- **`npm run check:di`** — walks every constructor under `lib/` and fails on any dependency cycle. It reproduces this break exactly and finds nothing else across 316 classes. Worth running before shipping any new constructor injection: NC's container treats a cycle as a hard failure at the first request, not a warning, so the symptom is the whole app down rather than one broken feature.
+
+## [4.8.7] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Added
+
+- **Member roles in the create-team wizard.** Each person or group added on the Members step gets a role: Member, Moderator or Team admin. Groups can also carry a level; **Team owner is disabled for them**, with the reason stated, because a group cannot act and so cannot own.
+
+- **Appointing someone else as team owner.** Pick Team owner for one member and the team is handed over as the **last** step of creation, just before the Open team button. The creator stays on the team as a moderator, which is what `assignOwner()` does to an outgoing owner.
+
+  **The appointed owner becomes a full member whether or not they accepted an invitation** (decided 2026-09-01). That needed no new code — `assignOwner()` already updates an existing row to `level 9, status Member` and inserts one where there is none — but it does quietly override the team's own join policy for exactly one person, and the audit row is the only place that shows.
+
+  **The handover is last for a hard reason**, not a cosmetic one: it demotes the creator from level 9, and every step above it — resource creation, module config, the type and expiry write — is owner- or admin-gated. Moving it earlier breaks everything after it.
+
+  **A failed handover is reported, never fatal.** The team exists and is usable, so the success screen says ownership could not be transferred and that the creator is still the owner. HANDOFF §0000 documents an upstream Circles/Talk bug live on the test instance that silently undoes a level-9 write about twenty minutes later; nothing here can prevent that, which is exactly why the outcome is shown rather than assumed.
+
+- **`POST /api/v1/teams/{teamId}/creation-roles`** — gated on **owning the team**, not on being an administrator. Handing over something you just created is not an administrative act, and it is the one transfer path with real-world exercise behind it.
+
+### Changed
+
+- **The policy description is now labelled as what it is.** It already existed and already reached the wizard; as a two-row box labelled "Description" it read as an admin note nobody else sees, so it went unwritten. It is now "Description shown when creating a team", four rows, with a line saying where it appears — and the wizard renders it as a proper block rather than grey hint text indistinguishable from the sentence beneath it.
+
+- The Members step is a list rather than a chip row. A chip is the wrong shape once each one needs a control beside it.
+
+## [4.8.6] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). No migration.
+
+### Fixed
+
+- **Settings in the profile editor could not be ticked.** Clicking a setting's checkbox — Integrations allowed, or any other — updated the draft and changed nothing on screen, so the control looked dead. Opening an existing profile rendered correctly, which is why it read as "something is wrong with selecting items" rather than as a blank screen.
+
+  The cause was `isGoverned()` using `Object.prototype.hasOwnProperty.call(draftValues, key)`. Vue 3's reactive proxy traps `get`, `set`, `deleteProperty`, `has` and `ownKeys`; the native `hasOwnProperty` uses `[[GetOwnProperty]]`, which is **not trapped**, so the render never registered a dependency and adding the key never re-rendered. Vue 3.4 added an instrumented `hasOwnProperty`, but only for `obj.hasOwnProperty(key)` — reached through the `get` trap — which the `.call()` form skips. Now uses the `in` operator, which goes through the `has` trap.
+
+### Changed
+
+- **A setting that depends on another is dimmed, and the reason is not.** The greyed-out state was applied to the whole row, which dimmed the sentence explaining why the control was unavailable. The dimming is now on the control only; the reason keeps full contrast and gains a lock icon so it does not read as ordinary help text.
+
+- **Turning a dependency off now un-governs what depended on it.** Switching "Anyone can join" off left "Join requests need approval" governed behind a greyed control — harmless, because the server dropped it on save, but the settings count and the saved profile disagreed with what was on screen. Both sides prune now.
+
+## [4.8.5] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). **A migration runs** (`Version000408005`): adds `teamhub_template.default_profile_key`, deletes the retired `policy_default_profile` appconfig value.
+
+The create-team wizard is rebuilt around the policy. Decided by Justin on 2026-09-01, and two of these reverse decisions from 4.8.4.
+
+### Changed
+
+- **The wizard is two steps: Details and Members.** The Settings step is gone — those values are the policy's, and showing them let a creator pick things the policy then overwrote. The Apps step is gone — apps and modules are the template's. **The wizard now produces a team that complies with its template and policy by construction**; a team administrator who needs something different does it from Manage team afterwards.
+
+  What that removes with it: the new-vs-existing resource chooser, per-resource custom names, and the module toggles. Connecting an existing Deck board or calendar is now done from Manage team → Integrations, which is where it already had to be done for a team that already existed.
+
+- **Policy is a required field in step 1, and every creator picks it** — not only Nextcloud administrators, which is what 4.8.4 shipped. Reclassifying a team afterwards is still admin-only, so that is where the boundary now sits. `DESIGN.md` §2.110 records the reversal and what it costs.
+
+- **The default policy is per template, not per instance.** The 4.8.4 instance-wide "Applied to new teams" setting is removed from the Policy tab; each template carries a `Default policy` instead, which preselects in the wizard and can be changed there. A Project team and a Department team start from different postures — the same reasoning that moved expiry onto the template in 4.8.3.
+
+- **The expiration-date field shows when the template enables it**, unchanged from 4.8.3 and now the only thing gating it.
+
+### Added
+
+- Deleting a profile is refused when a **template** points at it, and when it is the **last** one — the wizard requires a policy, so an instance with none could not create teams at all.
+
+### Removed
+
+- `PUT /api/v1/admin/policy/default` and the `policy_default_profile` appconfig value, both introduced in 4.8.4 and superseded by the per-template setting.
+- `GET /api/v1/policy/creation` no longer returns `canChoose` or `defaultKey`; every caller who may create a team gets every policy.
+
+## [4.8.4] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). No migration — 4.8.3's tables are enough.
+
+**Track F2b: a classification is now actually applied.** Until this version a profile was a definition nothing referenced; the create-team wizard looked identical whatever was defined. Now a team is created under a profile, and what that profile governs is set by the server.
+
+### Added
+
+- **A classification picker in the create-team wizard**, for Nextcloud administrators only. Everybody else gets the instance default applied silently and a read-only note saying which one and why. A team choosing its own classification is the bypass that got tags removed in 4.8.1 (`DESIGN.md` §2.107), and the check is server-side — `assignAtCreation()` re-resolves the key and substitutes the default for a non-admin whatever the request said.
+
+- **A default classification for new teams**, on Admin → TeamHub → Policy (`policy_default_profile`). **It ships unset**, and that one unset value is what keeps Track F inert: no default, no assignment, no comparison, and the wizard renders exactly as it did before.
+
+- **Governed settings are locked in the wizard** — the checkbox is disabled with a lock icon, and a line above the group says which classification set them. Integrations the profile does not permit are removed from the list rather than disabled: a disabled row invites the user to wonder how to enable it, and the answer is "be a different kind of team", which is not an action.
+
+- **Two endpoints**: `GET /api/v1/policy/creation` (member-callable, and **asymmetric** — an admin gets every profile, everybody else gets only the one that will apply to them) and `PUT /api/v1/admin/policy/default`.
+
+- **`teamhub_team_policy` finally has a writer**, so profiles report a real team count. `TeamPolicyMapper` and the `team.policy_applied_at_creation` audit event.
+
+### Changed
+
+- **`TeamService::updateTeamConfig()` overlays the team's governed config bits** on top of whatever the caller asked for. This is the change that makes the wizard's locks real rather than cosmetic: it is the single choke point every path reaches — wizard, Manage Team, CSV importer — and `DESIGN.md` §2.103 is explicit that hiding our own UI produces no control at all. Idempotent for the apply path, which passes the profile's own values.
+
+- **`ResourceService::createTeamResources()` filters to the profile's integration allow-list**, for the same reason and at the same kind of choke point.
+
+### Notes
+
+- Only the six Circles config bits and the integration list are enforced this way so far. `public_messages` is governed by the model and not yet by a write path.
+- Assignment to an **existing** team, drift detection and reclassification are still F2b's remainder, F2c and F2d.
+- `npm run check:l10n` is at **62**, down from 66 — this session translated three of the pre-existing `CreateTeamView.vue` strings on the way past.
+
+## [4.8.3] — 2026-09-01
+
+**A rebuild is required** (`npm run build`). **A migration runs** (`Version000408003`): adds one column, drops one, deletes retired rows.
+
+Justin's review of the Policy screen. Two of these are model changes, not wording.
+
+### Changed
+
+- **Expiry moved from profiles to templates.** `expiry_policy` and `expiry_max_days` are gone from the profile field set. A template now says whether teams of its kind can expire ("Enable team expiration", renamed from "Offer an expiration date…") and carries a **default expiration period in days**, which is the date the wizard's picker opens on. Whether a kind of team can expire is a property of what that kind of team *is*, not of how sensitive it is — a six-month project and a six-month confidential project want the same expiry.
+
+  **`TeamExpiryService` reads the template too.** `isEligibleTemplate()` replaces the hard-coded `ELIGIBLE_TYPES` pair on every path — eligibility, the admin grid's batch check, `setAtCreation()` and the CSV importer's preview. Enabling expiration on the Department template now both shows the field in the wizard and has the server accept the date; before this change the two would have disagreed and the server would have won silently.
+
+- **The per-field mode is gone.** A setting is either governed by a profile or it is not, and a governed setting is locked. The "starting value vs locked" picker and the `teamhub_policy_value.mode` column go with it.
+
+  **What this costs:** `TRACK-F2-DESIGN.md` §4d had per-field mode as the mechanism that let one design serve a governed posture and a looser mid-market one. That middle setting is now expressed by governing *fewer* fields rather than by governing many fields loosely.
+
+- **The create-team wizard reads the template table.** `CreateTeamView.vue`'s `templateProfile()` was a hand-maintained mirror of the PHP constants; it now derives from rows fetched once on mount via the new `GET /api/v1/templates` (member-callable). `TeamImportService` reads the same table. **`lib/Constants/TeamTemplates.php` is no longer read at runtime** — it is the vocabulary (`APPS`, `MODULES`) and the migration's seed, and editing `PROFILES` no longer changes anything on an instance past 4.8.2.
+
+  `GET /api/v1/admin/policy/templates` now reports `liveAtCreation: true`, so the panel's "this does not reach team creation yet" warning is gone.
+
+- **Policy page layout.** Team templates above Profiles; "Classification profiles" is now just "Profiles"; the page intro is removed. The enforced-vs-reported explanation it carried moved to the legend inside the profile editor, next to the fields it applies to.
+
+- **Settings that depend on another setting are greyed out** until the dependency is governed and on. `Join requests need approval` is the only one today: without `Anyone can join`, Circles treats the team as simply closed. Unticking a dependency drops anything that depended on it, client-side and server-side.
+
+- **Collectives and Intravox render under Apps**, in the Policy template editor and the profile's integration allow-list, matching where `CreateTeamView.vue` has put them since v4.4.10 — each provisions a resource rather than toggling a feature. They are still *stored* in the `modules` list; `RESOURCE_MODULES` is the shared grouping and the toggle routes back to whichever array holds the key.
+
+- The separator lines between settings in the profile editor are removed.
+
+### Removed
+
+- `PolicyField::TYPE_ENUM` and `TeamExpiryService::isEligibleType()`, both left without callers by the above.
+
+### Notes
+
+- Locale keys for the removed controls (`Locked`, `Starting value`, `How it applies`, `%n locked`, …) are left in the seven locale files rather than pruned, matching the standing practice that these files are never re-sorted or swept. They are simply never requested.
+- `npm run check:l10n` is at **65**, one below the 4.8.2 baseline of 66 and none of it from this session.
+
+## [4.8.2] — 2026-09-01
+
+**A rebuild is required** (`npm run build`) — frontend and backend. **A migration runs** (`Version000408002`): six new tables, plus a seed of three templates and four profiles.
+
+**Nothing in this release changes any team.** No team is assigned a profile, no team's settings are written, and an instance that never opens the new tab behaves exactly as it did on 4.8.1. That is deliberate — see `TRACK-F2-DESIGN.md` §5.
+
+### Added
+
+- **Track F2a — classification profiles and team templates.** A new **Admin → TeamHub → Policy** tab defines what a profile *is*: a set of team settings, each held either as a starting value or locked. Four starter profiles ship (Public, Internal, Confidential, Restricted), all unassigned, and the three team templates become editable rows.
+
+  Every governed setting carries a tag the UI always shows: **Enforced** — only TeamHub can write it, so a locked value is genuinely refused (expiry policy, public messages) — or **Reported** — something outside TeamHub can also write it, so TeamHub sets the value and detects a later change but cannot prevent one (the six Circles config bits, external members, integrations). Calling both "locked" is the failure mode this design exists to avoid; see `DESIGN.md` §2.104.
+
+  `integrations_allowed` is **Reported** despite `teamhub_team_apps` being a TeamHub table: `ResourceDiscoveryService` surfaces Deck boards and Talk rooms created directly in their own apps, so which integrations a team has was never decided by our routes alone.
+
+- **Nine admin endpoints** under `/api/v1/admin/policy`: `GET fields`, `GET|POST profiles`, `GET|PUT|DELETE profiles/{profileKey}`, `GET templates`, `PUT templates/{templateKey}`, `GET conflicts`. All gated with `#[AuthorizedAdminSetting]` **and** a full Nextcloud-admin check in the service.
+
+- **A template × profile conflict matrix** on the Policy tab, warning where a profile would strip something a template provides. A warning surface, never a save-blocker — the profile wins at creation, so the team is still correct; it just does not get everything the template offers.
+
+- **Instance-scoped audit events** — `policy.profile_created`, `policy.profile_updated` (naming the changed fields), `policy.profile_deleted`, `policy.template_updated` — written with the reserved `team_id` `_instance`. Every existing audit reader queries a real Circles `unique_id`, so these rows are invisible to them with no reader change.
+
+- **Six tables**, four of which nothing writes yet: `teamhub_template`, `teamhub_policy_profile`, `teamhub_policy_value`, `teamhub_team_policy` (assignment, F2b), `teamhub_policy_drift` (the scan, F2c), `teamhub_reclass_request` (reclassification, F2d). Created together because empty schema costs nothing and a migration per stage costs a rollout each.
+
+### Changed
+
+- **`lib/Constants/TeamTemplateProfiles.php` is now `TeamTemplates.php`.** It describes a *template*, and "profile" now means something else. Two call sites updated (`TeamImportService`, `TeamExportService`); no behaviour change. Its constants become the migration's seed data.
+
+  **The class is still what team creation reads.** The wizard, importer and exporter move onto `teamhub_template` in F2b; until then editing a template on the Policy tab changes the admin screen and not yet what a new team gets. The panel says so, and `GET /api/v1/admin/policy/templates` returns `liveAtCreation: false`.
+
+### Notes
+
+- The pre-existing `npm run check:l10n` backlog is **66 strings, none of them new** — all 70 strings added this session are keyed in `en.json` and translated into nl, de, fr, da, es and it. The per-file composition has drifted from what `HANDOFF.md` recorded on 2026-08-12; the current split is in HANDOFF.
+
+## [4.8.1] — 2026-09-01
+
+**A rebuild is required** (`npm run build`) — frontend and backend, no migration, no schema change.
+
+### Removed
+
+- **Team tags.** The whole 4.8.0 feature comes out: `TeamTagController`, `TeamTagService`, the four routes (`GET /api/v1/tags` and `GET`/`POST`/`DELETE` on `/api/v1/teams/{teamId}/tags[/{tagId}]`), the Manage Team → Tags section, the Vuex `teamTags` state with its mutation and three actions, and the `tags: []` enrichment on `GET /api/v1/teams/browse` and `GET /api/v1/admin/maintenance/teams`.
+
+  Tags were introduced as the way to identify a team's policy profile. Track F2 puts the profile in a TeamHub-owned row with a stable string key instead, so the tag was carrying no weight — and `TeamTagService` gated its writes on **team** admin (level ≥ 8), which would have let a team admin reclassify their own team by removing a chip. Removing it now avoids shipping a classification mechanism that Track F2 replaces.
+
+  **No data is deleted.** Existing assignments stay in `oc_systemtag_object_mapping` under `objecttype = 'teamhub_team'`; nothing reads them any more.
+
+- **The *Team classification* compliance row**, in both the Compliance tab and the printable report, along with the `team_tags: { tagged, total }` field on `GET /api/v1/admin/compliance/summary`.
+
+  **A.5.12 and A.5.13 now report as "Not evidenced"** in the report's coverage table. That is the intended behaviour of `isoControls.js` — a control in scope with no check behind it is reported as a gap — and it is the honest state until Track F2 profiles evidence those two controls again. Both controls stay in scope; only the claim goes.
+
+- **`team.tag_added` and `team.tag_removed` audit events** are no longer emitted. Rows already written are untouched and still render.
+
 ## [4.8.0] — 2026-08-30 — Session close: teams can be classified
 
 **A rebuild is required** (`npm run build`) — frontend and backend, no migration, no schema change. Closes the 4.7 line.
