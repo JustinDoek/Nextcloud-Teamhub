@@ -3,6 +3,28 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.9.1] — 2026-09-09
+
+**Hotfix — 4.9.0 could be neither installed nor upgraded to** ([#98](https://github.com/JustinDoek/Nextcloud-Teamhub/issues/98)). No migration and no new strings. **A rebuild is required**, not because any frontend source changed — none did — but because the version bump invalidates `appinfo/integrity.json` and the release pre-flight refuses a manifest that belongs to another version.
+
+Affected instances need no manual database work. Install 4.9.1 and re-run `occ upgrade`: `changeSchema()` guards on `hasTable`, `postSchemaChange()` guards per table on `isEmpty()`, and Nextcloud records a version as executed only after every step, so the retry skips the templates it already seeded and completes the profiles it did not.
+
+### Fixed
+
+- **`Undefined constant OCA\TeamHub\Constants\PolicyField::MODE_DEFAULT` fataled the migrator.** [`Version000408002`](lib/Migration/Version000408002Date20260901000000.php) seeds the four starter policy profiles and named `PolicyField::MODE_DEFAULT` / `::MODE_LOCKED` in 19 places. v4.8.3 removed per-field mode from the product and deleted both constants; PHP resolves a missing class constant into a fatal `Error` that the migrator cannot catch, so the upgrade died and left the instance in maintenance mode.
+
+  The seed is now frozen as literals — field keys, the two mode values and the boolean serialisation — and the `PolicyField` import is gone from the file. The mode values are `'default'` and `'locked'` per the column's own comment in `changeSchema()`, and nothing ever reads them: `Version000408003` drops the column immediately afterwards.
+
+  Two more references in the same function were the identical landmine and went with it. The `PolicyField::CFG_*` field keys would fatal the same way if any of those six fields were retired, and `PolicyField::serialize()` **throws by design** on a key that has left the registry.
+
+  **Why it reached a release.** A migration already recorded in `oc_migrations` never runs again. Every development machine passed `Version000408002` back when 4.8.2 was current and the constants still existed, so it is permanently skipped here — while the previous public release was 4.8.0, meaning no real install had ever run it. The bug was invisible to code review (both files read correctly on their own) and invisible to a test deploy, and was reachable only on the machines nobody develops on: every existing user and every new one.
+
+### Added
+
+- **`npm run check:migrations`** ([`scripts/check-migrations.js`](scripts/check-migrations.js)) — resolves every `OCA\TeamHub\…::MEMBER` reference in `lib/Migration/` through the file's own `use` statements and fails when the member no longer exists. Comments and string literals are blanked first, so prose about a retired constant is not a finding.
+
+  It runs from `collectPreflightProblems()` in [`scripts/lib/app-files.js`](scripts/lib/app-files.js), which puts it in front of **both** `deploy:aio` and `publish:release`. The existing three pre-flight checks all guard against a stale bundle; this one guards against code that was never going to run on a developer's machine no matter how carefully it was tested.
+
 ## [4.9.0] — 2026-09-08
 
 Release of the 4.8.x line. No functional change over 4.8.35 — this is the version that ships.

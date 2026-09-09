@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Migration;
 
 use Closure;
-use OCA\TeamHub\Constants\PolicyField;
 use OCA\TeamHub\Constants\TeamTemplates;
 use OCP\DB\ISchemaWrapper;
 use OCP\DB\Types;
@@ -339,48 +338,67 @@ class Version000408002Date20260901000000 extends SimpleMigrationStep {
         // 'public' locks nothing on purpose: a profile that only supplies
         // starting values is a legitimate one, and the starter set should show
         // both modes rather than teach that a profile means lockdown.
+        //
+        // **No PolicyField constants below this line, deliberately.** A
+        // migration is a historical record and has to keep running against a
+        // registry that has moved on. This one named PolicyField::MODE_DEFAULT
+        // and ::MODE_LOCKED until v4.9.1; when v4.8.3 took per-field mode out
+        // of the product those two constants went with it, and every instance
+        // that had not already recorded this migration died here on an
+        // `Undefined constant` fatal. That was every real install — the
+        // previous release was 4.8.0, so nobody had run it — and every fresh
+        // one. Only dev machines, which passed 4.8.2 while the constants still
+        // existed, were spared, which is why it reached users. Issue #98.
+        //
+        // Field keys, the mode values and the bool serialisation are frozen as
+        // literals for that reason. The modes are 'default' | 'locked' per the
+        // column comment in changeSchema() above, and nothing ever reads them:
+        // Version000408003 drops the column minutes later.
+        //
+        // scripts/check-migrations.js fails the build if a migration reaches
+        // for an OCA\TeamHub constant again.
         $seed = [
             'public' => [
                 'label' => 'Public', 'sort' => 0,
                 'description' => 'Open to the whole instance. Nothing is locked.',
                 'values' => [
-                    [PolicyField::CFG_VISIBLE, true, PolicyField::MODE_DEFAULT],
-                    [PolicyField::CFG_OPEN, true, PolicyField::MODE_DEFAULT],
-                    [PolicyField::EXTERNAL_MEMBERS, true, PolicyField::MODE_DEFAULT],
-                    [PolicyField::PUBLIC_MESSAGES, true, PolicyField::MODE_DEFAULT],
+                    ['cfg_visible', true, 'default'],
+                    ['cfg_open', true, 'default'],
+                    ['external_members', true, 'default'],
+                    ['public_messages', true, 'default'],
                 ],
             ],
             'internal' => [
                 'label' => 'Internal', 'sort' => 10,
                 'description' => 'Discoverable inside the organisation, but nobody joins on their own.',
                 'values' => [
-                    [PolicyField::CFG_VISIBLE, true, PolicyField::MODE_DEFAULT],
-                    [PolicyField::CFG_OPEN, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::EXTERNAL_MEMBERS, false, PolicyField::MODE_DEFAULT],
-                    [PolicyField::PUBLIC_MESSAGES, false, PolicyField::MODE_DEFAULT],
+                    ['cfg_visible', true, 'default'],
+                    ['cfg_open', false, 'locked'],
+                    ['external_members', false, 'default'],
+                    ['public_messages', false, 'default'],
                 ],
             ],
             'confidential' => [
                 'label' => 'Confidential', 'sort' => 20,
                 'description' => 'Not discoverable, invitation only, no external members.',
                 'values' => [
-                    [PolicyField::CFG_VISIBLE, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::CFG_OPEN, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::CFG_INVITE, true, PolicyField::MODE_DEFAULT],
-                    [PolicyField::EXTERNAL_MEMBERS, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::PUBLIC_MESSAGES, false, PolicyField::MODE_LOCKED],
+                    ['cfg_visible', false, 'locked'],
+                    ['cfg_open', false, 'locked'],
+                    ['cfg_invite', true, 'default'],
+                    ['external_members', false, 'locked'],
+                    ['public_messages', false, 'locked'],
                 ],
             ],
             'restricted' => [
                 'label' => 'Restricted', 'sort' => 30,
                 'description' => 'The most protected posture. Every governed setting is locked.',
                 'values' => [
-                    [PolicyField::CFG_VISIBLE, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::CFG_OPEN, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::CFG_INVITE, true, PolicyField::MODE_LOCKED],
-                    [PolicyField::CFG_PROTECTED, true, PolicyField::MODE_LOCKED],
-                    [PolicyField::EXTERNAL_MEMBERS, false, PolicyField::MODE_LOCKED],
-                    [PolicyField::PUBLIC_MESSAGES, false, PolicyField::MODE_LOCKED],
+                    ['cfg_visible', false, 'locked'],
+                    ['cfg_open', false, 'locked'],
+                    ['cfg_invite', true, 'locked'],
+                    ['cfg_protected', true, 'locked'],
+                    ['external_members', false, 'locked'],
+                    ['public_messages', false, 'locked'],
                 ],
             ],
         ];
@@ -405,7 +423,7 @@ class Version000408002Date20260901000000 extends SimpleMigrationStep {
                 $vb->insert('teamhub_policy_value')->values([
                     'profile_key' => $vb->createNamedParameter($key),
                     'field_key'   => $vb->createNamedParameter($fieldKey),
-                    'field_value' => $vb->createNamedParameter(PolicyField::serialize($fieldKey, $value)),
+                    'field_value' => $vb->createNamedParameter($value ? '1' : '0'),
                     'mode'        => $vb->createNamedParameter($mode),
                 ]);
                 $vb->executeStatement();
