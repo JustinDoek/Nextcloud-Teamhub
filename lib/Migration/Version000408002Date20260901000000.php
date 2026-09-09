@@ -290,8 +290,19 @@ class Version000408002Date20260901000000 extends SimpleMigrationStep {
             'department'    => ['label' => 'Department',    'sort' => 20, 'expiry' => 0],
         ];
 
-        foreach (TeamTemplates::TEMPLATES as $key) {
-            $m       = $meta[$key];
+        // **$meta drives the seed, not TeamTemplates::TEMPLATES.** The frozen
+        // list decides which templates this migration creates; the live class
+        // is consulted only for what each of those three contains.
+        //
+        // Reading the key list live meant a fourth template added to TEMPLATES
+        // years from now would hit `$meta[$key]` on a key that is not there,
+        // insert NULL into a notnull column, and break every fresh install —
+        // while this machine, which recorded this migration long ago and never
+        // runs it again, kept working. That is #98's shape exactly, and
+        // check:migrations cannot see it: both names still resolve, they just
+        // stop agreeing. A template introduced in a later version belongs to
+        // that version's migration, not retro-fitted into this one.
+        foreach ($meta as $key => $m) {
             $profile = TeamTemplates::forTemplate($key);
 
             $apps = [];
@@ -324,7 +335,7 @@ class Version000408002Date20260901000000 extends SimpleMigrationStep {
             $qb->executeStatement();
         }
 
-        $output->info('Version000408002: seeded ' . count(TeamTemplates::TEMPLATES) . ' team templates');
+        $output->info('Version000408002: seeded ' . count($meta) . ' team templates');
     }
 
     private function seedProfiles(IOutput $output, int $now): void {

@@ -19,6 +19,12 @@ Affected instances need no manual database work. Install 4.9.1 and re-run `occ u
 
   **Why it reached a release.** A migration already recorded in `oc_migrations` never runs again. Every development machine passed `Version000408002` back when 4.8.2 was current and the constants still existed, so it is permanently skipped here — while the previous public release was 4.8.0, meaning no real install had ever run it. The bug was invisible to code review (both files read correctly on their own) and invisible to a test deploy, and was reachable only on the machines nobody develops on: every existing user and every new one.
 
+- **`seedTemplates()` in the same migration would have broken fresh installs the same way, one version from now.** It looped `TeamTemplates::TEMPLATES` — read live — and looked each key up in `$meta`, a frozen array inside the migration. Both names still resolve, so `check:migrations` passes them; the defect is that the two lists can stop *agreeing*. Adding a fourth template key would have left `$meta[$key]` undefined, put NULL into a `notnull` column, and broken every fresh install while every development machine carried on working.
+
+  It now iterates `$meta`, so the frozen list decides what this migration seeds. A template introduced in a later version belongs to that version's migration.
+
+  What is left is deliberate: `forTemplate()` and `configBitmask()` are still read live for the three seeded keys. That cannot fail — `forTemplate()` falls back to `collaboration` on an unknown key — but it means the apps and modules a starter template carries are a snapshot of when an instance was installed rather than of the version it now runs. Recorded in `HANDOFF.md` §0-mig.
+
 ### Added
 
 - **`npm run check:migrations`** ([`scripts/check-migrations.js`](scripts/check-migrations.js)) — resolves every `OCA\TeamHub\…::MEMBER` reference in `lib/Migration/` through the file's own `use` statements and fails when the member no longer exists. Comments and string literals are blanked first, so prose about a retired constant is not a finding.

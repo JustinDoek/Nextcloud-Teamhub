@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "app_version": "4.9.1",
-  "generated_at": "2026-09-09T12:22:13.993Z",
+  "generated_at": "2026-09-09T12:31:47.238Z",
   "algorithm": "sha256",
   "files": {
     "announcements/The_journey.md": "4c7cf855cf9b97ec646710f94606d80a5ee0669e78a771bc062c1275444c1aaa",
@@ -276,7 +276,7 @@
     "lib/Migration/Version000406013Date20260809000000.php": "ed398c1c58f61e63e2376164f65e5be788f433addcc69df122c4872611308413",
     "lib/Migration/Version000406020Date20260810000000.php": "b219a3e5504eca54d08b560169b4d316025667ec44da37d291bca5229bfc7078",
     "lib/Migration/Version000407004Date20260828000000.php": "63ae643a1de5542f51012ebed61cbe0613315c5dbfdcf48379aba8c24bd4ec67",
-    "lib/Migration/Version000408002Date20260901000000.php": "0f0abf328982bdf7150ed7f8a480196981538352d380c3901e89a0bce9dcd86d",
+    "lib/Migration/Version000408002Date20260901000000.php": "dc7a46a2cdf52bbb2a85b1f75bd07c3757fac6092fdbfd83971e0cb77e01dfe6",
     "lib/Migration/Version000408003Date20260901010000.php": "d784e4e949824dc75943e2daff2da12ad89bd28411fb329e91a1b21a7b6ad5c0",
     "lib/Migration/Version000408005Date20260901020000.php": "eaa6a0238413151ec27107dbf00a7e0d8585eef52ed1a409a6890bc822997d29",
     "lib/Migration/Version000408007Date20260904000000.php": "77e433a621f4e5d14fbddbd38742e6e99c2453d5161fc078150c86a04e7c4df6",
