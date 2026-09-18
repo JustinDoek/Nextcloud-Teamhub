@@ -11,12 +11,18 @@ jobs:
     permissions:
       contents: write
 
+    # Every action is pinned to a full commit SHA (Semgrep
+    # github-actions-mutable-action-tag, 2026-09-18): a tag or branch can be
+    # repointed by the action's owner, a SHA cannot. The tag each SHA was
+    # resolved from is kept as a comment; to update, resolve the new tag with
+    #   curl -s https://api.github.com/repos/<owner>/<repo>/git/ref/tags/<tag>
+    # and replace both the SHA and the comment.
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Only needed to run the verification gate below — nothing is compiled here.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -25,11 +31,14 @@ jobs:
       # js/ and css/ are compiled by the developer (`npm run build` in the
       # working repo) and mirrored into this repo by scripts/publish-to-release.js.
       # This workflow used to run `npm install && npm run build`, which compiled
-      # whatever src/ was committed here -- but src/ is not mirrored, so it had
-      # been frozen since 2026-07-20 and every release from v4.30 through v4.5.0
-      # shipped a v4.3.0-era frontend under a newer version number. Packaging the
-      # committed bundle means the artifact customers install is byte-for-byte
-      # the one that was tested locally.
+      # whatever src/ was committed here -- for a long time a copy frozen on
+      # 2026-07-20, so every release from v4.30 through v4.5.0 shipped a
+      # v4.3.0-era frontend under a newer version number. Since v4.10.0 src/,
+      # tests/ and vite.config.mjs ARE mirrored on every publish (REPO_ONLY in the
+      # working repo's scripts/lib/app-files.js), so the repo carries the source
+      # of the bundle it ships -- but the bundle is still not rebuilt here.
+      # Packaging the committed bundle means the artifact customers install is
+      # byte-for-byte the one that was tested locally.
       - name: Assemble app folder
         run: |
           set -euo pipefail
@@ -60,7 +69,7 @@ jobs:
           ls -l teamhub.tar.gz
 
       - name: Upload Tarball to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: teamhub.tar.gz
           # Zorg dat we de exacte tag gebruiken
@@ -69,7 +78,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Register in Nextcloud App Store
-        uses: R0Wi/nextcloud-appstore-push-action@v1.0.1
+        uses: R0Wi/nextcloud-appstore-push-action@c30a75db8d7b01f70d80aaec65d731e0b00714c4 # v1.0.1
         with:
           app_name: teamhub
           app_private_key: ${{ secrets.NEXTCLOUD_KEY }}

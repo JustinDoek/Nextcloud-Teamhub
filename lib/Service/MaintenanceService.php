@@ -281,6 +281,22 @@ class MaintenanceService {
                 ]);
             }
 
+            // ── Step 5d: OpenProject links (v4.9.4) ───────────────────────────
+            // One read for the page; the row's Unlink action is the only way
+            // a link is ever removed. Through the container like the expiry
+            // block: the link service pulls MemberService and AuditService,
+            // and this constructor is where the v4.8.7 cycle started.
+            $openProjectLinks = [];
+            try {
+                $openProjectLinks = $this->container
+                    ->get(\OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService::class)
+                    ->linksForTeams($pageIds);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MaintenanceService] OpenProject link lookup failed for teams grid', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+
             // ── Step 6: assemble ──────────────────────────────────────────────
             $teams = [];
             foreach ($page_rows as $r) {
@@ -307,6 +323,11 @@ class MaintenanceService {
                     // and shows a renamed label as the admin typed it, which is
                     // the rule PolicyAdminPanel already applies.
                     'classification'     => $classification[$r['_id']] ?? null,
+                    // v4.9.4 — { projectId, projectIdentifier, projectName,
+                    // host, stale, url } for a team linked to an OpenProject
+                    // project, null otherwise. The frontend shows the project
+                    // under the name and offers Unlink only on a linked row.
+                    'openproject'        => $openProjectLinks[$r['_id']] ?? null,
                     // v4.6.17 — where the Email owner button goes, or null when
                     // the team has no owner or the owner has no address. The
                     // frontend hides the button on null rather than offering one

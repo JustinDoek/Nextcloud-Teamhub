@@ -162,7 +162,10 @@ class ProviderRegistry {
                 );
                 $row['count'] = count($page->items);
                 $row['total'] = $page->total;
-                $status[]     = $row;
+                // v4.9.7 — a provider that answered but not cleanly says so
+                // per code; the state stays `ok` because the rows are real.
+                $row['warnings'] = array_values(array_unique(array_map('strval', $page->warnings)));
+                $status[]        = $row;
 
                 $this->config->recordProviderSync($id, true, null);
             } catch (\Throwable $e) {
@@ -264,6 +267,7 @@ class ProviderRegistry {
             'durationMs' => $durationMs,
             'count'      => 0,
             'total'      => 0,
+            'warnings'   => [],
         ];
     }
 }

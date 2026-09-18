@@ -72,6 +72,21 @@
                                 {{ teamTypeLabel(team.type) }}
                             </span>
                         </div>
+                        <!-- v4.8.0 — Nextcloud tags. Members only: the
+                             backend sends an empty list for a team the
+                             viewer is not in, the same boundary image_url
+                             draws. Text, never colour alone (WCAG 1.4.1);
+                             the tag colour is a dot beside the name. -->
+                        <ul v-if="team.tags && team.tags.length" class="team-card__tags">
+                            <li v-for="tag in team.tags" :key="tag.id" class="team-card__tag">
+                                <span
+                                    v-if="tag.color"
+                                    class="team-card__tag-dot"
+                                    :style="{ backgroundColor: '#' + tag.color }"
+                                    aria-hidden="true" />
+                                {{ tag.name }}
+                            </li>
+                        </ul>
                         <p v-if="team.description" class="team-card__description">
                             {{ team.description }}
                         </p>
@@ -137,9 +152,9 @@
                         </span>
                     </template>
 
-                    <!-- Non-member open circle: Join immediately -->
+                    <!-- Non-member, team is open: join and land in it -->
                     <NcButton
-                        v-else-if="!team.requiresApproval"
+                        v-else-if="team.joinPolicy === 'open'"
                         variant="primary"
                         :disabled="actionInProgress[team.id]"
                         @click="joinTeam(team)">
@@ -153,9 +168,9 @@
                         }}
                     </NcButton>
 
-                    <!-- Non-member closed circle: Request access -->
+                    <!-- Non-member, team is open but a moderator approves -->
                     <NcButton
-                        v-else
+                        v-else-if="team.joinPolicy === 'request'"
                         variant="secondary"
                         :disabled="actionInProgress[team.id]"
                         @click="requestAccess(team)">
@@ -165,6 +180,19 @@
                         </template>
                         {{ t('teamhub', 'Request Access') }}
                     </NcButton>
+
+                    <!-- v4.6.17 — invite-only team, visible but not joinable.
+                         Before this version it offered Request Access, which
+                         Circles refuses; a label states the fact instead. Per
+                         SKILLS.md § Permissions an action a role cannot take is
+                         hidden, not shown disabled — so there is no button here
+                         at all, only the reason there isn't one. -->
+                    <span v-else class="team-card__invite-only">
+                        {{
+                            // TRANSLATORS: status label; this team admits new members by invitation only, so there is nothing to click
+                            t('teamhub', 'Invite only')
+                        }}
+                    </span>
                 </div>
             </div>
         </div>
@@ -174,7 +202,7 @@
 <script>
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
-import { showSuccess, showError } from '@nextcloud/dialogs'
+import { showSuccess, showError, showWarning } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { NcButton, NcLoadingIcon, NcTextField } from '@nextcloud/vue'
 import AccountGroup    from 'vue-material-design-icons/AccountGroup.vue'
@@ -243,12 +271,14 @@ export default {
             if (type === 'collaboration') return t('teamhub', 'Collaboration')
             if (type === 'project')       return t('teamhub', 'Project')
             if (type === 'department')    return t('teamhub', 'Department')
+            if (type === 'openproject')   return t('teamhub', 'OpenProject project')
             return null
         },
         teamTypeTooltip(type) {
             if (type === 'collaboration') return t('teamhub', 'Created from the Collaboration template.')
             if (type === 'project')       return t('teamhub', 'Created from the Project template.')
             if (type === 'department')    return t('teamhub', 'Created from the Department template.')
+            if (type === 'openproject')   return t('teamhub', 'Created from the OpenProject project template.')
             return ''
         },
 
@@ -273,6 +303,7 @@ export default {
                 team.isDirectMember = true
                 this.$emit('team-joined', team.id)
             } catch (error) {
+                if (this.reportIfInviteOnly(error, team)) return
                 showError(t('teamhub', 'Failed to join team'))
             } finally {
                 this.actionInProgress[team.id] = false
@@ -286,10 +317,30 @@ export default {
                 showSuccess(t('teamhub', 'Access requested for {team}', { team: team.name }))
                 // Don't flip isMember — user is in Requesting state, not yet approved
             } catch (error) {
+                if (this.reportIfInviteOnly(error, team)) return
                 showError(t('teamhub', 'Failed to request access'))
             } finally {
                 this.actionInProgress[team.id] = false
             }
+        },
+
+        /**
+         * v4.6.17 — the team's join policy changed after this list was loaded.
+         * Says so, and corrects the card in place so the button that cannot
+         * work is replaced by the reason it cannot, without a full reload.
+         *
+         * @param {object} error axios error from the join endpoint
+         * @param {object} team the card's team, mutated in place on a match
+         * @return {boolean} true when handled — caller should not also report
+         */
+        reportIfInviteOnly(error, team) {
+            if (error.response?.data?.error !== 'invite_only') {
+                return false
+            }
+            showError(t('teamhub', '{team} is invite only. Ask a member of the team to invite you.', { team: team.name }))
+            team.joinPolicy = 'closed'
+            team.requiresApproval = false
+            return true
         },
 
         openTeam(team) {
@@ -299,12 +350,27 @@ export default {
         async leaveTeam(team) {
             this.actionInProgress[team.id] = true
             try {
-                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/leave`), {})
+                const { data } = await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/leave`), {})
+
+                // v4.4.8 — a group or sub-team still grants access. The card
+                // flips to the existing indirect-member state (Open + disabled
+                // Leave + "via group" badge) rather than back to Join.
+                if (data?.stillMember) {
+                    showWarning(t('teamhub', 'You are no longer a direct member, but you still have access to this team through a group or another team.'))
+                    team.isDirectMember = false
+                    return
+                }
+
                 showSuccess(t('teamhub', 'You have left {team}', { team: team.name }))
                 team.isMember = false
+                team.isDirectMember = false
                 this.$emit('team-left', team.id)
             } catch (error) {
                 const msg = error.response?.data?.error || ''
+                if (msg === 'indirect_member') {
+                    showError(t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.'))
+                    return
+                }
                 showError(msg || t('teamhub', 'Failed to leave team'))
             } finally {
                 this.actionInProgress[team.id] = false
@@ -459,6 +525,42 @@ export default {
     white-space: nowrap;
 }
 
+/* v4.8.0 — tag chips. Deliberately quieter than the template badge above:
+   a team carries at most one template but any number of tags, so a row of
+   filled pills would out-shout the team name it sits under. */
+.team-card__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 6px;
+    padding: 0;
+    list-style: none;
+}
+
+.team-card__tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--th-font-micro);
+    padding: 1px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-pill);
+    color: var(--color-text-maxcontrast);
+    white-space: nowrap;
+}
+
+.team-card__tag-dot {
+    width: 8px;
+    height: 8px;
+    min-width: 8px;
+    min-height: 8px;
+    max-width: 8px;
+    max-height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+}
+
 .team-card__description {
     margin: 0;
     color: var(--color-text-maxcontrast);
@@ -485,6 +587,15 @@ export default {
     gap: 6px;
     cursor: default;
 }
+/* Invite-only teams have no action, so this sits where the buttons would and
+   reads as text, not as something disabled. */
+.team-card__invite-only {
+    align-self: center;
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+    font-style: italic;
+}
+
 /* v3.100.14: full-saturation warning badge per SKILLS.md
    (was a 15% color-mix() soft tint). */
 .team-card__via-badge {

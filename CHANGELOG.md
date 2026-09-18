@@ -3,6 +3,404 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.10.0] — 2026-09-15
+
+**The close of the 4.9.x line.** Justin, 2026-09-15: "we are done with version 4.9.x and want to move to 4.10.0." The release repo is at 4.9.1, so this release carries everything from 4.9.2 to 4.9.21 — the entries below — for the first time: the OpenProject integration (Phases 1–3 and the licensed module switch), My Work's source groups and admin page, the `dbtableprefix` fix (#100), the iCal escaping fix, the Talk-join change and the new mark. The full session-end sequence ran over 4.9.15–4.9.21 (4.9.16, 4.9.17 and 4.9.18 had not had one): no security finding; three accessibility findings and one translation-pipeline finding, all fixed below. **A rebuild and `npm run deploy:aio` are required** (the bump renews `integrity.json`; the modal and the locale files are in the bundle). No migration, no route change, no new UI string.
+
+### Added
+
+- **The unlicensed License tab makes the case for a licence.** Justin, 2026-09-18, for the founding of Doek Works on 2026-09-22: under the status pill, while no licence is active, trial or grace, a block titled *What a TeamHub license adds* lists what the public licensing model includes — every licensed module (Advanced projects, What's new, My Work with file reviews, the OpenProject module, bulk creation and export), the Compliance tab, quiet mode (no branding, prompts or telemetry), development support, and how seats are counted (one per unique member, never a licence server) — with a **Request a quote** button and a *See the licensing model* link to `https://tldr.host/teamhub/licensing.html`. The button opens the admin's mail client addressed to `teamhub@tldr.host`, subject **Supporter quote**, body pre-filled with the instance UUID and the seats in use — the two facts a quote is priced on — and three lines to complete: company name, country, contact e-mail (the same three the announcement asks for). No prices in the app: the page carries them and says they may change. Hidden the moment a licence is honoured. 14 strings in all seven languages.
+- **Announcement for 4.10.0** — `announcements/company_launch.md` (NC administrators, unlicensed instances, exactly 4.10.0) with its `registry.json` entry. **A template**: Justin writes the text into the bracketed placeholders before publishing; the licensing-model link and the quote `mailto:` (subject *Supporter quote*) are already in place, and `mailto:` is within the announcement renderer's URI allow-list.
+
+### Changed
+
+- **App Store description** (`appinfo/info.xml`): the *Development* section's second line reads **Modules — TeamHub's own modules: Decisions, Presence, Timeline, Budget and Time**; it said *Internal integrations*, a term retired on 2026-09-07 (CLAUDE.md § Modules vs integrations).
+- `OpenProjectSetupStep.vue`: the identifier check's failure line is `console.warn`, not `console.log` — a 4.9.6 leftover in the debug idiom, reporting a genuine soft failure.
+
+### Removed
+
+- **The License tab's section description** — *Advanced Projects (Compass, Project health, closing artifact, timeline) require a business license. Enter the license key you received by email.* — dated from when Advanced projects were the only licensed feature; the new block above says what a licence covers. Key retired from all seven l10n files.
+
+### Fixed
+
+- **The work-package modal's *Type* and *Assignee* labels now name their selects.** Both `NcSelect`s took a bare `id`, which `@nextcloud/vue` 9.8.0 puts on the wrapper `<div>`, so each `<label for>` pointed at nothing and the component warned at mount. Now `input-id` + `label-outside` (DESIGN §2.131). The required asterisk on *Type* is paired with a visually-hidden *Required* for readers (an existing key in all seven locales).
+- **The My Work admin tab's licence banner icon is `aria-hidden`** — decorative beside its sentence (4.9.19 addition).
+- **The two 4.9.19 strings render translated again.** That session added *My Work requires an active TeamHub license. Add or renew a license in the License tab to unlock it.* and *Category for {status} from {source}* to the seven `.json` files and retired the intro paragraph there — and did not touch the seven `.js` files, which are what the browser loads. All seven `.js` files now carry both keys with the `.json`'s translations and no longer carry the retired one; every locale's `.json` and `.js` hold identical key sets (verified by script).
+- **Three `OpenProjectWorkProvider.php` strings gained keys in all seven locales** — *The OpenProject integration app is not installed or not enabled.*, *No OpenProject host is configured in the integration app.*, *Work packages are changed in OpenProject.* (4.9.5; `check:l10n` cannot see PHP strings). 36 more in the two expiry providers and one in Decisions are still unkeyed — measured and logged in HANDOFF.
+
+### Security
+
+Justin ran Semgrep (Code + Supply Chain) over the release repo at v4.9.1 on 2026-09-18 — 34 code findings, 4 dependency findings — and asked what has to change before 4.10.0 publishes. Triage against the working copy, same version number:
+
+- **`appinfo/index.html` is gone from the package.** An 82 KB marketing landing page (SEO meta, JSON-LD, Google Fonts) had been sitting in `appinfo/` since 2026-06-17 — referenced by nothing, hashed into `integrity.json`, shipped to every install. Semgrep flagged its `<link>` for a missing `integrity` attribute; the finding is moot because the page does not belong in the app. The marketing site has its own, newer `index.html`. (`integrity.json` is regenerated by the build.)
+- **Every GitHub Action in `publish.yml` is pinned to a full commit SHA** (`actions/checkout`, `actions/setup-node`, `softprops/action-gh-release`, `R0Wi/nextcloud-appstore-push-action`), the tag kept as a comment — a mutable tag can be repointed by the action's owner. Release repo, `.github/workflows/publish.yml`.
+- **`.npmrc` with `min-release-age=7`** — npm resolves only to versions published at least seven days ago (npm 12 documents the behaviour; `--min-release-age=0` or `min-release-age-exclude` for a deliberate same-day pick). New in the working copy; mirrored to the release repo, replacing the July `.npmrc` there.
+- **The release repo now carries the real `src/`, `tests/`, `vite.config.mjs`, `developers.md`, `APIendpoints.md` and `INSTALL.md`** (`REPO_ONLY` in `scripts/lib/app-files.js`; mirrored on every `publish:release`). Its `src/` had been a hand copy frozen on 2026-07-20 that nothing refreshed — the tarball shipped compiled `js/` whose source was not on GitHub, and Semgrep audited the stale copy (one finding was in `src/timeline-iframe.js`, a file that no longer exists). Mirroring also fixes the AGPL gap.
+- **`.semgrepignore`** (working copy, mirrored) scopes the scan to code as written: `js/` and `css/` are compiled output — 13 of the 34 findings were Express-specific rules matching minified `@nextcloud/dialogs` code — and `scripts/` is maintainer-side tooling that never ships.
+- **Five `unlink()` and one `path.join()` are annotated `nosemgrep` with the reason on the line above** (`AuditController.php` ×2, `ArchiveBundleWriter.php` ×2, `ArchiveService.php`, release-repo `.github/verify-package.js`): every path is `tempnam()`'s, `sys_get_temp_dir()` + a `slugify()`'d name (letters, digits, `-` only), or a `readdirSync` listing — none carries request data. Comments only; no behaviour change.
+- **Reviewed, no change:** the four `v-html` sites (`CommentsSection`, `MessageCard`, `TeamDecisionsView` ×2) each end in `DOMPurify.sanitize()` with an explicit allow-list; `scripts/generate-integrity.js`'s joins take `__dirname`-derived and `readdirSync` paths.
+- **Supply chain:** `qs` (two CVEs) and `baseline-browser-mapping` were already at fixed versions in the working copy's `package-lock.json` (6.16.0, 2.11.25); `npm audit` lists neither. `elliptic` 6.6.1 (Low, no upstream fix) is a devDependency of `@nextcloud/vite-config`'s node polyfills and is not in the shipped bundle.
+
+### Dev tooling
+
+- **`tests/bootstrap.php` and `scripts/check-classes.js` run on Nextcloud 35.** The AIO test instance updated itself from 34 to 35.0.0 between 2026-09-15 and 2026-09-18, and NC 35 moved `OC_App::registerAutoloading()` to the `AppManager`; both tools now try the static and fall back to `IAppManager::registerAutoloading()`. 396 tests and 320 classes pass on 35 — a data point, not a compatibility claim; `info.xml` still declares `max-version="34"` (HANDOFF).
+
+### Documentation
+
+- `C:\Temp\docs`: `nextcloud-admin/licensing.md` § *Requesting a trial or a quote* describes the new block and the quote button; `nextcloud-admin/configuration.md` gains an **OpenProject module** section (licensed, off by default, the switch, the three prerequisites, what "off" hides and keeps) and a licence sentence under My Work, and its Presence line now says *enabled* by default, which is what every read of `presence_module_enabled` in `lib/` does; `nextcloud-admin/my-work.md` lists all nine sources and the seven-tab bar; `nextcloud-admin/licensing.md` names the module in both tier lists; `user/my-work.md`'s source-bar row quotes the 4.9.17 bar.
+
+### Tests
+
+- 396 PHP + 54 JS, unchanged. `check:migrations`, `check:classes`, `check:di`, `check:dates`, `check:markdown-list` green; `check:l10n` at the pre-existing 59.
+
+## [4.9.21] — 2026-09-15
+
+**The new TeamHub beeldmerk, everywhere the app shows itself.** Justin's 2026-09 brand sheet: a Hub Blue tile split by a Signal Orange diagonal, the team on the light field, the hub on the blue; *Team* in Hub Blue, *Hub* in Signal Orange. The sheet is a raster and the traced SVGs were unusable, so the mark is drawn by hand as geometry and every placement is a deliberate reduction of it — DESIGN §2.130. **A rebuild is required** (the sidebar block is in the bundle; the bump also renews `integrity.json`). No migration, no route change, no PHP change, no strings.
+
+### Changed
+
+- **`img/app.svg` and `img/app-dark.svg`** — the header/App Store/settings icon is the new mark as a single-colour glyph, reduced for 20 px: two silhouettes, the diagonal, a hub with three satellites, no tile. Same geometry in both files.
+- **`img/logo.svg`** (new, ships with `img/`) — the full-colour mark; the README header now uses it instead of the white icon, which was invisible on GitHub's light background.
+- **Sidebar brand block** (unlicensed instances) — the mark inlined at 28 px, same in both themes; the wordmark is now two-tone with *Hub* in Signal Orange. The old "Living Network" mark and its `--th-brand-linker` variable are gone.
+- **Docs site** — `public/logo.svg` (the mark) and `public/favicon.svg` (a 16 px reduction: one figure, one hub) replaced.
+
+### Not changed
+
+- `Notifier.php` still passes the white `app.svg` as the notification icon; likely invisible on a light notification list. Logged in HANDOFF, to be looked at on the instance.
+
+## [4.9.20] — 2026-09-15
+
+**A file opened from TeamHub no longer joins its Talk conversation for you.** Justin, 2026-09-15: opening a file from the Files tab "goes to chat and opens the chat. This also crowds Nextcloud Talk as the chat is also opened there while you might not have any intention of using the chat." **A rebuild is required.** No migration, no route change, no PHP change.
+
+### Changed
+
+- **The sidebar still opens on the *Chat* tab; *Join conversation* is now the user's click.** Since 4.5.5 TeamHub pressed Talk's button itself. Read in Talk 24.0.5's source: opening the tab only asks Talk for the room (no attendee is added), while the button joins it — and joining is what makes the file's conversation appear in the user's Talk conversation list. So every file merely opened from a team piled up in Talk. Now the sequence ends with the chat tab active and the button in front of the user; nothing lands in Talk until they choose to join. Design: DESIGN §2.69 (v4.9.20).
+- `src/lib/filesCollab.js` no longer reads Talk's DOM at all — the two NC-version-specific button selectors, the "is the chat mounted" probe and the disabled-button diagnostic are gone; only the Files sidebar API is used. The stale-`window.OCA.Talk` release on sidebar close stays (a manual join followed by the next file still hits Talk's disabled-button bug). The `gave up` debug line drops its `chatTabActive` field, which could no longer be true.
+- README: the *Collaboration-first file opening* line no longer promises "already joined".
+
+### Tests
+
+- 54 JS, unchanged (the module has no unit tests; it drives another app's sidebar). No strings changed.
+
+## [4.9.19] — 2026-09-15
+
+**Admin → TeamHub → My Work follows the licence and fits on one screen.** Justin, 2026-09-15: the page showed on an unlicensed instance although My Work itself is licence-gated, and "it looks like one long list and I lose overview". **A rebuild is required.** No migration, no route change, no PHP change.
+
+### Changed
+
+- **The My Work tab is licence-gated like the Compliance tab.** Without an active, trial or grace licence the tab shows one banner — *My Work requires an active TeamHub license. Add or renew a license in the License tab to unlock it.* — instead of the settings; the settings component is not mounted, so its two requests are not made. The endpoints behind it (`/api/v1/admin/mywork/*`) stay admin-only and ungated, as `MyWorkAdminController` documents.
+- **Sources are a list with a shared detail pane.** Each source is one row: its on/off switch on the left, its name as the row's button, an *Unavailable* pill only when that is the case. Selecting a row loads it in the pane on the right — availability, the reason, last sync and last error, the *Actions members may perform* checkboxes, and the integration details (open, no longer behind a disclosure). Until now every source was a full card stacked under the previous one. The pane keeps the selected source across a Reload; on a narrow window it drops under the list.
+- **The introduction paragraph is gone** (its key retired from all seven l10n files); the *Sources* hint stays.
+- **Time windows and Performance sit side by side** where the width allows (one column below ~660 px), with tighter rows.
+- **Category mapping is a table** — Source · Status · Category — with a small *Reset* beside an overridden category; the select carries an aria-label naming the status and source.
+- **Reload and the Saved / error line moved to the top of the page**, next to what they report on; the status line reserves its height so nothing shifts.
+- Scoped spacing on this page now uses the `--th-space-*` scale; the reason text uses `--color-warning-text`.
+
+### Tests
+
+- 54 JS, unchanged. `check:l10n` at the pre-existing 59. Two strings added in all seven languages (the banner, the select's aria-label), one retired.
+
+## [4.9.18] — 2026-09-15
+
+**Three findings from Justin's walk of 4.9.16/17.** **A rebuild is required.** No migration, no route change, no PHP change.
+
+### Changed
+
+- **The Upcoming tasks ⋯ action is *Create work package*** (was *Create OpenProject work package*) — on desktop, tablet and the mobile FAB, and as the modal's name and fallback title. The modal already names the project. The old key is retired from all seven l10n files; *Create work package* already existed as the modal button's string.
+- **The modal's primary button has no `+` glyph.** The spinner still takes the icon slot while saving, so the button keeps its width mid-request.
+
+### Fixed
+
+- **Two scrollbars side by side on the Edit template dialog.** `@nextcloud/vue` 9.8's `NcModal` puts `overflow: auto` on both its container (a row flexbox with a `max-height` and no `height`) and its content; whether the content is stretched to the *clamped* container height is the single-line flex clamp, which not every engine applies — Chromium does, so it showed one bar there, and the container scrolled over the content as well where it does not. `widget-tokens.css` (loaded by all three entries) now makes every TeamHub `NcModal` the shape `NcDialog` uses: a column-flex container that never scrolls, and the content shrinking into it (`flex: 1 1 auto; min-height: 0`) as the single scroller; the close button stays pinned. Verified in a reproduction: container never scrolls, the whole content is reachable, the close button holds its place. Unscoped, on purpose — 30 `NcModal`s across 22 components — and without `!important` (specificity (0,4,0) over the scoped (0,3,0)). No vite entry was added, so the chunk layout is unchanged; diff `css/*.css` after the build anyway.
+
+## [4.9.17] — 2026-09-15
+
+**My Work's source tabs cluster.** Justin, 2026-09-15: nine tabs was too many. Everything about files goes under **Files** (File approval + File reviews), everything a team's own admin owes their team under **Teams** (Team admin + Team expiration), and anything aimed at a Nextcloud administrator acting in the administration area — granting a longer expiration today, enlarging a team folder later — under **Administration** (Team lifecycle). Deck, Decisions, Meetings and OpenProject stay single tabs for now. The bar reads *All · Deck · Files · Decisions · Meetings · Teams · Administration · OpenProject*. **A rebuild is required.** No migration, no route change.
+
+### Added
+
+- **`lib/MyWork/SourceGroup.php`** — TeamHub's vocabulary, like `Category`: three groups naming their member provider ids, `of()` and `expand()`. Mirrored in `src/constants/myWork.js` (`SOURCE_GROUP*`, `sourceGroupOf`, `buildSourceTabs`, `sourceOptions`). A group key is a valid `providerIds` value: `MyWorkService::buildQuery()` expands it before the cache key is built, so the tab bar, the Source dropdown, a stored preference and an API caller all say the same thing.
+- **`GET /api/v1/mywork/providers` carries `group`** per provider (`files` / `teams` / `administration` / null).
+
+### Changed
+
+- **The Administration tab is hidden from anybody who is not a Nextcloud administrator.** `GET /mywork/providers` is now the viewer's list (`MyWorkService::describeProvidersForViewer()`): the instance-scoped providers are left out for a non-admin. Until now every member saw a *Team lifecycle* tab at zero — a role-restricted surface shown, not hidden, for two months. The admin page keeps the unfiltered list.
+- **An unavailable source gets no tab.** The bar used to list every enabled provider regardless of availability (Deck not installed → a Deck tab at zero). An empty queue is a tab at zero; no queue is no tab. A group survives on its available members and sums only their counts.
+- **The Filters → Source dropdown** lists the same groups as the tabs, one option per group or single source; a group is *(unavailable)* only when every member is.
+- **A preference saved before 4.9.17** holding a member id (`approval`) is normalised to its group on load, so the bar and the dropdown agree with the rows. The server would honour either.
+- The two group glyphs: Teams is `AccountGroupOutline`, Administration is `ShieldCrownOutline` — distinct from Team admin's `ShieldAccountOutline`, which now lives inside Teams. Files keeps `Folder`.
+
+### Tests
+
+- 396 PHP (7 new: `SourceGroupTest`, `MyWorkServiceProvidersTest`) + 54 JS (7 new: the tab builder, the dropdown options, the legacy preference). Every check green; `check:l10n` at the pre-existing 59. One new string (*Administration*) in all seven languages; *Files* and *Teams* already existed.
+
+## [4.9.16] — 2026-09-15
+
+**OpenProject is a licensed module with an administrator switch.** Justin, 2026-09-15: an administrator enables it when they have an OpenProject environment and leaves it off when they do not. Licensed like File reviews (`hasLicenseKey()` first, then `none`/`grace`), **off by default** unlike Presence and Decisions — the module is useless without an OpenProject to talk to. **A rebuild and `npm run deploy:aio` are required.** No migration, no route change. **On this instance the module is off until Lieke Adm switches it on** (Admin → TeamHub → Integrations → Modules → *OpenProject module*); until then ProjectTwo's widgets, the wizard card, the My Work source and the feed tab are absent — that is the feature working, not a regression.
+
+### Added
+
+- **`OpenProjectModuleService`** — the one answer to "does the OpenProject module exist here": licence, then the `openproject_module_enabled` switch, in the order an administrator fixes them. Two new `OpenProjectException` codes, `module_unlicensed` and `module_disabled`, with their user sentence (one for both — a member cannot tell a licence from a switch) and administrator sentences naming the License tab and the Modules section.
+- **Admin → TeamHub → Integrations → Modules → *OpenProject module***: the switch while a licence is active, *Needs a license* otherwise; the setup checklist carries a row for it. `GET/POST /api/v1/admin/settings` gained `openProjectModuleEnabled`.
+- **The capability envelope** (`GET /api/v1/openproject/capabilities`) leads with `moduleLicensed`, `moduleEnabled`, `moduleAvailable`; `integrationAppEnabled` now reports the official app's own state, not the module's. The layout bundle's `openProjectConfig` carries `moduleAvailable`.
+
+### Changed
+
+- **`OpenProjectClient::isIntegrationEnabled()` and `compatibilityProblem()` ask the module first**, so every surface that already asked the client — the My Work provider, the news and meetings services, the layout facts, `send()` itself — follows the gate without naming it, and a switched-off module can never reach OpenProject. `isIntegrationAppEnabled()` is the raw app check for diagnostics.
+- **Every member-facing OpenProject and provisioning route answers 403 with the code** (`licenseGate: true` when unlicensed) before membership or OpenProject is consulted — `OpenProjectResponseTrait::openProjectModuleGate()`. `GET /openproject/capabilities` stays open (it is how the wizard learns the module is off); `POST /teams` with the `openproject` template refuses the same way. The administrator routes (blueprint editor, operations list, Maintenance unlink) are not gated, so an instance can be prepared or tidied with the module off.
+- **With the module off, an OpenProject team's layout facts report `eligible: false, linked: false`** — the pair every widget, ⋯ action, calendar row and the Manage team panel gate on — so one answer hides every surface. Nothing is deleted: links, ledgers, provisioning records and the template row stay, and switching back on brings it all back. An integration-level problem (app disabled, no host) is deliberately still shown by the widgets, as 4.9.13 designed.
+- **The wizard hides the *OpenProject project* card** while the module is off (the Presence/Decisions rule: a module that is off is hidden, not explained); locked-with-reason remains for the module being on and this creator unable to use it yet.
+- **My Work → Admin → OpenProject** reports the module's state as its own reason and diagnostic row, before the app's.
+
+### Tests
+
+- 389 PHP (16 new: `OpenProjectModuleServiceTest`, the gate in the client, the capability envelope, the controller's 403s, the layout facts, the provider's reason) + 47 JS. `check:classes`, `check:di` green; `check:l10n` at the pre-existing 59. Five strings in all seven languages.
+
+## [4.9.15] — 2026-09-15
+
+**Create an OpenProject work package from the team home.** Justin's question for the first release (2026-09-14): "Can we create a new work package from the upcoming task action menu?" — yes. (The other question, completing a work package from My Work, is *no* until the official integration app accepts `PATCH`; see 0-op3 in HANDOFF.) **A rebuild and `npm run deploy:aio` are required**; two new routes need the php-fpm reload the deploy does. No migration.
+
+### Added
+
+- **Upcoming tasks → ⋯ → *Create OpenProject work package*** on an OpenProject-linked team home (desktop, tablet and the mobile FAB), shown only to members OpenProject lets add work packages to the project — hidden otherwise, never disabled. The modal (`AddOpenProjectWorkPackageModal.vue`) asks for subject, type, assignee, due date and description; the type and assignee lists are OpenProject's own form answer for this viewer and this project (`GET /api/v1/teams/{teamId}/openproject/work-packages/form`). The work package is created as the viewer with one POST (`POST /api/v1/teams/{teamId}/openproject/work-packages` → `POST work_packages`); OpenProject validates and its own sentence is what a refused form shows. Afterwards the widget's list and the Project info counts refresh, for every member (the team's cache generation is bumped).
+- `GET …/openproject/work` carries `canCreateWorkPackage` — the permission, read with the widget's page and cached with it, so the Upcoming tasks widget needs nothing from the Project info widget (which a team admin may have hidden).
+
+### Changed
+
+- **A refused OpenProject write is a 400 with OpenProject's sentence.** `validation_failed` mapped to 502 with a project-creation-specific sentence; it is now 400 and `error` is OpenProject's own message when it gave one (`OpenProjectResponseTrait`). The generic fallback reads *OpenProject did not accept this.* The provisioning wizard's 422s benefit too.
+- 21 new PHP tests (373 green), one JS test (47 green); `check:classes`, `check:di`, `check:l10n` green; 11 new strings in all seven languages.
+
+## [4.9.14] — 2026-09-14
+
+**The message board works on an instance whose database table prefix is not `oc_`** — issue [#100](https://github.com/JustinDoek/Nextcloud-Teamhub/issues/100). **A rebuild and `npm run deploy:aio` are required** (PHP only; the version bump invalidates `appinfo/integrity.json`). No migration, no route change.
+
+### Fixed
+
+- **Team messages failed to load with *Base table or view not found: … oc_teamhub_comments*** on any instance whose `dbtableprefix` is not the default — the reporter's has none, so the table is `teamhub_comments`. `MessageMapper::findByTeamId()` and `findPinnedByTeamId()` joined their comment counts through a derived table written out as literal SQL with the `oc_` prefix in it. The derived table is now built with the QueryBuilder (`commentCountSubquery()`), so the table name carries Nextcloud's `*PREFIX*` placeholder and the connection expands it to the instance's own prefix at execute time, the same way as every other query in the app. Verified on the test instance (Postgres): the generated SQL names `*PREFIX*teamhub_comments`, and both methods return their rows with the counts. Writing a comment was never affected — the reporter saw that too.
+
+## [4.9.13] — 2026-09-14
+
+**A lost OpenProject connection is one picture, in one widget.** Justin: "if the connection is lost it says so in every widget. We should just have a connection broken image on the project info widget with the text contact an admin. Not in any other widget." **A rebuild and `npm run deploy:aio` are required**; no PHP, no migration, no route change.
+
+### Changed
+
+- **Project info** shows a broken-connection state — a disconnected-network glyph, *OpenProject connection lost*, *Contact your administrator.* (`NcEmptyContent`; the exact reason is the hover title; the header's Refresh is the retry) — for every failure an administrator owns: the integration app not installed / disabled / incompatible / without a host, OpenProject unreachable, a temporary problem, rate-limiting, a link made against another host, an unrecognised answer (`isBrokenConnectionCode()` in `src/lib/openProject.js`). A member's own missing or refused connection keeps the sentence and the *Connect OpenProject account* button; a project problem (no access, gone) keeps its sentence.
+- **Upcoming tasks** and **Upcoming events** no longer print an OpenProject error line at all — a failed read costs the OpenProject rows, never the Deck, Tasks or calendar rows, and says nothing. Two new strings in all seven languages.
+
+## [4.9.12] — 2026-09-14
+
+**The My Work Views row without the *OpenProject* view.** Justin: "By views in 'My work' we also have OpenProject and 'By project'; these should all be under 'By project'. OpenProject can be dropped from views." **A rebuild and `npm run deploy:aio` are required**; no PHP, no migration.
+
+### Changed
+
+- The Views row is *Needs attention · Due this week · By team · By project*. The source tabs already filter by source, and OpenProject rows already group under their project's name in *By project*. `requiresProvider` stays as a generic view capability no view uses today.
+
+### Fixed (on the instance, not in code)
+
+- **Work packages 38 and 39 "missing" from My Work** — both `Lieke Adm` and `Inge NC` were connected to the same OpenProject user (`admin`) after the integration app lost its settings and was reconnected; My Work reads *assignee = me* as the connected user, and neither work package was that user's. Proven from the CLI in the container before any code was touched; fixed by reconnecting each Nextcloud account while the OpenProject browser session is that person's own user.
+
+## [4.9.11] — 2026-09-14
+
+**Calendar events no longer show a stray backslash before a comma or semicolon.** The item 4.9.10 noticed and left a chip for. **A rebuild and `npm run deploy:aio` are required** (the version bump invalidates `appinfo/integrity.json`; no frontend source changed). No migration, no route change.
+
+### Fixed
+
+- **A title such as *Plan, review* was stored as `Plan\\, review`** in events TeamHub writes to the team calendar — SUMMARY, LOCATION, DESCRIPTION, CATEGORIES and the reminder text alike — so the calendar showed *Plan\, review*. `ActivityService::escapeIcalText()` listed the backslash last in its `str_replace()` pairs, which PHP applies in order on the changing string; the backslash pair then doubled the backslashes the comma, semicolon and line-break pairs had just inserted. Events already on a calendar are not rewritten. The meeting-sync copy (4.9.10) was never affected.
+
+### Changed
+
+- **One iCalendar escaper.** `OCA\TeamHub\Util\IcalText::escape()` — backslash first, then line breaks, comma, semicolon (RFC 5545 §3.3.11) — now serves `ActivityService`, `OpenProjectMeetingMirrorService` and `PresenceCalendarService`; the three private copies delegate to it (the latter two were already correct). Eight unit tests pin the order (`tests/Unit/Util/IcalTextTest.php`); 352 PHP tests green.
+
+## [4.9.10] — 2026-09-14
+
+**OpenProject meetings copied into the team calendar, one way.** Justin's second review of Phase 3 (2026-09-14): "The upcoming meeting shows. But it's not added to the team calendar. Can we add it there. A one way sync is fine." **A rebuild, one migration (`Version000409010`) and `npm run deploy:aio` are required.**
+
+### Added
+
+- **Meeting sync.** The linked project's open meetings of the next 30 days — what the Upcoming events widget already reads live as the viewer — are written into the team calendar as plain events: title, times, location, the meeting's link, *Scheduled in OpenProject* in the description, an *OpenProject* category, and a 15-minute reminder. A meeting that changes in OpenProject is rewritten; one cancelled or deleted there loses its copy; one reopened gets it back. OpenProject is the source of truth: the copy is never read back, and a copy a member deletes from the calendar stays deleted. No organiser, no attendees — the copy never starts an invitation. The copy is made the first time a connected member loads the team home after the meeting exists (TeamHub holds no OpenProject token, so there is no background job), at most ten per load, and ledgered in `teamhub_op_meeting_sync` so two members loading at once cannot make two events.
+- **The team's share decides.** Only a calendar shared with the team read-write is written to — the share TeamHub itself makes when it connects a calendar. A read-only team calendar is left alone and the widget keeps showing the meeting beside it. The response's `sync` block says what a read did (`ok` · `no_calendar` · `read_only` · `unavailable` · `error`, with counts).
+- **Once in the widget.** A copied meeting shows as its calendar row — *Calendar* and *OpenProject* pills together — and the live OpenProject row steps aside; after a read that wrote something the widget reloads the calendar's rows once.
+
+### Changed
+
+- `GET …/openproject/meetings` also returns `cancelledIds` (the cancelled meetings inside the window) and, on a fresh read, `sync`. Calendar event rows (`GET …/calendar/events`) carry `openProjectMeetingId` on a copy.
+
+## [4.9.9] — 2026-09-14
+
+**Source: OpenProject.** The mirrored news post names its source with a pill instead of two footer lines. Justin (2026-09-14): "I want to remove the Posted in and Read it in lines and replace it with a Source: OpenProject where OpenProject is in a pill and links to the news item." **A rebuild, one migration (`Version000409009`) and `npm run deploy:aio` are required.**
+
+### Changed
+
+- **The mirrored post** carries the news item's summary (or excerpt) and nothing else. Under it, the stream and the feed show *Source:* with an **OpenProject** pill that opens the news item in OpenProject in a new tab — drawn from the mirror ledger (`origin` on the message row), with the link built from the configured host and the item's id, never from stored text; a post mirrored from a previous OpenProject host keeps the label and loses the link.
+- **Posts made by 4.9.7** are brought into line by `Version000409009`, which removes the two footer paragraphs from every message the ledger names (located by the item's URL, not by the footer's wording — that was in the author's language).
+- **What's new, All tab:** a news item whose live card is on the page is shown once — the mirrored message steps aside there, and stands on the Team tab and wherever the card is not.
+
+### Removed
+
+- The strings *Posted in OpenProject by … in the project …*, *Posted in OpenProject in the project …* and *Read it in OpenProject: …*.
+
+## [4.9.8] — 2026-09-14
+
+**My Work: the work packages were there — under a filter.** Justin (2026-09-14): "The 'My Work' items were assigned in OpenProject and they are still missing." They were not: the provider returned both (verified from the CLI against the live instance), but the page had *Needs attention* still on from earlier and *OpenProject* on top of it, so the two work packages — due in 2 and 7 days, that is *Upcoming* — matched nothing, and the page said *Nothing matches these filters*. Two things follow.
+
+### Changed
+
+- **A filter view replaces the other filter views.** *Needs attention*, *Due this week* and *OpenProject* are destinations: clicking one clears what the others set (category, due window, source) before applying its own, so *OpenProject* always means all of your OpenProject work. *By team* and *By project* only change the grouping and combine with any of them, as before. Turning an active view off still clears only its own keys.
+- **The actionable band is whole days for OpenProject work.** A work package's deadline is a date; the band ("n days before its due date", Admin → My Work, default 2) was measured from the end of that day, so a work package due the day after tomorrow said *Due in 2 days* and sat under Upcoming. The provider now decides the band in days: due today, tomorrow or in n days ≤ the band → *Action required*, high priority (OpenProject's own priority when higher); beyond it → *Upcoming* with OpenProject's priority. Overdue is unchanged.
+
+### Fixed
+
+- `OpenProjectMeetingServiceTest` compared thirty calendar days with thirty days of seconds, which differ by one across a DST change near local midnight in the test zone — the fixture now computes the horizon the way the service does.
+
+## [4.9.7] — 2026-09-14
+
+**OpenProject integration, Phase 3 — cross-team intelligence.** The viewer's OpenProject work, their projects' news and meetings now appear where TeamHub's views already are: My Work carries every kind of attention a work package can ask for, What's new carries the projects' news (and mirrors each item once into the team's stream), Upcoming events shows the project's meetings, the Project info widget carries a personal attention strip, and an administrator can read the health of it all. Each row keeps its OpenProject identity — the source chip, OpenProject's own words for type, status and priority, and a hand-off into OpenProject. Everything is read live as the viewer; nothing is polled or pushed. **Justin's review of the first draft (2026-09-14) reshaped the feed half**: work-package edits are not in What's new — "that is for news and messages" — news is, mirrored into the stream; meetings were asked for in Upcoming events; a work package you created and left unassigned counts as yours. Design, strategy, permissions, caching, deep links, diagnostics and the manual test plan: `OPENPROJECT.md` §6. **A rebuild, one migration (`Version000409007`) and `npm run deploy:aio` are required**; two new routes need the php-fpm reload the deploy does.
+
+### Added
+
+- **My Work categories for OpenProject.** Beside the dated assigned work of 4.9.5: *Recently assigned to you* and *Updated since your last visit* / *Updated recently* (assigned work changed in the last three days — the one read that brings undated work in), *Created by you, not assigned* (a work package you made and left unassigned is yours to act on — Justin, 2026-09-14), *Completed in OpenProject* (closed in the Completed window), and the project's upcoming milestones as informational rows of their own kind with a flag glyph. Reasons say why: *Overdue by n days*, *Due today*, *Due tomorrow*, *Due in n days*, *Milestone in n days*. Priority comes from OpenProject's own priority list by position relative to the default — instance- and language-independent — never from a label; the label stays on the row.
+- **One row per work package.** Rows are keyed on connection, project and work package, never the title; the reads overlap and collapse to one row with every reason kept, and if two teams ever linked one project (the unique index forbids it) the row lands under the first team by name with the other listed.
+- **Filters, grouping, views.** *Project* and *Work type* selects (offered when the queue holds rows that carry them), a worded *Status* filter, *Group by → Project*, and a **Views** row — *Needs attention · Due this week · OpenProject · By team · By project* — as one-click shortcuts over the same filter state. *Updated {time}* says when the queue was computed and whether it came from the cache.
+- **Honest partial states.** A source that answered with a caveat is one notice: *reconnect your account* (with the link to personal settings), *some projects could not be read*, *answered slowly*. The rows that arrived are real; other sources are never affected. The OpenProject provider reads at most 12 projects under its own 2.5 s budget so a slow OpenProject never spends the other providers' turn.
+- **OpenProject news in What's new.** One card per news item written in the period — the title, the summary, the project (a link that leaves TeamHub, labelled so), the team, the author, the time; *Open* goes to the news item in OpenProject in a new tab. An **OpenProject** tab, a Feed control switch and a project picklist; the saved defaults carry them. A member without an OpenProject account sees one connect notice; a failing OpenProject is one status line and the messages and Talk rows stand.
+- **News mirrored into the team stream.** Each news item is copied once into the linked team's message stream as a *System* post — *OpenProject news: {title}*, the summary, *Posted in OpenProject by {name} in the project {project}* and the link — so members without an OpenProject account read it too. The author is the OpenProject author's Nextcloud account when they have connected one, otherwise the team's creator. Only news written after the link and inside 30 days, at most ten per load; made the first time a connected member reads the feed or the team home; ledgered in `teamhub_op_news_mirror` so two members loading at once cannot make two posts.
+- **OpenProject meetings in Upcoming events.** The linked project's meetings of the next 30 days, read live as the viewer, shown beside the team calendar's events with an *OpenProject* pill, opening the meeting in OpenProject. Shown, not copied into the calendar (4.9.10 copies them).
+- **Your attention on the team home.** The Project info widget lists the viewer's overdue and due-this-week work packages, the next milestone and the week's activity count, each linking to the exact place in OpenProject — from the same provider read My Work uses.
+- **Administrator diagnostics.** Admin → TeamHub → My Work → OpenProject → *Integration details*: environment, strategy, limits, and the health of the live reads for both channels — last attempt / success / error with its code, runs, projects covered and skipped, problems by class (auth, permission, not found, timeout, unsupported, rate-limited, unreachable, budget). Nothing personal is recorded.
+- **Endpoints**: `GET /api/v1/teams/{teamId}/openproject/meetings`, `GET /api/v1/teams/{teamId}/openproject/attention`; `GET /api/v1/mywork` gained `projectIds`, `workTypes`, `groupBy=project`, `facets`, `providerStatus[].warnings`; `GET /api/v1/messages/feed` gained `includeOpenProject`, `projectIds`, `sources`, `facets.projects`, `sourceCounts.openproject`; a live `GET …/openproject/overview` mirrors news. `APIendpoints.md`.
+- **Migration `Version000409007`**: `teamhub_op_news_mirror` (team, connection, news id, message id, who, when; unique `th_opnm_uq`). Self-contained.
+- **Provider contract**: `WorkItemPage::$warnings`, `WorkQuery::$metadataFilters`, `facets` on the payload — any source may use them (`developers.md`).
+
+### Changed
+
+- The feed's merged order has a stable tie-break (`source:id`) so two loads with equal timestamps agree.
+- `OpenProjectNormalizer::workPackage()` carries the ids behind the type, status, priority and assignee links and the author's name (additive); `news()` and `meeting()` are new. 45 new strings in all seven languages.
+
+### Known limitations
+
+- **No write-back from My Work.** *Complete* is not offered: OpenProject changes a status with `PATCH`, and `integration_openproject` 3.2.0's `request()` knows GET, POST, PUT and DELETE only (verified). The supported path would be a small upstream change; TeamHub does not go around it. The row opens OpenProject instead.
+- Meetings are shown in Upcoming events, not copied into the team calendar — a one-way sync with its own rules, and a separate decision (`OPENPROJECT.md` §6.9). A news item reaches the stream when a connected member next looks, not the moment it is written. "Completed" uses the change time. "All time" is 90 days for OpenProject news. Nothing in Phase 3 has been observed against a live OpenProject yet — `OPENPROJECT.md` §6.10.
+
+### Tests
+
+- `npm run test:php`: 327 tests (86 new) — the provider (which teams cost a request and which reads; an unconnected viewer; the horizon and the milestone window as the viewer's dates; categories and reasons from the viewer's calendar, including the 23-hour and 25-hour DST days in Europe/Amsterdam and a midnight that has passed in Auckland but not on the server; recently touched undated work in, untouched out; work the viewer created and left unassigned; *since your last visit* and the checkpoint's cadence; priority from OpenProject's positions; completed rows; milestones; one row per work package across reads and across teams; partial, timeout and refused-token isolation with the health ledger; the project cap and the provider cap; HTML and `javascript:` in OpenProject fields; deep links on the configured host; two viewers never sharing an answer; access lost after caching refused on the re-read; nothing ever written to OpenProject; the attention summary), the news source (one read per project, rows keyed apart, the window and the project filter, the belt on a foreign row, partial and not-connected states, HTML never reaching a row; the mirror: once as a System post naming the source, the OpenProject author's own account or the creator, nothing older than the link or 30 days, a failed write releasing its slot, an unreadable ledger costing the copy not the feed, `mirrorForTeam` idempotent), the meetings source (the filter as the viewer's dates, what is dropped, order, end from duration, the per-viewer cache and the refresh cooldown), the activity source, the reference lists and the health ledger, the readers' grammar, the news and meeting normalisers, the controller gates and the two new routes, the overview's mirror side effect. `npm run test:js`: 42 (11 new) — the feed vocabulary and notices, the views and their on/off rule, status labels, provider warnings, the milestone glyph, the grouping list.
+
+## [4.9.6] — 2026-09-13
+
+**OpenProject integration, Phase 2 — blueprint-driven provisioning.** The OpenProject template now builds the whole workspace around a project — a new one copied from an OpenProject template, or an existing one — as one recorded, resumable, server-side operation: the project, the team and its link, project files, the Talk conversation, the calendar, the knowledge space, the modules, members and roles on both sides, the dashboard, the handover. Every step is stored, can be retried, and nothing is shown as ready while a required step failed. Design, security model, membership authority, folder ownership, troubleshooting and the manual test plan: `OPENPROJECT.md` §5. **A rebuild, a migration (`Version000409006`) and `npm run deploy:aio` are required**; twenty new routes need the php-fpm reload the deploy does. The Phase 1 decisions of 4.9.3–4.9.5 are unchanged.
+
+### Added
+
+- **The workspace wizard** for the OpenProject template: four steps instead of two — Details (the same as every template), **OpenProject** (everything OpenProject in one place: host and account; *create a new project* from an OpenProject template with a live-checked identifier, the project's visibility and an optional parent, or *connect an existing project* with Phase 1's picker; optional start date and category), **Members and roles** (the role mapping shown read-only, every member with the OpenProject user they match and the role they get, and an explicit decision for anyone without an OpenProject account — *Add to the team only* or *Leave out*), and **Review** (every resource as *New*, *Existing, will be linked*, *Skipped*, *Not available* or *Required, not installed*). A mode the creator cannot use is locked with the reason; the apps and modules are the template's and are not a step (Justin, 2026-09-13).
+- **The operation, live and after a reload.** The wizard pumps `POST /api/v1/provisioning/{id}/run` until the operation rests and shows every step with its state, a sentence for every failure, *Retry* where a retry is safe, *Remove what was created* when it is not worth continuing, and links to what exists. A `ProvisioningJob` (every five minutes) resumes an operation whose pump went quiet, as its creator, under a lease that stops two runners executing the same step. The team page carries a strip while provisioning is unfinished — every member sees the sentence; the creator, an administrator and the team's admins open the details and act.
+- **Two ways to a project.** Mode A copies an OpenProject template (`POST projects/{id}/copy`, the job polled, only templates the creator may copy and the administrator approved; members of the template are not copied by default — membership is TeamHub's step) or creates an empty project; mode B connects an existing project under Phase 1's rule. The project is made **before** the team, so a team still exists with its project or not at all.
+- **Roles on both sides.** TeamHub Owner/Admin → *Project admin*, Moderator/Member → *Member*, Guest → no access, as shipped; an administrator maps them to the roles their OpenProject has. Memberships are created as the creator, so OpenProject's own permissions bound the mapping. Afterwards OpenProject is authoritative: Manage team → Modules & integrations → OpenProject compares the two (*Not in the project*, *Different role*, *Only in OpenProject*, *No OpenProject account*) and offers one explicit action, *Add missing members to OpenProject*; nothing is ever removed from OpenProject.
+- **A creator who hands the workspace over leaves the project too.** OpenProject makes whoever creates a project a *Project admin*; when the creator appoints another owner and leaves the team, the handover step removes their membership from the project this operation created (never from an existing one). The wizard preview says so instead of listing them as a second owner. Found by Justin on the first real run.
+- **Project files, coordinated.** The project folder OpenProject manages is OpenProject's: linked, never created or touched. The team folder is the team's. The blueprint picks one, both (shipped) or none; "OpenProject's only" without a managed folder asks for attention rather than making a competing folder.
+- **Rollback, per resource.** A linked resource is kept; a created resource that may hold content is removed with the team only after confirmation; an OpenProject project is never deleted by TeamHub; a handed-over team is Maintenance's to remove.
+- **The resource ledger** `teamhub_resource_link` — what was created or linked for a team, by which operation, with health — beside the Phase 1 tables, which are unchanged.
+- **Administration.** Admin → TeamHub → Policy → the OpenProject template's *Edit* gained an *OpenProject workspace* section (modes, approved templates, copy switches, role mapping, project-files coordination, dashboard widgets; *Reset to shipped*). Admin → TeamHub → Maintenance gained *Workspace provisioning*: every operation with *Details*, *Retry*, *Continue now* and *Remove what was created* — run as the creator and audited.
+- **Endpoints**: `GET /api/v1/provisioning/options`, `…/parents`, `…/identifier`, `POST …/preview`, `POST /api/v1/provisioning`, `GET /api/v1/provisioning`, `GET|POST …/{id}`, `…/{id}/run`, `…/{id}/retry`, `…/{id}/rollback`, `GET /api/v1/teams/{teamId}/provisioning`, `GET …/openproject/membership-drift`, `POST …/openproject/membership-sync`, `GET /api/v1/admin/provisioning`, `GET /api/v1/admin/policy/openproject-roles`, `GET|PUT|DELETE /api/v1/admin/policy/templates/{templateKey}/blueprint`. `APIendpoints.md` § "OpenProject Phase 2".
+- **Migration `Version000409006`**: `teamhub_template.blueprint_json`; tables `teamhub_provisioning`, `teamhub_provisioning_step`, `teamhub_resource_link`; the OpenProject template's shipped blueprint seeded as literals. Self-contained; every key named.
+- **Capabilities**: `provisioningAvailable` is now OpenProject's answer (the project creation form offered or refused), probed with the connection test. `OpenProjectClient` gained `post()` and `delete()`; `validation_failed` (422, with OpenProject's own sentence) and `job_failed` joined the error codes.
+
+### Fixed
+
+- The "may create projects" probe sent a bodiless POST, which OpenProject answers with 406 Not Acceptable (the official app sets the JSON content type only with a body) — so *Create a new project* showed locked for everyone, Inge NC included. Every POST now carries a body, `{}` when empty.
+
+### Changed
+
+- The template's apps and modules are the one place that decides what a workspace is connected to; the blueprint stores only what the row cannot say and re-derives the rest on every read. The three older templates have no OpenProject section and provision exactly as before.
+- The v4.9.3 project picker moved from the Details step to the OpenProject step; `POST /api/v1/teams` with `openProjectId` still works for API callers.
+
+### Tests
+
+- `npm run test:php`: 241 tests (93 new) — the blueprint model (derivation, backward compatibility, the row-decides rule, refusals by name), the OpenProject writes (templates, identifiers, copy and job status, roles, memberships, user matching, storages; 403, 422 and timeout classification), role mapping and matching (connected, login, unmatched with decisions), the validate step (every refusal), the project / team / resource / folder steps (idempotency, adoption, team-or-nothing, never deleting the project, linked resources kept), and the engine (start and the replay guard, sanitising, a full run, failure at a step and retry from it, non-retry-safe refusals, attention, asynchronous steps, a step that throws, steps that do not apply, too many attempts, the lease and stale takeover, stalled detection, who may read and act, running as the creator, rollback dry run and confirmation, linked resources kept, no rollback of a completed or handed-over operation). `npm run test:js`: 31 — the provisioning helpers and the pump.
+
+## [4.9.5] — 2026-09-12
+
+**Personal work in My Work, team work on the team home.** The 4.9.3 layout put the viewer's own OpenProject work packages in a widget on the shared team page; Justin's review moved them where personal work lives and gave the team page the project's. **A rebuild and `npm run deploy:aio` are required** (five components, the store gates and the layout defaults changed; one component removed). No migration; no route added or removed.
+
+### Added
+
+- **OpenProject in My Work.** A new provider (`OpenProjectWorkProvider`, source *OpenProject*, briefcase glyph) lists the viewer's dated, open, assigned work packages in every OpenProject project their teams are linked to — one row per work package under its team, read as the viewer through the official integration app. The same rules as Deck cards: overdue is *Action required* at urgent, due within the Upcoming horizon is *Upcoming*, undated work stays in OpenProject, and the horizon is pushed into the OpenProject filter so a large project costs one bounded request. The one action is *Open*, a hand-off to OpenProject in a new tab; snoozing works because the row is re-read from OpenProject first. A member who has not connected their account gets no rows and no nagging — the team home's Project info widget already says what to do.
+- **Upcoming tasks lists the project's work packages.** On an OpenProject team the existing Upcoming tasks widget shows the project's open work packages **of every assignee** that carry a due date, soonest first (overdue at the top), merged with any Deck cards and personal tasks — ten at a time with *Show more*. An OpenProject row shows its type, its assignee's name as OpenProject gives it (not a Nextcloud avatar), and opens in OpenProject. A failure on the OpenProject side is one line under the list and never hides the Deck and Tasks rows. The widget now appears on OpenProject teams that have neither Deck nor Tasks.
+
+### Changed
+
+- **"OpenProject project" widget → "Project info"**, everywhere the widget is named: header, edit-mode handle, Manage team → Settings → Dashboard, mobile bar. The template keeps its name.
+- **The Project info widget's links moved into its header action menu** (⋯): *Open project*, *Work packages*, *New work package* (only when OpenProject grants it), *Project files* (only with a storage), *Refresh project data*. The row of buttons at the bottom of the widget is gone; the footer keeps *Retrieved {time}*. The widget reports the links it has to the grid, so the menu shows exactly what OpenProject granted. On tablet the same menu; on mobile the same set as FAB actions.
+- **`GET …/openproject/work`** has one section, `upcoming` (every assignee, dated, soonest first); the four personal sections of 4.9.3 went with the widget they served. "Has a due date" is the documented `dueDate <>d [1970-01-01, 2999-12-31]` range rather than a wildcard operator, because OpenProject does not document where a date sort puts nulls.
+
+### Removed
+
+- **The My OpenProject work widget** (`widget-openproject-work`, `OpenProjectMyWorkWidget.vue`). Saved layouts that still carry it lose it silently on the next load, like the legacy files widgets. The "Assigned to me / Overdue / Due this week / Recently updated" section switch went with it.
+
+### Tests
+
+- `npm run test:php`: 148 tests — the reshaped work-package service (the Upcoming grammar, the My Work read with its horizon and truncation, the uncached single re-read) and the provider (only linked, non-stale teams cost a request; an unconnected viewer gets nothing; rows categorised by due date with a date-only deadline ending at the end of the viewer's day; a hand-off row; one team's failure never empties another's; the re-read refuses a foreign team, a moved work package and a deleted one; nothing is changed in OpenProject). `npm run test:js`: 20 — the widget gate now includes Upcoming tasks and excludes the removed widget.
+
+## [4.9.4] — 2026-09-12
+
+**An OpenProject team is created with its project or not at all, and an administrator can unlink one.** In 4.9.3 the link was a separate wizard step after the team existed, so a project already taken by another team produced an error *and* an OpenProject team with no project and no way to give it one. **A rebuild and `npm run deploy:aio` are required** (the wizard, the picker and Admin settings changed; one new route, one removed). No migration.
+
+### Changed
+
+- **The link is part of creating the team.** `POST /api/v1/teams` takes `openProjectId` with the OpenProject template. Everything that can refuse the link — the creator's connection, their right to the project (administered or public), another team holding it — is checked **before the circle exists**; the team is then created, typed and linked in the same request, and if the link still loses the race on the unique index the team is deleted again. A refused project stops the wizard: the first task fails, the toast says the team was not created, and the wizard returns to step 1 with the reason under the project picker and the pick cleared. The success screen's "created, but could not be linked" warning is gone because the state it described no longer exists.
+- **The picker shows a taken project as taken.** `GET /api/v1/openproject/projects` annotates each project with `linkedTeam` (the team named only when the creator is a member of it); the wizard lists such a project dimmed with *Already linked to {team}* / *another team*, will not select it, and refuses it again at step 1. Shown rather than hidden, so a creator whose project is absent does not conclude OpenProject does not list it.
+- **The stale-link sentence** no longer tells a member that "a team admin needs to link the project again" — nobody can. It now says to ask the Nextcloud administrator; the administrator line names the two ways out (restore the previous instance URL, or unlink in Maintenance and create the team again).
+
+### Added
+
+- **Unlink from Maintenance.** Admin → TeamHub → Maintenance → All teams shows *OpenProject: {project}* under a linked team's name (linking to the project in a new tab; *Other instance* when the link was made against another host) and an *Unlink OpenProject project* row action with a confirmation that says what the team keeps and loses. `DELETE /api/v1/admin/maintenance/teams/{teamId}/openproject-link`, NC admin only, no team membership needed, idempotent; audited as `openproject.unlinked_by_admin`. Nothing in OpenProject changes, the project becomes linkable by a new team, and the unlinked team cannot be linked again — there is deliberately no re-link route.
+
+### Removed
+
+- **`PUT /api/v1/teams/{teamId}/openproject/link`.** The link is made by `POST /api/v1/teams` and removed only from Maintenance; a second way to link an existing team was the hole the 2026-09-12 review closed. `TeamOpenProjectLinkService::unlink()` (team-admin gated, never routed) went with it; `adminUnlink()` replaces it.
+
+### Tests
+
+- `npm run test:php`: 137 tests — the pre-creation check refuses what `link()` refuses and writes nothing; `linkNewTeam()` types then links, deletes the team when the project was taken meanwhile or the insert loses the race, and still reports the refusal when the rollback itself fails; a team admin cannot unlink, an NC admin in no team can, and it is idempotent; the two batch readers name teams only to their members and report staleness. The controller has no write, and the picker annotation is checked.
+
+## [4.9.3] — 2026-09-11
+
+**OpenProject integration, Phase 1.** A fourth team template, **OpenProject project**, whose teams are linked at creation to an existing OpenProject project; members get a project cockpit and their own work packages on the team home; everything else hands off to OpenProject. Design, administrator setup and the security model: [`OPENPROJECT.md`](OPENPROJECT.md). **A rebuild is required** (five new components; the wizard, Manage team, the store and the widget grid changed) and **two migrations**: `teamhub_openproject_link`, then the template seed and the one-project-one-team index.
+
+The principle the whole feature is built on: *OpenProject manages the structured project; TeamHub manages the collaborative workspace around it.* Nothing of OpenProject is recreated.
+
+### Added
+
+- **The OpenProject project template.** A fourth team type beside Collaboration, Project and Department, configurable on Admin → TeamHub → Policy like the others (seeded with Talk, Files and Calendar; Decisions, Messages and Pages; no Deck, no Timeline — work packages and the Gantt live in OpenProject). The OpenProject link, widgets and settings section exist on teams of this template and on no other. Not offered in bulk creation or the CSV importer: a row cannot pick a project as its creator.
+- **The project is chosen once, in the team-creation wizard.** Picking the template adds a required project field with a search over the projects the creator may link. Three rules, all enforced server-side: only a project the creator **administers in OpenProject, or a public project** (OpenProject's own answer per project — merely visible projects are not offered); **one project links to one team** (a project linked elsewhere is refused, naming the team when the creator is a member of it, with a unique index behind the check); and only a team of the OpenProject template can carry a link. The link is made right after the team exists, as the creator; the success screen names the project, or says why it could not be linked. Audit events `openproject.linked` and, for the delete cascade, `openproject.unlinked`.
+- **Manage team shows the link, never changes it.** Manage team → Modules & integrations → **OpenProject** (OpenProject-template teams only) shows the linked project, its last successful read, the integration's state for the admin looking, and a *Test connection* diagnostic.
+- **OpenProject project widget** — name, status chip, description excerpt, three counts (open, overdue, due in the next 7 days), the next milestone (or the overdue one, flagged), recently completed work, when the data was retrieved, and the quick actions: *Open project*, *Work packages*, *New work package* (only when OpenProject grants the permission), *Project files* (only when the project has a storage), *Refresh*.
+- **My OpenProject work widget** — the viewer's work packages in the linked project in four sections: *Assigned to me*, *Overdue*, *Due this week*, *Recently updated* (project-wide). Paged with *Show more*; never an unbounded list.
+- **Everything is fetched as the viewer.** TeamHub calls the official `integration_openproject` app's `OpenProjectAPIService::request()` with the session user's id and nothing else — no TeamHub token store, no service account, no token ever read, logged or returned. Two members of one team see what OpenProject shows each of them. A member without a connection sees one sentence and a *Connect OpenProject account* button.
+- **Capability detection** (`GET /api/v1/openproject/capabilities`) — installed, enabled, host configured, user connected, API reachable, what is available — with one `errorCode` naming the first thing wrong in fixing order, a sentence for the user and a line for the administrator. The settings section shows all of it, plus *Test connection*.
+- **Ten distinguishable failures**, each with its own sentence and administrator diagnostic: app not installed, disabled, incompatible, no host, user not connected, token rejected, permission denied, project removed or hidden, link made against another OpenProject host, unrecognised response, unreachable, temporary, rate-limited. The frontend chooses the action (connect / try again / change connection) from the code, never from the text.
+- **Conservative per-user caching** — every cached answer is keyed by user, team, project and host; nothing is shared between users. My work 2 min, overview 5 min, capability probe 1 min, milestone types 15 min. *Refresh* bypasses the cache with a 10 s cooldown; linking or unlinking invalidates the team. Widgets show the retrieval time.
+- **Six new endpoints** under `/api/v1/…/openproject/…` (documented in `APIendpoints.md`): capabilities and the project search per user (the search gated on the right to create a team), the link read, the one link write, the connection test, the overview and the work sections — all with Nextcloud's per-user rate limit where OpenProject is reached.
+- **Tests.** `npm run test:php` runs a 127-test PHPUnit suite inside the AIO container (the host has no PHP): capability detection, error classification, the filter grammar, cache separation between users, the three linking rules, stale links, status mapping, and that no response body ever reaches the log. `npm run test:js` runs 21 `node --test` cases over the widget state and error helpers. `npm test` runs both.
+- **Spacing tokens** `--th-space-xxs … xl` and `--th-accent-border` in `widget-tokens.css`, so new scoped styles have a scale to reach for instead of raw pixels.
+- **`npm run check:classes`** ([`scripts/check-classes.js`](scripts/check-classes.js)) — loads every class under `lib/` against the real Nextcloud in the AIO container and reports any constructor parameter type that does not resolve. Added after the first deploy of this version took the layout bundle down with a constructor type whose `use` import was missing — a fault neither `php -l` nor `check:di` can see.
+
+### Security
+
+- **No user-supplied host, ever.** The only OpenProject host TeamHub contacts or links to is the one a Nextcloud administrator configured in the official app. Links OpenProject hands back are resolved against that host and refused if they would leave its origin.
+- **Plain text only.** Every OpenProject string is reduced to text server-side (tags, Markdown decoration and link targets removed); identifiers are validated before they touch a URL. No `v-html`.
+- **Logs carry endpoint paths and status codes**, never query strings (search input), bodies (project names, error text) or hosts.
+
+### Notes
+
+- OpenProject refuses to be framed, so every action that leaves TeamHub says *Opens in OpenProject* and opens a new tab — deliberately, rather than losing the team view.
+- *Project manager* is not shown: OpenProject's API v3 has no built-in project responsible, and a custom field would be a guess. Counts that OpenProject does not answer render as `—`, not `0`.
+- Provisioning a project from a team template, direct work-package creation through the API, and My Work aggregation across linked projects are later phases; the services are shaped for them (`OPENPROJECT.md` §3.11).
+- Verified on the test instance against `integration_openproject` 3.x and an OpenProject 17 container (`http://host.docker.internal:8181`) as far as the settings section and the "not installed" path; the wizard flow and the widgets against a real project are the next thing to walk (HANDOFF §0-op).
+
+### Unreleased in this line
+
+- **4.9.2** (2026-09-10) shipped source changes — `CFG_FEDERATED` joined `CirclesConfig::MANAGED_BITS`, the new `CirclesMemberType` constants, a telemetry member-type correction, and `ManageTeamView`/`PolicyField` follow-ups — without a changelog entry. Recorded here so the gap is visible; the entry itself belongs to whoever has that session's context.
+
 ## [4.9.1] — 2026-09-09
 
 **Hotfix — 4.9.0 could be neither installed nor upgraded to** ([#98](https://github.com/JustinDoek/Nextcloud-Teamhub/issues/98)). No migration and no new strings. **A rebuild is required**, not because any frontend source changed — none did — but because the version bump invalidates `appinfo/integrity.json` and the release pre-flight refuses a manifest that belongs to another version.

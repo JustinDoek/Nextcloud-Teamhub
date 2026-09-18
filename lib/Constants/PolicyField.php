@@ -80,6 +80,7 @@ final class PolicyField {
     public const CFG_REQUEST   = 'cfg_request';
     public const CFG_PROTECTED = 'cfg_protected';
     public const CFG_ROOT      = 'cfg_root';
+    public const CFG_FEDERATED = 'cfg_federated';
 
     public const EXTERNAL_MEMBERS     = 'external_members';
     public const INTEGRATIONS_ALLOWED = 'integrations_allowed';
@@ -123,7 +124,7 @@ final class PolicyField {
      */
     public const FIELDS = [
         // ── Circles-owned config bits. CirclesConfig::MANAGED_BITS is the
-        //    authoritative bit set; these six are exactly it.
+        //    authoritative bit set; these seven are exactly it.
         self::CFG_VISIBLE => [
             'tag'    => self::TAG_ASSERTED,
             'type'   => self::TYPE_BOOL,
@@ -159,12 +160,32 @@ final class PolicyField {
             'type'   => self::TYPE_BOOL,
             'source' => 'circles_circle.config & 8192',
         ],
+        // v4.9.2. Note this field is the MIDDLE of three levels, not the top:
+        // the instance-wide "Allowed invite types" setting sits above it, and a
+        // profile cannot grant federation on an instance where an administrator
+        // has switched the federated invite type off. That precedence
+        // (instance → profile → team) lives in
+        // MemberService::resolveFederationSetting(), because only that layer
+        // can see the app config; the profile layer only ever narrows.
+        self::CFG_FEDERATED => [
+            'tag'    => self::TAG_ASSERTED,
+            'type'   => self::TYPE_BOOL,
+            'source' => 'circles_circle.config & 32768',
+        ],
 
         // ── Asserted despite being partly or wholly ours. See the class
         //    docblock — these two are why the tag is declared, not derived.
         self::EXTERNAL_MEMBERS => [
-            // Enforced on TeamHub's invite path; asserted overall, because
-            // Contacts can add a mail member without passing through us.
+            // Asserted, and NOT enforced anywhere — see PolicyApplyService,
+            // which reports drift on this field and deliberately declines to
+            // act on it ("enforcing it would evict people"). MemberService
+            // never reads it.
+            //
+            // v4.9.2 — the previous comment here claimed "Enforced on TeamHub's
+            // invite path", which was never true. Worth noting that the source
+            // line below was the one correct reading of Circles' member types
+            // anywhere in this codebase: 4 is TYPE_MAIL and 8 is TYPE_CONTACT.
+            // Everywhere else read 4 as "federated user". See CirclesMemberType.
             'tag'    => self::TAG_ASSERTED,
             'type'   => self::TYPE_BOOL,
             'source' => 'circles_member.user_type in (4 mail, 8 contact)',
@@ -285,7 +306,9 @@ final class PolicyField {
     }
 
     /**
-     * The six Circles config bits, in MANAGED_BITS order.
+     * The Circles config bits a profile can govern, in MANAGED_BITS order.
+     *
+     * Seven since v4.9.2, when CFG_FEDERATED joined MANAGED_BITS.
      *
      * @return array<string,int> field key => bit value
      */
@@ -297,6 +320,7 @@ final class PolicyField {
             self::CFG_REQUEST   => CirclesConfig::CFG_REQUEST,
             self::CFG_PROTECTED => CirclesConfig::CFG_PROTECTED,
             self::CFG_ROOT      => CirclesConfig::CFG_ROOT,
+            self::CFG_FEDERATED => CirclesConfig::CFG_FEDERATED,
         ];
     }
 

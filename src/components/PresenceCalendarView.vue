@@ -92,6 +92,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import { todayIso, formatIsoDate, shiftIsoDate } from '../lib/localDate.js'
 import LockIcon from 'vue-material-design-icons/Lock.vue'
 
 /**
@@ -117,17 +118,17 @@ export default {
     emits: ['pick'],
     computed: {
         today() {
-            return new Date().toISOString().slice(0, 10)
+            return todayIso()
         },
 
         dayNames() {
-            // Short Mon–Sun labels in the user's locale.
-            const base = new Date('2024-01-01') // a Monday
-            return Array.from({ length: 7 }, (_, i) => {
-                const d = new Date(base)
-                d.setDate(d.getDate() + i)
-                return d.toLocaleDateString(undefined, { weekday: 'short' })
-            })
+            // Short Mon–Sun labels in the reader's locale. Built by shifting
+            // an ISO string rather than a Date: `new Date('2024-01-01')` is
+            // UTC midnight, and reading that through a zone west of Greenwich
+            // gives Sunday the 31st — so the whole header row was labelled a
+            // day out for those readers.
+            return Array.from({ length: 7 }, (_, i) =>
+                formatIsoDate(shiftIsoDate('2024-01-01', { days: i }), { weekday: 'short' }))
         },
 
         /** Slot lookup: key = `${iso}_${half}` */
@@ -161,7 +162,10 @@ export default {
             const startDow = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1
             const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-            const label = firstDay.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+            const label = formatIsoDate(
+                `${year}-${String(month + 1).padStart(2, '0')}-01`,
+                { month: 'long', year: 'numeric' },
+            )
             const cells = []
 
             // Leading empty cells
@@ -217,7 +221,7 @@ export default {
         slotAriaLabel(day, half) {
             const halfLabel = half === 0 ? t('teamhub', 'Morning') : t('teamhub', 'Afternoon')
             const s = this.slotFor(day.iso, half)
-            const dateStr = new Date(day.iso + 'T12:00:00').toLocaleDateString(undefined, {
+            const dateStr = formatIsoDate(day.iso, {
                 weekday: 'long', month: 'short', day: 'numeric',
             })
             // A slot row exists even after the user clears it (presence_type_id=null);

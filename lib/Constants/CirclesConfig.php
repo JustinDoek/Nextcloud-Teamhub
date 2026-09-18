@@ -68,7 +68,14 @@ final class CirclesConfig {
     /** Circle can be invited into other circles. */
     public const CFG_CIRCLE_INVITE = 16384;
 
-    /** Federated members allowed. */
+    /**
+     * Federated members allowed on this team. User-facing toggle.
+     *
+     * v4.9.2 — joined MANAGED_BITS. The Contacts app exposes this as a per-team
+     * switch ("allow federated members") with a confirmation step, and TeamHub
+     * gates its own member search and invite path on it, so it had to become a
+     * bit TeamHub can write rather than one it merely preserved.
+     */
     public const CFG_FEDERATED = 32768;
 
     /** Used as a mountpoint. */
@@ -97,15 +104,17 @@ final class CirclesConfig {
      * CFG_HIDDEN flag.
      */
     public const MANAGED_BITS =
-          self::CFG_VISIBLE   //    8
-        | self::CFG_OPEN      //   16
-        | self::CFG_INVITE    //   32
-        | self::CFG_REQUEST   //   64
-        | self::CFG_PROTECTED // 256
-        | self::CFG_ROOT;     // 8192 — Contacts uses CFG_ROOT to implement
-                              //        "Prevent teams from being a member of
-                              //        another team". TeamHub syncs with this.
-    // = 8568
+          self::CFG_VISIBLE   //     8
+        | self::CFG_OPEN      //    16
+        | self::CFG_INVITE    //    32
+        | self::CFG_REQUEST   //    64
+        | self::CFG_PROTECTED //   256
+        | self::CFG_ROOT      //  8192 — Contacts uses CFG_ROOT to implement
+                              //         "Prevent teams from being a member of
+                              //         another team". TeamHub syncs with this.
+        | self::CFG_FEDERATED; // 32768 — v4.9.2. Same bit Contacts writes from
+                              //         its own per-team federation switch.
+    // = 41336
 
     /**
      * System bits that must never appear on a source=16 user team.

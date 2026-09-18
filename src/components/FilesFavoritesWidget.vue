@@ -59,9 +59,11 @@
 <script>
 import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatDate as fmtDate, zonedIsoDate, todayIso, shiftIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon } from '@nextcloud/vue'
+import { fileOpenUrl } from '../lib/filesCollab.js'
 
 // Icons
 import FolderIcon           from 'vue-material-design-icons/Folder.vue'
@@ -122,12 +124,16 @@ export default {
         },
 
         /**
-         * Open the file in its native NC editor / viewer by file ID.
+         * Open the file in its native NC editor / viewer by file ID, with the
+         * team's conversation about it showing alongside (v4.5.5).
          * NC resolves the correct app (Text, Collabora, OnlyOffice, etc.)
          * based on mimetype when using the /f/{id} route.
+         *
+         * Favourites is files-only (FilesService::getFavoriteFiles skips
+         * anything that isn't TYPE_FILE), so no folder check is needed here.
          */
         fileUrl(file) {
-            return generateUrl(`/f/${file.id}`)
+            return fileOpenUrl(file.id)
         },
 
         /**
@@ -154,13 +160,13 @@ export default {
 
         formatDate(mtime) {
             if (!mtime) return ''
-            // mtime is a Unix timestamp (seconds).
-            const d = new Date(mtime * 1000)
-            const now = new Date()
-            const diffDays = Math.floor((now - d) / 86400000)
-            if (diffDays === 0) return t('teamhub', 'Today')
-            if (diffDays === 1) return t('teamhub', 'Yesterday')
-            return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+            // mtime is a Unix timestamp (seconds). Calendar days in the
+            // reader's zone, not elapsed hours — see FilesRecentWidget.
+            const iso = zonedIsoDate(mtime * 1000)
+            const today = todayIso()
+            if (iso === today) return t('teamhub', 'Today')
+            if (iso === shiftIsoDate(today, { days: -1 })) return t('teamhub', 'Yesterday')
+            return fmtDate(mtime * 1000, { month: 'short', day: 'numeric' })
         },
 
         /**

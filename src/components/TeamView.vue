@@ -11,7 +11,8 @@
             @tab-reorder="onTabReorder"
             @manage-links="showManageLinks = true"
             @toggle-edit-mode="toggleEditMode"
-            @show-picker="onShowPicker" />
+            @show-picker="onShowPicker"
+            @preload="preloadView" />
 
         <!-- ── Content area ─────────────────────────────────────────── -->
         <div class="teamhub-content">
@@ -116,15 +117,19 @@
                 @add-meeting="showAddMeeting = true"
                 @add-deck-task="showAddTask = true"
                 @add-personal-task="showAddPersonalTask = true"
+                @add-openproject-work-package="showAddOpenProjectWorkPackage = true"
                 @create-page="openCreatePage"
                 @delete-page="openDeletePage"
+                @create-wiki-page="openCreateWikiPage"
                 @pages-loaded="onPagesLoaded"
+                @collective-loaded="onCollectiveLoaded"
                 @set-view="setView"
                 @widget-actions-loaded="onWidgetActionsLoaded"
                 @leave-team="onLeaveTeam"
                 @set-as-default="setAsDefault"
                 @reset-to-default="resetToDefault"
-                @propose-decision="openCompose" />
+                @propose-decision="openCompose"
+                @provisioning-changed="loadLayout(currentTeamId)" />
 
             <!-- Activity feed -->
             <ActivityFeedView v-if="currentView === 'activity'" />
@@ -138,27 +143,88 @@
                 v-if="(preloadedViews.has('talk') || currentView === 'talk') && resources.talk"
                 v-show="currentView === 'talk'"
                 :url="talkUrl"
-                :label="t('teamhub', 'Chat')" />
+                :show-bar="false"
+                :intercept-file-links="true"
+                link-self-type="talk"
+                :label="t('teamhub', 'Chat')"
+                @open-target="onEmbedOpenTarget" />
             <AppEmbed
                 v-if="((preloadedViews.has('files') || currentView === 'files') && resources.files) || filesEmbedFileUrl"
                 v-show="currentView === 'files'"
                 :url="filesUrl"
-                :label="t('teamhub', 'Files')" />
+                :show-bar="false"
+                :collab-sidebar="!isMobile"
+                :intercept-file-links="true"
+                link-self-type="file"
+                :label="t('teamhub', 'Files')"
+                @open-target="onEmbedOpenTarget" />
+            <!--
+                Calendar tab (v4.6.20) — TeamHub's own grid, hosted inside
+                AppEmbed so the toolbar is the same component every other tab
+                uses. No `url` is passed, which is what removes "Open in new
+                tab": there is no external page behind this view any more. The
+                iframe it replaces could only show one calendar by pointing at
+                the public share route, which required publishing every team
+                calendar to the internet.
+            -->
             <AppEmbed
                 v-if="preloadedViews.has('calendar') || currentView === 'calendar'"
                 v-show="currentView === 'calendar'"
                 ref="calendarEmbed"
-                :url="calendarUrl"
+                :hosted="true"
                 :label="t('teamhub', 'Calendar')"
                 :embed-actions="calendarEmbedActions"
                 :embed-selects="calendarEmbedSelects"
                 @action="onCalendarEmbedAction"
-                @select="onCalendarEmbedSelect" />
+                @select="onCalendarEmbedSelect"
+                @reload="reloadCalendarGrid">
+                <TeamCalendarGrid
+                    ref="calendarGrid"
+                    :team-id="currentTeamId"
+                    :view="calendarView"
+                    :date="calendarDate"
+                    :has-calendar="(resources.calendar || []).length > 0" />
+            </AppEmbed>
             <AppEmbed
                 v-if="(preloadedViews.has('deck') || currentView === 'deck') && resources.deck && resources.deck.length > 0"
                 v-show="currentView === 'deck'"
                 :url="deckUrl"
-                :label="t('teamhub', 'Deck')" />
+                :show-bar="false"
+                :intercept-file-links="true"
+                link-self-type="deck"
+                :label="t('teamhub', 'Deck')"
+                @open-target="onEmbedOpenTarget" />
+
+            <!-- Collectives tab (v4.3.5) — iframes the team's collective.
+                 Labelled "Wiki" from 4.3.5 until 4.6.9, when the whole
+                 surface went back to the app's own name.
+
+                 v4.8.8 — the page rail sits beside the frame. The embed
+                 strips NC's app navigation, and in Collectives that
+                 navigation is the page tree, so without this the tab shows
+                 one page and no way to reach another. v-if/v-show moved up
+                 to the wrapper so preloading still works exactly as before. -->
+            <div
+                v-if="(preloadedViews.has('collectives') || currentView === 'collectives') && collectivesConfig?.collectives_enabled"
+                v-show="currentView === 'collectives'"
+                class="th-collectives-tab">
+                <CollectivesPageRail
+                    ref="collectivesRail"
+                    :team-id="currentTeamId"
+                    :active-url="collectivesFrameUrl"
+                    @open="onCollectivePageOpen"
+                    @create="openCreateWikiPage" />
+                <AppEmbed
+                    :url="collectivesUrl"
+                    :show-bar="false"
+                    :intercept-file-links="true"
+                    :track-location="currentView === 'collectives'"
+                    link-self-type="collectives"
+                    :label="t('teamhub', 'Collectives')"
+                    class="th-collectives-tab__frame"
+                    @navigate="collectivesFrameUrl = $event"
+                    @open-target="onEmbedOpenTarget" />
+            </div>
 
             <!-- Presence tab — rendered when module is enabled globally AND for this team -->
             <TeamPresenceView
@@ -306,6 +372,35 @@
             </template>
         </NcDialog>
 
+        <!-- Wiki (Collectives) page create modal (v4.3.9). On success the
+             Wiki iframe tab opens on the new page via collectivesEmbedPageUrl. -->
+        <NcDialog
+            v-if="showCreateWikiPage"
+            :name="t('teamhub', 'Create Collectives page')"
+            :open="true"
+            @update:open="showCreateWikiPage = false">
+            <template #default>
+                <p style="margin: 0 0 12px; font-size: 13px; color: var(--color-text-maxcontrast);">
+                    {{ t('teamhub', 'The new page will be created inside the team\'s collective in Collectives.') }}
+                </p>
+                <NcTextField
+                    v-model="newWikiPageTitle"
+                    :label="t('teamhub', 'Page title')"
+                    :placeholder="t('teamhub', 'Enter a title for the new page')"
+                    autofocus
+                    @keyup.enter="submitCreateWikiPage" />
+            </template>
+            <template #actions>
+                <NcButton variant="tertiary" @click="showCreateWikiPage = false">
+                    {{ t('teamhub', 'Cancel') }}
+                </NcButton>
+                <NcButton variant="primary" :disabled="!newWikiPageTitle.trim() || creatingWikiPage" @click="submitCreateWikiPage">
+                    <template #icon><NcLoadingIcon v-if="creatingWikiPage" :size="20" /></template>
+                    {{ t('teamhub', 'Create') }}
+                </NcButton>
+            </template>
+        </NcDialog>
+
         <NcDialog
             v-if="showDeletePage"
             :name="t('teamhub', 'Delete page')"
@@ -371,10 +466,20 @@
             @close="showAddPersonalTask = false"
             @created="$store.dispatch('fetchTeamTasks', currentTeamId)" />
 
+        <!-- v4.9.15 — the Upcoming tasks header's "Create OpenProject work
+             package". After a create both OpenProject surfaces are one row
+             behind: the widget's list and the Project info counts. -->
+        <AddOpenProjectWorkPackageModal v-if="showAddOpenProjectWorkPackage"
+            :team-id="currentTeamId"
+            :project-name="openProjectConfig?.project?.name || ''"
+            @close="showAddOpenProjectWorkPackage = false"
+            @created="$refs.widgetGrid?.refreshOpenProjectWork(); $refs.widgetGrid?.refreshOpenProject()" />
+
         <!-- Shared compose-decision modal — triggered by widget header `+`
-             and by TeamDecisionsView's Propose button. Always renders proposals
-             as `finalized` (auto-skip the open/discussion phase) since the
-             proposer fills the entire proposal in the modal. -->
+             and by TeamDecisionsView's Propose button. Since v4.5.42 it is the
+             *only* way to propose a decision (the message composer's Decision
+             type is gone), and the proposer chooses inside it whether to
+             finalize immediately or leave the proposal open for discussion. -->
         <ComposeDecisionModal
             :open="composeDecisionOpen"
             @close="composeDecisionOpen = false"
@@ -386,11 +491,17 @@
 <script>
 import { mapState, mapGetters, mapActions, mapMutations } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatIsoDate, toIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { showError, showSuccess } from '@nextcloud/dialogs'
+import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import { NcButton, NcDialog, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
+import {
+    buildAllTabDescriptors,
+    isNcRelativeUrl,
+    orderTabDescriptors,
+} from '../lib/teamTabs.js'
 
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
@@ -405,6 +516,7 @@ import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 import FilterVariant from 'vue-material-design-icons/FilterVariant.vue'
 import Printer from 'vue-material-design-icons/Printer.vue'
 
+import CollectivesPageRail from './CollectivesPageRail.vue'
 import TeamTabBar from './TeamTabBar.vue'
 import TeamWidgetGrid from './TeamWidgetGrid.vue'
 import ActivityFeedView from './ActivityFeedView.vue'
@@ -414,8 +526,10 @@ import AddEventModal from './AddEventModal.vue'
 import SuggestMeetingWizard from './SuggestMeetingWizard.vue'
 import DeleteEventsModal from './DeleteEventsModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
+import AddOpenProjectWorkPackageModal from './AddOpenProjectWorkPackageModal.vue'
 import AddPersonalTaskModal from './AddPersonalTaskModal.vue'
 import AppEmbed from './AppEmbed.vue'
+import TeamCalendarGrid from './TeamCalendarGrid.vue'
 import ProjectSwimlaneView from './ProjectSwimlaneView.vue'
 import ProjectBudgetView from './ProjectBudgetView.vue'
 import ProjectTimeView from './ProjectTimeView.vue'
@@ -467,6 +581,28 @@ function TeamView_subPeriod(d, mode) {
     return r
 }
 
+/**
+ * The date a pinned calendar event falls on, from the URL the backend built
+ * for it (v4.6.20).
+ *
+ * Those URLs end `…/edit/sidebar/{objectId}/{recurrenceId}`, and the recurrence
+ * id is the instance's start as a Unix timestamp — so the last path segment is
+ * the date, and no extra field has to be threaded through the store to carry
+ * it. Returns null rather than an Invalid Date when the URL is not that shape,
+ * so the caller can leave the grid where it is instead of jumping to 1970.
+ */
+function TeamView_pinnedEventDate(ev) {
+    const last = String(ev?.url || '').split('?')[0].split('/').filter(Boolean).pop()
+    if (!/^\d+$/.test(last || '')) {
+        return null
+    }
+    const ts = Number(last)
+    // Seconds, not milliseconds. A plausibility floor keeps a stray small
+    // number (an id that happens to be all digits) from reading as 1970.
+    const d = new Date(ts * 1000)
+    return Number.isNaN(d.getTime()) || d.getFullYear() < 2000 ? null : d
+}
+
 export default {
     name: 'TeamView',
 
@@ -475,9 +611,9 @@ export default {
         FileDocumentOutline, CalendarPlus, CalendarRemove, CalendarClock,
         ChevronLeft, ChevronRight, CalendarToday,
         CalendarIcon, GavelIcon, CardTextIcon, FilterVariant, Printer,
-        TeamTabBar, TeamWidgetGrid,
+        TeamTabBar, TeamWidgetGrid, CollectivesPageRail,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
-        AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AppEmbed, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
+        AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AddOpenProjectWorkPackageModal, AppEmbed, TeamCalendarGrid, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
         TeamPresenceView,
         TeamDecisionsView,
         ComposeDecisionModal,
@@ -514,12 +650,27 @@ export default {
             _tabletMqlHandler: null,
             showManageLinks:     false,
             pagesData:          { teamPage: null, subPages: [], teamhubRoot: null, allPages: [] },
+            // v4.3.5 — Wiki (Collectives) resolver cache; populated by the
+            // unified Pages widget on first render via @collective-loaded so
+            // the Wiki iframe tab can point at the team's own collective
+            // without an extra fetch. Falls back to /apps/collectives/ index
+            // when null.
+            collectivesCollective: null,
             showCreatePage:     false,
             newPageTitle:       '',
             creatingPage:       false,
             showDeletePage:     false,
             deletingPage:       false,
             deletePageTarget:   null,
+            // v4.3.9 — Wiki (Collectives) page-create modal state.
+            // Where the Collectives iframe currently is, as AppEmbed reports
+            // it (v4.8.8). Only the rail reads it, to mark the open page —
+            // including a page reached by a link inside the page body, which
+            // is navigation we never issued and would otherwise not see.
+            collectivesFrameUrl: '',
+            showCreateWikiPage: false,
+            newWikiPageTitle:   '',
+            creatingWikiPage:   false,
             showInviteModal:     false,
             showAddEvent:        false,
             // showSuggestMeeting is the legacy approver-meeting flow
@@ -572,6 +723,7 @@ export default {
             showCalendarPicker:  false,
             selectedCalendar:    null,   // { id, name } — set when picker chooses
             showAddPersonalTask: false,
+            showAddOpenProjectWorkPackage: false,
             // Compose-decision modal (Session A) — opened by widget header `+`
             // and by TeamDecisionsView's Propose button. Single instance.
             composeDecisionOpen: false,
@@ -587,20 +739,25 @@ export default {
             // Once a view is in this set the AppEmbed is kept in the DOM
             // (v-show) rather than destroyed, so tab switches are instant.
             preloadedViews: new Set(),
+            // Pending preload timers, cleared on re-schedule and on unmount.
+            _preloadTimers: [],
             // Presence module — per-team config loaded from store (B3/B4)
         }
     },
 
     computed: {
         ...mapState([
-            'currentTeamId', 'currentView', 'resources', 'webLinks', 'filesEmbedFileUrl',
+            'currentTeamId', 'currentView', 'resources', 'webLinks', 'filesEmbedFileUrl', 'collectivesEmbedPageUrl',
+            'calendarEmbedEvent', 'deckEmbedCardUrl',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
-            'timelineConfig', 'messagesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
+            'timelineConfig', 'messagesConfig', 'collectivesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
             // Sidebar 3-dot action intent — TeamView consumes it after the
             // team's layout has loaded, then clears it.
             'dashboardConfig', 'pendingTeamAction',
+            // v4.9.15 — the linked project's name for the create modal's title.
+            'openProjectConfig',
         ]),
         ...mapGetters(['currentTeam', 'canManageLinks']),
 
@@ -658,7 +815,10 @@ export default {
 
         talkUrl() {
             const token = this.resources.talk?.token
-            return token ? generateUrl('/call/' + token) : generateUrl('/apps/spreed')
+            // Trailing slash on the no-token fallback for the same reason as
+            // filesUrl below (GitHub #74) — a bare app root redirects, and a
+            // redirected document is what Chromium blocks in an iframe.
+            return token ? generateUrl('/call/' + token) : generateUrl('/apps/spreed/')
         },
         filesUrl() {
             // A file widget may have requested a specific file be embedded
@@ -668,26 +828,28 @@ export default {
                 return this.filesEmbedFileUrl
             }
             const path = this.resources.files?.path || '/'
-            return generateUrl('/apps/files') + '?dir=' + encodeURIComponent(path)
+            // The trailing slash is load-bearing (GitHub #74). `/apps/files`
+            // is not the canonical route — the server answers it with a 301 to
+            // `/apps/files/`, and Chromium refuses to render the *redirected*
+            // document inside an iframe ("This content is blocked. Contact the
+            // site owner to fix the issue"), even though `X-Frame-Options:
+            // SAMEORIGIN` and `frame-ancestors 'self'` both allow it and no CSP
+            // violation is reported. Asking for the canonical URL up front means
+            // there is no redirect left to block. Direct browser access and a
+            // new tab were never affected, which is what made this look like a
+            // proxy or CSP problem for the reporter rather than a URL problem.
+            // v4.6.25 — this is now the only place the team-folder URL is
+            // built. TeamWidgetGrid used to carry its own copy for the File
+            // Center's "open folder" link; that link opens this view instead.
+            return generateUrl('/apps/files/') + '?dir=' + encodeURIComponent(path)
         },
-        calendarUrl() {
-            // NC Calendar app requires the full path including view and date suffix.
-            // calendarView is user-selectable from the embed bar dropdown.
-            // calendarDate drives prev/next/today navigation.
-            const cal = this.selectedCalendar || (this.resources.calendar && this.resources.calendar[0])
-            const dateStr = this.calendarDateIso
-            if (cal?.public_token) {
-                return generateUrl('/apps/calendar/p/' + cal.public_token + '/' + this.calendarView + '/' + dateStr)
-            }
-            return generateUrl('/apps/calendar/' + this.calendarView + '/' + dateStr)
-        },
-
-        /** ISO date string (YYYY-MM-DD) for the NC Calendar URL. */
-        calendarDateIso() {
-            const d = this.calendarDate
-            const pad = n => String(n).padStart(2, '0')
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-        },
+        // v4.6.20 — `calendarUrl()` was removed with the iframe it fed. It chose
+        // between `/apps/calendar/p/{public_token}/…` and the plain user route,
+        // and that choice is the whole reason team calendars were published
+        // publicly: the token route was the only way to show one calendar. The
+        // grid renders the team's events directly, so there is no URL to build
+        // and no share to publish. `TeamCalendarGrid` receives `calendarView`
+        // and `calendarDate` as props instead.
 
         /**
          * Human-readable label shown in the embed bar between prev/next buttons.
@@ -699,12 +861,16 @@ export default {
         calendarDateLabel() {
             const d = this.calendarDate
             const view = this.calendarView
-            const locale = document.documentElement.lang || 'en'
+            // These are calendar *positions* built by local arithmetic, not
+            // instants off the wire — the label has to name the day the grid
+            // is showing. So they go through the floating-date path (which is
+            // zone-immune) rather than the viewer's zone, which could shift
+            // a locally-built midnight onto the previous day.
             if (view === 'dayGridMonth' || view === 'listMonth') {
-                return d.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+                return formatIsoDate(toIsoDate(d), { month: 'long', year: 'numeric' })
             }
             if (view === 'timeGridDay' || view === 'listDay') {
-                return d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                return formatIsoDate(toIsoDate(d), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
             }
             // Week views — show Mon–Sun range
             const startOfWeek = new Date(d)
@@ -713,8 +879,8 @@ export default {
             startOfWeek.setDate(d.getDate() + diff)
             const endOfWeek = new Date(startOfWeek)
             endOfWeek.setDate(startOfWeek.getDate() + 6)
-            const startFmt = startOfWeek.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
-            const endFmt   = endOfWeek.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+            const startFmt = formatIsoDate(toIsoDate(startOfWeek), { day: 'numeric', month: 'short' })
+            const endFmt   = formatIsoDate(toIsoDate(endOfWeek), { day: 'numeric', month: 'short', year: 'numeric' })
             return `${startFmt} – ${endFmt}`
         },
 
@@ -805,8 +971,40 @@ export default {
             ]
         },
         deckUrl() {
+            // v4.5.9 — one-shot card deep-link from the upcoming-tasks widget,
+            // cleared by SET_VIEW on leaving the deck tab.
+            if (this.deckEmbedCardUrl) {
+                return this.deckEmbedCardUrl
+            }
             const board = this.selectedDeckBoard || (this.resources.deck && this.resources.deck[0])
             return generateUrl('/apps/deck') + (board ? '/#/board/' + board.board_id : '/')
+        },
+
+        /**
+         * URL of the Wiki (Collectives) iframe tab (v4.3.5). Resolves to the
+         * team's own collective when the widget has cached it via
+         * @collective-loaded; otherwise falls back to Collectives' index page
+         * so the tab still renders instead of showing a blank iframe. The
+         * widget always fires before the tab is opened (mounted with the
+         * layout), so the fallback is only hit on the first render race.
+         *
+         * v4.3.9 — one-shot deep-link precedence: when the store has a
+         * pending collectivesEmbedPageUrl (set by "Create Wiki page"), it
+         * wins so the iframe opens directly on the new page. Cleared by
+         * SET_VIEW when the user navigates away.
+         */
+        collectivesUrl() {
+            // v4.3.11 — wrap the deep-link with generateUrl too. Backend
+            // returns a relative path ('/apps/collectives/…?fileId=…');
+            // installs with URL rewriting disabled need the index.php
+            // prefix generateUrl adds. Without this the iframe silently
+            // top-navigated on some NC setups instead of loading in place.
+            if (this.collectivesEmbedPageUrl) {
+                return generateUrl(this.collectivesEmbedPageUrl)
+            }
+            return this.collectivesCollective?.url
+                ? generateUrl(this.collectivesCollective.url)
+                : generateUrl('/apps/collectives/')
         },
 
         /**
@@ -847,17 +1045,18 @@ export default {
         timelinePeriodLabel() {
             const start = this.timelineWindowStart
             const end   = new Date(TeamView_addPeriod(start, this.timelineViewMode).getTime() - 1)
-            const locale = document.documentElement.lang || 'en'
+            // Calendar positions, same as calendarDateLabel — floating-date
+            // path, not the viewer's zone.
             if (this.timelineViewMode === '1W') {
-                const startFmt = start.toLocaleDateString(locale, { day: 'numeric', month: 'short' })
-                const endFmt   = end.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+                const startFmt = formatIsoDate(toIsoDate(start), { day: 'numeric', month: 'short' })
+                const endFmt   = formatIsoDate(toIsoDate(end), { day: 'numeric', month: 'short', year: 'numeric' })
                 return `${startFmt} – ${endFmt}`
             }
             if (this.timelineViewMode === '1M') {
-                return start.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+                return formatIsoDate(toIsoDate(start), { month: 'long', year: 'numeric' })
             }
-            const startFmt = start.toLocaleDateString(locale, { month: 'short', year: 'numeric' })
-            const endFmt   = end.toLocaleDateString(locale, { month: 'short', year: 'numeric' })
+            const startFmt = formatIsoDate(toIsoDate(start), { month: 'short', year: 'numeric' })
+            const endFmt   = formatIsoDate(toIsoDate(end), { month: 'short', year: 'numeric' })
             return `${startFmt} – ${endFmt}`
         },
 
@@ -1083,6 +1282,14 @@ export default {
     },
 
     watch: {
+        // v4.6.20 — a pin now moves the grid to the event's date rather than
+        // starting a watcher on an iframe that no longer exists.
+        calendarEmbedEvent(ev) {
+            if (ev?.url) {
+                this.$nextTick(() => this.showPinnedCalendarEvent(ev))
+            }
+        },
+
         currentTeamId(newId) {
             if (newId) {
                 this.gridLayout = []
@@ -1091,6 +1298,10 @@ export default {
                 this.editMode = false
                 this.defaultTabAppliedFor = null
                 this.preloadedViews = new Set()
+                // v4.5.10 — re-arm the preload for the new team. Without this
+                // the schedule only ever ran once, in mounted(), so from the
+                // first team switch onwards every tab was a cold load.
+                this.schedulePreload()
                 this.SET_PRESENCE_CONFIG({ presence_enabled: false, hide_reasons: false })
                 this.SET_DECISIONS_CONFIG({ decisions_enabled: false })
                 // loadLayout now includes presenceConfig in its response,
@@ -1133,6 +1344,18 @@ export default {
             },
         },
         timelineConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
+        // v4.3.8 — same rebuild-on-flip pattern for the Wiki (Collectives)
+        // per-team toggle. Without this the Wiki iframe tab never appears
+        // in the tab bar until a page reload, even though buildAllTabDescriptors
+        // already checks collectivesConfig.collectives_enabled. Recurring
+        // gap when adding new config-gated tabs — see the presenceConfig /
+        // decisionsConfig / timelineConfig watchers above.
+        collectivesConfig: {
             deep: true,
             handler() {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
@@ -1191,15 +1414,13 @@ export default {
         },
 
         /**
-         * Re-apply snap when resources change (widget enabled/disabled).
-         * Skipped during edit mode to avoid disrupting drag interactions.
+         * v4.6.1 — the snap call that used to live here is gone; the grid
+         * compacts itself when visibleLayout changes, which is exactly what a
+         * resource appearing or disappearing causes.
          */
         resources: {
             deep: true,
             handler() {
-                if (this.layoutLoaded && !this.editMode) {
-                    this.applySnap()
-                }
                 // v4.2.2 — resource additions/removals change which built-in
                 // tabs isBuiltinTabRenderable considers valid, so the store's
                 // availableTabs (source for the Default-tab select) needs to
@@ -1212,16 +1433,16 @@ export default {
         },
 
         /**
-         * When the user exits edit mode (true → false), apply snap to close any
-         * gaps left from inactive widgets, then immediately save the resulting
-         * layout so the server has the correct positions. Without this, a user
-         * who drags quickly and exits edit mode before the 1.2 s debounce fires
-         * would not have their final arrangement persisted.
+         * When the user exits edit mode (true → false), immediately save so the
+         * server has the final positions. Without this, a user who drags quickly
+         * and exits edit mode before the 1.2 s debounce fires would not have
+         * their arrangement persisted.
+         *
+         * v4.6.1 — the applySnap() that used to run first is gone. The grid has
+         * already compacted during the drag, so gridLayout is current.
          */
         editMode(newVal, oldVal) {
             if (!newVal && oldVal) {
-                // Exiting edit mode — snap first, then save the snapped layout.
-                this.applySnap()
                 this.$nextTick(() => {
                     this.saveLayout()
                 })
@@ -1268,16 +1489,7 @@ export default {
         if (this.currentTeamId) {
             this.loadLayout(this.currentTeamId)
         }
-        const builtinViews = ['talk', 'files', 'calendar', 'deck', 'timeline']
-        builtinViews.forEach((view, i) => {
-            setTimeout(() => {
-                if (!this.preloadedViews.has(view)) {
-                    const next = new Set(this.preloadedViews)
-                    next.add(view)
-                    this.preloadedViews = next
-                }
-            }, 1500 + i * 800)
-        })
+        this.schedulePreload()
 
         // Timeline crowding-badge navigation (v3.78.4) — the timeline.php
         // iframe has no navigation state of its own (view mode + window
@@ -1298,7 +1510,12 @@ export default {
         window.addEventListener('message', this._onTimelineMessage)
     },
 
-    beforeDestroy() {
+    // v4.5.10 — was beforeDestroy(), which Vue 3 never calls, so the media-query
+    // listeners and the timeline message listener below leaked on unmount. The
+    // preload timers added here need real teardown, so this file is fixed too;
+    // the remaining components with the dead hook are logged in HANDOFF.
+    beforeUnmount() {
+        this.cancelPreload()
         for (const key of ['_mobileMql', '_tabletMql']) {
             const mql = this[key]
             const handler = this[key.replace('Mql', 'MqlHandler')]
@@ -1321,9 +1538,59 @@ export default {
     methods: {
         t,
         ...mapActions(['selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_PRESENCE_MODULE_ENABLED', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_MODULE_ENABLED', 'SET_DECISIONS_TARGET', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_TEAM_TYPE', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS', 'SET_DASHBOARD_CONFIG']),
+        // v4.6.15 — the layout bundle's commits moved to the store's
+        // loadTeamLayout action, so the mutations this component mapped only to
+        // unpack that response went with them. What is left is what TeamView
+        // still writes itself.
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_TARGET', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
+
+        /**
+         * Mark a view as preloaded so its iframe is created (and starts
+         * loading) before the user asks for it. Idempotent; replaces the Set so
+         * the v-ifs that read it stay reactive.
+         */
+        preloadView(view) {
+            if (!view || this.preloadedViews.has(view)) {
+                return
+            }
+            const next = new Set(this.preloadedViews)
+            next.add(view)
+            this.preloadedViews = next
+        },
+
+        /**
+         * Stagger the built-in app tabs into existence shortly after a team is
+         * opened, so clicking one is instant rather than a cold NC app boot.
+         *
+         * Runs on mount AND on every team switch — `preloadedViews` is cleared
+         * per team, so a schedule that only fired once left every tab cold from
+         * the first switch onwards (fixed v4.5.10).
+         *
+         * Still staggered: six embedded Nextcloud apps starting at once makes
+         * the team view janky on arrival, which is the moment the user is
+         * actually looking at it. The stagger is much tighter than the original
+         * 1.5–5.5 s, and hover-intent (see TeamTabBar's `preload` event)
+         * short-circuits it for the tab the user is actually reaching for.
+         */
+        schedulePreload() {
+            this.cancelPreload()
+            const views = ['talk', 'files', 'calendar', 'deck', 'collectives', 'timeline']
+            views.forEach((view, i) => {
+                this._preloadTimers.push(
+                    setTimeout(() => this.preloadView(view), 800 + i * 400),
+                )
+            })
+        },
+
+        /** Drop pending preload timers so a previous team's schedule can't fire late. */
+        cancelPreload() {
+            if (Array.isArray(this._preloadTimers)) {
+                this._preloadTimers.forEach(id => clearTimeout(id))
+            }
+            this._preloadTimers = []
+        },
 
         /**
          * Apply the team's configured default tab on first open. The owner/admin
@@ -1391,55 +1658,18 @@ export default {
 
         // ── Layout load / save ──────────────────────────────────────
 
+        /**
+         * v4.6.15 — the bundle's GET and the thirteen per-team commits that
+         * follow it moved to the store's `loadTeamLayout` action, because
+         * Manage Team needs the same facts on the paths where this component
+         * never mounts. What stays here is what is genuinely this component's:
+         * the widget grid and the tab arrangement.
+         */
         async loadLayout(teamId) {
             try {
-                const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`))
+                const data = await this.$store.dispatch('loadTeamLayout', teamId)
                 this.gridLayout        = Array.isArray(data.layout)      ? data.layout      : []
                 this.userDefaultLayout = Array.isArray(data.userDefault) ? data.userDefault : []
-                // Presence module flag and per-team config both arrive with layout — no race.
-                if (typeof data.presenceModuleEnabled === 'boolean') {
-                    this.SET_PRESENCE_MODULE_ENABLED(data.presenceModuleEnabled)
-                }
-                if (data.presenceConfig) {
-                    this.SET_PRESENCE_CONFIG(data.presenceConfig)
-                }
-                // Decisions module flag — default off until getTeam confirms it's on.
-                if (typeof data.decisionsModuleEnabled === 'boolean') {
-                    this.SET_DECISIONS_MODULE_ENABLED(data.decisionsModuleEnabled)
-                }
-                if (data.decisionsConfig) {
-                    this.SET_DECISIONS_CONFIG(data.decisionsConfig)
-                }
-                if (data.timelineConfig) {
-                    this.SET_TIMELINE_CONFIG(data.timelineConfig)
-                }
-                // Messages integration (v3.104.1) — per-team toggle rides along
-                // with the layout, same pattern as timelineConfig.
-                if (data.messagesConfig) {
-                    this.SET_MESSAGES_CONFIG(data.messagesConfig)
-                }
-                // Team-wide dashboard customization (hidden widgets + default
-                // tab) rides along with the layout, same pattern as messagesConfig.
-                if (data.dashboardConfig) {
-                    this.SET_DASHBOARD_CONFIG(data.dashboardConfig)
-                }
-                // Team template label (v4.0.2) — always emitted (null for
-                // legacy teams). Reset the store so switching from a labelled
-                // team to a legacy one clears the badge.
-                this.SET_TEAM_TYPE(data.teamType ?? null)
-                // Budget integration (v3.92.0) — per-team toggle rides along
-                // with the layout, same pattern as timelineConfig.
-                if (data.budgetConfig) {
-                    this.SET_BUDGET_CONFIG(data.budgetConfig)
-                }
-                // Time investment integration (v3.96.0) — same pattern.
-                if (data.timeConfig) {
-                    this.SET_TIME_CONFIG(data.timeConfig)
-                }
-                // Project Teams (v3.88.0) — project fact rides along with the layout.
-                if (data.project) {
-                    this.SET_PROJECT(data.project)
-                }
                 // Project-owner onboarding (v3.90.x) — project is ready now; members
                 // may or may not be (fetchMembers resolves independently via the
                 // store's selectTeam action) — the isTeamAdmin watcher below covers
@@ -1448,7 +1678,6 @@ export default {
                 this.buildOrderedTabs(Array.isArray(data.tabOrder) ? data.tabOrder : [])
                 this.layoutLoaded = true
                 this.applyDefaultTab()
-                this.applySnap()
             } catch (err) {
                 console.warn('[TeamHub][TeamView] loadLayout: failed', err?.message)
                 this.gridLayout = []
@@ -1490,136 +1719,21 @@ export default {
             if (this.layoutLoaded) this._debouncedSave()
         },
 
-        // ── Snap / reflow ───────────────────────────────────────────
+        // ── Widget gating ───────────────────────────────────────────
 
-        /**
-         * Returns the Set of widget IDs that are currently active
-         * (i.e., their v-if condition in TeamWidgetGrid would be true).
-         */
-        getActiveWidgetIds() {
-            const active = new Set()
-            // Always-active widgets.
-            active.add('msgstream')
-            active.add('widget-teaminfo')
-            active.add('widget-members')
-            active.add('widget-activity')
-            // Resource-gated widgets.
-            if (this.resources && this.resources.calendar && this.resources.calendar.length > 0) active.add('widget-calendar')
-            // Tasks widget shows for Deck OR when Tasks app + calendar are both active.
-            if (this.resources && ((this.resources.deck && this.resources.deck.length > 0) || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0))) {
-                active.add('widget-deck')
-            }
-            if (this.resources && this.resources.intravox) active.add('widget-pages')
-            // Files widget — active whenever the team has a files resource.
-            // Mirrors v-if="resources.files && ..." in TeamWidgetGrid.
-            if (this.resources && this.resources.files) active.add('widget-files-center')
-            // Decisions widget — active when the module is enabled globally AND for this team.
-            // Mirrors showDecisionsWidget computed in TeamWidgetGrid.
-            if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
-                active.add('widget-decisions')
-            }
-            // v3.97.3 — Project Health widget. Same gate as
-            // TeamWidgetGrid.showProjectHealthWidget. Without this entry,
-            // applySnap() treats the widget as inactive and parks it at
-            // y=9999 (off-screen), which is what Justin was seeing after
-            // 3.97.0–.2. Missing this method was the root cause, not the
-            // DEFAULT_LAYOUT position or the merge logic.
-            const phase = this.project && this.project.phase
-            if (this.project && this.project.isProject
-                && this.project.mode === 'advanced'
-                && (phase === 'planning' || phase === 'execution')
-                && this.budgetConfig && this.budgetConfig.can_view_budget
-                && this.timeConfig && this.timeConfig.can_view_time) {
-                active.add('widget-project-health')
-            }
-            // Dynamic integration widgets.
-            ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
-            return active
-        },
+        // v4.6.15 — getActiveWidgetIds() and buildDashboardWidgetCatalog() moved
+        // to src/lib/teamTabs.js. Both existed only to feed the store, and the
+        // store is now what builds them, so Manage Team gets the same lists on
+        // the paths where this component never mounts.
 
-        /**
-         * Labeled catalog of the home widgets currently active for this team
-         * (mirrors getActiveWidgetIds), minus the message-stream widget —
-         * Messages visibility is owned by its own integration toggle. Consumed
-         * by Manage Team → Settings → Dashboard for the per-widget show/hide
-         * switches. Integration widgets carry their registry title.
-         */
-        buildDashboardWidgetCatalog() {
-            const labels = {
-                'widget-teaminfo':       t('teamhub', 'Team info'),
-                'widget-members':        t('teamhub', 'Members'),
-                'widget-activity':       t('teamhub', 'Activity'),
-                'widget-calendar':       t('teamhub', 'Calendar'),
-                'widget-deck':           t('teamhub', 'Tasks'),
-                'widget-pages':          t('teamhub', 'Pages'),
-                'widget-files-center':   t('teamhub', 'File center'),
-                'widget-decisions':      t('teamhub', 'Decisions'),
-                'widget-project-health': t('teamhub', 'Project health'),
-            }
-            const catalog = []
-            this.getActiveWidgetIds().forEach(id => {
-                if (id === 'msgstream' || id.startsWith('widget-int-')) return
-                if (labels[id]) catalog.push({ key: id, label: labels[id] })
-            })
-            ;(this.teamWidgets || []).forEach(w => {
-                catalog.push({ key: 'widget-int-' + w.registry_id, label: w.title || t('teamhub', 'Widget') })
-            })
-            return catalog
-        },
-
-        /**
-         * Snap all widgets upward within their column to close gaps left by
-         * inactive (hidden) widgets.
-         *
-         * Strategy:
-         *  - Group widgets by their x position (each unique x = one column).
-         *  - Within each column, sort active widgets by their current y.
-         *  - Repack from y=0 with no gaps between active widgets.
-         *  - Park inactive widgets at y=9999 so they don't take up space.
-         *    (They are already hidden by v-if in TeamWidgetGrid.)
-         *
-         * This handles any layout — single column, two column, user-rearranged.
-         * Applied on load and when resources change; never during edit mode.
-         */
-        applySnap() {
-            if (!this.layoutLoaded || !this.gridLayout.length) return
-
-            const activeIds = this.getActiveWidgetIds()
-            const PARK_Y = 9999
-
-            // Build a map of x → [items in that column].
-            const columns = {}
-            for (const item of this.gridLayout) {
-                const col = item.x
-                if (!columns[col]) columns[col] = []
-                columns[col].push(item)
-            }
-
-            const snapped = []
-            for (const col of Object.keys(columns)) {
-                const items = columns[col]
-
-                const active   = items.filter(item => activeIds.has(item.i))
-                const inactive = items.filter(item => !activeIds.has(item.i))
-
-                // Sort active by current y to preserve user-defined ordering.
-                active.sort((a, b) => a.y - b.y)
-
-                let nextY = 0
-                for (const item of active) {
-                    snapped.push({ ...item, y: nextY })
-                    // A collapsed widget occupies h=1 in the grid.
-                    nextY += item.collapsed ? 1 : item.h
-                }
-
-                // Park inactive items — v-if hides them but they must not occupy space.
-                for (const item of inactive) {
-                    snapped.push({ ...item, y: PARK_Y })
-                }
-            }
-
-            this.gridLayout = snapped
-        },
+        // v4.6.1 — applySnap() removed. It reimplemented the compaction that
+        // grid-layout-plus already does, and got it wrong in two ways: it
+        // grouped columns by exact x equality (so a w=3 widget dragged from
+        // x=9 to x=8 became its own column and repacked to y=0 over the x=9
+        // stack), and it parked inactive widgets at y=9999, which then leaked
+        // into every "bottom of the column" calculation and pushed newly-added
+        // widgets thousands of rows down the page. The grid now runs with
+        // :vertical-compact="true" and compacts during the drag instead.
 
         // ── Default layout actions ──────────────────────────────────
 
@@ -1650,9 +1764,10 @@ export default {
         async resetToDefault() {
             if (!this.userDefaultLayout || !this.userDefaultLayout.length) return
 
-            // Copy default into current layout, then snap for this team's active widgets.
+            // v4.6.1 — copy the default in and let the grid compact it for this
+            // team's active widgets on the next render. The applySnap() that
+            // used to run here did the repack itself, wrongly.
             this.gridLayout = this.userDefaultLayout.map(item => ({ ...item }))
-            this.applySnap()
 
             // Immediately persist the reset so the debounce doesn't race.
             try {
@@ -1668,106 +1783,22 @@ export default {
 
         // ── Tab management ──────────────────────────────────────────
 
-        buildOrderedTabs(savedOrder) {
-            const all = this.buildAllTabDescriptors()
-            const allMap = Object.fromEntries(all.map(t => [t.key, t]))
-            let ordered = []
-            if (savedOrder.length > 0) {
-                savedOrder.forEach(key => { if (allMap[key]) ordered.push(allMap[key]) })
-                all.forEach(tab => { if (!ordered.find(t => t.key === tab.key)) ordered.push(tab) })
-            } else {
-                ordered = all
-            }
-            this.orderedTabs = ordered
-
-            // Publish the selectable tab list (Home + ordered tabs) and the
-            // hideable widget catalog to the store so Manage Team → Settings →
-            // Dashboard can render pickers that match exactly what this member
-            // sees — without duplicating the activation logic over there.
-            //
-            // v4.2.2 — filter out tabs that TeamTabBar.isTabRenderable would
-            // hide anyway (Chat/Files/Calendar/Deck without a backing resource).
-            // Otherwise the Default-tab select offered options that render
-            // nothing for the team. orderedTabs itself is left unfiltered so
-            // saved tab order survives a temporary resource dropout.
-            this.$store.commit('SET_AVAILABLE_TABS', [
-                { key: 'msgstream', label: t('teamhub', 'Home') },
-                ...ordered
-                    .filter(tab => this.isBuiltinTabRenderable(tab.key))
-                    .map(tab => ({ key: tab.key, label: tab.label })),
-            ])
-            this.$store.commit('SET_DASHBOARD_WIDGET_CATALOG', this.buildDashboardWidgetCatalog())
-        },
-
         /**
-         * Mirror of TeamTabBar.isTabRenderable for the four resource-gated
-         * built-in tabs. Non-built-in tabs (presence, decisions, timeline,
-         * budget, time, ext-* integrations, link-* custom links) are already
-         * filtered by their own gates at the point of insertion in
-         * buildAllTabDescriptors, so they always return true here.
+         * Rebuild this component's tab arrangement and republish the store's
+         * dashboard pickers from it.
+         *
+         * v4.6.15 — the gates and the ordering rule moved to
+         * src/lib/teamTabs.js; `orderedTabs` stays here because the user can
+         * drag-reorder it, and it stays unfiltered so a temporary resource
+         * dropout never rewrites the saved tab order. The publish step passes
+         * that arrangement through so the picker matches the tab bar exactly.
          */
-        isBuiltinTabRenderable(key) {
-            const r = this.resources || {}
-            switch (key) {
-            case 'talk':     return !!(r.talk && r.talk.token)
-            case 'files':    return !!(r.files && r.files.path)
-            case 'calendar': return Array.isArray(r.calendar) && r.calendar.length > 0
-            case 'deck':     return Array.isArray(r.deck) && r.deck.length > 0
-            default:         return true
-            }
-        },
-
-        buildAllTabDescriptors() {
-            const tabs = []
-            ;[
-                { key: 'talk',     label: t('teamhub', 'Chat'),     icon: 'Chat' },
-                { key: 'files',    label: t('teamhub', 'Files'),    icon: 'Folder' },
-                { key: 'calendar', label: t('teamhub', 'Calendar'), icon: 'Calendar' },
-                { key: 'deck',     label: t('teamhub', 'Deck'),     icon: 'CardText' },
-            ].forEach(b => tabs.push(b))
-            // Presence tab — only when the NC admin has enabled the module
-            // AND the team admin has enabled it for this specific team.
-            if (this.presenceModuleEnabled && this.presenceConfig && this.presenceConfig.presence_enabled) {
-                tabs.push({ key: 'presence', label: t('teamhub', 'Presence'), icon: 'OfficeBuilding' })
-            }
-            // Decisions tab — same double-gate pattern.
-            if (this.decisionsModuleEnabled && this.decisionsConfig && this.decisionsConfig.decisions_enabled) {
-                tabs.push({ key: 'decisions', label: t('teamhub', 'Decisions'), icon: 'Gavel' })
-            }
-            // Timeline tab — per-team toggle (managed in Manage Team →
-            // Integrations → Internal). Default is on; admins can disable it
-            // for teams that don't need a timeline view. Empty state inside
-            // the iframe handles the no-data case when enabled but no source
-            // has events yet.
-            if (this.timelineConfig && this.timelineConfig.timeline_enabled !== false) {
-                tabs.push({ key: 'timeline', label: t('teamhub', 'Timeline'), icon: 'TimelineCheckOutline' })
-            }
-            // Budget tab — Advanced-mode projects only. Three gates:
-            //  (a) the per-team on/off toggle in Manage Team → Integrations
-            //      (default on).
-            //  (b) the project-level view floor — a caller below the floor
-            //      doesn't see the tab UNLESS
-            //  (c) they are a named editor on any of the project's lanes.
-            // (b)+(c) are precomputed server-side as budgetConfig.can_view_budget.
-            if (this.isAdvancedProject
-                && this.budgetConfig
-                && this.budgetConfig.budget_enabled !== false
-                && this.budgetConfig.can_view_budget !== false) {
-                tabs.push({ key: 'budget', label: t('teamhub', 'Budget'), icon: 'WalletOutline' })
-            }
-            // Time tab — Advanced-mode projects only. Same three-gate pattern
-            // as Budget. can_view_time is precomputed server-side (role floor
-            // OR named project-participant row).
-            if (this.isAdvancedProject
-                && this.timeConfig
-                && this.timeConfig.time_enabled !== false
-                && this.timeConfig.can_view_time !== false) {
-                tabs.push({ key: 'time', label: t('teamhub', 'Time'), icon: 'ClockOutline' })
-            }
-            ;(this.teamMenuItems || []).filter(item => !item.is_builtin)
-                .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            ;(this.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
-            return tabs
+        buildOrderedTabs(savedOrder) {
+            this.orderedTabs = orderTabDescriptors(buildAllTabDescriptors(this.$store.state), savedOrder)
+            this.$store.dispatch('publishTeamTabs', {
+                teamId: this.currentTeamId,
+                ordered: this.orderedTabs,
+            })
         },
 
         async loadPresenceConfig(teamId) {
@@ -1791,7 +1822,7 @@ export default {
         syncExtTabs() {
             const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'presence', 'decisions', 'timeline', 'budget', 'time'])
+            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'collectives', 'presence', 'decisions', 'timeline', 'budget', 'time'])
             this.orderedTabs = [
                 ...this.orderedTabs.filter(t => builtinKeys.has(t.key)),
                 ...extTabs,
@@ -1943,10 +1974,9 @@ export default {
          * that should open in an iframe rather than a new browser tab.
          * Mirrors the normalisation in WebLinkService::normaliseUrl().
          */
-        isNcRelativeUrl(url) {
-            if (!url) return false
-            return url.startsWith('/apps/') || url.startsWith('/index.php/')
-        },
+        // v4.6.15 — the rule lives in src/lib/teamTabs.js, which builds the link
+        // tab descriptors that carry the same flag.
+        isNcRelativeUrl,
 
         /**
          * Build the final iframe src for an NC-relative link tab.
@@ -1961,7 +1991,29 @@ export default {
             return generateUrl('/' + path)
         },
 
+        /**
+         * An internal link was clicked inside one of the embedded NC apps
+         * (v4.5.6, generalised v4.5.11).
+         *
+         * Talk posts shared files as `/f/{id}` links with target="_blank", and
+         * Deck / Calendar / Wiki do the same for their own objects — so clicking
+         * one used to throw the user into a separate browser window, out of the
+         * team context. Route it into the tab that owns it instead.
+         *
+         * The embed has already checked `canOpenInEmbed` and skipped links to
+         * its own app, so by here the target is known-openable.
+         */
+        onEmbedOpenTarget(target) {
+            this.$store.dispatch('openInEmbed', target)
+        },
+
         onCalendarEmbedAction(actionId) {
+            // v4.5.9 — any navigation in the embed bar ends the one-shot event
+            // deep-link, so moving the window does not fight a pin that keeps
+            // pulling it back to the pinned event's date.
+            if (this.calendarEmbedEvent && actionId.startsWith('cal-')) {
+                this.$store.commit('SET_CALENDAR_EMBED_EVENT', null)
+            }
             if (actionId === 'add-event') {
                 this.showAddEvent = true
             } else if (actionId === 'delete-events') {
@@ -1970,7 +2022,11 @@ export default {
                 this.showSuggestMeeting = true
             } else if (actionId === 'cal-today') {
                 this.calendarDate = new Date()
-                this.$nextTick(() => this.$refs.calendarEmbed?.reload())
+                // v4.6.20 — no reload. The grid watches `date`, calls
+                // gotoDate(), and refetches from its own `datesSet` only when
+                // the new window falls outside what it already holds. Forcing a
+                // reload here would put a request behind every arrow press,
+                // including the ones that move within a month already loaded.
             } else if (actionId === 'cal-prev' || actionId === 'cal-next') {
                 const dir = actionId === 'cal-next' ? 1 : -1
                 const d = new Date(this.calendarDate)
@@ -1987,17 +2043,32 @@ export default {
                     d.setDate(d.getDate() + dir * 7)
                 }
                 this.calendarDate = d
-                this.$nextTick(() => this.$refs.calendarEmbed?.reload())
             }
         },
 
         onCalendarEmbedSelect({ id, value }) {
             if (id === 'calendar-view') {
+                // Picking a view means the user is done with the pinned event.
+                if (this.calendarEmbedEvent) {
+                    this.$store.commit('SET_CALENDAR_EMBED_EVENT', null)
+                }
                 this.calendarView = value
-                this.calendarDate = new Date()
-                // calendarUrl recomputes automatically; reload the iframe with the new URL.
-                this.$nextTick(() => this.$refs.calendarEmbed?.reload())
+                // v4.6.20 — the date is deliberately NOT reset to today. The
+                // iframe needed that because each view was a separate URL and
+                // the pinned-event route had to be escaped; the grid keeps its
+                // own position, and throwing the user back to today every time
+                // they switched Month → Week was never the intent.
             }
+        },
+
+        /**
+         * Reload button on the calendar tab (v4.6.20).
+         *
+         * AppEmbed's Reload has nothing to rebind in hosted mode, so it emits
+         * and the grid refetches the window it is showing.
+         */
+        reloadCalendarGrid() {
+            this.$refs.calendarGrid?.refresh()
         },
 
         onTimelineEmbedAction(actionId) {
@@ -2094,13 +2165,54 @@ export default {
             }
         },
 
+        /**
+         * Show an event that something else asked us to open (v4.6.20).
+         *
+         * Replaces `watchCalendarReturn()`, which existed only because the tab
+         * was an iframe. The old flow could not show an event in the team's
+         * agenda at all: an event id resolves only in the personal Calendar
+         * route family, so opening one navigated the frame out of the team
+         * calendar, and a polling watcher waited for the user to leave the
+         * event route so the tab could be put back. Two versions (v4.5.10,
+         * v4.5.13) tried to avoid that and could not — see DESIGN.
+         *
+         * With the grid there is nothing to navigate away from. The event is on
+         * screen already, so all this has to do is move the window to the date
+         * it falls on. The date comes off the end of the URL the backend built:
+         * its last segment is the recurrence id, which is the instance's own
+         * start as a Unix timestamp.
+         */
+        showPinnedCalendarEvent(ev) {
+            const when = TeamView_pinnedEventDate(ev)
+            if (when) {
+                this.calendarDate = when
+            }
+            const cal = (this.resources.calendar || [])
+                .find(c => String(c.id) === String(ev?.calendarId))
+            if (cal) {
+                this.selectedCalendar = cal
+            }
+            // One-shot: the grid has been moved, and leaving the pin set would
+            // drag the view back to this date on the next unrelated re-render.
+            this.$store.commit('SET_CALENDAR_EMBED_EVENT', null)
+        },
+
+        // v4.5.12 — both pickers must drop whatever a widget had pinned.
+        // SET_VIEW only clears a pin when moving to a *different* view, and
+        // these run while the tab is already open, so the pin survived: picking
+        // another calendar rebuilt the URL around an event belonging to the
+        // calendar you just left, and the app quietly showed nothing. Going
+        // Home and back appeared to "fix" it only because leaving the tab
+        // cleared the pin.
         pickDeckBoard(board) {
+            this.$store.commit('SET_DECK_EMBED_CARD_URL', null)
             this.$store.commit('SET_SELECTED_DECK_BOARD', board)
             this.showDeckPicker = false
             this.$store.commit('SET_VIEW', 'deck')
         },
 
         pickCalendar(cal) {
+            this.$store.commit('SET_CALENDAR_EMBED_EVENT', null)
             this.selectedCalendar = cal
             this.showCalendarPicker = false
             this.$store.commit('SET_VIEW', 'calendar')
@@ -2108,13 +2220,31 @@ export default {
 
         async onLeaveTeam() {
             try {
-                await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/leave`), {})
+                const { data } = await axios.post(generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/leave`), {})
+
+                // v4.4.8 — the direct membership is gone but a group or sub-team
+                // still grants access, so the team stays in the sidebar. Bouncing
+                // the user out and saying "you have left" would be a lie they can
+                // disprove by looking at the sidebar. Refresh instead, so the row
+                // comes back at level 0 and the Leave action correctly disappears.
+                if (data?.stillMember) {
+                    showWarning(t('teamhub', 'You are no longer a direct member, but you still have access to this team through a group or another team.'))
+                    await this.$store.dispatch('fetchTeams')
+                    return
+                }
+
                 showSuccess(t('teamhub', 'You have left the team'))
                 this.$store.commit('SET_CURRENT_TEAM', null)
                 await this.$store.dispatch('fetchTeams')
                 this.$emit('team-left')
             } catch (error) {
                 const msg = error.response?.data?.error || ''
+                // 'indirect_member' is a backend sentinel, not a message — it
+                // reached the toast verbatim before v4.4.8.
+                if (msg === 'indirect_member') {
+                    showError(t('teamhub', 'You were added via a group or team. Ask your administrator to remove you.'))
+                    return
+                }
                 showError(msg || t('teamhub', 'Failed to leave team'))
             }
         },
@@ -2126,8 +2256,80 @@ export default {
             this.pagesData.allPages    = data.allPages    || []
         },
 
+        /**
+         * Cache the team's collective so the Wiki iframe tab can deep-link
+         * to it without an extra fetch (v4.3.5). Idempotent — the widget
+         * emits on mount and on refresh(); either payload is fine.
+         */
+        onCollectiveLoaded(data) {
+            this.collectivesCollective = data?.collective || null
+        },
+
         openCreatePage() { this.newPageTitle = ''; this.showCreatePage = true },
         openDeletePage() { this.deletePageTarget = null; this.showDeletePage = true },
+        /**
+         * A page picked in the rail. Commits the deep-link and nothing else:
+         * we are already on the Collectives view, so SET_VIEW would be a
+         * no-op, and the store's clear-on-leave only fires for a view that
+         * is not this one. AppEmbed routes the frame in place from there.
+         */
+        onCollectivePageOpen(url) {
+            this.$store.commit('SET_COLLECTIVES_EMBED_PAGE_URL', url)
+        },
+
+        openCreateWikiPage() { this.newWikiPageTitle = ''; this.showCreateWikiPage = true },
+
+        /**
+         * Create a new page inside the team's collective (v4.3.9). On
+         * success, sets the store's one-shot collectivesEmbedPageUrl so the
+         * Wiki iframe opens directly on the new page, then switches the
+         * view to 'collectives'. The store clears the deep-link on the next
+         * SET_VIEW away from 'collectives' so a later re-open of the tab
+         * lands on the collective's landing page.
+         */
+        async submitCreateWikiPage() {
+            const title = this.newWikiPageTitle.trim()
+            if (!title) return
+            this.creatingWikiPage = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/collectives/pages`),
+                    { title },
+                )
+                if (data?.url) {
+                    // v4.3.11 — commit the deep-link BEFORE showing the
+                    // Wiki view so the AppEmbed mounts with the new URL in
+                    // place, not with the collective's landing URL that
+                    // then swaps a beat later. The old sequence (setView
+                    // before URL commit, or preloadedViews miss) was the
+                    // "opens in a new window" report — some browsers
+                    // navigated top when the iframe's src changed
+                    // mid-mount.
+                    this.$store.commit('SET_COLLECTIVES_EMBED_PAGE_URL', data.url)
+                    // Prime the preload set so the AppEmbed's v-if is
+                    // already true before we flip currentView, avoiding
+                    // any render race.
+                    this.preloadedViews.add('collectives')
+                }
+                showSuccess(t('teamhub', 'Collectives page "{title}" created', { title: data?.title || title }))
+                this.showCreateWikiPage = false
+                // Refresh the widget so the new page shows up in its list too.
+                this.$refs.widgetGrid?.refreshIntravox()
+                // The rail is built from a fetch, so a page created here is
+                // invisible to it until it refetches.
+                this.$refs.collectivesRail?.refresh()
+                // Jump to the Wiki tab — collectivesUrl computed picks up
+                // the deep-link automatically.
+                this.setView('collectives')
+            } catch (e) {
+                const msg = e?.response?.data?.error || e?.response?.data?.message || ''
+                showError(msg
+                    ? t('teamhub', 'Failed to create Collectives page: {error}', { error: msg })
+                    : t('teamhub', 'Failed to create Collectives page'))
+            } finally {
+                this.creatingWikiPage = false
+            }
+        },
 
         async submitCreatePage() {
             const title = this.newPageTitle.trim()
@@ -2266,6 +2468,22 @@ export default {
     overflow: hidden;
     min-height: 0;
     position: relative;
+}
+
+/* Collectives tab: page rail beside the frame (v4.8.8). The rail is a
+   fixed column and the frame takes the rest; min-width:0 on the frame is
+   what stops a wide page inside the iframe from pushing the rail off. */
+.th-collectives-tab {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.th-collectives-tab__frame {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .teamhub-page-delete-list {

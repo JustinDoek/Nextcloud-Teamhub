@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\CirclesMemberType;
 use OCA\TeamHub\Mentions\MentionParser;
 use OCP\App\IAppManager;
 use OCP\IUserSession;
@@ -1376,8 +1377,8 @@ class TalkService {
      * Remove a single member's attendee row(s) from the Talk room connected
      * to $teamId.
      *
-     * Called when a direct member (user_type=1 local OR user_type=4 federated)
-     * leaves or is removed from the team. Talk does not watch for Circles
+     * Called when a direct member (user_type=1 — local, or federated via a
+     * remote instance) leaves or is removed from the team. Talk does not watch for Circles
      * membership changes, so TeamHub must explicitly remove the row to revoke
      * access.
      *
@@ -1902,19 +1903,38 @@ class TalkService {
             return ['added' => 0, 'removed' => 0];
         }
 
-        // Map Circles user_type → Talk actor_type for every member type that
-        // corresponds to a per-person attendee row in talk_attendees.
-        //   1 (local user)  → 'users'
-        //   4 (federated)   → 'federated_users'
+        // Local Nextcloud accounts only → Talk 'users' attendee rows.
+        //
+        // v4.9.2 — this used to map `4 => 'federated_users'` alongside
+        // `1 => 'users'`, on the belief that Circles type 4 meant "federated
+        // user". It does not: type 4 is Member::TYPE_MAIL, an email address
+        // invited into the team. Federation is not a member type at all — a
+        // federated account is TYPE_USER carrying a remote `instance`.
+        //
+        // That mattered more than a wrong comment, because step 4 below INSERTS
+        // an attendee for anything in $effective that is missing. Every mail
+        // member would have been injected into the team's Talk room as a
+        // 'federated_users' attendee whose actor_id was an email address. It
+        // never fired only because the old invite map made type-4 rows
+        // unreachable; correcting that map in the same release would have armed
+        // it. See CirclesMemberType.
+        //
+        // Federated users are deliberately NOT managed here yet. Talk stores
+        // them as 'federated_users' with actor_id = ICloudId::getId(), and
+        // whether that string carries a protocol prefix depends on how the id
+        // was resolved — while circles_member holds user_id and instance in
+        // separate columns. Reconstructing the actor_id wrongly would be worse
+        // than not reconciling: step 5 removes managed attendees absent from
+        // $effective, so a near-miss would delete the real attendee and insert
+        // a duplicate. Establishing the exact format needs a live federated
+        // pair; until then this manages the set it can key exactly, and
+        // federated Talk membership is left to Talk's own circle expansion.
+        // Logged in HANDOFF as an open issue.
+        //
         // 'circles' attendee rows represent the team itself and must never be
-        // touched; group / sub-team / email member types do not produce per-
-        // person attendee rows from the circle-expansion side, so they're
-        // intentionally outside this map.
-        $userTypeToActorType = [
-            1 => 'users',
-            4 => 'federated_users',
-        ];
-        $managedActorTypes = array_values($userTypeToActorType);
+        // touched; group and sub-team members reach the room by expansion, not
+        // as per-person rows from this side.
+        $managedActorTypes = ['users'];
 
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
@@ -1948,23 +1968,22 @@ class TalkService {
             $effective = [];
 
             $eQb  = $db->getQueryBuilder();
-            $eRes = $eQb->select('m.user_id', 'm.user_type')
+            $eRes = $eQb->select('m.user_id', 'm.instance')
                 ->from('circles_membership', 'ms')
                 ->innerJoin('ms', 'circles_member', 'm', $eQb->expr()->andX(
                     $eQb->expr()->eq('m.circle_id', 'ms.single_id'),
-                    $eQb->expr()->in('m.user_type', $eQb->createNamedParameter(
-                        array_keys($userTypeToActorType),
-                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                    $eQb->expr()->eq('m.user_type', $eQb->createNamedParameter(
+                        CirclesMemberType::TYPE_USER,
+                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT
                     )),
                 ))
                 ->where($eQb->expr()->eq('ms.circle_id', $eQb->createNamedParameter($teamId)))
                 ->executeQuery();
             while ($eRow = $eRes->fetch()) {
-                $uid       = (string)($eRow['user_id'] ?? '');
-                $userType  = (int)($eRow['user_type'] ?? 0);
-                $actorType = $userTypeToActorType[$userType] ?? null;
-                if ($uid !== '' && $actorType !== null) {
-                    $effective[$actorType . '|' . $uid] = ['actor_type' => $actorType, 'actor_id' => $uid];
+                $uid = (string)($eRow['user_id'] ?? '');
+                // Remote accounts are skipped, not mapped — see the note above.
+                if ($uid !== '' && CirclesMemberType::isLocalInstance((string)($eRow['instance'] ?? ''))) {
+                    $effective['users|' . $uid] = ['actor_type' => 'users', 'actor_id' => $uid];
                 }
             }
             $eRes->closeCursor();
@@ -1972,21 +1991,19 @@ class TalkService {
             // Safety net: circles_membership can lag for very freshly added
             // direct members. Also fold in the direct membership rows.
             $dQb  = $db->getQueryBuilder();
-            $dRes = $dQb->select('user_id', 'user_type')
+            $dRes = $dQb->select('user_id', 'instance')
                 ->from('circles_member')
                 ->where($dQb->expr()->eq('circle_id', $dQb->createNamedParameter($teamId)))
-                ->andWhere($dQb->expr()->in('user_type', $dQb->createNamedParameter(
-                    array_keys($userTypeToActorType),
-                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY
+                ->andWhere($dQb->expr()->eq('user_type', $dQb->createNamedParameter(
+                    CirclesMemberType::TYPE_USER,
+                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT
                 )))
                 ->andWhere($dQb->expr()->eq('status', $dQb->createNamedParameter('Member')))
                 ->executeQuery();
             while ($dRow = $dRes->fetch()) {
-                $uid       = (string)($dRow['user_id'] ?? '');
-                $userType  = (int)($dRow['user_type'] ?? 0);
-                $actorType = $userTypeToActorType[$userType] ?? null;
-                if ($uid !== '' && $actorType !== null) {
-                    $effective[$actorType . '|' . $uid] = ['actor_type' => $actorType, 'actor_id' => $uid];
+                $uid = (string)($dRow['user_id'] ?? '');
+                if ($uid !== '' && CirclesMemberType::isLocalInstance((string)($dRow['instance'] ?? ''))) {
+                    $effective['users|' . $uid] = ['actor_type' => 'users', 'actor_id' => $uid];
                 }
             }
             $dRes->closeCursor();

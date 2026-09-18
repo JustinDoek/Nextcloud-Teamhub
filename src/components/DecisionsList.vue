@@ -98,6 +98,7 @@
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatDate, formatDateTime } from '../lib/localDate.js'
 import { mapState, mapMutations }                from 'vuex'
 import GavelIcon               from 'vue-material-design-icons/Gavel.vue'
 import AlertCircleOutlineIcon  from 'vue-material-design-icons/AlertCircleOutline.vue'
@@ -231,14 +232,14 @@ export default {
             if (days === 0) return t('teamhub', 'Today')
             if (days === 1) return t('teamhub', 'Yesterday')
             if (days < 7) return n('teamhub', '{n} day ago', '{n} days ago', days, { n: days })
-            return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            return formatDate(ms, { month: 'short', day: 'numeric' })
         },
 
         fullDate(ts) {
             if (!ts) return ''
             const ms = typeof ts === 'number' ? ts * 1000 : Date.parse(ts)
             if (isNaN(ms)) return ''
-            return new Date(ms).toLocaleString()
+            return formatDateTime(ms)
         },
     },
 }

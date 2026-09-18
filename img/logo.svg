@@ -1,0 +1,50 @@
+<!-- width/height are required alongside viewBox: an SVG loaded through <img>
+     with no intrinsic size reports naturalWidth 0 in Chrome and collapses to
+     zero width in a nav bar. -->
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="TeamHub">
+  <title>TeamHub</title>
+  <!-- TeamHub beeldmerk (2026-09 brand sheet), drawn by hand as geometry:
+       a Hub Blue tile split by a Signal Orange diagonal — the team (three
+       silhouettes) on the light field, the hub (one node, four satellites)
+       on the blue. Palette: Hub Blue #245C80, Bridge Blue #328FB7,
+       Signal Orange #FB5000, Accent #7FDDEE. -->
+  <defs>
+    <clipPath id="th-tile"><rect x="2" y="2" width="60" height="60" rx="13"/></clipPath>
+    <!-- The light field: everything above-left of the diagonal x + y = 64. -->
+    <clipPath id="th-field"><path d="M2 2H62L2 62Z"/></clipPath>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="13" fill="#245C80"/>
+  <g clip-path="url(#th-tile)">
+    <path d="M2 2H62L2 62Z" fill="#FFFFFF"/>
+    <!-- The team. Back figures first; the front figure covers their inner
+         shoulders; the field clip cuts whatever runs under the diagonal. -->
+    <g clip-path="url(#th-field)">
+      <g fill="#328FB7">
+        <circle cx="8" cy="22" r="4.4"/>
+        <rect x="0.5" y="28.5" width="12.5" height="14" rx="6.25"/>
+      </g>
+      <g fill="#7FDDEE">
+        <circle cx="37" cy="18" r="4.4"/>
+        <rect x="28" y="25" width="14" height="14" rx="7"/>
+      </g>
+      <circle cx="24" cy="14" r="6.4" fill="#FB5000"/>
+      <rect x="14" y="22.5" width="19" height="20" rx="9.5" fill="#245C80"/>
+    </g>
+    <!-- The diagonal: the band between x + y = 64 and x + y = 70. -->
+    <path d="M2 62L62 2L62 8L8 62Z" fill="#FB5000"/>
+    <!-- The hub. -->
+    <g stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round">
+      <line x1="46" y1="46" x2="34" y2="53"/>
+      <line x1="46" y1="46" x2="53" y2="34"/>
+      <line x1="46" y1="46" x2="56" y2="56"/>
+      <line x1="46" y1="46" x2="38" y2="40"/>
+    </g>
+    <g fill="#FFFFFF">
+      <circle cx="34" cy="53" r="2.6"/>
+      <circle cx="53" cy="34" r="2.6"/>
+      <circle cx="56" cy="56" r="2.6"/>
+      <circle cx="38" cy="40" r="2.6"/>
+    </g>
+    <circle cx="46" cy="46" r="5.2" fill="#FB5000" stroke="#FFFFFF" stroke-width="1.6"/>
+  </g>
+</svg>

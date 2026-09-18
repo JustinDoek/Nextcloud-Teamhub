@@ -18,10 +18,10 @@
                         'comment--solved': messageType === 'question' && c.id === solvedCommentId,
                         'comment--decided-answer': isDecisionAnswer(c),
                     }">
-                    <NcAvatar :user="c.author_id" :display-name="c.author_id" :size="28" />
+                    <NcAvatar :user="c.author_id" :display-name="c.author_display_name || c.author_id" :size="28" />
                     <div class="comment__content">
                         <div class="comment__header">
-                            <span class="comment__author">{{ c.author_id }}</span>
+                            <span class="comment__author">{{ c.author_display_name || c.author_id }}</span>
                             <span class="comment__date">{{ formatDate(c.created_at) }}</span>
                             <!-- Solved badge for the answer -->
                             <span v-if="messageType === 'question' && c.id === solvedCommentId" class="comment__solved-badge">
@@ -86,6 +86,14 @@
                         <!-- View mode -->
                         <!-- eslint-disable-next-line vue/no-v-html -->
                         <div v-else class="comment__body" v-html="renderedComments[c.id]" />
+
+                        <!-- v4.7.4 — edit provenance, same rule as a message:
+                             shown whenever the row was edited, whoever did it.
+                             Hidden while editing, where it would describe the
+                             previous edit rather than the text on screen. -->
+                        <div v-if="editingCommentId !== c.id && editedLine(c)" class="comment__edited">
+                            {{ editedLine(c) }}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -102,7 +110,7 @@
 
             <!-- Add comment (greyed out if question is solved) -->
             <div class="comments-section__add" :class="{ 'comments-section__add--disabled': commentsReadOnly }">
-                <NcAvatar :user="currentUser" :display-name="currentUser" :size="28" />
+                <NcAvatar :user="currentUser" :display-name="currentUserDisplayName" :size="28" />
                 <div class="comments-section__input">
                     <NcRichContenteditable
                         ref="commentEditor"
@@ -119,7 +127,7 @@
                             :aria-label="t('teamhub', 'Bold')"
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
-                            @click="applyMarkdown('**', '**', t('teamhub', 'bold text'))">
+                            @click="applyMarkdown('**', '**')">
                             <template #icon><FormatBold :size="14" /></template>
                         </NcButton>
                         <NcButton
@@ -128,7 +136,7 @@
                             :aria-label="t('teamhub', 'Italic')"
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
-                            @click="applyMarkdown('*', '*', t('teamhub', 'italic text'))">
+                            @click="applyMarkdown('*', '*')">
                             <template #icon><FormatItalic :size="14" /></template>
                         </NcButton>
                         <NcButton
@@ -137,7 +145,7 @@
                             :aria-label="t('teamhub', 'Inline code')"
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
-                            @click="applyMarkdown('`', '`', t('teamhub', 'code'))">
+                            @click="applyMarkdown('`', '`')">
                             <template #icon><CodeTags :size="14" /></template>
                         </NcButton>
                         <NcButton
@@ -146,7 +154,7 @@
                             :aria-label="t('teamhub', 'Code block')"
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
-                            @click="applyMarkdown('```\n', '\n```', t('teamhub', 'code block'))">
+                            @click="applyMarkdown('```\n', '\n```')">
                             <template #icon><CodeBraces :size="14" /></template>
                         </NcButton>
                         <NcButton
@@ -155,7 +163,7 @@
                             :aria-label="t('teamhub', 'Heading')"
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
-                            @click="applyMarkdown('## ', '', t('teamhub', 'Heading'))">
+                            @click="applyMarkdown('## ', '')">
                             <template #icon><FormatHeader2 :size="14" /></template>
                         </NcButton>
                         <NcButton
@@ -164,8 +172,17 @@
                             :aria-label="t('teamhub', 'Bullet list')"
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
-                            @click="applyMarkdown('- ', '', t('teamhub', 'list item'))">
+                            @click="applyList(false)">
                             <template #icon><FormatListBulleted :size="14" /></template>
+                        </NcButton>
+                        <NcButton
+                            variant="tertiary"
+                            :title="t('teamhub', 'Numbered list')"
+                            :aria-label="t('teamhub', 'Numbered list')"
+                            :disabled="commentsReadOnly"
+                            @mousedown.prevent
+                            @click="applyList(true)">
+                            <template #icon><FormatListNumbered :size="14" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -215,6 +232,11 @@
 <script>
 import { mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatDateTime } from '../lib/localDate.js'
+import {
+    buildList, editorHasFocus, focusEditorAtEnd, insertIntoEditor,
+    listMarker, moveCaretBack, resolveEditorElement, selectedText,
+} from '../lib/markdownToolbar.js'
 import { getCurrentUser } from '@nextcloud/auth'
 import { showError } from '@nextcloud/dialogs'
 import { NcAvatar, NcLoadingIcon, NcButton, NcRichContenteditable, NcDialog } from '@nextcloud/vue'
@@ -227,6 +249,7 @@ import FormatBold from 'vue-material-design-icons/FormatBold.vue'
 import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
 import FormatItalic from 'vue-material-design-icons/FormatItalic.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import FormatListNumbered from 'vue-material-design-icons/FormatListNumbered.vue'
 import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
@@ -298,6 +321,7 @@ export default {
         FormatHeader2,
         FormatItalic,
         FormatListBulleted,
+        FormatListNumbered,
         GavelIcon,
         LinkVariant,
         Pencil,
@@ -340,7 +364,7 @@ export default {
         }
     },
     computed: {
-        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin']),
+        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin', 'canComment', 'canManageMessages']),
         comments() { return this.commentsForMessage(this.messageId) },
         /**
          * Memoized map of comment id → sanitized HTML body (perf pass V6).
@@ -360,6 +384,10 @@ export default {
             return map
         },
         currentUser() { return getCurrentUser()?.uid || '' },
+        // v4.3.16 — use the real display name for the composer avatar so
+        // NcAvatar doesn't fall back to rendering the raw UID when its
+        // remote avatar lookup misses.
+        currentUserDisplayName() { return getCurrentUser()?.displayName || getCurrentUser()?.uid || '' },
 
         // ── Decision state ──────────────────────────────────────────────────
 
@@ -383,9 +411,15 @@ export default {
                 || s === 'decided'
         },
 
-        /** Comments are read-only when either a question is solved OR a decision is terminal. */
+        /**
+         * Comments are read-only when either a question is solved, a
+         * decision is terminal, OR the current user's level is below the
+         * per-team commentMinLevel floor (v4.3.1). The role floor is
+         * enforced server-side in MessageService::enforceCommentMinLevel;
+         * mirroring it here keeps the composer from allowing a doomed submit.
+         */
         commentsReadOnly() {
-            return this.questionSolved || this.decisionLocked
+            return this.questionSolved || this.decisionLocked || !this.canComment
         },
 
         commentPlaceholder() {
@@ -404,6 +438,10 @@ export default {
             }
             if (this.questionSolved) {
                 return t('teamhub', 'This question has been solved')
+            }
+            if (!this.canComment) {
+                // TRANSLATORS: shown as the disabled comment-composer placeholder when the team admin has restricted commenting to a higher role than the current user holds.
+                return t('teamhub', 'Commenting is restricted for this team')
             }
             return t('teamhub', 'Write a comment…')
         },
@@ -427,7 +465,29 @@ export default {
     },
     methods: {
         t,
-        formatDate(ts) { return new Date(ts * 1000).toLocaleString() },
+        formatDate(ts) { return formatDateTime(ts * 1000) },
+
+        /**
+         * "Edited by Inge NC on 28 August 2026 at 14:03" for a comment that
+         * has been changed since posting, '' otherwise (v4.7.4).
+         *
+         * A method rather than a computed because it is per-row; the list is
+         * short and this only runs for rows that carry an edit.
+         */
+        editedLine(comment) {
+            if (!comment?.edited_at) {
+                return ''
+            }
+            const who = comment.edited_by_display_name || comment.edited_by
+            if (!who) {
+                return ''
+            }
+            // TRANSLATORS: shown under a comment that has been changed since posting. {name} is who changed it, {datetime} is when.
+            return t('teamhub', 'Edited by {name} on {datetime}', {
+                name: who,
+                datetime: formatDateTime(comment.edited_at * 1000),
+            })
+        },
         startEditComment(comment) {
             this.editingCommentId = comment.id
             this.editCommentText = comment.comment
@@ -448,7 +508,6 @@ export default {
                 this.editingCommentId = null
                 this.editCommentText = ''
             } catch (e) {
-                // showError is not imported here — just log
                 showError(t('teamhub', 'Failed to update comment'))
             } finally {
                 this.savingComment = false
@@ -464,53 +523,82 @@ export default {
         },
 
         // ── Markdown toolbar ──────────────────────────────────────────────
-        // Same mechanic as PostMessageForm: @mousedown.prevent on the buttons
-        // keeps the contenteditable's cursor alive; execCommand fires into it.
-        applyMarkdown(before, after, placeholder = '') {
-        
-            const editorEl = this.$refs.commentEditor?.$el?.querySelector('.rich-contenteditable__input')
-                          || this.$refs.commentEditor?.$el
+        // The mechanics live in src/lib/markdownToolbar.js, shared with the
+        // composer and message edit mode. Only the model property differs
+        // between the three, which is all that is left here. @mousedown.prevent
+        // on the buttons is what keeps the contenteditable's selection alive
+        // while the click is processed.
 
-            if (!editorEl) {
-                this.newComment += before + (placeholder || '') + after
+        /**
+         * @param {string} before Markdown prefix
+         * @param {string} after  Markdown suffix, empty for line prefixes
+         */
+        applyMarkdown(before, after) {
+            const editorEl = resolveEditorElement(this.$refs.commentEditor)
+
+            if (!editorHasFocus(editorEl)) {
+                this.newComment += (this.newComment && !this.newComment.endsWith('\n') ? '\n' : '') + before + after
+                this.$nextTick(() => {
+                    focusEditorAtEnd(editorEl)
+                    moveCaretBack(after.length)
+                })
                 return
             }
 
-            const activeEl = document.activeElement
-            const editorHasFocus = editorEl === activeEl || editorEl.contains(activeEl)
-
-            if (editorHasFocus) {
-                const sel = window.getSelection()
-                const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : (placeholder || '')
-                document.execCommand('insertText', false, before + selectedText + after)
-            } else {
-                const selectedText = placeholder || ''
-                this.newComment += (this.newComment && !this.newComment.endsWith('\n') ? '\n' : '') + before + selectedText + after
-                this.$nextTick(() => editorEl.focus())
+            const selection = selectedText(editorEl)
+            insertIntoEditor(editorEl, before + selection + after)
+            if (!selection) {
+                moveCaretBack(after.length)
             }
         },
 
-        applyLink() {
-            const editorEl = this.$refs.commentEditor?.$el?.querySelector('.rich-contenteditable__input')
-                          || this.$refs.commentEditor?.$el
+        /**
+         * Turn the selection into a list, one item per line.
+         *
+         * @param {boolean} ordered `1. 2. 3.` when true, `- ` when false
+         */
+        applyList(ordered = false) {
+            const editorEl = resolveEditorElement(this.$refs.commentEditor)
 
-            const sel = window.getSelection()
-            const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : ''
-            const label = selectedText || t('teamhub', 'link text')
-
-            if (editorEl && (editorEl === document.activeElement || editorEl.contains(document.activeElement))) {
-                document.execCommand('insertText', false, `[${label}](url)`)
-            } else {
-                this.newComment += `[${label}](url)`
-                this.$nextTick(() => editorEl?.focus())
+            if (!editorHasFocus(editorEl)) {
+                this.newComment += (this.newComment && !this.newComment.endsWith('\n') ? '\n' : '') + listMarker(1, ordered)
+                this.$nextTick(() => focusEditorAtEnd(editorEl))
+                return
             }
+
+            const selection = selectedText(editorEl)
+            insertIntoEditor(editorEl, selection ? buildList(selection, ordered) : listMarker(1, ordered))
+        },
+
+        applyLink() {
+            const editorEl = resolveEditorElement(this.$refs.commentEditor)
+            const label = selectedText(editorEl)
+
+            if (!editorHasFocus(editorEl)) {
+                this.newComment += `[]()`
+                this.$nextTick(() => {
+                    focusEditorAtEnd(editorEl)
+                    moveCaretBack(3)
+                })
+                return
+            }
+
+            insertIntoEditor(editorEl, `[${label}]()`)
+            moveCaretBack(label ? 1 : 3)
         },
         /**
          * Permission predicate for the delete button.
          * Mirrors backend gating (CommentController::deleteComment): the comment
-         * author may always delete their own comment; team admins may delete
-         * any comment. The backend remains authoritative — this is purely a
-         * UI-affordance check, not a security boundary.
+         * author may always delete their own comment; anyone clearing the
+         * team's moderation floor may delete any comment. The backend remains
+         * authoritative — this is purely a UI-affordance check, not a
+         * security boundary.
+         *
+         * v4.7.4 — moderation was `currentUserIsTeamAdmin`; it is now the
+         * team's `manageMinLevel`, which defaults to admin. The decision
+         * locks below deliberately still test *admin*, not the floor: a
+         * decided proposal is frozen by the decision workflow, and lowering
+         * the message-moderation floor is not a statement about that.
          */
         canDeleteComment(comment) {
             if (!comment) return false
@@ -524,18 +612,24 @@ export default {
                 return false
             }
             if (comment.author_id === this.currentUser) return true
-            return this.currentUserIsTeamAdmin
+            return this.canManageMessages
         },
         /**
-         * UI-affordance check for the edit pencil. Same rules as delete,
-         * minus admin-override on terminal decisions (admins can delete to
-         * moderate, but we don't expose an edit affordance to non-authors
-         * even with admin level — editing someone else's content is a
-         * stronger action than removing it).
+         * UI-affordance check for the edit pencil.
+         *
+         * v4.7.4 — a non-author who clears the moderation floor now gets one.
+         * The old comment here argued that editing someone else's content is
+         * a stronger action than removing it, and that is still true — but
+         * the team now chooses that threshold explicitly, and an edit is
+         * recorded and shown under the comment while a delete leaves nothing
+         * behind at all.
+         *
+         * The decision locks stay absolute: unlike delete, there is no
+         * admin override, because a decided proposal's wording is the record.
          */
         canEditComment(comment) {
             if (!comment) return false
-            if (comment.author_id !== this.currentUser) return false
+            if (comment.author_id !== this.currentUser && !this.canManageMessages) return false
             if (this.decisionLocked) return false
             if (this.decision?.selectedCommentId && comment.id === this.decision.selectedCommentId) return false
             return true
@@ -738,10 +832,19 @@ export default {
     margin-left: auto;
 }
 
-.comment__body { 
-    font-size: 13px; 
-    line-height: 1.5; 
-    word-break: break-word; 
+.comment__body {
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+/* v4.7.4 — edit provenance under a comment. Matches the message card's
+   treatment: muted, micro, a fact about the row rather than part of it. */
+.comment__edited {
+    margin-top: 4px;
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-micro);
+    line-height: var(--th-line-height-body);
 }
 
 .comment__body :deep(code) {

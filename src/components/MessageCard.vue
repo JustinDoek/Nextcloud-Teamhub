@@ -40,33 +40,62 @@
                 <span class="message-card__decision-badge-dot" aria-hidden="true">·</span>
                 <span class="message-card__decision-badge-status">{{ statusLabel(decisionStatus) }}</span>
             </span>
-            <!-- Unpin button — shown on the pinned slot to users with pin rights -->
+            <!-- v4.8.7 (GitHub #95) — follow this thread's comments.
+                 Ungated: every member of the team may decide for themselves
+                 whether they hear about replies, and the server re-checks
+                 membership before it sends anything.
+
+                 A real toggle button, not two actions sharing a slot: the
+                 label is stable and names the thing being toggled, `pressed`
+                 carries the state (NcButton turns that into `aria-pressed`
+                 plus the checked style), and the icon shows the same state so
+                 it is not conveyed by styling alone. DESIGN §2.75 is why that
+                 distinction is spelled out here — the Follow toggle removed in
+                 v4.5.40 failed because its two ends were different actions
+                 rather than each other's undo. Subscribe and unsubscribe are
+                 exact inverses. -->
             <NcButton
-                v-if="canPin && isPinnedSlot"
+                variant="tertiary"
+                :pressed="isSubscribed"
+                :disabled="subscriptionSaving"
+                :aria-label="t('teamhub', 'Notify me about new comments')"
+                :title="t('teamhub', 'Notify me about new comments')"
+                @click="toggleSubscription">
+                <template #icon>
+                    <BellOutline v-if="isSubscribed" :size="iconBody" />
+                    <BellOffOutline v-else :size="iconBody" />
+                </template>
+            </NcButton>
+            <!-- Unpin button — shown on the pinned slot to users who can moderate -->
+            <NcButton
+                v-if="canManage && isPinnedSlot"
                 variant="tertiary"
                 :aria-label="t('teamhub', 'Unpin message')"
                 :title="t('teamhub', 'Unpin message')"
                 @click="doUnpin">
                 <template #icon><PinOff :size="16" /></template>
             </NcButton>
-            <!-- Pin button — shown on regular messages to users with pin rights -->
+            <!-- Pin button — shown on regular messages to users who can moderate -->
             <NcButton
-                v-else-if="canPin && !isPinnedSlot"
+                v-else-if="canManage && !isPinnedSlot"
                 variant="tertiary"
                 :aria-label="t('teamhub', 'Pin message')"
                 :title="t('teamhub', 'Pin message')"
                 @click="doPin">
                 <template #icon><Pin :size="16" /></template>
             </NcButton>
+            <!-- v4.7.4 — the author always, plus anyone clearing the team's
+                 moderation floor. Hidden rather than disabled, per SKILLS.md
+                 § Permissions. The service re-checks both. -->
             <NcButton
-                v-if="isAuthor"
+                v-if="canEditThis"
                 variant="tertiary"
                 :aria-label="t('teamhub', 'Edit message')"
                 @click="startEdit">
                 <template #icon><Pencil :size="16" /></template>
             </NcButton>
             <NcButton
-                v-if="isAuthor"
+                v-if="canEditThis"
                 variant="tertiary"
                 :aria-label="t('teamhub', 'Delete message')"
                 @click="confirmDelete">
@@ -96,18 +125,18 @@
                 :link-autocomplete="true"
                 :auto-complete="editMentionAutoComplete"
                 :user-data="mentionsObj" />
-            <!-- Markdown formatting toolbar for the edit body textarea.
-                 Uses selectionStart/End (plain textarea API) rather than
-                 execCommand, so no contenteditable quirks.
-                 @mousedown.prevent keeps the textarea selection alive while
-                 the button click is processed. -->
+            <!-- Markdown formatting toolbar for the edit body.
+                 @mousedown.prevent keeps the editor's selection alive while
+                 the button click is processed. The insertion mechanics are
+                 shared with the composer and the comment box — see
+                 src/lib/markdownToolbar.js. -->
             <div class="message-card__edit-md-toolbar" role="toolbar" :aria-label="t('teamhub', 'Formatting')">
                 <NcButton
                     variant="tertiary"
                     :title="t('teamhub', 'Bold (Ctrl+B)')"
                     :aria-label="t('teamhub', 'Bold')"
                     @mousedown.prevent
-                    @click="applyEditMarkdown('**', '**', t('teamhub', 'bold text'))">
+                    @click="applyEditMarkdown('**', '**')">
                     <template #icon><FormatBold :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -115,7 +144,7 @@
                     :title="t('teamhub', 'Italic (Ctrl+I)')"
                     :aria-label="t('teamhub', 'Italic')"
                     @mousedown.prevent
-                    @click="applyEditMarkdown('*', '*', t('teamhub', 'italic text'))">
+                    @click="applyEditMarkdown('*', '*')">
                     <template #icon><FormatItalic :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -123,7 +152,7 @@
                     :title="t('teamhub', 'Inline code')"
                     :aria-label="t('teamhub', 'Inline code')"
                     @mousedown.prevent
-                    @click="applyEditMarkdown('`', '`', t('teamhub', 'code'))">
+                    @click="applyEditMarkdown('`', '`')">
                     <template #icon><CodeTags :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -131,7 +160,7 @@
                     :title="t('teamhub', 'Code block')"
                     :aria-label="t('teamhub', 'Code block')"
                     @mousedown.prevent
-                    @click="applyEditMarkdown('```\n', '\n```', t('teamhub', 'code block'))">
+                    @click="applyEditMarkdown('```\n', '\n```')">
                     <template #icon><CodeBraces :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -139,7 +168,7 @@
                     :title="t('teamhub', 'Heading')"
                     :aria-label="t('teamhub', 'Heading')"
                     @mousedown.prevent
-                    @click="applyEditMarkdown('## ', '', t('teamhub', 'Heading'))">
+                    @click="applyEditMarkdown('## ', '')">
                     <template #icon><FormatHeader2 :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -147,8 +176,16 @@
                     :title="t('teamhub', 'Bullet list')"
                     :aria-label="t('teamhub', 'Bullet list')"
                     @mousedown.prevent
-                    @click="applyEditMarkdown('- ', '', t('teamhub', 'list item'))">
+                    @click="applyEditList(false)">
                     <template #icon><FormatListBulleted :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    variant="tertiary"
+                    :title="t('teamhub', 'Numbered list')"
+                    :aria-label="t('teamhub', 'Numbered list')"
+                    @mousedown.prevent
+                    @click="applyEditList(true)">
+                    <template #icon><FormatListNumbered :size="16" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -187,7 +224,9 @@
         </template>
 
         <!-- Link / attachment previews -->
-        <div v-if="previews.length" class="message-card__previews">
+        <!-- Delegated so the internal-link takeover covers every preview card
+             without repeating a handler on each anchor. -->
+        <div v-if="previews.length" class="message-card__previews" @click="openInternalLink">
             <template v-for="(preview, i) in previews">
 
                 <!-- Image thumbnail — full-width when the URL is a direct image -->
@@ -287,7 +326,7 @@
                 <span v-if="isPollClosed" class="poll-closed-label">
                     {{
                         // TRANSLATORS: total vote count when poll is closed, e.g. "1 total vote – Poll closed"
-                        n('teamhub', '{total} total vote \u2013 Poll closed', '{total} total votes \u2013 Poll closed', pollResults.totalVotes, { total: pollResults.totalVotes })
+                        n('teamhub', '{total} total vote – Poll closed', '{total} total votes – Poll closed', pollResults.totalVotes, { total: pollResults.totalVotes })
                     }}
                 </span>
                 <span v-else>
@@ -400,8 +439,46 @@
             <span>{{ t('teamhub', 'Question solved') }}</span>
         </div>
 
-        <!-- Footer: comment toggle -->
-        <div class="message-card__footer">
+        <!-- v4.9.9 — a post mirrored from OpenProject news names its source
+             (Justin's review, 2026-09-14: the two footer lines in the body
+             went; this is what replaced them). The pill is the link — to the
+             item in OpenProject, built server-side from the configured host
+             — and a plain pill when the ledger's connection is no longer
+             the current host. -->
+        <div v-if="origin" class="message-card__origin">
+            <span class="message-card__origin-label">{{ t('teamhub', 'Source:') }}</span>
+            <a
+                v-if="origin.url"
+                class="th-widget__pill th-widget__pill--outline message-card__origin-pill"
+                :href="origin.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :title="t('teamhub', 'Open this news item in OpenProject')">
+                {{ t('teamhub', 'OpenProject') }}
+                <OpenInNew :size="iconInline" class="message-card__origin-icon" aria-hidden="true" />
+            </a>
+            <span v-else class="th-widget__pill th-widget__pill--outline message-card__origin-pill">
+                {{ t('teamhub', 'OpenProject') }}
+            </span>
+        </div>
+
+        <!-- v4.7.4 — an edit is recorded, so it is shown. Deliberately not
+             conditional on who made it: a reader of a message that has
+             changed since it was posted is entitled to know that, whether
+             the author fixed their own typo or a moderator rewrote it. The
+             line is the only thing standing between "an owner can edit a
+             message" and "an owner can silently rewrite history". -->
+        <div v-if="editedLine" class="message-card__edited">
+            {{ editedLine }}
+        </div>
+
+        <!-- Footer: comment toggle.
+             v4.5.38 — absent, not disabled, when the team has switched
+             commenting off for this message type. A greyed-out count still
+             tells you a conversation exists somewhere you can't reach; the
+             setting means the reader sees the message only. The role floor is
+             the other case and still greys the composer inside the section. -->
+        <div v-if="commentsAllowedForType" class="message-card__footer">
             <NcButton variant="tertiary" @click="toggleComments">
                 <template #icon><CommentOutline :size="16" /></template>
                 {{ commentLabel }}
@@ -411,7 +488,7 @@
         <!-- Comments section -->
         <Transition name="comments">
             <CommentsSection
-                v-if="commentsOpen"
+                v-if="commentsOpen && commentsAllowedForType"
                 :message-id="message.id"
                 :message-type="message.messageType"
                 :is-author="isAuthor"
@@ -584,7 +661,14 @@
 <script>
 import { mapState, mapGetters, mapMutations } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatDateTime } from '../lib/localDate.js'
 import { generateUrl, generateRemoteUrl } from '@nextcloud/router'
+import { handleInternalLinkClick } from '../lib/internalLinks.js'
+import { renderMarkdown } from '../lib/messageMarkdown.js'
+import {
+    buildList, editorHasFocus, focusEditorAtEnd, insertIntoEditor,
+    listMarker, moveCaretBack, resolveEditorElement, selectedText,
+} from '../lib/markdownToolbar.js'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import { NcAvatar, NcButton, NcLoadingIcon, NcRichContenteditable, NcDialog, NcTextField } from '@nextcloud/vue'
@@ -599,19 +683,27 @@ import Delete from 'vue-material-design-icons/Delete.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
 import Pin from 'vue-material-design-icons/Pin.vue'
 import PinOff from 'vue-material-design-icons/PinOff.vue'
+import BellOutline from 'vue-material-design-icons/BellOutline.vue'
+import BellOffOutline from 'vue-material-design-icons/BellOffOutline.vue'
 import FormatBold from 'vue-material-design-icons/FormatBold.vue'
 import FormatItalic from 'vue-material-design-icons/FormatItalic.vue'
 import CodeTags from 'vue-material-design-icons/CodeTags.vue'
 import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
 import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import FormatListNumbered from 'vue-material-design-icons/FormatListNumbered.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import GavelIcon from 'vue-material-design-icons/Gavel.vue'
+import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import CommentsSection from './CommentsSection.vue'
 import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
+// v4.8.7 — new icon sizes come from the shared scale rather than a literal,
+// per SKILLS.md § Design tokens. ICON_BODY is 16, which is what the icons
+// already in this header use, so nothing shifts visually.
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 // Image extensions we can render as inline thumbnails
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
@@ -680,211 +772,11 @@ function extractUrlObjects(text) {
     return results
 }
 
-// Simple markdown renderer
-import DOMPurify from 'dompurify'
-
-// Tags and attributes that our regex renderer intentionally produces.
-// (img is allowed; its src is constrained by the hook registered below.)
-// DOMPurify drops everything not on these lists — defence-in-depth even if
-// a future regex change accidentally widens the output.
-const ALLOWED_TAGS = ['strong', 'em', 'code', 'pre', 'a', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'span', 'img']
-const ALLOWED_ATTR = ['href', 'target', 'rel', 'class', 'data-mention-user', 'src', 'alt', 'width', 'loading', 'decoding', 'referrerpolicy', 'tabindex', 'role']
-
-// Path of the TeamHub backend image proxy. Every REMOTE image src is rewritten
-// to point here so the viewer's browser never hits the third-party host directly
-// (no IP leak / tracking-pixel surface; satisfies NC's img-src CSP).
-const IMAGE_PROXY_PATH = generateUrl('/apps/teamhub/api/v1/preview/image')
-
-/**
- * Decide what an <img> src is allowed to become, or null to drop the image.
- *
- * Three outcomes:
- *   - Remote https:// URL        → rewrite to the proxy path (?url=<encoded>)
- *   - Same-origin NC path/URL     → pass through unchanged (uploads, previews)
- *   - Anything else (data:, http:,
- *     javascript:, other origins) → null  (image is removed by the sanitizer)
- *
- * The sanitizer hook (below) is the single point that enforces this — the
- * markdown regex never emits a raw remote src, but we still re-derive the safe
- * src here so a future regex change can't widen what actually renders.
- */
-/**
- * Escape a string for safe inclusion inside a double-quoted HTML attribute.
- * DOMPurify is still the authoritative sanitizer; this just prevents the
- * markdown layer from emitting attribute-breaking characters.
- */
-function attrEscape(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-}
-
-function safeImageSrc(rawSrc) {
-    if (!rawSrc) return null
-
-    // Already proxied by us — accept as-is (avoids double-encoding on re-render/edit).
-    if (rawSrc.startsWith(IMAGE_PROXY_PATH)) {
-        return rawSrc
-    }
-
-    // Same-origin: relative path, or an absolute URL whose origin matches the page.
-    // These are NC-served (uploaded images, share previews) and need no proxy.
-    if (rawSrc.startsWith('/')) {
-        // Reject protocol-relative '//evil.com/x' (starts with '/' but is cross-origin).
-        if (rawSrc.startsWith('//')) return null
-        return rawSrc
-    }
-    try {
-        const u = new URL(rawSrc, window.location.origin)
-        if (u.origin === window.location.origin) {
-            return u.pathname + u.search
-        }
-        // Remote: only https is proxied. http/ftp/data/javascript are dropped.
-        if (u.protocol === 'https:') {
-            return IMAGE_PROXY_PATH + '?url=' + encodeURIComponent(u.href)
-        }
-    } catch (e) {
-        return null
-    }
-    return null
-}
-
-// One-time DOMPurify hook: enforce the image src policy and harden every <img>.
-// Runs after DOMPurify has parsed attributes, on every sanitize() call. Because
-// it is the only place that sets the final src, no raw remote/data/http URL can
-// reach the DOM even if the markdown layer is later changed.
-let imageHookRegistered = false
-function ensureImageHook() {
-    if (imageHookRegistered) return
-    imageHookRegistered = true
-    DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-        if (node.nodeName !== 'IMG') return
-
-        const safe = safeImageSrc(node.getAttribute('src'))
-        if (safe === null) {
-            // Disallowed source — remove the element entirely.
-            node.remove()
-            return
-        }
-        node.setAttribute('src', safe)
-
-        // Clamp width to a sane integer (1–2000). Drop anything non-numeric.
-        const w = parseInt(node.getAttribute('width'), 10)
-        if (Number.isFinite(w) && w >= 1 && w <= 2000) {
-            node.setAttribute('width', String(w))
-        } else {
-            node.removeAttribute('width')
-        }
-
-        // Guarantee a frame class, lazy loading, and async decode.
-        node.setAttribute('class', 'teamhub-inline-image')
-        node.setAttribute('loading', 'lazy')
-        node.setAttribute('decoding', 'async')
-        // Never let an inline image carry a referrer to the (proxied) origin.
-        node.setAttribute('referrerpolicy', 'no-referrer')
-        // Keyboard-accessible: focusable and announced as an activatable control
-        // (Enter opens the lightbox, handled by the delegated body listener).
-        node.setAttribute('tabindex', '0')
-        node.setAttribute('role', 'button')
-    })
-}
-
-/**
- * Convert a subset of Markdown to sanitised HTML.
- * @param {string} text - raw message body
- * @param {Object} membersMap - optional { [userId]: displayName } for @mention rendering
- */
-function renderMarkdown(text, membersMap = {}) {
-    if (!text) return ''
-
-    // 1. Fenced code blocks
-    const codeBlocks = []
-    let html = text.replace(/```([\s\S]+?)```/g, (_, code) => {
-        codeBlocks.push(`<pre><code>${code}</code></pre>`)
-        return `\u0000${codeBlocks.length - 1}\u0000`
-    })
-
-    // 2. Inline code
-    const inlineCodes = []
-    html = html.replace(/`([^`]+)`/g, (_, code) => {
-        inlineCodes.push(`<code>${code}</code>`)
-        return `\u0001${inlineCodes.length - 1}\u0001`
-    })
-
-    // 3. @mentions — convert @userId to a styled mention span with display name
-    html = html.replace(/@([a-zA-Z0-9._-]+)/g, (match, userId) => {
-        const displayName = membersMap[userId] || userId
-        return `<span class="teamhub-mention" data-mention-user="${userId}">@${displayName}</span>`
-    })
-
-    // 4. Bold and italic
-    html = html
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/__([^_]+)__/g, '<strong>$1</strong>')
-        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-        .replace(/_([^_]+)_/g, '<em>$1</em>')
-
-    // 4b. Inline images — ![alt](url) and ![alt|320](url) (optional width).
-    //     Emitted BEFORE the link rule so ![..](..) is not eaten by [..](..),
-    //     AND stashed behind a placeholder so the bare-URL autolinker in step 5
-    //     can't match the https:// inside the emitted src="..." attribute.
-    //     (That corruption is exactly what broke v3.58.0.) src/alt are
-    //     attribute-escaped; the final src policy + width clamp are enforced in
-    //     the DOMPurify hook (safeImageSrc) — a src the hook rejects (data:,
-    //     http:, cross-origin) is dropped entirely at sanitize time.
-    const imageTags = []
-    html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, altRaw, urlRaw) => {
-        let alt = altRaw
-        let widthAttr = ''
-        // Optional "|<width>" suffix inside the alt segment: ![alt|320](url)
-        const pipe = altRaw.lastIndexOf('|')
-        if (pipe !== -1) {
-            const maybeWidth = altRaw.slice(pipe + 1).trim()
-            if (/^\d{1,4}$/.test(maybeWidth)) {
-                alt = altRaw.slice(0, pipe)
-                widthAttr = ` width="${maybeWidth}"`
-            }
-        }
-        const safeAlt = attrEscape(alt.trim())
-        const safeUrl = attrEscape(urlRaw)
-        imageTags.push(`<img src="${safeUrl}" alt="${safeAlt}"${widthAttr} />`)
-        return `\u0002${imageTags.length - 1}\u0002`
-    })
-
-    // 5. Links — explicit [text](url) then bare https?:// URLs
-    html = html
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-        .replace(/(?<!href=")(?<!\()https?:\/\/[^\s<>"'\)]+/g, '<a href="$&" target="_blank" rel="noopener noreferrer">$&</a>')
-
-    // 6a. Headings
-    html = html
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-
-    // 6b. Bullet lists
-    html = html.replace(/((?:^- .+(?:\n|$))+)/gm, (block) => {
-        const items = block.trimEnd().split('\n')
-            .map(line => `<li>${line.replace(/^- /, '')}</li>`)
-            .join('')
-        return `<ul>${items}</ul>\n`
-    })
-
-    // 7. Remaining newlines → <br>
-    html = html.replace(/\n/g, '<br>')
-
-    // 8. Restore code + image placeholders
-    html = html
-        .replace(/\u0000(\d+)\u0000/g, (_, i) => codeBlocks[+i])
-        .replace(/\u0001(\d+)\u0001/g, (_, i) => inlineCodes[+i])
-        .replace(/\u0002(\d+)\u0002/g, (_, i) => imageTags[+i])
-
-    // 9. Sanitize
-    ensureImageHook()
-    return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR })
-}
+// v4.6.25 — the markdown pipeline (renderMarkdown, its DOMPurify hook, the
+// tag/attribute allowlists and the image src policy) moved to
+// src/lib/messageMarkdown.js so the What's new feed can render a message
+// body without a second copy of the sanitiser. Imported at the top of this
+// block; nothing about the output changed.
 
 export default {
     name: 'MessageCard',
@@ -901,6 +793,7 @@ export default {
         CheckCircleOutline,
         CheckCircle,
         GavelIcon,
+        OpenInNew,
         Lock,
         Delete,
         Pencil,
@@ -914,19 +807,32 @@ export default {
         CodeBraces,
         FormatHeader2,
         FormatListBulleted,
+        FormatListNumbered,
         LinkVariant,
         ImageIcon,
         FolderIcon,
         Close,
+        BellOutline,
+        BellOffOutline,
     },
     props: {
         message:      { type: Object,  required: true },
-        canPin:       { type: Boolean, default: false },
+        // v4.7.4 — was `canPin`. Pinning and moderating a message are one
+        // permission now (the team's manageMinLevel), so one prop.
+        canManage:    { type: Boolean, default: false },
         isPinnedSlot: { type: Boolean, default: false },
     },
     data() {
         return {
             commentsOpen: false,
+            // v4.8.7 — icon size from the shared scale, exposed the way the
+            // rest of the app exposes it (a data field, because MDI's :size
+            // prop cannot read a CSS variable).
+            iconBody: ICON_BODY,
+            iconInline: ICON_INLINE,
+            // In-flight guard for the subscribe toggle, so a double click
+            // cannot fire two writes that race each other.
+            subscriptionSaving: false,
             pollResults: { votes: {}, userVote: null, totalVotes: 0 },
             votingInProgress: false,
             previews: [],
@@ -954,7 +860,7 @@ export default {
     },
     computed: {
         ...mapState(['members', 'allEffectiveMembers']),
-        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin']),
+        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin', 'commentsEnabledForType']),
         isPriority() { return this.message.priority === 'priority' },
         isPollClosed() { return this.message.pollClosed === true },
         isQuestionSolved() { return this.message.questionSolved === true },
@@ -1022,8 +928,41 @@ export default {
         },
 
         renderedMessage() { return renderMarkdown(this.message.message, this.membersMap) },
+
+        /**
+         * v4.9.9 — where a mirrored post came from. Only the one origin the
+         * server knows how to stamp; the URL is accepted only as https/http,
+         * the same rule the feed's external links follow.
+         */
+        origin() {
+            const o = this.message.origin
+            if (!o || o.kind !== 'openproject') {
+                return null
+            }
+            let url = null
+            if (typeof o.url === 'string' && o.url !== '') {
+                try {
+                    const parsed = new URL(o.url)
+                    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                        url = parsed.href
+                    }
+                } catch (e) {
+                    url = null
+                }
+            }
+            return { url }
+        },
         formattedDate() {
-            return new Date(this.message.created_at * 1000).toLocaleString()
+            return formatDateTime(this.message.created_at * 1000)
+        },
+        /**
+         * v4.5.38 — whether this team takes comments on this message's type.
+         * Reads the current team's settings, which is correct here: the stream
+         * only ever renders one team. The cross-team feed cannot use this and
+         * is answered per row by the server via `can_view_comments`.
+         */
+        commentsAllowedForType() {
+            return this.commentsEnabledForType(this.message.messageType)
         },
         commentCount() { return this.message.comment_count || 0 },
         commentLabel() {
@@ -1048,6 +987,60 @@ export default {
         },
         isAuthor() {
             return this.$store.state.currentUser?.uid === this.message.author_id
+        },
+
+        /**
+         * May the viewer edit or delete THIS message? (v4.7.4)
+         *
+         * The author always can. Anyone else needs the team's moderation
+         * floor, which is what `canManage` carries. Rendering only — the
+         * service checks the same thing before it writes.
+         */
+        canEditThis() {
+            return this.isAuthor || this.canManage
+        },
+
+        /**
+         * Does the viewer get a notification when somebody comments on THIS
+         * message? (v4.8.7, GitHub #95)
+         *
+         * `subscribed` is stamped onto every row the stream fetches, so this
+         * normally just reads it. The fallback covers one real case rather
+         * than being defensive padding: a message the viewer has just posted
+         * goes into the store straight from the create response, which carries
+         * no `subscribed` field. The server's default for a message with no
+         * subscription row is "the author is subscribed", so deriving the same
+         * answer here shows the bell correctly the moment the message appears,
+         * instead of a beat later when the stream is refetched.
+         */
+        isSubscribed() {
+            if (typeof this.message.subscribed === 'boolean') {
+                return this.message.subscribed
+            }
+            return this.isAuthor
+        },
+
+        /**
+         * "Edited by Inge NC on 28 August 2026 at 14:03", or '' if the
+         * message has never been edited.
+         *
+         * `edited_at` is only ever set by a person's edit — a decision
+         * finalisation rewrites the body without stamping it, so this line
+         * never claims somebody edited a message the app rewrote itself.
+         */
+        editedLine() {
+            if (!this.message.edited_at) {
+                return ''
+            }
+            const who = this.message.edited_by_display_name || this.message.edited_by
+            if (!who) {
+                return ''
+            }
+            // TRANSLATORS: shown under a message that has been changed since posting. {name} is who changed it, {datetime} is when.
+            return t('teamhub', 'Edited by {name} on {datetime}', {
+                name: who,
+                datetime: formatDateTime(this.message.edited_at * 1000),
+            })
         },
 
         /** user-data object for NcRichContenteditable — keyed by userId */
@@ -1178,6 +1171,38 @@ export default {
                 )
             }
         },
+        /**
+         * Flip the comment-notification subscription for this message
+         * (v4.8.7, GitHub #95).
+         *
+         * The store commits the state the *server* returned rather than the
+         * one requested, so the toggle can never settle on a value the server
+         * did not accept. On failure nothing is committed, which leaves the
+         * button showing the state that is actually stored.
+         */
+        async toggleSubscription() {
+            if (this.subscriptionSaving) {
+                return
+            }
+            this.subscriptionSaving = true
+            const next = !this.isSubscribed
+            try {
+                await this.$store.dispatch('setMessageSubscription', {
+                    messageId: this.message.id,
+                    subscribed: next,
+                })
+                showSuccess(next
+                    ? t('teamhub', 'You will be notified about new comments')
+                    : t('teamhub', 'You will no longer be notified about new comments'))
+            } catch (e) {
+                showError(next
+                    ? t('teamhub', 'Failed to subscribe to new comments')
+                    : t('teamhub', 'Failed to unsubscribe from new comments'))
+            } finally {
+                this.subscriptionSaving = false
+            }
+        },
+
         async doPin() {
             try {
                 await this.$store.dispatch('pinMessage', {
@@ -1308,64 +1333,88 @@ export default {
         },
 
         // ── Markdown toolbar for edit mode ───────────────────────────────
-        // The edit body is a plain <textarea>, so we use selectionStart /
-        // selectionEnd to locate the cursor and setSelectionRange to restore
-        // it after Vue re-renders. No execCommand needed.
+        // The mechanics live in src/lib/markdownToolbar.js, shared with the
+        // composer and the comment box.
         //
-        // @mousedown.prevent on the toolbar buttons keeps the textarea's
+        // v4.7.18 — these used to address the edit body as a <textarea>,
+        // through selectionStart / selectionEnd. It is an NcRichContenteditable
+        // and has neither property, so `el.selectionStart ?? this.editBody.length`
+        // resolved to "caret at the end of the text" on every press: the
+        // buttons always appended, and a selection was never seen. The `??`
+        // hid it for as long as the buttons still did something visible.
+        //
+        // @mousedown.prevent on the toolbar buttons keeps the editor's
         // selection alive while the click fires.
 
         /**
-         * Wrap the selected text in the textarea with markdown syntax,
-         * or insert `before + placeholder + after` at the cursor when nothing
-         * is selected.
+         * Insert markdown syntax around the current selection.
          *
-         * @param {string} before       Prefix (e.g. '**')
-         * @param {string} after        Suffix (e.g. '**'), empty for line-prefix syntax
-         * @param {string} placeholder  Fallback label when there is no selection
+         * v4.7.17 — no placeholder text. This inserted `**bold text**` when
+         * nothing was selected; the example was never what anyone wanted to
+         * keep, so every use began by deleting it.
+         *
+         * @param {string} before Markdown prefix (e.g. '**')
+         * @param {string} after  Markdown suffix (e.g. '**'), empty for line prefixes
          */
-        applyEditMarkdown(before, after, placeholder = '') {
-            const el = this.$refs.editBodyRef
-            if (!el) {
-                this.editBody += before + (placeholder || '') + after
+        applyEditMarkdown(before, after) {
+            const editorEl = resolveEditorElement(this.$refs.editBodyRef)
+
+            if (!editorHasFocus(editorEl)) {
+                this.editBody += (this.editBody && !this.editBody.endsWith('\n') ? '\n' : '') + before + after
+                this.$nextTick(() => {
+                    focusEditorAtEnd(editorEl)
+                    moveCaretBack(after.length)
+                })
                 return
             }
 
-            const start = el.selectionStart ?? this.editBody.length
-            const end   = el.selectionEnd   ?? this.editBody.length
-            const selected = this.editBody.slice(start, end) || placeholder || ''
-            const replacement = before + selected + after
-
-            this.editBody = this.editBody.slice(0, start) + replacement + this.editBody.slice(end)
-
-            // Restore cursor to end of inserted text after Vue re-renders
-            this.$nextTick(() => {
-                const cursor = start + replacement.length
-                el.focus()
-                el.setSelectionRange(cursor, cursor)
-            })
+            const selection = selectedText(editorEl)
+            insertIntoEditor(editorEl, before + selection + after)
+            if (!selection) {
+                moveCaretBack(after.length)
+            }
         },
 
         /**
-         * Insert a Markdown link at the cursor, using the current selection
-         * (if any) as the link label.
+         * Turn the selection into a bullet or numbered list, one item per line.
+         *
+         * @param {boolean} ordered `1. 2. 3.` when true, `- ` when false
+         */
+        applyEditList(ordered = false) {
+            const editorEl = resolveEditorElement(this.$refs.editBodyRef)
+
+            if (!editorHasFocus(editorEl)) {
+                this.editBody += (this.editBody && !this.editBody.endsWith('\n') ? '\n' : '') + listMarker(1, ordered)
+                this.$nextTick(() => focusEditorAtEnd(editorEl))
+                return
+            }
+
+            const selection = selectedText(editorEl)
+            insertIntoEditor(editorEl, selection ? buildList(selection, ordered) : listMarker(1, ordered))
+        },
+
+        /**
+         * Insert a Markdown link, using the current selection as the label.
+         *
+         * v4.7.17 — no `link text` / `url` placeholders. The caret lands where
+         * the missing half goes: inside the parentheses when a label came from
+         * the selection, inside the brackets when it did not.
          */
         applyEditLink() {
-            const el = this.$refs.editBodyRef
-            const start = el?.selectionStart ?? this.editBody.length
-            const end   = el?.selectionEnd   ?? this.editBody.length
-            const selected = this.editBody.slice(start, end)
-            const label = selected || t('teamhub', 'link text')
-            const replacement = `[${label}](url)`
+            const editorEl = resolveEditorElement(this.$refs.editBodyRef)
+            const label = selectedText(editorEl)
 
-            this.editBody = this.editBody.slice(0, start) + replacement + this.editBody.slice(end)
+            if (!editorHasFocus(editorEl)) {
+                this.editBody += `[]()`
+                this.$nextTick(() => {
+                    focusEditorAtEnd(editorEl)
+                    moveCaretBack(3)
+                })
+                return
+            }
 
-            this.$nextTick(() => {
-                if (el) {
-                    el.focus()
-                    el.setSelectionRange(start + replacement.length, start + replacement.length)
-                }
-            })
+            insertIntoEditor(editorEl, `[${label}]()`)
+            moveCaretBack(label ? 1 : 3)
         },
 
         // ── Insert image by URL (edit toolbar) ───────────────────────────────
@@ -1391,17 +1440,20 @@ export default {
             const widthSeg = (Number.isFinite(w) && w >= 1 && w <= 2000) ? `|${w}` : ''
             const snippet = `![${alt}${widthSeg}](${url})`
 
-            const el = this.$refs.editBodyRef
-            if (el) {
-                const start = el.selectionStart ?? this.editBody.length
-                const end   = el.selectionEnd   ?? this.editBody.length
-                this.editBody = this.editBody.slice(0, start) + snippet + this.editBody.slice(end)
-                this.$nextTick(() => {
-                    el.focus()
-                    el.setSelectionRange(start + snippet.length, start + snippet.length)
-                })
+            // v4.7.18 — this carried the same stale <textarea> assumption as
+            // the toolbar did, and it was the worse of the two: `el` is the
+            // NcRichContenteditable component, so `el.focus()` and
+            // `el.setSelectionRange()` are not functions and the $nextTick
+            // callback threw every time an image was inserted while editing.
+            // Confirming the dialog means focus is in the dialog, not the
+            // editor, so appending and then focusing is also the honest
+            // behaviour — there is no caret to insert at.
+            const editorEl = resolveEditorElement(this.$refs.editBodyRef)
+            if (editorHasFocus(editorEl)) {
+                insertIntoEditor(editorEl, snippet)
             } else {
                 this.editBody += (this.editBody && !this.editBody.endsWith('\n') ? '\n' : '') + snippet
+                this.$nextTick(() => focusEditorAtEnd(editorEl))
             }
             this.imageDialogOpen = false
         },
@@ -1479,6 +1531,13 @@ export default {
          * sanitised (proxied / same-origin) value — no second trust path.
          */
         onBodyClick(event) {
+            // v4.5.6, generalised v4.5.11 — an attachment or a pasted link
+            // pointing at something one of our tabs owns (file, Deck card,
+            // calendar event, wiki page) opens there instead of a new browser
+            // tab. Anything else — external links, old share-landing attachment
+            // URLs, tabs this team does not have — is left alone.
+            if (this.openInternalLink(event)) return
+
             const img = event.target.closest && event.target.closest('img.teamhub-inline-image')
             if (!img) return
             event.preventDefault()
@@ -1488,6 +1547,23 @@ export default {
                 const box = document.querySelector('.teamhub-lightbox')
                 box?.focus()
             })
+        },
+
+        /**
+         * If the click landed on a link this instance owns, open it in the tab
+         * that owns it instead of a new browser tab, and report that we handled
+         * it (v4.5.6, generalised to all tab types in v4.5.11).
+         *
+         * Covers both the rendered message body and the attachment preview
+         * cards. Attachments posted before 4.5.7 carry a share-landing or DAV
+         * URL with no file id in it — those do not match and keep working as
+         * external links.
+         *
+         * @param {MouseEvent} event
+         * @return {boolean} true when the click was taken over
+         */
+        openInternalLink(event) {
+            return handleInternalLinkClick(event, this.$store)
         },
 
         closeLightbox() {
@@ -1858,6 +1934,52 @@ export default {
     color: var(--color-primary-element);
     font-weight: 500;
     cursor: default;
+}
+
+/* v4.7.4 — the edit provenance line. Quiet by design: it is a fact about
+   the message, not part of it, so it takes the muted meta treatment rather
+   than competing with the body. Sits above the comment toggle, so it reads
+   as the last word on the message itself. */
+.message-card__edited {
+    margin-top: 12px;
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-micro);
+    line-height: var(--th-line-height-body);
+}
+
+/* v4.9.9 — the Source line of a mirrored OpenProject news item: the same
+   muted meta treatment as the edited line, the pill in the feed's
+   OpenProject ink so the two places the item appears agree. */
+.message-card__origin {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-xs);
+    margin-top: var(--th-space-md);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-micro);
+    line-height: var(--th-line-height-body);
+}
+
+.message-card__origin-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--th-space-xxs);
+    color: var(--th-feed-openproject-ink);
+    text-decoration: none;
+}
+
+a.message-card__origin-pill:hover,
+a.message-card__origin-pill:focus-visible {
+    background: var(--th-feed-openproject-soft);
+}
+
+a.message-card__origin-pill:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+}
+
+.message-card__origin-icon {
+    display: inline-flex;
 }
 
 .message-card__footer {

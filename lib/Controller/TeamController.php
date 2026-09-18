@@ -16,6 +16,9 @@ use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\MilestoneService;
+use OCA\TeamHub\Service\OpenProject\OpenProjectMessages;
+use OCA\TeamHub\Service\OpenProject\OpenProjectModuleService;
+use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
 use OCA\TeamHub\Service\PolicyService;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\ResourceService;
@@ -37,6 +40,10 @@ use Psr\Log\LoggerInterface;
 
 class TeamController extends Controller {
     use ExceptionResponseTrait;
+    // v4.9.4 — createTeam() answers a refused OpenProject link with the same
+    // status and `code` OpenProjectController would, so the wizard branches
+    // on one vocabulary.
+    use OpenProjectResponseTrait;
 
     public function __construct(
         string $appName,
@@ -77,6 +84,14 @@ class TeamController extends Controller {
         // v4.6.26 — decides whether a compose URL points at Nextcloud Mail or
         // hands off to the OS handler. Backs the sidebar's Email all members.
         private MailClientService $mailClientService,
+        // v4.9.4 — an OpenProject team is created with its project or not at
+        // all: the link is checked before the circle exists and made right
+        // after, inside createTeam(). See TeamOpenProjectLinkService.
+        private TeamOpenProjectLinkService $openProjectLinks,
+        private OpenProjectMessages $openProjectMessages,
+        // v4.9.16 — the OpenProject module gate, for the one route here that
+        // makes an OpenProject team.
+        private OpenProjectModuleService $openProjectModule,
         private IConfig $config,
         private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
         private IUserSession $userSession,
@@ -160,6 +175,18 @@ class TeamController extends Controller {
      * `templateKey` is the fallback: a caller that is not the wizard and sends
      * no policy gets the template's default rather than an unclassified team.
      * Both are optional on the wire so an older client keeps working.
+     *
+     * `openProjectId` (v4.9.4) is **required with, and only with,** the
+     * `openproject` template: the OpenProject project this team is the
+     * workspace for. Everything that can refuse the link — the creator's
+     * connection, their right to the project, another team holding it — is
+     * checked **before the circle exists**, and the link is written right
+     * after, so a refused project never produces a team (Justin, 2026-09-12:
+     * a refused link is fatal to the creation, not a warning on its success
+     * screen). A refusal answers with the OpenProject status and `code`
+     * (409 `project_already_linked`, 403, 404, 412, 422, …) and the wizard
+     * returns the creator to the project picker. The response carries the
+     * link as `openProject` when one was made.
      */
     #[NoAdminRequired]
     public function createTeam(
@@ -167,8 +194,21 @@ class TeamController extends Controller {
         string $description = '',
         string $profileKey = '',
         string $templateKey = '',
+        int $openProjectId = 0,
     ): JSONResponse {
         try {
+            $linkOpenProject = $templateKey === TeamOpenProjectLinkService::TEMPLATE || $openProjectId > 0;
+            if ($linkOpenProject) {
+                // v4.9.16 — no OpenProject team without the OpenProject module.
+                // The link service would refuse on its first read anyway; this
+                // is the explicit line, before anything is checked as the user.
+                $gate = $this->openProjectModuleGate();
+                if ($gate !== null) {
+                    return $gate;
+                }
+                $this->openProjectLinks->assertLinkableForNewTeam($templateKey, $openProjectId);
+            }
+
             $team   = $this->teamService->createTeam($name);
             $teamId = (string)($team['id'] ?? '');
 
@@ -183,12 +223,27 @@ class TeamController extends Controller {
                     // what makes them land without a second code path.
                     $this->teamService->applyPolicyConfig($teamId);
                 }
+                if ($linkOpenProject) {
+                    // Types the team and links it, or deletes the team again
+                    // and rethrows — see TeamOpenProjectLinkService::linkNewTeam.
+                    $team['openProject'] = $this->openProjectLinks->linkNewTeam($teamId, $openProjectId);
+                }
             }
 
             return new JSONResponse($team, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
-            return $this->exceptionResponse($e, 'Failed to create team');
+            return $this->openProjectFailure($e, 'Failed to create team');
         }
+    }
+
+    /** For OpenProjectResponseTrait (v4.9.4). */
+    protected function openProjectMessages(): OpenProjectMessages {
+        return $this->openProjectMessages;
+    }
+
+    /** For `OpenProjectResponseTrait::openProjectModuleGate()` (v4.9.16). */
+    protected function openProjectModuleCode(): ?string {
+        return $this->openProjectModule->unavailableCode();
     }
 
     /**
@@ -2123,6 +2178,14 @@ class TeamController extends Controller {
             return new JSONResponse([
                 'config' => $this->teamService->getTeamConfig($teamId),
                 'policy' => $this->policyService->governanceSummaryFor($teamId),
+                // v4.9.2 — the resolved federation state. `policy` already tells
+                // the client which bits a profile fixes, but federation has a
+                // level above the profile (the instance-wide "Allowed invite
+                // types" setting) that the policy summary cannot express. The
+                // settings screen needs to grey the control and say which of the
+                // two decided, so it is resolved once here rather than
+                // reassembled in the browser.
+                'federation' => $this->memberService->resolveFederationSetting($teamId),
             ]);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to load team config', [

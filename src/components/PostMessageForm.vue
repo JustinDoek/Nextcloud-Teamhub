@@ -18,16 +18,21 @@
                 <HelpCircleOutline :size="16" />
                 {{ t('teamhub', 'Question') }}
             </label>
-            <label
-                v-if="decisionsAvailable"
-                class="post-form__type-option"
-                :class="{ active: messageType === 'decision' }">
-                <input v-model="messageType" type="radio" value="decision">
-                <GavelIcon :size="16" />
-                {{ t('teamhub', 'Decision') }}
-            </label>
+            <!-- v4.5.42 — Decision is no longer a message type you pick here.
+                 It had its own workflow (open → discuss in comments → finalize)
+                 that the compose modal's (finalize immediately) did not share,
+                 so the same feature behaved differently depending on which
+                 button you happened to press. Proposals now start in one place,
+                 the Decisions tab / widget `+`, which is also where the three
+                 share modes live. `forceDecision` still drives that modal. -->
         </div>
 
+        <!-- v4.5.44 — the subject and body sit in a row so a caller can put
+             something alongside them. ComposeDecisionModal fills `aside` with
+             the lifecycle rail. With no slot content the aside collapses and
+             the row is indistinguishable from the previous stacked layout. -->
+        <div class="post-form__fields" :class="{ 'post-form__fields--with-aside': $slots.aside }">
+            <div class="post-form__fields-main">
         <NcTextField
             v-model="subject"
             :label="subjectLabel"
@@ -56,7 +61,7 @@
                     :title="t('teamhub', 'Bold (Ctrl+B)')"
                     :aria-label="t('teamhub', 'Bold')"
                     @mousedown.prevent
-                    @click="applyMarkdown('**', '**', t('teamhub', 'bold text'))">
+                    @click="applyMarkdown('**', '**')">
                     <template #icon><FormatBold :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -64,7 +69,7 @@
                     :title="t('teamhub', 'Italic (Ctrl+I)')"
                     :aria-label="t('teamhub', 'Italic')"
                     @mousedown.prevent
-                    @click="applyMarkdown('*', '*', t('teamhub', 'italic text'))">
+                    @click="applyMarkdown('*', '*')">
                     <template #icon><FormatItalic :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -72,7 +77,7 @@
                     :title="t('teamhub', 'Inline code')"
                     :aria-label="t('teamhub', 'Inline code')"
                     @mousedown.prevent
-                    @click="applyMarkdown('`', '`', t('teamhub', 'code'))">
+                    @click="applyMarkdown('`', '`')">
                     <template #icon><CodeTags :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -80,7 +85,7 @@
                     :title="t('teamhub', 'Code block')"
                     :aria-label="t('teamhub', 'Code block')"
                     @mousedown.prevent
-                    @click="applyMarkdown('```\n', '\n```', t('teamhub', 'code block'))">
+                    @click="applyMarkdown('```\n', '\n```')">
                     <template #icon><CodeBraces :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -88,7 +93,7 @@
                     :title="t('teamhub', 'Heading')"
                     :aria-label="t('teamhub', 'Heading')"
                     @mousedown.prevent
-                    @click="applyMarkdown('## ', '', t('teamhub', 'Heading'))">
+                    @click="applyMarkdown('## ', '')">
                     <template #icon><FormatHeader2 :size="16" /></template>
                 </NcButton>
                 <NcButton
@@ -96,8 +101,16 @@
                     :title="t('teamhub', 'Bullet list')"
                     :aria-label="t('teamhub', 'Bullet list')"
                     @mousedown.prevent
-                    @click="applyMarkdown('- ', '', t('teamhub', 'list item'))">
+                    @click="applyList(false)">
                     <template #icon><FormatListBulleted :size="16" /></template>
+                </NcButton>
+                <NcButton
+                    variant="tertiary"
+                    :title="t('teamhub', 'Numbered list')"
+                    :aria-label="t('teamhub', 'Numbered list')"
+                    @mousedown.prevent
+                    @click="applyList(true)">
+                    <template #icon><FormatListNumbered :size="16" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -187,6 +200,15 @@
                 </div>
             </div>
         </div>
+            </div><!-- /post-form__fields-main -->
+
+            <!-- v4.5.46 — the aside is now the RIGHT column. It is a progress
+                 indicator, not an input: reading order should reach the fields
+                 first, and on the mobile stack below it belongs under them. -->
+            <div v-if="$slots.aside" class="post-form__fields-aside">
+                <slot name="aside" />
+            </div>
+        </div><!-- /post-form__fields -->
 
         <!-- Poll options -->
         <div v-if="messageType === 'poll'" class="post-form__poll-options">
@@ -232,72 +254,69 @@
                 </button>
             </div>
 
-            <div class="decision-field">
-                <label class="post-form__label" for="decision-impact">
-                    {{ t('teamhub', 'Impact') }}
-                    <span class="decision-required" aria-hidden="true">*</span>
-                </label>
-                <div id="decision-impact" class="decision-impact-row" role="radiogroup" :aria-label="t('teamhub', 'Decision impact')">
-                    <label
-                        v-for="opt in impactOptions"
-                        :key="opt.value"
-                        class="decision-impact-chip"
-                        :class="{ active: decisionImpact === opt.value, ['decision-impact-chip--' + opt.value]: true }">
-                        <input
-                            v-model="decisionImpact"
-                            type="radio"
-                            name="decision-impact-radio"
-                            :value="opt.value">
-                        <span>{{ opt.label }}</span>
-                    </label>
-                </div>
-            </div>
-
-            <!-- Level picker — only rendered when the per-team toggle is on -->
-            <div v-if="decisionsLevelEnabled" class="decision-field">
-                <label class="post-form__label" for="decision-level">
-                    {{ t('teamhub', 'Level') }}
-                </label>
-                <div id="decision-level" class="decision-impact-row" role="radiogroup" :aria-label="t('teamhub', 'Decision level')">
-                    <label
-                        v-for="opt in levelOptions"
-                        :key="opt.value"
-                        class="decision-impact-chip decision-level-chip"
-                        :class="{ active: decisionLevel === opt.value }">
-                        <input
-                            v-model="decisionLevel"
-                            type="radio"
-                            name="decision-level-radio"
-                            :value="opt.value">
-                        <span>{{ opt.label }}</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="decision-field">
-                <label class="post-form__label" for="decision-category">
-                    {{ t('teamhub', 'Category') }}
-                    <span class="decision-required" aria-hidden="true">*</span>
-                </label>
-
-                <!-- No categories yet — admin warning -->
-                <div v-if="!loadingCategories && !decisionCategoryOptions.length" class="decision-category-empty" role="alert">
-                    <!-- TRANSLATORS: Shown in the message composer when no decision categories have been set up for this team -->
-                    {{ t('teamhub', 'No decision categories have been set up for this team. Ask a team admin to add categories in Manage team → Decisions.') }}
+            <!-- v4.5.46 — Impact / Level / Category as one two-row grid.
+                 They were three stacked blocks, each with its own label line
+                 and a row of chips: about 180px of modal for three values that
+                 fit on one line. Header row names them, selector row picks
+                 them, equal columns keep the two aligned. -->
+            <div class="decision-meta" :class="{ 'decision-meta--no-level': !decisionsLevelEnabled }">
+                <div class="decision-meta__head">
+                    <span class="decision-meta__cell-label">
+                        {{ t('teamhub', 'Impact') }}
+                        <span class="decision-required" aria-hidden="true">*</span>
+                    </span>
+                    <span v-if="decisionsLevelEnabled" class="decision-meta__cell-label">
+                        {{ t('teamhub', 'Level') }}
+                    </span>
+                    <span class="decision-meta__cell-label">
+                        {{ t('teamhub', 'Category') }}
+                        <span class="decision-required" aria-hidden="true">*</span>
+                    </span>
                 </div>
 
-                <NcSelect
-                    v-else
-                    id="decision-category"
-                    v-model="decisionCategory"
-                    :options="decisionCategoryOptions"
-                    :loading="loadingCategories"
-                    :clearable="false"
-                    :searchable="true"
-                    :placeholder="t('teamhub', 'Pick a category')"
-                    label="name"
-                    track-by="id"
-                    :aria-label="t('teamhub', 'Decision category')" />
+                <div class="decision-meta__row">
+                    <select
+                        id="decision-impact"
+                        v-model="decisionImpact"
+                        class="decision-meta__select"
+                        :aria-label="t('teamhub', 'Decision impact')">
+                        <option v-for="opt in impactOptions" :key="opt.value" :value="opt.value">
+                            {{ opt.label }}
+                        </option>
+                    </select>
+
+                    <select
+                        v-if="decisionsLevelEnabled"
+                        id="decision-level"
+                        v-model="decisionLevel"
+                        class="decision-meta__select"
+                        :aria-label="t('teamhub', 'Decision level')">
+                        <option v-for="opt in levelOptions" :key="opt.value" :value="opt.value">
+                            {{ opt.label }}
+                        </option>
+                    </select>
+
+                    <!-- No categories yet — the picker cannot be filled, so it
+                         is replaced rather than shown empty and disabled. -->
+                    <span
+                        v-if="!loadingCategories && !decisionCategoryOptions.length"
+                        class="decision-meta__empty"
+                        role="alert">
+                        <!-- TRANSLATORS: Shown in the message composer when no decision categories have been set up for this team -->
+                        {{ t('teamhub', 'No decision categories have been set up for this team. Ask a team admin to add categories in Manage team → Decisions.') }}
+                    </span>
+                    <select
+                        v-else
+                        id="decision-category"
+                        v-model="decisionCategoryId"
+                        class="decision-meta__select"
+                        :disabled="loadingCategories"
+                        :aria-label="t('teamhub', 'Decision category')">
+                        <option v-for="opt in decisionCategoryOptions" :key="opt.id" :value="opt.id">
+                            {{ opt.name }}
+                        </option>
+                    </select>
+                </div>
             </div>
 
             <!-- v3.97.5 — Milestone picker. Advanced project teams only.
@@ -335,7 +354,7 @@
 
         <!-- v4.2.11 — Public visibility toggle. Only surfaced for plain
              Message posts on teams whose admin has enabled it in Manage Team
-             → Integration settings → Messages. Backend forces the flag off
+             → Module settings → Messages. Backend forces the flag off
              for polls / questions / decisions and when the team setting is
              off, so hiding the checkbox client-side is UX polish, not the
              security boundary. -->
@@ -361,6 +380,12 @@
                 </template>
             </NcButton>
         </div>
+
+        <!-- v4.5.42 — the last thing before the buttons. ComposeDecisionModal
+             fills this with the share-mode chooser: "how should this be
+             handled" is a question about the finished proposal, so it reads
+             better after the proposal than before it. -->
+        <slot name="before-actions" />
 
         <!-- Actions -->
         <div class="post-form__actions">
@@ -440,6 +465,11 @@
 import { mapState, mapActions } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateRemoteUrl, generateUrl } from '@nextcloud/router'
+import { fileOpenUrl } from '../lib/filesCollab.js'
+import {
+    buildList, editorHasFocus, focusEditorAtEnd, insertIntoEditor,
+    listMarker, moveCaretBack, resolveEditorElement, selectedText,
+} from '../lib/markdownToolbar.js'
 import { getCurrentUser } from '@nextcloud/auth'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
@@ -454,7 +484,6 @@ import {
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
 import PollIcon from 'vue-material-design-icons/Poll.vue'
-import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
@@ -467,6 +496,7 @@ import CodeTags from 'vue-material-design-icons/CodeTags.vue'
 import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
 import FormatHeader2 from 'vue-material-design-icons/FormatHeader2.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import FormatListNumbered from 'vue-material-design-icons/FormatListNumbered.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -478,10 +508,10 @@ export default {
     name: 'PostMessageForm',
     components: {
         NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon, NcDialog, NcSelect,
-        MessageOutline, HelpCircleOutline, PollIcon, GavelIcon, Plus, Close, Send, SwapHorizontal,
+        MessageOutline, HelpCircleOutline, PollIcon, Plus, Close, Send, SwapHorizontal,
         Paperclip, LinkVariant,
         FormatBold, FormatItalic, CodeTags, CodeBraces,
-        FormatHeader2, FormatListBulleted, ImageIcon, FolderIcon, InformationOutline,
+        FormatHeader2, FormatListBulleted, FormatListNumbered, ImageIcon, FolderIcon, InformationOutline,
     },
     emits: ['submitted', 'cancel'],
 
@@ -491,6 +521,32 @@ export default {
         // so the form can be embedded in a Decisions-only modal without exposing
         // the other message types.
         forceDecision: {
+            type: Boolean,
+            default: false,
+        },
+        /**
+         * v4.5.42 — how the proposal is being opened. Only meaningful together
+         * with `forceDecision`.
+         *
+         *   immediate — finalize on creation (the pre-4.5.42 behaviour)
+         *   selected  — leave open; the modal then shares it to a Talk group
+         *   team      — leave open; the modal then posts it to the team room
+         *
+         * The form's only job is to translate this into `autoFinalize`. The
+         * Talk half belongs to ComposeDecisionModal, which owns the picker and
+         * knows the decision id once the message comes back.
+         */
+        shareMode: {
+            type: String,
+            default: 'immediate',
+            validator: v => ['immediate', 'selected', 'team'].includes(v),
+        },
+        /**
+         * v4.5.42 — a parent-supplied veto on submit, ANDed with the form's own
+         * `canSubmit`. Lets ComposeDecisionModal block on requirements that
+         * belong to the share mode rather than to the message.
+         */
+        submitDisabled: {
             type: Boolean,
             default: false,
         },
@@ -511,7 +567,11 @@ export default {
             // frontend can't opt itself into public visibility.
             isPublic: false,
             // Decision-specific fields (only used when messageType === 'decision')
-            decisionImpact: '',
+            // v4.5.46 — impact defaults to the first option rather than empty.
+            // An empty required field that blocks submit until you notice it is
+            // a worse default than the least consequential real value, and
+            // "low" is what most proposals are.
+            decisionImpact: 'low',
             decisionLevel: 'operational',
             // NcSelect bound — selected option object { id, name, approvers, ... } or null
             decisionCategory: null,
@@ -603,7 +663,11 @@ export default {
         subjectLabel() {
             if (this.messageType === 'poll') return t('teamhub', 'Poll Question')
             if (this.messageType === 'question') return t('teamhub', 'Question')
-            if (this.messageType === 'decision') return t('teamhub', 'Decision question')
+            // v4.5.44 — "Proposal subject", not "Decision question". What you
+            // are writing here is a proposal; it only becomes a decision once
+            // an approver has acted on it, which is the last step of the rail
+            // beside this field.
+            if (this.messageType === 'decision') return t('teamhub', 'Proposal subject')
             return t('teamhub', 'Subject')
         },
         subjectPlaceholder() {
@@ -627,11 +691,20 @@ export default {
         submitButtonText() {
             if (this.messageType === 'poll') return t('teamhub', 'Create Poll')
             if (this.messageType === 'question') return t('teamhub', 'Ask Question')
-            if (this.messageType === 'decision') return t('teamhub', 'Propose Decision')
+            // v4.5.42 — "Submit", not "Propose Decision". The button no longer
+            // does one thing: what happens on click is whatever share mode the
+            // chooser above it is set to, so naming one of the three outcomes
+            // on the button would be wrong two times out of three.
+            if (this.messageType === 'decision') return t('teamhub', 'Submit')
             return t('teamhub', 'Post Message')
         },
 
         canSubmit() {
+            // v4.5.42 — the parent can veto. ComposeDecisionModal uses this
+            // when the chosen share mode has an unmet requirement of its own
+            // (nobody picked for `selected`, no team conversation for `team`),
+            // which this form has no way to know about.
+            if (this.submitDisabled) return false
             if (!this.subject.trim()) return false
             if (this.messageType === 'poll') {
                 return this.pollOptions.filter(o => o.text.trim()).length >= 2
@@ -651,15 +724,29 @@ export default {
 
         // ── Decision helpers ────────────────────────────────────────────────
 
+        // v4.5.42 — `decisionsAvailable` lived here to gate the Decision radio
+        // in the type selector. That radio is gone, and the gate moved with it
+        // to the surfaces that open ComposeDecisionModal (TeamView) — the
+        // modal is only reachable from a team that has decisions on, so the
+        // form no longer has to decide.
+
         /**
-         * Decision compose option is shown only when the module is enabled
-         * globally AND for the current team. Both flags arrive on the layout
-         * response (loaded by TeamView) and live in the Vuex store.
+         * v4.5.46 — id bridge for the category `<select>`.
+         *
+         * The submit path and the supersede handshake both want the whole
+         * option object (`decisionCategory.name` is what is sent), but a
+         * native select binds a scalar. Keeping the object as the source of
+         * truth and deriving the id — rather than the reverse — means nothing
+         * downstream had to change.
          */
-        decisionsAvailable() {
-            return !!(this.decisionsModuleEnabled
-                && this.decisionsConfig
-                && this.decisionsConfig.decisions_enabled)
+        decisionCategoryId: {
+            get() {
+                return this.decisionCategory?.id ?? null
+            },
+            set(id) {
+                this.decisionCategory = this.decisionCategoryOptions
+                    .find(o => o.id === id) || null
+            },
         },
 
         // True when the per-team level toggle is on.
@@ -734,7 +821,7 @@ export default {
                 this.consumeDecisionComposeHandshake()
                 // v4.2.13 — Re-fetch message settings whenever the home
                 // tab is (re)loaded so an admin's Public toggle change
-                // (Manage Team → Integration Settings → Messages) reaches
+                // (Manage Team → Module settings → Messages) reaches
                 // the compose form without a browser reload. Fire-and-
                 // forget — the compose form stays usable while the
                 // (fast) settings request is in flight.
@@ -904,71 +991,95 @@ export default {
         },
 
         // ── Markdown toolbar ────────────────────────────────────────────────
-        /**
-         * Insert markdown syntax around the current selection (or around a
-         * placeholder if nothing is selected). Works for both mouse and keyboard
-         * activation:
-         *
-         * - Mouse path: @mousedown.prevent keeps the contenteditable focused and
-         *   selection alive; execCommand fires into the active element, the
-         *   component's 'input' listener updates v-model automatically.
-         *
-         * - Keyboard path: the button receives focus, so we re-focus the editor
-         *   and append to the model string as a reliable fallback (no cursor
-         *   position tracking when focus has left the editor).
-         *
-         * @param {string} before   Markdown prefix (e.g. '**')
-         * @param {string} after    Markdown suffix (e.g. '**'), empty for line prefixes
-         * @param {string} placeholder  Fallback text when there is no selection
-         */
-        applyMarkdown(before, after, placeholder = '') {
-        
-            const editorEl = this.$refs.editor?.$el?.querySelector('.rich-contenteditable__input')
-                          || this.$refs.editor?.$el
+        // The mechanics live in src/lib/markdownToolbar.js, shared with the
+        // comment box and message edit mode. Only the model property differs
+        // between the three, which is all that is left here.
+        //
+        // Mouse path: @mousedown.prevent on the buttons keeps the
+        // contenteditable focused and its selection alive, so execCommand
+        // fires into it and the component's own input listener updates
+        // v-model. Keyboard path: the button took focus, so there is no live
+        // selection — append to the model and put the caret at the end.
 
-            if (!editorEl) {
-                // No DOM reference — fall back to appending to the model.
-                this.body += before + (placeholder || '') + after
+        /**
+         * Insert markdown syntax around the current selection.
+         *
+         * v4.7.17 — no placeholder text. This used to insert `**bold text**`
+         * when nothing was selected, to show what the button did; the example
+         * was never what anyone wanted to keep, so every use began by deleting
+         * it. The syntax goes in alone and the caret lands between the halves.
+         *
+         * @param {string} before Markdown prefix (e.g. '**')
+         * @param {string} after  Markdown suffix (e.g. '**'), empty for line prefixes
+         */
+        applyMarkdown(before, after) {
+            const editorEl = resolveEditorElement(this.$refs.editor)
+
+            if (!editorHasFocus(editorEl)) {
+                this.body += (this.body && !this.body.endsWith('\n') ? '\n' : '') + before + after
+                this.$nextTick(() => {
+                    focusEditorAtEnd(editorEl)
+                    moveCaretBack(after.length)
+                })
                 return
             }
 
-            const activeEl = document.activeElement
-            const editorHasFocus = editorEl === activeEl || editorEl.contains(activeEl)
-
-            if (editorHasFocus) {
-                // Mouse path: selection is still live in the contenteditable.
-                const sel = window.getSelection()
-                const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : (placeholder || '')
-                document.execCommand('insertText', false, before + selectedText + after)
-            } else {
-                // Keyboard path: focus was elsewhere. Append to the model string
-                // and move the cursor to the body field for the user to continue.
-                const selectedText = placeholder || ''
-                this.body += (this.body && !this.body.endsWith('\n') ? '\n' : '') + before + selectedText + after
-                this.$nextTick(() => editorEl.focus())
+            const selection = selectedText(editorEl)
+            insertIntoEditor(editorEl, before + selection + after)
+            // Wrapping something leaves the caret after the lot, which is
+            // right. Inserting empty syntax leaves it outside what the user
+            // just asked for, so step back over the closing half.
+            if (!selection) {
+                moveCaretBack(after.length)
             }
         },
 
         /**
-         * Insert a Markdown link `[text](url)`.
-         * If text is selected, it becomes the link label;
-         * otherwise a placeholder is used.
-         * The user can tab through the brackets to complete the URL.
+         * Turn the selection into a bullet or numbered list, one item per line.
+         *
+         * v4.7.17 — this was `applyMarkdown('- ', '')`, which treats `- ` as a
+         * prefix for the whole insertion and so marked only the first line of a
+         * multi-line selection. A list is a per-line construct, which is why it
+         * needs its own method rather than another prefix/suffix pair.
+         *
+         * @param {boolean} ordered `1. 2. 3.` when true, `- ` when false
+         */
+        applyList(ordered = false) {
+            const editorEl = resolveEditorElement(this.$refs.editor)
+
+            if (!editorHasFocus(editorEl)) {
+                this.body += (this.body && !this.body.endsWith('\n') ? '\n' : '') + listMarker(1, ordered)
+                this.$nextTick(() => focusEditorAtEnd(editorEl))
+                return
+            }
+
+            const selection = selectedText(editorEl)
+            insertIntoEditor(editorEl, selection ? buildList(selection, ordered) : listMarker(1, ordered))
+        },
+
+        /**
+         * Insert a Markdown link.
+         *
+         * v4.7.17 — no placeholder text here either. A selection becomes the
+         * label and the caret lands between the parentheses ready for the URL;
+         * with nothing selected the caret lands between the brackets, where the
+         * label goes. Either way there is nothing to delete first.
          */
         applyLink() {
-            const editorEl = this.$refs.editor?.$el?.querySelector('.rich-contenteditable__input')
-                          || this.$refs.editor?.$el
+            const editorEl = resolveEditorElement(this.$refs.editor)
+            const label = selectedText(editorEl)
 
-            const sel = window.getSelection()
-            const selectedText = (sel && !sel.isCollapsed) ? sel.toString() : ''
-            const label = selectedText || t('teamhub', 'link text')
-
-            if (editorEl && (editorEl === document.activeElement || editorEl.contains(document.activeElement))) {
-                document.execCommand('insertText', false, `[${label}](url)`)
-            } else {
-                this.body += `[${label}](url)`
-                this.$nextTick(() => editorEl?.focus())
+            if (!editorHasFocus(editorEl)) {
+                this.body += `[]()`
+                this.$nextTick(() => {
+                    focusEditorAtEnd(editorEl)
+                    moveCaretBack(3)
+                })
+                return
             }
+
+            insertIntoEditor(editorEl, `[${label}]()`)
+            moveCaretBack(label ? 1 : 3)
         },
 
         // ── Insert image by URL ──────────────────────────────────────────────
@@ -1143,8 +1254,9 @@ export default {
                 // Determine upload folder. Strategy:
                 //   - Shared-folder team folder → upload into {team folder}/Attachments
                 //     (lives inside the team's share; everyone in the team can read it)
-                //   - Group Folder team folder → upload into the user's PERSONAL
-                //     'TeamHub Attachments/' instead. Group Folders have their own
+                //   - Team Folders-backed team folder → upload into the user's
+                //     PERSONAL 'TeamHub Attachments/' instead. The Team Folders
+                //     app (`groupfolders`) has its own
                 //     ACL layer that often forbids create-folder for normal members
                 //     (MKCOL returns 405) and the path can include the mount-point
                 //     prefix vs. the team-subfolder prefix in ways that vary by
@@ -1164,7 +1276,7 @@ export default {
                     // teamFilesPath is the file_target from share table, e.g. "/Team Name"
                     uploadFolder = teamFilesPath.replace(/\/$/, '') + '/Attachments'
                 } else {
-                    // Group folder, or no team folder at all → personal attachments
+                    // Team Folders-backed, or no team folder at all → personal attachments
                     uploadFolder = '/' + ATTACH_FOLDER
                 }
                 // Debug log stripped at session end (3.71.10).
@@ -1246,7 +1358,20 @@ export default {
                 } else if (isImage && fileId) {
                     // Fallback: share failed — poster sees it, others may not
                     fileViewUrl = generateUrl('/core/preview') + `?fileId=${fileId}&x=1024&y=1024&a=true`
+                } else if (fileId) {
+                    // v4.5.6 — link non-images by file id rather than by share
+                    // landing page or DAV path. Three reasons:
+                    //  - /f/{id} resolves per-viewer, so every team member lands
+                    //    on the file itself (the share is with the circle, and a
+                    //    DAV URL under the uploader's own path did not resolve
+                    //    for anyone else).
+                    //  - it opens in the team's Files view rather than a new tab.
+                    //  - it carries ?opendetails=true, so the conversation about
+                    //    the attachment opens with it.
+                    fileViewUrl = fileOpenUrl(fileId)
                 } else {
+                    // No file id came back from the PUT — fall back to the share
+                    // landing page. These links stay external.
                     fileViewUrl = shareUrl || davDownloadUrl
                 }
 
@@ -1301,6 +1426,13 @@ export default {
                 )
                 this.decisionCategoryOptions = Array.isArray(data?.items) ? data.items : []
                 this.decisionCategoriesLoaded = true
+                // v4.5.46 — preselect the first category. Category is required
+                // and the picker is now a plain select, where an unset value
+                // shows the first option's *label* while holding null — the
+                // form would look complete and refuse to submit.
+                if (!this.decisionCategory && this.decisionCategoryOptions.length) {
+                    this.decisionCategory = this.decisionCategoryOptions[0]
+                }
             } catch (err) {
                 console.error('[TeamHub][PostMessageForm] loadDecisionCategories error:', err)
                 // Non-fatal — the template renders the "no categories" warning
@@ -1383,11 +1515,16 @@ export default {
                         // from the Decisions tab. Backend auto-withdraws the
                         // referenced decision if it was still open.\
                         supersedesId: this.decisionSupersedesId,
-                        // Session A: when the form is in the compose modal
-                        // (forceDecision prop), the proposer has written the
-                        // full proposal upfront. Skip the open/discussion phase
-                        // and land directly on 'finalized' (awaits approval).
-                        autoFinalize: this.forceDecision,
+                        // Session A: the compose modal's proposer has written
+                        // the full proposal upfront, so it can land directly on
+                        // 'finalized'.
+                        //
+                        // v4.5.42 — unless they asked to discuss it first. The
+                        // other two share modes deliberately leave the proposal
+                        // 'open' so it can be edited after feedback and
+                        // finalized later; ComposeDecisionModal then attaches
+                        // the Talk surface.
+                        autoFinalize: this.forceDecision && this.shareMode === 'immediate',
                         // Mark compose-modal proposals as 'direct' so the
                         // message stream can filter them out. Direct proposals
                         // bypass stream discussion and live only in the
@@ -1526,11 +1663,68 @@ export default {
     color: var(--color-primary-element-text);
 }
 
+/* v4.5.44 — subject + body row, with an optional aside column.
+   Without slot content this is a single full-width column, so every existing
+   caller (the stream composer, polls, questions) renders exactly as before. */
+.post-form__fields {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.post-form__fields-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    /* min-width:0 is what stops a long placeholder or an over-wide
+       contenteditable from pushing the aside off the edge. */
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.post-form__fields-aside {
+    flex: 0 0 auto;
+    /* v4.5.46 — "minimal width" per the brief. The rail's longest label is
+       one word, so this is enough for every locale we ship without letting it
+       compete with the editor. */
+    max-width: 160px;
+    /* Aligns the first rail dot with the subject field's label rather than
+       its input, which is where the eye starts. */
+    padding-top: 2px;
+}
+
+/* Below the tablet breakpoint the rail stacks under the fields — a 160 px
+   column beside a text editor leaves neither enough room. Under, not over:
+   it follows the fields in DOM order now, and a progress indicator above the
+   thing it describes reads as a heading. */
+@media (max-width: 700px) {
+    .post-form__fields {
+        flex-direction: column;
+        gap: 12px;
+    }
+    .post-form__fields-aside {
+        max-width: none;
+        padding-top: 0;
+    }
+}
+
 /* Body + toolbar */
 .post-form__body {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+/* v4.5.46 — open at four lines and grow with the content.
+   NcRichContenteditable is a contenteditable, not a textarea, so it sizes to
+   its content already; what it lacked was a floor small enough to stop an
+   empty editor reserving a third of the modal, and a ceiling to stop a long
+   proposal pushing the buttons off screen. 4 × 1.4em + padding ≈ 6em.
+   `:deep` because the element belongs to the NC component. */
+.post-form__body :deep(.rich-contenteditable__input) {
+    min-height: 6em;
+    max-height: 40vh;
+    overflow-y: auto;
 }
 
 .post-form__label {
@@ -1762,6 +1956,71 @@ export default {
     font-size: 0.9em;
     color: var(--color-text-maxcontrast);
     line-height: 1.4;
+}
+
+/* ── Compact Impact / Level / Category grid (v4.5.46) ──────────────────
+   Two rows of equal columns: names, then selectors. Replaces three stacked
+   label-plus-chip-row blocks that cost ~180px for three values.
+
+   grid-template-columns is set from the same `--th-meta-cols` on both rows,
+   so the header cell and its selector cannot drift apart when the Level
+   column is hidden by the per-team toggle. */
+.decision-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    --th-meta-cols: 1fr 1fr 1fr;
+}
+
+.decision-meta--no-level {
+    --th-meta-cols: 1fr 1fr;
+}
+
+.decision-meta__head,
+.decision-meta__row {
+    display: grid;
+    grid-template-columns: var(--th-meta-cols);
+    gap: 8px;
+    align-items: center;
+}
+
+.decision-meta__cell-label {
+    font-size: var(--th-font-meta);
+    font-weight: var(--th-font-weight-medium);
+    color: var(--color-main-text);
+}
+
+.decision-meta__select {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 34px;
+    padding: 4px 8px;
+    font-size: var(--th-font-meta);
+    font-family: inherit;
+    color: var(--color-main-text);
+    background: var(--color-main-background);
+    border: 2px solid var(--color-border-dark);
+    border-radius: var(--th-radius-control);
+    /* NC's form-field pattern: no outline, primary border on focus.
+       SKILLS.md § Focus visibility standard names this as acceptable. */
+    outline: none;
+}
+
+.decision-meta__select:focus {
+    border-color: var(--color-primary-element);
+}
+
+.decision-meta__select:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-primary-element);
+}
+
+/* Spans the whole selector row when there is nothing to pick from — a
+   sentence squeezed into a third of the width is unreadable. */
+.decision-meta__empty {
+    grid-column: 1 / -1;
+    font-size: var(--th-font-meta);
+    line-height: var(--th-line-height-body);
+    color: var(--color-warning-text);
 }
 
 .post-form__image-dialog {

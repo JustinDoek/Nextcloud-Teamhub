@@ -176,6 +176,7 @@ import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { todayIso, formatIsoDate } from '../lib/localDate.js'
 import {
     NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog,
 } from '@nextcloud/vue'
@@ -251,23 +252,15 @@ export default {
     methods: {
         t, n,
 
+        // holiday_date is a floating ISO date. formatIsoDate builds a local
+        // Date from the parts, so the calendar day survives in every zone.
         formatDate(iso) {
-            if (!iso) return ''
-            // Render in the user's locale; iso comes as YYYY-MM-DD which
-            // Date parses as UTC midnight — formatting that with the user's
-            // locale gives the right day for every timezone east of UTC.
-            try {
-                const [y, m, d] = iso.split('-').map(Number)
-                const dt = new Date(y, m - 1, d)
-                return dt.toLocaleDateString(undefined, {
-                    weekday: 'short',
-                    year:    'numeric',
-                    month:   'short',
-                    day:     'numeric',
-                })
-            } catch (e) {
-                return iso
-            }
+            return formatIsoDate(iso, {
+                weekday: 'short',
+                year:    'numeric',
+                month:   'short',
+                day:     'numeric',
+            })
         },
 
         async load() {
@@ -290,8 +283,7 @@ export default {
         // ── Add (preview → confirm → commit) ──────────────────────────
 
         openCreate() {
-            const today = new Date().toISOString().slice(0, 10)
-            this.addDialog = { open: true, date: today, name: '' }
+            this.addDialog = { open: true, date: todayIso(), name: '' }
         },
 
         closeAddDialog() {

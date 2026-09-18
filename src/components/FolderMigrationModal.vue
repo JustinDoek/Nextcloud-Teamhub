@@ -10,17 +10,17 @@
         <div v-if="screen === 'intro'" class="fmm-screen">
             <div class="fmm-info-block">
                 <FolderIcon :size="32" class="fmm-icon" aria-hidden="true" />
-                <h3 class="fmm-heading">{{ t('teamhub', 'A group folder is now connected to this team') }}</h3>
+                <h3 class="fmm-heading">{{ t('teamhub', 'A team folder is now connected to this team') }}</h3>
             </div>
             <p class="fmm-body">
                 <!-- TRANSLATORS: {groupFolder} and {sharedFolder} are folder names -->
-                {{ t('teamhub', 'The group folder "{groupFolder}" has been added to this team. Your team currently also has access to the shared folder "{sharedFolder}".', { groupFolder: groupFolderName, sharedFolder: sharedFolderName }) }}
+                {{ t('teamhub', 'The team folder "{groupFolder}" has been added to this team. Your team currently also has access to the shared folder "{sharedFolder}".', { groupFolder: groupFolderName, sharedFolder: sharedFolderName }) }}
             </p>
             <p class="fmm-body">
-                {{ t('teamhub', 'The group folder will become the team\'s primary folder. The shared folder will no longer be connected to the team, but the owner can keep or delete it.') }}
+                {{ t('teamhub', 'The team folder will become the team\'s primary folder. The shared folder will no longer be connected to the team, but the owner can keep or delete it.') }}
             </p>
             <p class="fmm-body fmm-body--question">
-                {{ t('teamhub', 'Would you like to move the files from the shared folder into the group folder automatically, or do it manually?') }}
+                {{ t('teamhub', 'Would you like to move the files from the shared folder into the team folder automatically, or do it manually?') }}
             </p>
 
             <div class="fmm-actions">
@@ -55,7 +55,7 @@
                             <td>{{ formatBytes(preflight.sharedFolderBytes) }}</td>
                         </tr>
                         <tr>
-                            <th scope="row">{{ t('teamhub', 'Available in group folder') }}</th>
+                            <th scope="row">{{ t('teamhub', 'Available in team folder') }}</th>
                             <td :class="preflight.canAutoMigrate ? 'fmm-ok' : 'fmm-warn'">
                                 {{ preflight.groupFolderFree < 0 || preflight.groupFolderFree >= Number.MAX_SAFE_INTEGER
                                     ? t('teamhub', 'Unlimited')
@@ -66,10 +66,10 @@
                 </table>
 
                 <p v-if="!preflight.canAutoMigrate" class="fmm-warning-text">
-                    {{ t('teamhub', 'There is not enough space in the group folder for an automatic migration. Please migrate manually: move the files yourself, then return here to connect the group folder.') }}
+                    {{ t('teamhub', 'There is not enough space in the team folder for an automatic migration. Please migrate manually: move the files yourself, then return here to connect the team folder.') }}
                 </p>
                 <p v-else class="fmm-body">
-                    {{ t('teamhub', 'TeamHub will copy all files from the shared folder into the group folder. If the group folder already has files, they will first be moved to a backup folder called "team_files_backup". The shared folder will remain intact but the team will no longer have access to it.') }}
+                    {{ t('teamhub', 'TeamHub will copy all files from the shared folder into the team folder. If the team folder already has files, they will first be moved to a backup folder called "team_files_backup". The shared folder will remain intact but the team will no longer have access to it.') }}
                 </p>
 
                 <div class="fmm-actions">
@@ -106,10 +106,10 @@
             <CheckCircleIcon :size="48" class="fmm-icon fmm-icon--success" aria-hidden="true" />
             <h3 class="fmm-heading">{{ t('teamhub', 'Migration complete') }}</h3>
             <p v-if="resultMode === 'auto'" class="fmm-body">
-                {{ t('teamhub', 'Files have been moved into the group folder. The shared folder is no longer connected to the team.') }}
+                {{ t('teamhub', 'Files have been moved into the team folder. The shared folder is no longer connected to the team.') }}
             </p>
             <p v-else class="fmm-body">
-                {{ t('teamhub', 'The group folder is now the team\'s primary folder. Please move your files from the shared folder into the group folder manually.') }}
+                {{ t('teamhub', 'The team folder is now the team\'s primary folder. Please move your files from the shared folder into the team folder manually.') }}
             </p>
             <div class="fmm-actions fmm-actions--centered">
                 <NcButton variant="primary" @click="$emit('done')">
@@ -128,7 +128,7 @@
                 {{ t('teamhub', 'The automatic file copy failed: {error}', { error: migrationError }) }}
             </p>
             <p class="fmm-body">
-                {{ t('teamhub', 'The group folder is now connected as the team\'s primary folder. The shared folder is no longer connected to the team, but the owner can still access it and move the files manually.') }}
+                {{ t('teamhub', 'The team folder is now connected as the team\'s primary folder. The shared folder is no longer connected to the team, but the owner can still access it and move the files manually.') }}
             </p>
             <div class="fmm-actions fmm-actions--centered">
                 <NcButton variant="primary" @click="$emit('done')">

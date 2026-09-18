@@ -1,6 +1,6 @@
 # TeamHub Developer Guide
 
-TeamHub is a Nextcloud 32+ app that gives each Nextcloud Team (Circle) a unified workspace. This guide explains how to build integrations that plug into TeamHub.
+TeamHub is a Nextcloud 33+ app that gives each Nextcloud Team (Circle) a unified workspace. This guide explains how to build integrations that plug into TeamHub.
 
 ---
 
@@ -317,6 +317,8 @@ Removes all registry rows for your `app_id` and cascade-deletes all per-team opt
 
 | TeamHub version | Changes |
 |---|---|
+| 4.9.7 | My Work provider contract (`OCA\TeamHub\MyWork\IWorkProvider`, internal — registered in `Application.php`) extended, all additive: `WorkItemPage::$warnings` (`auth_required` \| `partial` \| `budget` \| `not_connected` — a provider that answered but not cleanly; the registry copies them to `providerStatus[].warnings` and the frontend shows one notice each); `WorkQuery::$metadataFilters` (`{ metadataKey: [values] }`, applied centrally — today `projectId` and `type`); `facets` on the payload from any item carrying `metadata.projectId` + `projectName` / `metadata.type`; `groupBy=project` (an item that names a project groups under it, others under their team); `metadata.opensIn` (an app name — the row renders an "opens in {app}" chip). `OPENPROJECT.md` §6.2. |
+| 4.9.6 | Workspace provisioning steps (`OCA\TeamHub\Service\Provisioning\Step\StepInterface`): an app that provisions a resource for a new team can register a step in `StepRegistry` — idempotent `run()`, a per-resource `rollback()`, `applies()` per blueprint — and record it in the `teamhub_resource_link` ledger. Internal for now (constructor-registered, not a public registration API); `OPENPROJECT.md` §5.3 "Extension points". |
 | 3.0.0 – 3.2.0 | Security hardening: all team-scoped read endpoints now enforce membership. No interface changes for external apps. |
 | 2.46.0 | `getActionForm()` + `handleAction()` added to `ITeamHubWidget`. Actions use `actionId` for native modals. |
 | 2.42.3 – 2.45.x | Widget + menu_item both supported. `iframe_url` accepts relative NC paths. |

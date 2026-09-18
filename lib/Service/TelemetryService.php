@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\CirclesMemberType;
 use OCA\TeamHub\Db\DecisionMapper;
 use OCA\TeamHub\Db\DecisionTeamConfigMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -458,8 +459,14 @@ class TelemetryService {
      * circles). Walks circles_membership — the denormalised cache — so a
      * user reaching a team via an attached group or sub-team is counted once,
      * and a user who is a direct member of multiple teams is also counted
-     * once. user_type IN (1, 4) covers both local NC users and federated
-     * users — same set we treat as "people" elsewhere (Talk reconciler, etc).
+     * once. Counts TYPE_USER rows only, which covers local AND federated
+     * accounts — federation lives in circles_member.instance, not in the type.
+     *
+     * v4.9.2 — this filtered on user_type IN (1, 4) in the belief that 4 added
+     * federated users. Circles' type 4 is TYPE_MAIL: an email address invited
+     * into a team, holding no account on any server. So the count included
+     * mail invitees as seats, and federated users were already inside the 1.
+     * See CirclesMemberType::PEOPLE_WITH_ACCOUNTS.
      *
      * This is the metric a per-seat licence would key off: how many distinct
      * humans actually have access to at least one TeamHub team on this
@@ -480,7 +487,7 @@ class TelemetryService {
                 ->innerJoin('ms', 'circles_member', 'm', $qb->expr()->andX(
                     $qb->expr()->eq('m.circle_id', 'ms.single_id'),
                     $qb->expr()->in('m.user_type', $qb->createNamedParameter(
-                        [1, 4], IQueryBuilder::PARAM_INT_ARRAY
+                        CirclesMemberType::PEOPLE_WITH_ACCOUNTS, IQueryBuilder::PARAM_INT_ARRAY
                     )),
                 ))
                 ->where($qb->expr()->eq('c.source',

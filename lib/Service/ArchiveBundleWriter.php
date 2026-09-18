@@ -271,7 +271,9 @@ HTML;
         $zip->close();
 
         if (!rename($zipTmpPath, $zipFinalPath)) {
-            @unlink($zipTmpPath);
+            // $zipTmpPath is built by ArchiveService under sys_get_temp_dir()
+            // from slugify()'d parts — letters, digits and '-' only.
+            @unlink($zipTmpPath); // nosemgrep: php.lang.security.unlink-use.unlink-use
             throw new \RuntimeException("Could not rename zip from {$zipTmpPath} to {$zipFinalPath}");
         }
 
@@ -333,7 +335,10 @@ HTML;
             if (is_dir($path)) {
                 $this->rmDir($path);
             } else {
-                @unlink($path);
+                // Only ever called on the work dir this class created
+                // (createWorkDir: temp base + slugify()'d name); $item is
+                // scandir()'s own listing of it.
+                @unlink($path); // nosemgrep: php.lang.security.unlink-use.unlink-use
             }
         }
         @rmdir($dir);

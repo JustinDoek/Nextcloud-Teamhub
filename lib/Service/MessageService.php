@@ -9,6 +9,7 @@ use OCA\TeamHub\Db\MessageMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\NotFoundException;
 use OCA\TeamHub\Mentions\MentionParser;
+use OCA\TeamHub\Service\OpenProject\OpenProjectNewsService;
 use OCP\App\IAppManager;
 use OCP\IConfig;
 use OCP\IDBConnection;
@@ -151,6 +152,11 @@ class MessageService {
         // check, not this comment — see HANDOFF on why one-hop grepping misses
         // the shape that took the app down in 4.8.7.
         private PolicyService $policyService,
+        // v4.9.7 — OpenProject news in What's new (Justin, 2026-09-14: the
+        // feed is for news and messages). Takes the link mapper, the message
+        // mapper, the OpenProject client and framework interfaces only — no
+        // MemberService, no TeamService — so it closes no cycle either.
+        private OpenProjectNewsService $openProjectNews,
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -314,6 +320,19 @@ class MessageService {
             }
             $messages = $toStamp;
         }
+
+        // v4.9.9 — a post mirrored from OpenProject news says so: `origin`
+        // from the mirror ledger, rendered as *Source: OpenProject* with the
+        // pill linking to the item. Same batch shape as the stamp above.
+        $toStamp = $messages;
+        if ($pinned !== null) {
+            $toStamp[] = $pinned;
+        }
+        $this->openProjectNews->stampOrigins($toStamp);
+        if ($pinned !== null) {
+            $pinned = array_pop($toStamp);
+        }
+        $messages = $toStamp;
 
         return [
             'pinned'   => $pinned,
@@ -1412,6 +1431,10 @@ class MessageService {
         $to            = (int)($filters['to'] ?? 0);
         $teamFilter    = is_array($filters['teamIds'] ?? null) ? array_values($filters['teamIds']) : [];
         $typeFilter    = is_array($filters['messageTypes'] ?? null) ? array_values($filters['messageTypes']) : [];
+        // v4.9.7 — OpenProject news, its own Show switch (default on), with
+        // a project list of its own.
+        $includeOpenProject = $filters['includeOpenProject'] ?? true;
+        $projectFilter      = is_array($filters['projectIds'] ?? null) ? array_values($filters['projectIds']) : [];
 
         $mapperFilters = [
             'from'          => $from,
@@ -1540,6 +1563,52 @@ class MessageService {
         $talkThreads  = $this->filterTalkRows($talkThreads,  $from, $to, $teamFilter, $roomTeamMap, $typeFilter);
         $talkMentions = $this->filterTalkRows($talkMentions, $from, $to, $teamFilter, $roomTeamMap, $typeFilter);
 
+        // v4.9.7 — OpenProject news, read live as the viewer across the
+        // projects their teams are linked to, and mirrored into each team's
+        // stream on the way (once, ledgered). The period bounds are applied
+        // to the news' creation time; the team filter is applied here; the
+        // TYPES filter excludes these rows wholesale like Talk's, since a
+        // news item is not a message type. One failing source is one status
+        // line in the payload, never a failed feed.
+        $openProject = [
+            'items'    => [],
+            'status'   => ['state' => 'skipped', 'code' => null, 'message' => null, 'covered' => 0, 'skipped' => 0],
+            'projects' => [],
+        ];
+        if ($includeOpenProject && $typeFilter === []) {
+            try {
+                $openProject = $this->openProjectNews->feed(
+                    $viewerUid, $userTeamIds, $from, $to, min($fetchCap, OpenProjectNewsService::NEWS_LIMIT), $projectFilter,
+                );
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MessageService] OpenProject news could not be read', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+                $openProject['status'] = ['state' => 'error', 'code' => null, 'message' => null, 'covered' => 0, 'skipped' => 0];
+            }
+        } else {
+            // Switched off, or excluded by a message-type filter: still say
+            // whether the source exists here at all, so the rail can hide the
+            // switch on an instance without the integration rather than
+            // offer one that can never show anything.
+            try {
+                $unavailable = $this->openProjectNews->availability($viewerUid);
+                if ($unavailable !== null && $unavailable['state'] === 'unavailable') {
+                    $openProject['status']['state'] = 'unavailable';
+                }
+            } catch (\Throwable) {
+                // Leave it 'skipped'.
+            }
+        }
+        $openProjectRows = $openProject['items'];
+        if ($teamFilter !== []) {
+            $teamFilterSet   = array_flip($teamFilter);
+            $openProjectRows = array_values(array_filter(
+                $openProjectRows,
+                static fn (array $r): bool => isset($teamFilterSet[(string)($r['team_id'] ?? '')]),
+            ));
+        }
+
         $messageRows = $this->messageMapper->findFeed(
             $userTeamIds,
             $includeTeam,
@@ -1575,7 +1644,7 @@ class MessageService {
         $messageTotal = ($excludeMentions || $decisionsRemoved)
             ? count($messageRows)
             : $this->messageMapper->countFeed($userTeamIds, $includeTeam, $includePublic, $mapperFilters);
-        $total = $messageTotal + count($talkPolls) + count($talkThreads) + count($talkMentions);
+        $total = $messageTotal + count($talkPolls) + count($talkThreads) + count($talkMentions) + count($openProjectRows);
 
         // Tag messages so the merge stage can identify by source cheaply.
         // Talk items already carry `source` set by TalkService.
@@ -1605,8 +1674,22 @@ class MessageService {
                 $m['room_token'] = $roomIndex[$m['room_id']]['token'] ?? '';
                 return $m;
             }, $talkMentions),
+            // v4.9.7 — OpenProject rows arrive fully shaped from the
+            // activity service (`source`, `team_id`, `created_at`).
+            array_map(static function (array $r): array {
+                $r['__kind'] = 'openproject';
+                return $r;
+            }, $openProjectRows),
         );
-        usort($merged, static fn($a, $b) => ($b['created_at'] ?? 0) <=> ($a['created_at'] ?? 0));
+        // Newest first; ties broken on a stable key so two loads agree on the
+        // order (v4.9.7 — the merge used to be a bare timestamp sort).
+        usort($merged, static function (array $a, array $b): int {
+            $byTime = ($b['created_at'] ?? 0) <=> ($a['created_at'] ?? 0);
+            if ($byTime !== 0) {
+                return $byTime;
+            }
+            return strcmp((string)($a['source'] ?? '') . ':' . (string)($a['id'] ?? ''), (string)($b['source'] ?? '') . ':' . (string)($b['id'] ?? ''));
+        });
 
         // Per-source counts for the tab bar. Computed on the merged list
         // *before* the source tab narrows it, so picking one tab leaves the
@@ -1625,8 +1708,8 @@ class MessageService {
         // own-team message still gets the badge but has source='team'.
         $teamIdSet = array_flip($userTeamIds);
         foreach ($rows as &$m) {
-            if (($m['__kind'] ?? '') === 'talk') {
-                // Talk rows already have source set. Nothing to add here.
+            if (($m['__kind'] ?? '') === 'talk' || ($m['__kind'] ?? '') === 'openproject') {
+                // Talk and OpenProject rows already carry their source.
                 continue;
             }
             $m['source'] = isset($teamIdSet[$m['team_id'] ?? '']) ? 'team' : 'public';
@@ -1690,9 +1773,23 @@ class MessageService {
         }
         unset($m);
 
+        // v4.9.9 — the message rows only (a Talk poll's id is not a message
+        // id): a post mirrored from OpenProject news carries `origin`, and
+        // the All tab drops it when the live news card is on the same page.
+        $messagePage = array_filter($rows, static fn (array $m): bool => in_array($m['source'] ?? '', ['team', 'public'], true));
+        if ($messagePage !== []) {
+            $this->openProjectNews->stampOrigins($messagePage);
+            foreach ($messagePage as $k => $m) {
+                $rows[$k] = $m;
+            }
+        }
+
         // v4.5.26 — everything the feed's comment / reply / vote affordances
         // need in order to render only what the server would actually accept.
         $this->stampInteractionRights($rows, $userTeamIds, $viewerUid);
+
+        $facets             = $this->buildFeedFacets($merged, $teamNameMap);
+        $facets['projects'] = $openProject['projects'];
 
         $payload = [
             'items'        => $rows,
@@ -1701,7 +1798,10 @@ class MessageService {
             'limit'        => $limit,
             'offset'       => $offset,
             'sourceCounts' => $sourceCounts,
-            'facets'       => $this->buildFeedFacets($merged, $teamNameMap),
+            'facets'       => $facets,
+            // v4.9.7 — per-source health for sources that can fail on their
+            // own: the card renders a notice, the rest of the feed stands.
+            'sources'      => ['openproject' => $openProject['status']],
         ];
 
         return $payload;
@@ -1922,6 +2022,11 @@ class MessageService {
             // would turn "show me only mentions" into "hide my mentions".
             'includeMentions' => (bool)($stored['includeMentions'] ?? true),
             'includeDecisions' => (bool)($stored['includeDecisions'] ?? true),
+            // v4.9.7 — OpenProject news: its Show switch (default on) and
+            // the projects to keep ([] = all), validated to a bounded id
+            // shape so a hand-edited blob cannot widen anything.
+            'includeOpenProject' => (bool)($stored['includeOpenProject'] ?? true),
+            'projectIds'         => $this->sanitiseProjectIds($stored['projectIds'] ?? []),
             'period'        => $period,
             // Only meaningful when period === 'custom'; kept regardless so
             // switching away and back doesn't lose the dates.
@@ -1968,6 +2073,9 @@ class MessageService {
                 || !empty($prefs['includeMentions']),
             'includeDecisions' => !array_key_exists('includeDecisions', $prefs)
                 || !empty($prefs['includeDecisions']),
+            'includeOpenProject' => !array_key_exists('includeOpenProject', $prefs)
+                || !empty($prefs['includeOpenProject']),
+            'projectIds'       => $this->sanitiseProjectIds($prefs['projectIds'] ?? []),
             'period'        => $period,
             'customFrom'    => $from,
             'customTo'      => $to,
@@ -2021,6 +2129,30 @@ class MessageService {
             }
             $out[$s] = true;
             if (count($out) >= $cap) {
+                break;
+            }
+        }
+        return array_keys($out);
+    }
+
+    /**
+     * v4.9.7 — OpenProject project ids as the feed accepts them: positive
+     * integers, as strings, at most 50. Anything else is dropped.
+     *
+     * @param mixed $value
+     * @return string[]
+     */
+    private function sanitiseProjectIds($value): array {
+        if (!is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $item) {
+            if (!is_scalar($item) || !ctype_digit((string)$item) || (int)$item <= 0) {
+                continue;
+            }
+            $out[(string)(int)$item] = true;
+            if (count($out) >= 50) {
                 break;
             }
         }
@@ -2256,11 +2388,17 @@ class MessageService {
      */
     private function buildSourceCounts(array $merged, array $userTeamIds, string $viewerUid): array {
         $teamIdSet = array_flip($userTeamIds);
-        $counts = ['all' => 0, 'team' => 0, 'public' => 0, 'talk' => 0, 'mentions' => 0, 'decisions' => 0];
+        $counts = ['all' => 0, 'team' => 0, 'public' => 0, 'talk' => 0, 'mentions' => 0, 'decisions' => 0, 'openproject' => 0];
 
         foreach ($merged as $row) {
             $counts['all']++;
             $source = (string)($row['source'] ?? '');
+            // v4.9.7 — an OpenProject row counts under its own tab and
+            // nowhere else: it is not a message, so neither Team nor Public.
+            if ($source === 'openproject') {
+                $counts['openproject']++;
+                continue;
+            }
             // v4.5.33 — a Talk mention counts under Mentions and nowhere else.
             // It is not a poll or a thread, so it does not belong under Talk;
             // it has no team-message identity, so it does not belong under Team
@@ -2422,6 +2560,19 @@ class MessageService {
         foreach ($rows as &$row) {
             $source = (string)($row['source'] ?? '');
             $teamId = (string)($row['team_id'] ?? '');
+
+            // v4.9.7 — an OpenProject row is a hand-off: it opens in
+            // OpenProject, has no thread here and nothing to vote on. It is
+            // only ever resolved through a link on a team the viewer is in,
+            // so `can_open_team` is true by construction; stamped from the
+            // same test as everything else all the same.
+            if ($source === 'openproject') {
+                $row['can_open_team']     = $teamId !== '' && isset($teamIdSet[$teamId]);
+                $row['can_view_comments'] = false;
+                $row['can_comment']       = false;
+                $row['comment_count']     = 0;
+                continue;
+            }
 
             if ($source === 'talk-poll' || $source === 'talk-thread' || $source === 'talk-mention') {
                 // Talk's permissions decide here, not TeamHub's — a member of

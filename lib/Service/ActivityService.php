@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\AuditLogMapper;
 use OCA\TeamHub\Exception\AppNotAvailableException;
+use OCA\TeamHub\Util\IcalText;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
 use OCP\IUserSession;
@@ -576,6 +577,12 @@ class ActivityService {
                             'editUrl'      => $editUrl,
                             'calendarId'   => $calendarId,
                             'calendarName' => $calName,
+                            // v4.9.10 — set on a copy the OpenProject meeting
+                            // sync wrote (X-TEAMHUB-OPENPROJECT-MEETING), so the
+                            // widget shows the copy once, with its source.
+                            'openProjectMeetingId' => isset($vevent->{'X-TEAMHUB-OPENPROJECT-MEETING'})
+                                ? (int)(string)$vevent->{'X-TEAMHUB-OPENPROJECT-MEETING'}
+                                : null,
                         ];
                     } catch (\Exception $e) {
                         $this->logger->warning('[TeamHub][ActivityService] Error parsing calendar event', [
@@ -1181,13 +1188,15 @@ class ActivityService {
         return $uid;
     }
 
-    /** Escape special characters in iCalendar text property values. */
+    /**
+     * Escape special characters in iCalendar text property values.
+     *
+     * Delegates to the shared helper (v4.9.11). The former inline copy
+     * escaped the backslash last, which doubled the backslashes the
+     * comma / semicolon / newline pairs had just inserted.
+     */
     private function escapeIcalText(string $text): string {
-        return str_replace(
-            ["\r\n", "\n", "\r", ',',  ';',  '\\'],
-            ['\\n',  '\\n', '\\n', '\\,', '\\;', '\\\\'],
-            $text
-        );
+        return IcalText::escape($text);
     }
 
     /**

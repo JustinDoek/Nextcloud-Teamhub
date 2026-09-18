@@ -137,6 +137,7 @@
 <script>
 import { mapState, mapMutations } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import WalletOutline from 'vue-material-design-icons/WalletOutline.vue'
@@ -274,15 +275,11 @@ export default {
             }
         },
 
+        // Milestone dates arrive as ISO YYYY-MM-DD floating dates. Parsing
+        // them at UTC midnight and then rendering in the viewer's zone showed
+        // the previous day west of Greenwich; formatIsoDate keeps the day.
         formatDate(iso) {
-            if (!iso) return ''
-            try {
-                return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, {
-                    year: 'numeric', month: 'short', day: 'numeric',
-                })
-            } catch (e) {
-                return iso
-            }
+            return formatIsoDate(iso)
         },
 
         ...mapMutations(['SET_DECISIONS_PRESELECT_STATUS']),

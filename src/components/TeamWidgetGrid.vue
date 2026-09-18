@@ -37,6 +37,14 @@
             </div>
         </div>
 
+        <!-- v4.6.1 — vertical-compact is back ON. It was previously false, with
+             TeamView.applySnap() standing in as a hand-rolled reflow. That
+             reflow only ran on load and on resource change (never during a
+             drag) and grouped columns by exact x equality, so a w=3 widget
+             dragged from x=9 to x=8 became its own "column" and repacked to
+             y=0 on top of the x=9 stack. The library's own compaction runs
+             during the drag and resolves overlapping x-ranges correctly.
+             applySnap has been deleted; this prop replaces it. -->
         <grid-layout
             v-if="!isMobile && !isTablet && layoutLoaded && gridLayout.length > 0"
             :layout="visibleLayout"
@@ -47,7 +55,7 @@
             :margin="[12, 12]"
             :use-css-transforms="true"
             :responsive="false"
-            :vertical-compact="false"
+            :vertical-compact="true"
             @update:layout="onLayoutUpdated">
 
             <!-- Message stream -->
@@ -144,11 +152,60 @@
                         <button
                             type="button"
                             class="teamhub-resource-warning__link"
-                            :aria-label="t('teamhub', 'Open team settings to review resources')"
+                            :aria-label="t('teamhub', 'Open modules & integrations to review resources')"
+                            :title="t('teamhub', 'Open modules & integrations to review resources')"
                             @click="openSettingsAtRisk">
                             <ChevronRightIcon :size="16" aria-hidden="true" />
                         </button>
                     </div>
+
+                    <!-- v4.6.13 — expiration strip. Same shape as the resource
+                         warning above, and admin-only for the same reason: the
+                         only thing to do about it is request an extension, and
+                         that is a team-admin action (SKILLS.md § Permissions —
+                         hide what a member cannot do rather than disable it).
+                         Only appears inside the warning window or after the
+                         date has passed; a team expiring in eight months has
+                         nothing to say here. -->
+                    <div
+                        v-if="isTeamAdmin && expiryBannerVisible"
+                        class="teamhub-resource-warning"
+                        :class="{ 'teamhub-resource-warning--expired': teamExpiry.expired }"
+                        role="status"
+                        aria-live="polite">
+                        <AlertCircle :size="15" class="teamhub-resource-warning__icon" aria-hidden="true" />
+                        <span class="teamhub-resource-warning__text">
+                            <template v-if="teamExpiry.expired">
+                                {{ t('teamhub', 'This team passed its expiration date on {date}.', { date: teamExpiry.expiresOn }) }}
+                            </template>
+                            <template v-else>
+                                <!-- TRANSLATORS: N is a whole number of days until this team's expiration date -->
+                                {{ n('teamhub',
+                                     'This team expires in %n day.',
+                                     'This team expires in %n days.',
+                                     teamExpiry.daysRemaining,
+                                     { n: teamExpiry.daysRemaining }) }}
+                            </template>
+                        </span>
+                        <button
+                            type="button"
+                            class="teamhub-resource-warning__link"
+                            :aria-label="t('teamhub', 'Open team maintenance to request an extension')"
+                            :title="t('teamhub', 'Open team maintenance to request an extension')"
+                            @click="openMaintenanceForExpiry">
+                            <ChevronRightIcon :size="16" aria-hidden="true" />
+                        </button>
+                    </div>
+
+                    <!-- v4.9.6 — a workspace whose provisioning is not finished says
+                         so here, to every member; the details and the actions are
+                         for the creator, an administrator and the team's admins.
+                         Never hidden while a required step failed. -->
+                    <ProvisioningBanner
+                        v-if="provisioning && !provisioning.complete"
+                        :provisioning="provisioning"
+                        :is-team-admin="isTeamAdmin"
+                        @changed="$emit('provisioning-changed')" />
 
                     <div v-show="!isCollapsed('widget-teaminfo')" class="teamhub-widget-content teamhub-widget-content--teaminfo">
                         <div class="teamhub-teaminfo-body">
@@ -300,6 +357,12 @@
                                 <template #icon><ClipboardPlusOutline :size="20" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
+                            <!-- v4.9.15 — only when OpenProject grants "add work
+                                 packages" to this viewer (hidden, not disabled). -->
+                            <NcActionButton v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
+                                <template #icon><BriefcaseOutline :size="20" /></template>
+                                {{ t('teamhub', 'Create work package') }}
+                            </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-deck')"
@@ -307,7 +370,7 @@
                             @toggle="toggleCollapse('widget-deck')" />
                     </div>
                     <div v-show="!isCollapsed('widget-deck')" class="teamhub-widget-content">
-                        <DeckWidget />
+                        <DeckWidget ref="deckWidget" @openproject-actions="openProjectWorkActions = $event" />
                     </div>
                 </div>
             </grid-item>
@@ -345,9 +408,12 @@
                 </div>
             </grid-item>
 
-            <!-- Pages / Intravox widget -->
+            <!-- Pages widget (v4.3.7) — unified surface for Intranet
+                 (Intravox) + Wiki (Collectives). Renders whichever
+                 section(s) are enabled and have content. Grid gate
+                 activates when EITHER provider is on for the team. -->
             <grid-item
-                v-if="resources.intravox && getGridItem('widget-pages')"
+                v-if="(resources.intravox || collectivesConfig?.collectives_enabled) && getGridItem('widget-pages')"
                 v-bind="getGridItem('widget-pages')"
                 class="teamhub-grid-item"
                 :class="{ 'teamhub-grid-item--editing': editMode }">
@@ -367,16 +433,29 @@
                     <div class="teamhub-widget-header">
                         <FileDocumentOutline :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Pages') }}</h2>
-                        <NcActions v-if="isTeamModerator && !editMode" class="teamhub-widget-actions">
-                            <NcActionButton @click="$emit('create-page')">
+                        <!-- Actions menu (v4.3.9). Intranet actions
+                             (Create/Delete page) show when the Intranet
+                             team-app is on; the Wiki create action shows
+                             when the Wiki team-app is on. Both are
+                             visible when both are on. Wiki management
+                             beyond create still belongs in Collectives'
+                             own UI — one click on a page link opens the
+                             full editor there. -->
+                        <NcActions v-if="isTeamModerator && !editMode && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-widget-actions">
+                            <NcActionButton v-if="resources.intravox" @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="20" /></template>
-                                {{ t('teamhub', 'Create page') }}
+                                {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
                             <NcActionButton
+                                v-if="resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="$emit('delete-page')">
                                 <template #icon><TrashCan :size="20" /></template>
-                                {{ t('teamhub', 'Delete page') }}
+                                {{ t('teamhub', 'Delete Intranet page') }}
+                            </NcActionButton>
+                            <NcActionButton v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
+                                <template #icon><FilePlus :size="20" /></template>
+                                {{ t('teamhub', 'Create Collectives page') }}
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
@@ -388,7 +467,8 @@
                         <IntravoxWidget
                             ref="intravoxWidget"
                             :can-act="isTeamModerator"
-                            @pages-loaded="$emit('pages-loaded', $event)" />
+                            @pages-loaded="$emit('pages-loaded', $event)"
+                            @collective-loaded="$emit('collective-loaded', $event)" />
                     </div>
                 </div>
             </grid-item>
@@ -415,15 +495,20 @@
                     <div class="teamhub-widget-header">
                         <Folder :size="25" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'File Center') }}</h2>
-                        <a
+                        <!-- v4.6.25 — was an <a target="_blank"> to /apps/files,
+                             which left TeamHub for a new browser tab. Every
+                             other file affordance in this app opens in the
+                             Files tab; this one did not, and the + read as
+                             "create a file somewhere else". Raw <button> per
+                             SKILLS' widget-header carve-out, matching the
+                             Decisions header button directly below. -->
+                        <button
                             v-if="resources.files && resources.files.path"
-                            :href="teamFolderUrl"
-                            target="_blank"
-                            rel="noopener noreferrer"
                             class="teamhub-widget-header-btn"
-                            :aria-label="t('teamhub', 'Open team folder in Files')">
+                            :aria-label="t('teamhub', 'Open team folder in Files')"
+                            @click="openTeamFolder">
                             <PlusIcon :size="18" aria-hidden="true" />
-                        </a>
+                        </button>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-files-center')"
                             :widget-name="t('teamhub', 'File Center')"
@@ -505,6 +590,87 @@
                     </div>
                     <div v-show="!isCollapsed('widget-project-health')" class="teamhub-widget-content teamhub-widget-content--notoppad">
                         <ProjectHealthWidget @open-tab="$emit('set-view', $event)" />
+                    </div>
+                </div>
+            </grid-item>
+
+            <!-- Project info (v4.9.3, Phase 1; renamed and given its action
+                 menu in v4.9.5) — gated on the team's OpenProject link
+                 (src/lib/activeWidgets.js). Data is fetched by the widget
+                 itself, as the viewer; it reports the links OpenProject
+                 granted through `actions`, and the header menu shows exactly
+                 those. Every link leaves TeamHub for OpenProject in a new tab
+                 (OpenProject refuses to be framed) and says so. -->
+            <grid-item
+                v-if="showOpenProjectWidgets && getGridItem('widget-openproject')"
+                v-bind="getGridItem('widget-openproject')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Project info') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-openproject', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-openproject', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-openproject', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-openproject', 'right')">
+                        <DragVariant :size="16" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Project info') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <BriefcaseOutline :size="25" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Project info') }}</h2>
+                        <NcActions class="teamhub-widget-actions">
+                            <NcActionLink
+                                v-if="openProjectActions.projectUrl"
+                                :href="openProjectActions.projectUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><OpenInNew :size="20" /></template>
+                                {{ t('teamhub', 'Open project') }}
+                            </NcActionLink>
+                            <NcActionLink
+                                v-if="openProjectActions.workPackagesUrl"
+                                :href="openProjectActions.workPackagesUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><FormatListChecks :size="20" /></template>
+                                {{ t('teamhub', 'Work packages') }}
+                            </NcActionLink>
+                            <NcActionLink
+                                v-if="openProjectActions.newWorkPackageUrl"
+                                :href="openProjectActions.newWorkPackageUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><PlusBoxOutline :size="20" /></template>
+                                {{ t('teamhub', 'New work package') }}
+                            </NcActionLink>
+                            <NcActionLink
+                                v-if="openProjectActions.filesUrl"
+                                :href="openProjectActions.filesUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><FolderOutline :size="20" /></template>
+                                {{ t('teamhub', 'Project files') }}
+                            </NcActionLink>
+                            <NcActionButton @click="refreshOpenProject">
+                                <template #icon><Refresh :size="20" /></template>
+                                {{ t('teamhub', 'Refresh project data') }}
+                            </NcActionButton>
+                        </NcActions>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-openproject')"
+                            :widget-name="t('teamhub', 'Project info')"
+                            @toggle="toggleCollapse('widget-openproject')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-openproject')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <OpenProjectOverviewWidget ref="openProjectWidget" @actions="openProjectActions = $event" />
                     </div>
                 </div>
             </grid-item>
@@ -676,10 +842,16 @@
                                 <template #icon><ClipboardPlusOutline :size="20" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
+                            <!-- v4.9.15 — only when OpenProject grants "add work
+                                 packages" to this viewer (hidden, not disabled). -->
+                            <NcActionButton v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
+                                <template #icon><BriefcaseOutline :size="20" /></template>
+                                {{ t('teamhub', 'Create work package') }}
+                            </NcActionButton>
                         </NcActions>
                     </div>
                     <div v-if="!isCollapsed('widget-deck')" class="teamhub-tablet-widget__body">
-                        <DeckWidget />
+                        <DeckWidget ref="deckWidgetTablet" @openproject-actions="openProjectWorkActions = $event" />
                     </div>
                 </div>
 
@@ -697,27 +869,38 @@
                     </div>
                 </div>
 
-                <!-- Pages (Intravox) -->
-                <div v-if="getGridItem('widget-pages') && resources.intravox" class="teamhub-tablet-widget">
+                <!-- Pages (Intranet + Wiki) — tablet (v4.3.7 unified) -->
+                <div v-if="getGridItem('widget-pages') && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
                         <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-pages')">
                             <FileDocumentOutline :size="18" />
                             <span>{{ t('teamhub', 'Pages') }}</span>
                             <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-pages') }" />
                         </button>
-                        <NcActions v-if="isTeamModerator" class="teamhub-tablet-widget__actions">
-                            <NcActionButton @click="$emit('create-page')">
+                        <!-- Actions menu (v4.3.9) — same shape as desktop grid. -->
+                        <NcActions v-if="isTeamModerator && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget__actions">
+                            <NcActionButton v-if="resources.intravox" @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="20" /></template>
-                                {{ t('teamhub', 'Create page') }}
+                                {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
-                            <NcActionButton :disabled="!pagesData.teamPage" @click="pagesData.teamPage && $emit('delete-page')">
+                            <NcActionButton
+                                v-if="resources.intravox"
+                                :disabled="!pagesData.teamPage"
+                                @click="pagesData.teamPage && $emit('delete-page')">
                                 <template #icon><TrashCan :size="20" /></template>
-                                {{ t('teamhub', 'Delete page') }}
+                                {{ t('teamhub', 'Delete Intranet page') }}
+                            </NcActionButton>
+                            <NcActionButton v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
+                                <template #icon><FilePlus :size="20" /></template>
+                                {{ t('teamhub', 'Create Collectives page') }}
                             </NcActionButton>
                         </NcActions>
                     </div>
                     <div v-if="!isCollapsed('widget-pages')" class="teamhub-tablet-widget__body">
-                        <IntravoxWidget :can-act="isTeamModerator" @pages-loaded="$emit('pages-loaded', $event)" />
+                        <IntravoxWidget
+                            :can-act="isTeamModerator"
+                            @pages-loaded="$emit('pages-loaded', $event)"
+                            @collective-loaded="$emit('collective-loaded', $event)" />
                     </div>
                 </div>
 
@@ -760,6 +943,63 @@
                     </div>
                     <div v-if="!isCollapsed('widget-project-health')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
                         <ProjectHealthWidget @open-tab="$emit('set-view', $event)" />
+                    </div>
+                </div>
+
+                <!-- Project info — tablet layout (v4.9.3; menu v4.9.5). Same
+                     links as the desktop header, from the same event. -->
+                <div v-if="showOpenProjectWidgets && getGridItem('widget-openproject')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-openproject')">
+                            <BriefcaseOutline :size="18" />
+                            <span>{{ t('teamhub', 'Project info') }}</span>
+                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-openproject') }" />
+                        </button>
+                        <NcActions class="teamhub-tablet-widget__actions">
+                            <NcActionLink
+                                v-if="openProjectActions.projectUrl"
+                                :href="openProjectActions.projectUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><OpenInNew :size="20" /></template>
+                                {{ t('teamhub', 'Open project') }}
+                            </NcActionLink>
+                            <NcActionLink
+                                v-if="openProjectActions.workPackagesUrl"
+                                :href="openProjectActions.workPackagesUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><FormatListChecks :size="20" /></template>
+                                {{ t('teamhub', 'Work packages') }}
+                            </NcActionLink>
+                            <NcActionLink
+                                v-if="openProjectActions.newWorkPackageUrl"
+                                :href="openProjectActions.newWorkPackageUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><PlusBoxOutline :size="20" /></template>
+                                {{ t('teamhub', 'New work package') }}
+                            </NcActionLink>
+                            <NcActionLink
+                                v-if="openProjectActions.filesUrl"
+                                :href="openProjectActions.filesUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                :title="t('teamhub', 'Opens in OpenProject')">
+                                <template #icon><FolderOutline :size="20" /></template>
+                                {{ t('teamhub', 'Project files') }}
+                            </NcActionLink>
+                            <NcActionButton @click="refreshOpenProject">
+                                <template #icon><Refresh :size="20" /></template>
+                                {{ t('teamhub', 'Refresh project data') }}
+                            </NcActionButton>
+                        </NcActions>
+                    </div>
+                    <div v-if="!isCollapsed('widget-openproject')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <OpenProjectOverviewWidget ref="openProjectWidgetTablet" @actions="openProjectActions = $event" />
                     </div>
                 </div>
 
@@ -810,9 +1050,12 @@
             @add-meeting="$emit('add-meeting')"
             @add-deck-task="$emit('add-deck-task')"
             @add-personal-task="$emit('add-personal-task')"
+            @add-openproject-work-package="$emit('add-openproject-work-package')"
             @create-page="$emit('create-page')"
             @delete-page="$emit('delete-page')"
+            @create-wiki-page="$emit('create-wiki-page')"
             @pages-loaded="$emit('pages-loaded', $event)"
+            @collective-loaded="$emit('collective-loaded', $event)"
             @set-view="$emit('set-view', $event)"
             @widget-actions-loaded="$emit('widget-actions-loaded', $event)" />
 
@@ -824,8 +1067,16 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
 import { mapState, mapGetters, mapMutations } from 'vuex'
-import { NcAvatar, NcActions, NcActionButton, NcButton } from '@nextcloud/vue'
+import { NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
+import { computeActiveWidgetIds, isProjectHealthActive } from '../lib/activeWidgets.js'
+
+/**
+ * v4.6.1 — any saved y at or above this is a leftover parking position from
+ * the removed applySnap(), not a real coordinate. Kept in sync with
+ * LayoutController::PARK_Y_THRESHOLD, which unparks these on read.
+ */
+const PARK_Y_THRESHOLD = 1000
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
@@ -875,6 +1126,13 @@ import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import ContentSaveAll from 'vue-material-design-icons/ContentSaveAll.vue'
 import Restore from 'vue-material-design-icons/Restore.vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
+import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
+// v4.9.5 — the Project info header menu: the links into OpenProject.
+import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
+import FormatListChecks from 'vue-material-design-icons/FormatListChecks.vue'
+import PlusBoxOutline from 'vue-material-design-icons/PlusBoxOutline.vue'
+import FolderOutline from 'vue-material-design-icons/FolderOutline.vue'
+import Refresh from 'vue-material-design-icons/Refresh.vue'
 
 import MessageStream from './MessageStream.vue'
 import DeckWidget from './DeckWidget.vue'
@@ -886,16 +1144,21 @@ import FilesWidget          from './FilesWidget.vue'
 import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
 import ProjectHealthWidget  from './ProjectHealthWidget.vue'
+// v4.9.3 — OpenProject Phase 1: the Project info widget. (The My OpenProject
+// work widget of 4.9.3 is gone in 4.9.5 — its rows are in My Work now.)
+import OpenProjectOverviewWidget from './OpenProjectOverviewWidget.vue'
 import MobileWidgetView from './MobileWidgetView.vue'
 // v3.100.14: shared chevron toggle for every desktop widget header.
 // See gui.md § 6 — this replaces 12 copies of the same 5-line button.
 import WidgetCollapseButton from './WidgetCollapseButton.vue'
+// v4.9.6 — the incomplete-provisioning strip in the Team info widget.
+import ProvisioningBanner from './ProvisioningBanner.vue'
 
 export default {
     name: 'TeamWidgetGrid',
 
     components: {
-        NcAvatar, NcActions, NcActionButton, NcButton,
+        NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton,
         GridLayout, GridItem,
         MessageOutline, Folder, Calendar, CalendarPlus, CardText,
         CheckboxMarkedOutline, InformationOutline, AccountGroup,
@@ -905,13 +1168,16 @@ export default {
         ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
         ContentSaveAll, Restore,
-        ClipboardPlusOutline,
+        ClipboardPlusOutline, BriefcaseOutline,
+        OpenInNew, FormatListChecks, PlusBoxOutline, FolderOutline, Refresh,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
         ActivityWidget, IntegrationWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
         ProjectHealthWidget,
+        OpenProjectOverviewWidget,
         MobileWidgetView,
         WidgetCollapseButton,
+        ProvisioningBanner,
     },
 
     props: {
@@ -936,15 +1202,29 @@ export default {
     emits: [
         'layout-updated', 'layout-autofit', 'manage-team', 'copy-link', 'invite',
         'schedule-meeting', 'add-event', 'add-meeting', 'add-deck-task', 'add-personal-task',
-        'create-page', 'delete-page', 'pages-loaded', 'set-view',
+        // v4.9.15 — the Upcoming tasks header's "Create work package" (labelled without "OpenProject" since v4.9.18).
+        'add-openproject-work-package',
+        'create-page', 'delete-page', 'create-wiki-page', 'pages-loaded', 'collective-loaded', 'set-view',
         'widget-actions-loaded',
         'set-as-default',
         'reset-to-default',
         'propose-decision',
+        // v4.9.6 — a provisioning operation reached a resting state from the
+        // banner's dialog; the view reloads the bundle.
+        'provisioning-changed',
     ],
 
     data() {
-        return {}
+        return {
+            // v4.9.5 — the links the Project info widget currently has, as
+            // it reports them (`actions` event); the header menu renders
+            // exactly these. All null until the widget's first payload.
+            openProjectActions: { projectUrl: null, workPackagesUrl: null, newWorkPackageUrl: null, filesUrl: null },
+            // v4.9.15 — what the Upcoming tasks widget reported about the
+            // viewer's OpenProject rights (`openproject-actions` event):
+            // the header's create item shows exactly when this is true.
+            openProjectWorkActions: { canCreate: false },
+        }
     },
 
     computed: {
@@ -953,23 +1233,38 @@ export default {
             'effectiveMemberCount',
             'teamWidgets', 'isCurrentUserDirectMember',
             'resourceWarnings',
+            'messageTarget',
             'presenceModuleEnabled', 'presenceConfig',
             'decisionsModuleEnabled', 'decisionsConfig',
             // v3.104.1 — per-team Messages toggle; drives the msgstream widget
             // and tablet-mode stream column so a team without messages doesn't
             // render either surface.
             'messagesConfig',
+            // v4.3.5 — per-team Wiki (Collectives) toggle. Contributes to
+            // the widget-pages gate (unified Pages widget renders when
+            // EITHER Intranet or Wiki is enabled). `collectives_installed`
+            // is a separate flag consumed by the Manage Team toggle to
+            // render "Not installed" instead of erroring when the NC app
+            // is absent.
+            'collectivesConfig',
             // Team-wide dashboard customization — hidden_widgets removes widgets
             // from every member's grid; default_tab is consumed on team open.
             'dashboardConfig',
             // v4.0.2 — team template label from CreateTeamView. Renders as the
             // leading badge in the Team info widget's labels row.
             'teamType',
+            // v4.6.13 — optional expiration date; drives the Team info strip.
+            // Null for every team that has none, which is most of them.
+            'teamExpiry',
             // v3.97.0 — gate for the project-health widget. Both flags are
             // precomputed on the layout bundle; project.mode + phase come
             // with the same bundle. The widget also self-checks the payload,
             // but gating here avoids a needless fetch on non-eligible views.
             'budgetConfig', 'timeConfig', 'project',
+            // v4.9.3 — OpenProject link facts; gate for both OpenProject widgets.
+            'openProjectConfig',
+            // v4.9.6 — is this workspace's provisioning finished; the banner reads it.
+            'provisioning',
         ]),
         ...mapGetters(['currentTeam', 'canPost']),
 
@@ -981,7 +1276,11 @@ export default {
          * The widget renders whichever subset of tasks is available.
          */
         showTasksWidget() {
-            return !!((this.resources.deck && this.resources.deck.length > 0) || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0))
+            // v4.9.5 — or an OpenProject team: the widget then lists the
+            // project's work packages by due date (DeckWidget's third source).
+            return !!((this.resources.deck && this.resources.deck.length > 0)
+                || (this.resources.tasks && this.resources.calendar && this.resources.calendar.length > 0)
+                || this.showOpenProjectWidgets)
         },
 
         /**
@@ -1013,53 +1312,30 @@ export default {
          * work, not only once execution starts.
          */
         showProjectHealthWidget() {
-            const phase = this.project?.phase
-            return !!(
-                this.project?.isProject
-                && this.project?.mode === 'advanced'
-                && (phase === 'planning' || phase === 'execution')
-                && this.budgetConfig?.can_view_budget
-                && this.timeConfig?.can_view_time
-            )
+            return isProjectHealthActive(this)
+        },
+
+        /**
+         * v4.9.3 — the Project info widget renders exactly when the team is
+         * of the OpenProject template and linked. Not gated on the
+         * integration being usable for this viewer: the widget itself
+         * explains what is missing (see activeWidgets.js). Also what puts
+         * OpenProject rows into the Upcoming tasks widget (v4.9.5).
+         */
+        showOpenProjectWidgets() {
+            return !!(this.openProjectConfig?.eligible && this.openProjectConfig?.linked)
         },
 
         /**
          * The set of widget IDs that are currently active (their v-if would be
-         * true). Must stay in sync with the v-if conditions on each grid-item.
+         * true). Gating rules live in src/lib/activeWidgets.js — the single
+         * source of truth shared with TeamView. Do not inline a rule here.
          *
-         * Used to compute visibleLayout — the subset of gridLayout that is
-         * actually passed to <grid-layout>. Inactive items are kept in gridLayout
-         * for position memory but excluded here so VGL never sees them and never
-         * inflates the grid height with their y=9999 parking position.
+         * applyHidden defaults to true: the grid must not render a widget the
+         * admin has hidden.
          */
         activeWidgetIds() {
-            const active = new Set()
-            active.add('msgstream')
-            active.add('widget-teaminfo')
-            active.add('widget-members')
-            active.add('widget-activity')
-            if (this.resources?.calendar?.length > 0) active.add('widget-calendar')
-            if ((this.resources?.deck?.length > 0) || (this.resources?.tasks && this.resources?.calendar?.length > 0)) {
-                active.add('widget-deck')
-            }
-            if (this.resources?.intravox) active.add('widget-pages')
-            if (this.resources?.files) active.add('widget-files-center')
-            if (this.decisionsModuleEnabled && this.decisionsConfig?.decisions_enabled) {
-                active.add('widget-decisions')
-            }
-            if (this.showProjectHealthWidget) {
-                active.add('widget-project-health')
-            }
-            ;(this.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
-
-            // Team-wide owner/admin hidden widgets — removed from every member's
-            // dashboard. Their positions stay in gridLayout (position memory), so
-            // a widget toggled back on returns to its place. Applied last so it
-            // overrides every activation rule above.
-            const hidden = this.dashboardConfig?.hidden_widgets || []
-            hidden.forEach(id => active.delete(id))
-
-            return active
+            return computeActiveWidgetIds(this)
         },
 
         /**
@@ -1083,17 +1359,10 @@ export default {
             return this.visibleLayout.map(item => item.i).sort().join(',')
         },
 
-        /**
-         * URL to open the team folder directly in NC Files.
-         * Uses the /files/{userId}/{path} route which NC Files maps to the
-         * correct folder view regardless of whether it's a group folder or a
-         * shared folder. Falls back gracefully if resources.files is unset.
-         */
-        teamFolderUrl() {
-            if (!this.resources.files || !this.resources.files.path) return null
-            const path = this.resources.files.path.replace(/^\//, '')
-            return generateUrl(`/apps/files/?dir=/${encodeURIComponent(path)}`)
-        },
+        // v4.6.25 — `teamFolderUrl()` removed with the <a target="_blank"> it
+        // fed. The team folder now opens in TeamHub's own Files tab, whose URL
+        // `TeamView::filesUrl` already builds; a second copy of that
+        // construction here was the thing the two had to be kept "in step".
 
         /**
          * Human-readable labels derived from the Circles config bitmask (team.config).
@@ -1146,6 +1415,13 @@ export default {
                     key: 'type-department',
                     text: t('teamhub', 'Department'),
                     tooltip: t('teamhub', 'Created from the Department template.'),
+                    tone: 'primary',
+                })
+            } else if (this.teamType === 'openproject') {
+                labels.push({
+                    key: 'type-openproject',
+                    text: t('teamhub', 'OpenProject project'),
+                    tooltip: t('teamhub', 'Created from the OpenProject project template.'),
                     tone: 'primary',
                 })
             }
@@ -1236,6 +1512,17 @@ export default {
             return (w.pending || 0) + (w.atRisk || 0)
         },
 
+        /**
+         * v4.6.13 — the expiration strip appears only once the date is close
+         * or has passed. `warning` is computed server-side against the
+         * instance's configured window, so the banner, the My Work item and
+         * the admin table all agree on what "close" means.
+         */
+        expiryBannerVisible() {
+            const e = this.teamExpiry
+            return !!e && (e.expired || e.warning)
+        },
+
         isTeamModerator() {
             if (!this.members?.length) return false
             const uid = getCurrentUser()?.uid
@@ -1246,6 +1533,18 @@ export default {
     },
 
     watch: {
+        /**
+         * v4.5.26 — a deep link is about to scroll to a message. If the stream
+         * widget is collapsed the target is `display: none` and the scroll
+         * silently does nothing, so open it first. MessageStream itself does
+         * the loading and highlighting; this only clears its way.
+         */
+        messageTarget(target) {
+            if (target?.messageId) {
+                this.expandWidget('msgstream')
+            }
+        },
+
         /**
          * v4.0.8 — first time the layout is fully hydrated after team open,
          * run the auto-fit pass so any widget flagged autoFit (DEFAULT_LAYOUT
@@ -1286,16 +1585,52 @@ export default {
     },
 
     methods: {
-        t, n,
-
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS']),
+        /**
+         * v4.9.5 — the Project info header menu's Refresh. Whichever copy
+         * of the widget is mounted (desktop grid or tablet column) owns the
+         * request; the other ref is absent.
+         */
+        refreshOpenProject() {
+            const widget = this.$refs.openProjectWidget || this.$refs.openProjectWidgetTablet
+            if (widget && typeof widget.refresh === 'function') widget.refresh()
+        },
 
         /**
-         * Called from the warning block "Open settings →" button.
-         * Sets the focus flag so ManageTeamView scrolls to the at-risk section.
+         * v4.9.15 — re-read the Upcoming tasks widget's OpenProject rows
+         * (TeamView calls this after a work package was created), on
+         * whichever of the desktop, tablet or mobile widgets is mounted.
+         */
+        refreshOpenProjectWork() {
+            const widget = this.$refs.deckWidget || this.$refs.deckWidgetTablet
+                || this.$refs.mobileView?.$refs?.deckWidget
+            if (widget && typeof widget.refreshOpenProject === 'function') widget.refreshOpenProject()
+        },
+
+        t, n,
+
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_MANAGE_TEAM_DEEP_LINK']),
+
+        /**
+         * Called from the warning block's chevron button.
+         *
+         * Order matters and is load-bearing: the flag is committed first, then
+         * the emit makes App.vue render ManageTeamView, which reads the flag in
+         * its own mounted() hook (v4.5.36). Committing after the emit would be
+         * too late.
          */
         openSettingsAtRisk() {
             this.SET_RESOURCE_WARNING_FOCUS(true)
+            this.$emit('manage-team')
+        },
+
+        /**
+         * v4.6.13 — open Manage team on the Maintenance tab, where the
+         * expiration panel and the request form live. Uses the same deep-link
+         * mutation the Project Compass uses, so ManageTeamView lands on the
+         * right tab whether it is already mounted or not.
+         */
+        openMaintenanceForExpiry() {
+            this.SET_MANAGE_TEAM_DEEP_LINK({ tab: 'danger', section: 'expiry' })
             this.$emit('manage-team')
         },
 
@@ -1314,9 +1649,11 @@ export default {
         },
 
         onLayoutUpdated(newLayout) {
-            // VGL only knows about visibleLayout (active items).
-            // Merge their updated positions back into the full gridLayout so
-            // inactive items (parked at y=9999) are preserved and not lost.
+            // VGL only knows about visibleLayout (active items). Merge their
+            // updated positions back into the full gridLayout so inactive
+            // items keep their remembered position instead of being dropped.
+            // (v4.6.1 — inactive items are no longer parked at y=9999; they
+            // simply aren't in visibleLayout. The merge is still required.)
             const updatedMap = {}
             newLayout.forEach(item => { updatedMap[item.i] = item })
 
@@ -1351,8 +1688,18 @@ export default {
             const existing = this.gridLayout.find(item => item.i === id)
             if (existing) return existing
 
+            // v4.6.1 — ignore parked rows when finding the bottom edge. Layouts
+            // saved before this version may still hold items at y=9999 (the old
+            // applySnap parking position); one of those would put a new widget
+            // at y≈10002, which is the "new widgets land far off the grid"
+            // symptom. The server unparks on read, so this is belt-and-braces
+            // for a layout already in memory when the fix ships.
             const maxBottom = this.gridLayout.reduce(
-                (acc, item) => Math.max(acc, (item.y || 0) + (item.h || 3)), 0,
+                (acc, item) => {
+                    const y = item.y || 0
+                    if (y >= PARK_Y_THRESHOLD) return acc
+                    return Math.max(acc, y + (item.h || 3))
+                }, 0,
             )
             const newItem = {
                 i: id,
@@ -1444,6 +1791,30 @@ export default {
         isCollapsed(id) {
             const item = this.gridLayout.find(g => g.i === id)
             return item ? !!item.collapsed : false
+        },
+
+        /**
+         * v4.6.25 — File Center header button. The store action clears any
+         * pinned file first, so this lands on the team folder rather than
+         * whatever file was last opened from a widget.
+         */
+        openTeamFolder() {
+            this.$store.dispatch('openTeamFolderInEmbed')
+        },
+
+        /**
+         * v4.5.26 — expand a widget that a deep link is about to scroll into.
+         *
+         * The message stream can be collapsed to its header, and `v-show`
+         * leaves it in the DOM with `display: none` — where `scrollIntoView()`
+         * does nothing and the landing highlight is invisible. So "Open" from
+         * "What's new" would silently appear to do nothing for anyone who had
+         * collapsed the stream. Unlike toggleCollapse() this only ever opens.
+         */
+        expandWidget(id) {
+            const item = this.gridLayout.find(g => g.i === id)
+            if (!item || !item.collapsed) return
+            this.toggleCollapse(id)
         },
 
         toggleCollapse(id) {
@@ -1859,6 +2230,18 @@ export default {
 .teamhub-resource-warning__icon {
     flex-shrink: 0;
     color: var(--color-warning-text);
+}
+/* v4.6.13 — a date that has already passed escalates the same strip from
+   warning to error. The wording changes too ("passed its expiration date"),
+   so the colour is reinforcement rather than the signal (WCAG 1.4.1). */
+.teamhub-resource-warning--expired {
+    background: var(--color-error);
+    border-bottom-color: var(--color-error-text);
+    color: var(--color-error-text);
+}
+.teamhub-resource-warning--expired .teamhub-resource-warning__icon,
+.teamhub-resource-warning--expired .teamhub-resource-warning__link {
+    color: var(--color-error-text);
 }
 .teamhub-resource-warning__text {
     flex: 1;

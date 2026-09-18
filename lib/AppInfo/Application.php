@@ -20,6 +20,7 @@ use OCA\TeamHub\MyWork\Provider\DeckWorkProvider;
 use OCA\TeamHub\MyWork\Provider\DecisionWorkProvider;
 use OCA\TeamHub\MyWork\Provider\FileReviewWorkProvider;
 use OCA\TeamHub\MyWork\Provider\MeetingWorkProvider;
+use OCA\TeamHub\MyWork\Provider\OpenProjectWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryTeamWorkProvider;
@@ -210,6 +211,11 @@ class Application extends App implements IBootstrap {
                 // lives entirely in the provider — see its docblock — which is
                 // the extension point working as advertised.
                 FileReviewWorkProvider::class,
+                // v4.9.5 — the viewer's OpenProject work packages, one row per
+                // dated, assigned, open work package in every project their
+                // teams are linked to. Read as the viewer through the official
+                // integration app; OPEN is a hand-off to OpenProject.
+                OpenProjectWorkProvider::class,
             ];
 
             foreach ($builtIn as $providerClass) {

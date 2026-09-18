@@ -11,6 +11,7 @@ use OCA\TeamHub\MyWork\ActionType;
 use OCA\TeamHub\MyWork\Category;
 use OCA\TeamHub\MyWork\Priority;
 use OCA\TeamHub\MyWork\ProviderRegistry;
+use OCA\TeamHub\MyWork\SourceGroup;
 use OCA\TeamHub\MyWork\WorkItem;
 use OCA\TeamHub\MyWork\WorkQuery;
 use OCP\ICacheFactory;
@@ -230,6 +231,12 @@ class MyWorkService {
             $this->applyFilters($items, $query, ignoreCategory: false, ignoreProvider: true),
         );
 
+        // ── Facets (v4.9.7): the projects and work types the queue currently
+        //    holds, for the filter bar's two source-specific selects. From
+        //    the pre-filter set, on the same principle as the counts — a
+        //    select that only offers what is already selected is no select.
+        $facets = $this->buildFacets($items);
+
         // ── The rail's contents (v4.5.25), from the SAME pre-category-filter
         //    set as the counts. The rail used to derive its rows from the
         //    current page, which meant selecting a summary card emptied every
@@ -277,6 +284,7 @@ class MyWorkService {
             'counts'         => $counts,
             'breakdown'      => $breakdown,
             'sourceCounts'   => $sourceCounts,
+            'facets'         => $facets,
             'highlights'     => $highlights,
             'sortBy'         => $query->sortBy,
             'total'          => $total,
@@ -604,12 +612,30 @@ class MyWorkService {
         // return completions inside the (7-day by default) retention window.
         $includeCompleted = true;
 
+        // v4.9.7 — source-specific narrowing, keyed on item metadata. Only
+        // the two keys the filter bar offers are accepted; a client cannot
+        // filter on an arbitrary metadata field. Values are bounded strings.
+        $metadataFilters = [];
+        foreach (['projectIds' => 'projectId', 'workTypes' => 'type'] as $param => $metaKey) {
+            $values = array_map(
+                static fn (string $v): string => mb_substr($v, 0, 120),
+                $this->stringList($params[$param] ?? []),
+            );
+            if ($values !== []) {
+                $metadataFilters[$metaKey] = array_slice($values, 0, 50);
+            }
+        }
+
         return new WorkQuery(
             userId:           $userId,
             teamIds:          $teamIds,
             teamNames:        $teams,
             categories:       $categories,
-            providerIds:      $this->stringList($params['providerIds'] ?? []),
+            // v4.9.17 — a source group key (`files`, `teams`, `administration`)
+            // is accepted beside provider ids and expanded here, so the tab
+            // bar, a stored preference and an API caller all say the same
+            // thing. Expanded before the cache key is built from it.
+            providerIds:      SourceGroup::expand($this->stringList($params['providerIds'] ?? [])),
             resourceTypes:    $this->stringList($params['resourceTypes'] ?? []),
             priorities:       $priorities,
             statuses:         $this->stringList($params['statuses'] ?? []),
@@ -629,6 +655,7 @@ class MyWorkService {
             isInstanceAdmin:  $instanceScopedProviderIds !== [],
             teamFilterActive: $teamFilterActive,
             instanceScopedProviderIds: $instanceScopedProviderIds,
+            metadataFilters:  $metadataFilters,
         );
     }
 
@@ -845,6 +872,15 @@ class MyWorkService {
             if ($query->dueTo !== null && ($item->dueAt === null || $item->dueAt > $query->dueTo)) {
                 return false;
             }
+            // v4.9.7 — an item without the key is excluded when the key is
+            // filtered on: "this project" cannot mean "and everything that
+            // has no project".
+            foreach ($query->metadataFilters as $key => $values) {
+                $have = $item->metadata[$key] ?? null;
+                if (!is_scalar($have) || !in_array((string)$have, $values, true)) {
+                    return false;
+                }
+            }
             if ($search !== '') {
                 $haystack = mb_strtolower(
                     $item->title . ' ' . $item->subtitle . ' ' . $item->teamName . ' ' . $item->reason,
@@ -987,6 +1023,13 @@ class MyWorkService {
             if ($groupBy === 'resource_type' && $a->resourceType !== $b->resourceType) {
                 return strcmp($a->resourceType, $b->resourceType);
             }
+            if ($groupBy === 'project') {
+                $pa = self::projectLabel($a);
+                $pb = self::projectLabel($b);
+                if ($pa !== $pb) {
+                    return strcasecmp($pa, $pb);
+                }
+            }
 
             if ($groupBy !== 'date') {
                 $ca = Category::rank($a->category);
@@ -1127,6 +1170,11 @@ class MyWorkService {
                 'team'          => [$item->teamId, $item->teamName],
                 'resource_type' => [$item->resourceType, $this->resourceTypeLabel($item->resourceType)],
                 'date'          => $this->dateBucket($item, $query),
+                // v4.9.7 — "By project": a source that names a project (an
+                // OpenProject work package) groups under it; everything else
+                // groups under its team, which is the project container for
+                // TeamHub's own sources.
+                'project'       => [self::projectKey($item), self::projectLabel($item)],
                 default         => [$item->category, $this->categoryLabel($item->category)],
             };
 
@@ -1147,6 +1195,58 @@ class MyWorkService {
         }
 
         return $ordered;
+    }
+
+    /** The grouping key for `groupBy=project` (v4.9.7). */
+    private static function projectKey(WorkItem $item): string {
+        $pid = $item->metadata['projectId'] ?? null;
+        if (is_scalar($pid) && (string)$pid !== '' && (string)($item->metadata['projectName'] ?? '') !== '') {
+            return 'project:' . (string)($item->metadata['connection'] ?? '') . ':' . (string)$pid;
+        }
+        return 'team:' . $item->teamId;
+    }
+
+    /** The heading for `groupBy=project` (v4.9.7). */
+    private static function projectLabel(WorkItem $item): string {
+        $name = $item->metadata['projectName'] ?? null;
+        if (is_string($name) && $name !== '' && isset($item->metadata['projectId'])) {
+            return $name;
+        }
+        return $item->teamName;
+    }
+
+    /**
+     * The projects and work types present in the queue (v4.9.7), for the
+     * filter bar. Any source may contribute by setting `metadata.projectId`
+     * + `metadata.projectName` and `metadata.type`; today OpenProject does.
+     *
+     * @param WorkItem[] $items
+     * @return array{projects: list<array{id: string, name: string, teamId: string, count: int}>, workTypes: list<array{id: string, count: int}>}
+     */
+    private function buildFacets(array $items): array {
+        $projects = [];
+        $types    = [];
+        foreach ($items as $item) {
+            $pid  = $item->metadata['projectId'] ?? null;
+            $name = $item->metadata['projectName'] ?? null;
+            if (is_scalar($pid) && (string)$pid !== '' && is_string($name) && $name !== '') {
+                $key = (string)$pid;
+                if (!isset($projects[$key])) {
+                    $projects[$key] = ['id' => $key, 'name' => $name, 'teamId' => $item->teamId, 'count' => 0];
+                }
+                $projects[$key]['count']++;
+            }
+            $type = $item->metadata['type'] ?? null;
+            if (is_string($type) && $type !== '' && isset($item->metadata['projectId'])) {
+                if (!isset($types[$type])) {
+                    $types[$type] = ['id' => $type, 'count' => 0];
+                }
+                $types[$type]['count']++;
+            }
+        }
+        usort($projects, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        usort($types, static fn (array $a, array $b): int => strcasecmp($a['id'], $b['id']));
+        return ['projects' => array_values($projects), 'workTypes' => array_values($types)];
     }
 
     /** @return array{0:string,1:string} */
@@ -1211,6 +1311,12 @@ class MyWorkService {
             'team_join_request'   => $this->l->t('Membership requests'),
             'team_expiry'         => $this->l->t('Team expirations'),
             'team_expiry_request' => $this->l->t('Extension requests'),
+            // v4.9.7 — the two OpenProject row kinds. Same strings as the JS
+            // mirror's plural forms.
+            // TRANSLATORS: My Work section heading over OpenProject work packages
+            'openproject_work_package' => $this->l->t('Work packages'),
+            // TRANSLATORS: My Work section heading over OpenProject milestones
+            'openproject_milestone'    => $this->l->t('Milestones'),
             default               => $type,
         };
     }
@@ -1348,6 +1454,7 @@ class MyWorkService {
             $query->teamIds, $query->limit, $query->offset,
             $query->upcomingDays, $query->completedDays,
             $query->actionRequiredDays, $groupBy, $query->sortBy,
+            $query->metadataFilters,
         ];
         return $userId . ':' . $this->userNonce($userId) . ':' . md5(json_encode($shape));
     }
@@ -1459,5 +1566,46 @@ class MyWorkService {
     /** Provider descriptors for the filter UI. @return array<int,array<string,mixed>> */
     public function describeProviders(): array {
         return $this->registry->describeAll();
+    }
+
+    /**
+     * The providers **this viewer** may see in the source bar (v4.9.17):
+     * `describeProviders()` with each one's source group, and without the
+     * instance-scoped providers for anybody who is not a Nextcloud
+     * administrator.
+     *
+     * Those providers (`TeamExpiryAdminWorkProvider`, the *Administration*
+     * group) return nothing to a non-admin, so listing them showed every
+     * member a *Team lifecycle* tab at zero for two months. A role-restricted
+     * surface is hidden, not disabled — and the tab bar cannot hide what it
+     * is told about, so the list itself has to leave them out. The admin page
+     * keeps `describeProviders()`: an administrator sees everything.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function describeProvidersForViewer(string $userId): array {
+        // The same gate the read path uses: the ids an admin may see across
+        // teams, and an empty list for everybody else. A provider that is
+        // instance-scoped but not on this viewer's list is one they cannot
+        // hold work in, so it is not listed.
+        $allowed = $this->instanceScopedProviderIds($userId);
+
+        $out = [];
+        foreach ($this->describeProviders() as $p) {
+            $id       = (string)($p['id'] ?? '');
+            $provider = $this->registry->get($id);
+            if ($provider !== null && method_exists($provider, 'isInstanceScoped') && !in_array($id, $allowed, true)) {
+                try {
+                    if ($provider->isInstanceScoped() === true) {
+                        continue;
+                    }
+                } catch (\Throwable) {
+                    // Cannot tell — treat as the ordinary provider it presents as.
+                }
+            }
+            $p['group'] = SourceGroup::of($id);
+            $out[] = $p;
+        }
+        return $out;
     }
 }

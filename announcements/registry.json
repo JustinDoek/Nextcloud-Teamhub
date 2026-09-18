@@ -12,6 +12,11 @@
             "filename": "import.md",
             "role": "admin",
             "version": "4.7.1"
+        },
+        {
+            "filename": "company_launch.md",
+            "role": "admin",
+            "version": "4.10.0"
         }
     ]
 }

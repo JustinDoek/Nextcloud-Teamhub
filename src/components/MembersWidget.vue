@@ -44,7 +44,8 @@
                     v-for="m in sortedMembers"
                     :key="m.userId"
                     :member="m"
-                    :talk-available="talkAvailable" />
+                    :talk-available="talkAvailable"
+                    :mail-available="mailAvailable" />
             </ul>
         </div>
 
@@ -126,7 +127,8 @@
                     v-for="m in filteredMembers"
                     :key="m.userId"
                     :member="m"
-                    :talk-available="talkAvailable" />
+                    :talk-available="talkAvailable"
+                    :mail-available="mailAvailable" />
             </ul>
         </div>
 
@@ -176,12 +178,22 @@ export default {
             'currentTeamId',
             'allEffectiveMembers',
             'allEffectiveMembersTalkAvailable',
+            'allEffectiveMembersMailAvailable',
             'presenceModuleEnabled',
             'presenceConfig',
         ]),
 
         talkAvailable() {
             return !!this.allEffectiveMembersTalkAvailable
+        },
+
+        /**
+         * Whether the *viewer* can compose in NC Mail. Nothing to do with the
+         * member being contacted — they only need an address. Falsy simply
+         * means the email icons keep handing off to the OS mailto: handler.
+         */
+        mailAvailable() {
+            return !!this.allEffectiveMembersMailAvailable
         },
 
         /**

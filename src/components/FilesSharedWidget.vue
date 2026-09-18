@@ -83,9 +83,11 @@
 <script>
 import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatDate as fmtDate, zonedIsoDate, todayIso, shiftIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcAvatar, NcButton } from '@nextcloud/vue'
+import { fileOpenUrl } from '../lib/filesCollab.js'
 
 // Icons
 
@@ -170,9 +172,14 @@ export default {
         /**
          * Open the file/folder in NC Files via the /f/{id} shortlink.
          * NC resolves the correct viewer or folder based on node type and mimetype.
+         *
+         * Files additionally get the team's conversation about them showing
+         * alongside (v4.5.5). Folders don't — Talk registers its chat tab as
+         * files-only, so there is no conversation and the sidebar would open
+         * on an unrelated tab.
          */
         itemUrl(item) {
-            return generateUrl(`/f/${item.id}`)
+            return fileOpenUrl(item.id, { isFolder: item.item_type === 'folder' })
         },
 
         /**
@@ -190,12 +197,13 @@ export default {
 
         formatDate(stime) {
             if (!stime) return ''
-            const d = new Date(stime * 1000)
-            const now = new Date()
-            const diffDays = Math.floor((now - d) / 86400000)
-            if (diffDays === 0) return t('teamhub', 'Today')
-            if (diffDays === 1) return t('teamhub', 'Yesterday')
-            return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+            // Calendar days in the reader's zone, not elapsed hours — see
+            // FilesRecentWidget.
+            const iso = zonedIsoDate(stime * 1000)
+            const today = todayIso()
+            if (iso === today) return t('teamhub', 'Today')
+            if (iso === shiftIsoDate(today, { days: -1 })) return t('teamhub', 'Yesterday')
+            return fmtDate(stime * 1000, { month: 'short', day: 'numeric' })
         },
 
         /**

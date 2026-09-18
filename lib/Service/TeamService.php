@@ -9,6 +9,7 @@ use OCA\TeamHub\Constants\TeamApps;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\PendingDeletionMapper;
+use OCA\TeamHub\Db\ResourceLinkMapper;
 use OCA\TeamHub\Db\TeamAppMapper;
 use OCA\TeamHub\Db\TeamAppPresenceMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
@@ -73,6 +74,9 @@ class TeamService {
         // team's profile governs, this service owns the writes that apply it.
         // Acyclic on purpose — PolicyService knows nothing about TeamService.
         private PolicyService        $policyService,
+        // v4.9.6 — the provisioning ledger, removed with the team. A DI leaf
+        // (IDBConnection only).
+        private ResourceLinkMapper   $resourceLinks,
     ) {
     }
 
@@ -1074,6 +1078,23 @@ class TeamService {
                 ->executeStatement();
         } catch (\Throwable $e) { /* Not fatal */ }
 
+        // v4.9.3 — the OpenProject link row and its cache generation. Resolved
+        // through the container rather than injected: the link service depends
+        // on MemberService and AuditService, and adding that edge to this
+        // constructor is exactly how the v4.8.7 DI cycle happened. Nothing in
+        // OpenProject is touched — the link is TeamHub's row alone.
+        try {
+            $this->container->get(\OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService::class)
+                ->deleteForTeamCascade($teamId);
+        } catch (\Throwable $e) { /* Not fatal */ }
+
+        // v4.9.6 — the provisioning ledger rows (what was created or linked
+        // for this team). Bookkeeping only; every resource they name was
+        // handled above.
+        try {
+            $this->resourceLinks->deleteByTeam($teamId);
+        } catch (\Throwable $e) { /* Not fatal */ }
+
         // ── Step 5: Audit log ─────────────────────────────────────────────────
         // Logged AFTER successful destroy so a failed delete doesn't produce a
         // misleading "team.deleted" row.
@@ -1270,6 +1291,19 @@ class TeamService {
         $overlay = $this->policyService->configOverlayForTeam($teamId);
         if ($overlay['mask'] !== 0) {
             $newConfig = ($newConfig & ~$overlay['mask']) | ($overlay['value'] & $overlay['mask']);
+        }
+
+        // v4.9.2 — federation, the one managed bit with a level above the
+        // profile. Precedence is instance → profile → team: the "Allowed invite
+        // types" admin setting can forbid federated members instance-wide, and
+        // neither a profile nor a team owner may grant what it has withheld.
+        //
+        // The profile level needs nothing here — CFG_FEDERATED is in
+        // PolicyField::configBits(), so a governing profile already arrives in
+        // the overlay above. This clamp is only the instance level, applied
+        // after the overlay precisely because it outranks it.
+        if ($this->memberService->resolveFederationSetting($teamId)['lockedBy'] === 'instance') {
+            $newConfig &= ~CirclesConfig::CFG_FEDERATED;
         }
 
         $updQb = $db->getQueryBuilder();
@@ -1637,6 +1671,16 @@ class TeamService {
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',
             // Decisions module — default ON (v3.75.4). Same rationale as above.
             'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1',
+            // OpenProject module — default OFF (v4.9.16): useless without an
+            // OpenProject to talk to, so an administrator opts in. The switch
+            // alone; whether the module is *available* also needs the licence,
+            // which the admin panel reads from the License tab it already has.
+            // Key and default live in OpenProjectModuleService.
+            'openProjectModuleEnabled' => $config->getAppValue(
+                Application::APP_ID,
+                \OCA\TeamHub\Service\OpenProject\OpenProjectModuleService::CONFIG_ENABLED,
+                '0',
+            ) === '1',
             // File reviews are no longer an administrator switch (v4.8.31).
             // Whether they exist follows the licence, because a review's whole
             // working life happens in My Work and My Work is licensed — a
@@ -1810,6 +1854,18 @@ class TeamService {
                 $settings['decisionsModuleEnabled'] ? '1' : '0'
             );
         }
+        // v4.9.16 — the OpenProject module's switch. Written whatever the
+        // licence says: the panel hides the control while unlicensed, and a
+        // stored '1' on an unlicensed instance is inert (OpenProjectModuleService
+        // checks the licence first), so an instance that licenses later finds
+        // the module already on if that is what the administrator chose.
+        if (isset($settings['openProjectModuleEnabled'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                \OCA\TeamHub\Service\OpenProject\OpenProjectModuleService::CONFIG_ENABLED,
+                $settings['openProjectModuleEnabled'] ? '1' : '0'
+            );
+        }
         // `fileReviewsModuleEnabled` was written here until v4.8.31. It is
         // ignored now rather than accepted-and-discarded: an older admin bundle
         // still posting the field gets the same answer as a current one, which
@@ -1851,8 +1907,27 @@ class TeamService {
     // =========================================================================
 
     private function circleToArray(mixed $circle): array {
+        // Member count, in the order Circles itself prefers (v4.9.2).
+        //
+        // getPopulationInherited() expands nested teams and groups; getMembers()
+        // counts direct rows only, so a team whose members include a group of
+        // twelve reported 1. MaintenanceService has counted from the
+        // circles_membership cache for exactly this reason since v4.6 — this was
+        // the one path still disagreeing with it, which meant the same team could
+        // show two different member counts depending on which screen asked.
+        //
+        // The Contacts app made the same move for the same reason, settling on
+        // populationInherited as the single source. Both fall back rather than
+        // fail: the inherited figure is hydrated from the circle's settings and
+        // is 0 when the caller fetched the circle without them.
         $memberCount = 0;
-        if (method_exists($circle, 'getMembers')) {
+        if (method_exists($circle, 'getPopulationInherited')) {
+            $memberCount = (int)$circle->getPopulationInherited();
+        }
+        if ($memberCount === 0 && method_exists($circle, 'getPopulation')) {
+            $memberCount = (int)$circle->getPopulation();
+        }
+        if ($memberCount === 0 && method_exists($circle, 'getMembers')) {
             $members     = $circle->getMembers();
             $memberCount = is_array($members) ? count($members) : 0;
         }

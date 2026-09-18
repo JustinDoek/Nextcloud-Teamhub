@@ -39,7 +39,7 @@
                         <ImageIcon v-else :size="48" class="team-image-preview__placeholder" />
                     </div>
 
-                    <div class="team-image-actions">
+                    <div v-if="canSetTeamImage" class="team-image-actions">
                         <!-- Upload button — triggers hidden file input -->
                         <NcButton
                             variant="secondary"
@@ -113,38 +113,124 @@
                     <NcLoadingIcon :size="24" />
                 </div>
                 <div v-else class="manage-settings">
+                    <!-- v4.8.17 — TRACK-F2-DESIGN §4.4. One notice for the panel
+                         rather than a sentence under every governed toggle: six
+                         copies of the same explanation is noise, and the lock
+                         beside each row is what says *which* ones.
+
+                         **"here" is load-bearing.** These fields are ASSERTED,
+                         not enforced — Contacts and the Teams app write
+                         `circles_circle.config` directly and Nextcloud gives us
+                         no way to stop them. An unqualified "cannot be changed"
+                         would be exactly the "locked" claim §7 exists to
+                         prevent; "cannot be changed *here*" is true and claims
+                         only what this screen actually does. Do not drop the
+                         word in a later edit for reading better without it.
+
+                         A second sentence spelling out that Contacts can still
+                         change it, and that TeamHub reports the change, was cut
+                         at Justin's request on 2026-09-07 — it belongs in the
+                         docs and the drift report, not over a settings panel. -->
+                    <div v-if="anyCircleSettingGoverned" class="manage-settings-governed">
+                        <LockOutline :size="iconToolbar" aria-hidden="true" />
+                        <span>
+                            {{ t('teamhub', 'Some settings are set by the “{profile}” classification and cannot be changed here.', { profile: circlePolicyName }) }}
+                        </span>
+                    </div>
                     <div class="manage-settings-group">
                         <h4>{{ t('teamhub', 'Invitations') }}</h4>
-                        <NcCheckboxRadioSwitch
-                            v-for="opt in invitationOptions"
-                            :key="opt.key"
-                            v-model="circleConfig[opt.key]"
-                            type="checkbox"
-                            @update:model-value="saveConfig">
-                            {{ opt.label }}
-                        </NcCheckboxRadioSwitch>
+                        <div v-for="opt in invitationOptions" :key="opt.key" class="manage-settings-item">
+                            <NcCheckboxRadioSwitch
+                                v-model="circleConfig[opt.key]"
+                                :disabled="isConfigGoverned(opt.field) || !configDependencyMet(opt)"
+                                type="checkbox"
+                                @update:model-value="saveConfig">
+                                {{ opt.label }}
+                            </NcCheckboxRadioSwitch>
+                            <LockOutline
+                                v-if="isConfigGoverned(opt.field)"
+                                :size="iconInline"
+                                class="manage-settings-lock"
+                                :title="t('teamhub', 'Set by the “{profile}” classification', { profile: circlePolicyName })" />
+                            <!-- v4.8.30 — greyed because the platform ignores it,
+                                 not because a profile locked it. Two different
+                                 reasons need two different explanations: the lock
+                                 icon says "an administrator decided this", this
+                                 says "this setting does nothing right now". -->
+                            <span
+                                v-if="!isConfigGoverned(opt.field) && !configDependencyMet(opt)"
+                                class="manage-settings-note">
+                                {{ dependencyNote(opt.dependsOnField) }}
+                            </span>
+                        </div>
                     </div>
                     <div class="manage-settings-group">
                         <h4>{{ t('teamhub', 'Membership') }}</h4>
                         <!-- CFG_ROOT (8192): same bit Contacts uses for "Prevent teams from being
                              a member of another team". Checked = prevention is active (CFG_ROOT set). -->
-                        <NcCheckboxRadioSwitch
-                            v-model="circleConfig.preventSubMembership"
-                            type="checkbox"
-                            @update:model-value="saveConfig">
-                            {{ t('teamhub', 'Prevent this team from being a member of another team') }}
-                        </NcCheckboxRadioSwitch>
+                        <div class="manage-settings-item">
+                            <NcCheckboxRadioSwitch
+                                v-model="circleConfig.preventSubMembership"
+                                :disabled="isConfigGoverned('cfg_root')"
+                                type="checkbox"
+                                @update:model-value="saveConfig">
+                                {{ t('teamhub', 'Prevent this team from being a member of another team') }}
+                            </NcCheckboxRadioSwitch>
+                            <LockOutline
+                                v-if="isConfigGoverned('cfg_root')"
+                                :size="iconInline"
+                                class="manage-settings-lock"
+                                :title="t('teamhub', 'Set by the “{profile}” classification', { profile: circlePolicyName })" />
+                        </div>
+                        <!-- CFG_FEDERATED (32768): the same bit the Contacts app
+                             writes from its own per-team federation switch.
+
+                             Three levels decide this one, which is why it does not
+                             use isConfigGoverned() like its neighbours. Precedence
+                             is instance → profile → team: the server-wide "Allowed
+                             invite types" setting sits above the classification,
+                             and neither a profile nor an owner may grant what it
+                             has withheld. The backend resolves all three in
+                             MemberService::resolveFederationSetting() and hands
+                             back the answer plus who decided; this only renders
+                             it. Two levels of lock need two explanations — the
+                             tooltip names whichever one applies. -->
+                        <div class="manage-settings-item">
+                            <NcCheckboxRadioSwitch
+                                v-model="circleConfig.federated"
+                                :disabled="federation.locked"
+                                type="checkbox"
+                                @update:model-value="saveConfig">
+                                {{ t('teamhub', 'Allow members from other Nextcloud servers') }}
+                            </NcCheckboxRadioSwitch>
+                            <LockOutline
+                                v-if="federation.locked"
+                                :size="iconInline"
+                                class="manage-settings-lock"
+                                :title="federationLockTitle" />
+                            <span
+                                v-if="federation.lockedBy === 'instance'"
+                                class="manage-settings-note">
+                                {{ t('teamhub', 'Federated invitations are switched off for this server.') }}
+                            </span>
+                        </div>
                     </div>
                     <div class="manage-settings-group">
                         <h4>{{ t('teamhub', 'Privacy') }}</h4>
-                        <NcCheckboxRadioSwitch
-                            v-for="opt in privacyOptions"
-                            :key="opt.key"
-                            v-model="circleConfig[opt.key]"
-                            type="checkbox"
-                            @update:model-value="saveConfig">
-                            {{ opt.label }}
-                        </NcCheckboxRadioSwitch>
+                        <div v-for="opt in privacyOptions" :key="opt.key" class="manage-settings-item">
+                            <NcCheckboxRadioSwitch
+                                v-model="circleConfig[opt.key]"
+                                :disabled="isConfigGoverned(opt.field)"
+                                type="checkbox"
+                                @update:model-value="saveConfig">
+                                {{ opt.label }}
+                            </NcCheckboxRadioSwitch>
+                            <LockOutline
+                                v-if="isConfigGoverned(opt.field)"
+                                :size="iconInline"
+                                class="manage-settings-lock"
+                                :title="t('teamhub', 'Set by the “{profile}” classification', { profile: circlePolicyName })" />
+                        </div>
                     </div>
                     <p v-if="configSaved" class="manage-settings-saved">
                         <CheckCircle :size="14" />{{ t('teamhub', 'Settings saved') }}
@@ -154,7 +240,7 @@
 
             <!-- Permissions (v3.104.7) — merged Meeting + Custom links rows
                  under one section using the compact manage-section__row
-                 pattern from Integration Settings → Messages. Auto-save on
+                 pattern from Module settings → Messages. Auto-save on
                  change; the shared endpoint (message/settings) drives Custom
                  links, saveMeetingSettings drives the Meeting row. -->
             <div class="manage-section">
@@ -217,7 +303,11 @@
                         <span class="manage-section__row-title">{{ t('teamhub', 'Default tab') }}</span>
                         <span class="manage-section__row-desc">{{ t('teamhub', 'The tab shown first when a member opens this team.') }}</span>
                     </div>
+                    <!-- v4.6.15 — the empty case is a real one: if the layout
+                         bundle fails, an option-less <select> is a control that
+                         looks usable and can never fire @change. Say so instead. -->
                     <select
+                        v-if="selectableDefaultTabs.length"
                         class="teamhub-dec-level-select"
                         :disabled="dashboardSaving"
                         :value="dashboardConfig.default_tab"
@@ -225,6 +315,9 @@
                         @change="saveDefaultTab($event.target.value)">
                         <option v-for="tab in selectableDefaultTabs" :key="tab.key" :value="tab.key">{{ tab.label }}</option>
                     </select>
+                    <span v-else class="manage-section__row-desc">
+                        {{ t('teamhub', 'Tabs for this team could not be loaded.') }}
+                    </span>
                 </div>
 
                 <!-- Per-widget show/hide -->
@@ -383,6 +476,49 @@
                 </div>
             </div>
 
+            <!-- v4.7.14 (GitHub #87) — the people inside those groups and teams.
+                 Without this the list showed "Marketing (2)" and nothing else, so
+                 an admin could neither see who was in the team nor give one of
+                 them a role. -->
+            <div v-if="!loadingMembers && manageMembers.inherited.length > 0" class="manage-section">
+                <div class="manage-section-header">
+                    <h3>{{ t('teamhub', 'People from groups and teams') }} ({{ manageMembers.inherited.length }})</h3>
+                </div>
+                <p class="inherited-hint">
+                    {{ t('teamhub', 'These people are members through a group or team. Giving someone a higher role adds them to this team directly as well — they keep their group membership.') }}
+                </p>
+                <div class="members-list">
+                    <div
+                        v-for="member in manageMembers.inherited"
+                        :key="'inh-' + member.userId"
+                        class="member-item">
+                        <NcAvatar
+                            :user="member.userId"
+                            :display-name="member.displayName"
+                            :size="32"
+                            :show-user-status="false" />
+                        <div class="member-info">
+                            <span class="member-name">{{ member.displayName }}</span>
+                            <span v-if="member.via" class="member-via">
+                                {{ t('teamhub', 'via {source}', { source: member.via }) }}
+                            </span>
+                        </div>
+                        <select
+                            v-if="canPromoteInherited(member)"
+                            :value="member.level"
+                            :disabled="changingLevel === member.userId"
+                            class="member-level-select"
+                            :aria-label="t('teamhub', 'Change role for {name}', { name: member.displayName })"
+                            @change="changeLevel(member, Number($event.target.value))">
+                            <option :value="member.level">{{ getMemberRoleLabel(member.level) }}</option>
+                            <option v-if="member.level < 4" :value="4">{{ t('teamhub', 'Moderator') }}</option>
+                            <option v-if="member.level < 8 && currentUserIsOwner" :value="8">{{ t('teamhub', 'Admin') }}</option>
+                        </select>
+                        <span v-else class="member-role-static">{{ getMemberRoleLabel(member.level) }}</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Effective count summary -->
             <div v-if="!loadingMembers" class="manage-section manage-section--summary">
                 <span class="effective-count-label">
@@ -440,18 +576,20 @@
         <!-- TAB: Integrations -->
         <div v-else-if="activeTab === 'integrations'" class="manage-tab-content">
             <div class="manage-section">
-                <h3>{{ t('teamhub', 'Integrations') }}</h3>
+                <h3>{{ t('teamhub', 'Modules & integrations') }}</h3>
                 <p class="manage-section-desc">
-                    {{ t('teamhub', 'Enable or disable integrations for this team. Internal integrations are built into TeamHub; third-party integrations are registered by other Nextcloud apps. Widgets appear on the Home view; tab integrations add a tab to the tab bar.') }}
+                    {{ t('teamhub', 'Enable or disable what this team uses. Modules are built into TeamHub; integrations are registered by other Nextcloud apps. Widgets appear on the Home view; tab entries add a tab to the tab bar.') }}
                 </p>
 
-                <!-- ── Internal integrations (built into TeamHub) ──────────── -->
+                <!-- ── Modules (built into TeamHub) ─────────────────────────
+                     v4.8.33 — 'internal integration' is retired. Ours are
+                     modules; an integration is somebody else's app. -->
                 <!-- v3.104.1 — parent gate loosened to isTeamAdmin alone.
                      Messages/Timeline/Budget/Time are always available (no
                      instance-wide module gate) so the subsection must render
                      even when neither Presence nor Decisions is on. -->
                 <div v-if="isTeamAdmin" class="integrations-subsection">
-                    <h4 class="integrations-subsection__title">{{ t('teamhub', 'Internal integrations') }}</h4>
+                    <h4 class="integrations-subsection__title">{{ t('teamhub', 'Modules') }}</h4>
                     <div class="widgets-list">
                         <!-- Presence row — only shown when presence module is on -->
                         <div
@@ -529,6 +667,36 @@
                             </NcCheckboxRadioSwitch>
                         </div>
 
+                        <!-- File reviews row (v4.8.18) — only shown when the
+                             module is on instance-wide. No "Menu item" badge:
+                             the entry point is the Files app's own ⋯ menu, and
+                             the work lands in My Work, so this module adds no
+                             tab of its own. -->
+                        <div
+                            v-if="fileReviewsModuleEnabled"
+                            class="widget-item widget-item--internal"
+                            :class="{ 'widget-item--enabled': fileReviewsEnabled }">
+                            <span class="widget-drag-handle widget-drag-handle--placeholder" />
+                            <div class="widget-info">
+                                <span class="widget-title">
+                                    <!-- TRANSLATORS: Name of the File reviews feature — asking teammates to review a file -->
+                                    {{ t('teamhub', 'File reviews') }}
+                                    <span class="widget-badge widget-badge--internal">
+                                        {{ t('teamhub', 'Built-in') }}
+                                    </span>
+                                </span>
+                                <span class="widget-description">{{ t('teamhub', 'Let members ask teammates to review a file from the Files app. Requests appear in the reviewers’ My Work, and the discussion happens in the file’s own chat.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                :model-value="fileReviewsEnabled"
+                                :disabled="savingFileReviewsConfig"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable file reviews for this team')"
+                                @update:model-value="setFileReviewsEnabled($event)">
+                                {{ fileReviewsEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
+
                         <!-- Messages row (v3.104.1) — per-team toggle. Default
                              on: most teams communicate via the message stream.
                              Disabling hides the message stream widget, the
@@ -545,7 +713,7 @@
                                         {{ t('teamhub', 'Built-in') }}
                                     </span>
                                 </span>
-                                <span class="widget-description">{{ t('teamhub', 'Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Integration settings.') }}</span>
+                                <span class="widget-description">{{ t('teamhub', 'Enable the team message stream — posts, questions, polls, and pinned messages. Role limits live under Module settings.') }}</span>
                             </div>
                             <NcCheckboxRadioSwitch
                                 :model-value="messagesEnabled"
@@ -654,8 +822,8 @@
                     </div>
                 </div>
 
-                <!-- ── Third-party integrations (registered by other apps) ── -->
-                <h4 v-if="isTeamAdmin" class="integrations-subsection__title">{{ t('teamhub', 'Third-party integrations') }}</h4>
+                <!-- ── Integrations (registered by other apps) ────────────── -->
+                <h4 v-if="isTeamAdmin" class="integrations-subsection__title">{{ t('teamhub', 'Integrations') }}</h4>
                 <div v-if="loadingWidgets" class="section-loading">
                     <NcLoadingIcon :size="32" />
                 </div>
@@ -668,7 +836,7 @@
                         the integration API — so they must not appear here.
                     -->
                     <div v-if="externalIntegrations.length === 0" class="no-pending">
-                        {{ t('teamhub', 'No third-party integrations available. Install a compatible app to add integrations to this team.') }}
+                        {{ t('teamhub', 'No integrations available. Install a compatible app to add one to this team.') }}
                     </div>
                     <div v-else class="widgets-list">
                         <div
@@ -711,6 +879,18 @@
                     </div>
                 </template>
             </div>
+
+            <!-- OpenProject (v4.9.3, Phase 1) — an integration in the
+                 vocabulary above (somebody else built it), so it lives on this
+                 tab, and only for teams created from the OpenProject template.
+                 Read-only: the project is chosen in the creation wizard; this
+                 shows it and tests the connection. v4.9.16 — hidden, like
+                 every OpenProject surface, while TeamHub's OpenProject module
+                 is unlicensed or switched off; an integration-level problem
+                 (app disabled, no host) keeps the panel, which is where it is
+                 diagnosed. -->
+            <OpenProjectSettingsPanel v-if="isTeamAdmin && teamType === 'openproject' && openProjectConfig.moduleAvailable && team && team.id" :team-id="team.id" />
+
             <!-- Team Apps — per-app resource lists for resource-backed apps -->
             <div class="manage-section">
                 <h3>{{ t('teamhub', 'Team Apps') }}</h3>
@@ -733,52 +913,87 @@
                         <div v-if="dualFolderPendingRow" class="dual-folder-notice">
                             <div class="dual-folder-notice__header">
                                 <FolderIcon :size="18" aria-hidden="true" />
-                                <strong>{{ t('teamhub', 'Group folder connect') }}</strong>
+                                <strong>{{ t('teamhub', 'Team folder connect') }}</strong>
                             </div>
                             <p class="dual-folder-notice__body">
                                 <!-- TRANSLATORS: {groupFolder} and {sharedFolder} are folder names -->
-                                {{ t('teamhub', 'The group folder "{groupFolder}" is available for this team alongside the existing shared folder "{sharedFolder}". Use the + connect group folder to attach the group folder. Migrate files from your shared folder before you disconnect or delete the shared folder.', {
+                                {{ t('teamhub', 'The team folder "{groupFolder}" is available for this team alongside the existing shared folder "{sharedFolder}". Use the + connect team folder to attach the team folder. Migrate files from your shared folder before you disconnect or delete the shared folder.', {
                                     groupFolder: dualFolderPendingRow.displayName || dualFolderPendingRow.resourceId,
                                     sharedFolder: dualFolderSharedRow ? (dualFolderSharedRow.displayName || dualFolderSharedRow.resourceId) : t('teamhub', 'shared folder'),
                                 }) }}
                             </p>
                         </div>
 
-                        <p v-if="normalPendingResources.length > 0" class="manage-section-desc manage-section-desc--inline">
+                        <p v-if="reviewablePendingResources.length > 0" class="manage-section-desc manage-section-desc--inline">
                             {{ t('teamhub', 'These resources are connected to this team in Nextcloud but were not added through TeamHub. Review each one and choose to accept or ignore it.') }}
                         </p>
                         <div v-if="loadingPendingResources" class="section-loading">
                             <NcLoadingIcon :size="24" />
                         </div>
-                        <div v-else class="pending-resources-list">
-                            <div
-                                v-for="resource in normalPendingResources"
-                                :key="resource.id"
-                                class="pending-resource-item">
-                                <div class="pending-resource-info">
-                                    <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
-                                    <span class="pending-resource-name" :title="resource.resourceId">
-                                        {{ resource.displayName || resource.resourceId }}
-                                    </span>
-                                </div>
-                                <div class="pending-resource-actions">
-                                    <NcButton
-                                        variant="primary"
-                                        :disabled="resource._loading"
-                                        :aria-label="t('teamhub', 'Accept resource {id}', { id: resource.resourceId })"
-                                        @click="acceptResource(resource)">
-                                        {{ t('teamhub', 'Accept') }}
-                                    </NcButton>
-                                    <NcButton
-                                        variant="tertiary"
-                                        :disabled="resource._loading"
-                                        :aria-label="t('teamhub', 'Ignore resource {id}', { id: resource.resourceId })"
-                                        @click="ignoreResource(resource)">
-                                        {{ t('teamhub', 'Ignore') }}
-                                    </NcButton>
+                        <template v-else>
+                            <div v-if="reviewablePendingResources.length > 0" class="pending-resources-list">
+                                <div
+                                    v-for="resource in reviewablePendingResources"
+                                    :key="resource.id"
+                                    class="pending-resource-item">
+                                    <div class="pending-resource-info">
+                                        <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
+                                        <span class="pending-resource-name" :title="resource.resourceId">
+                                            {{ resource.displayName || resource.resourceId }}
+                                        </span>
+                                    </div>
+                                    <div class="pending-resource-actions">
+                                        <NcButton
+                                            variant="primary"
+                                            :disabled="resource._loading"
+                                            :aria-label="t('teamhub', 'Accept resource {id}', { id: resource.resourceId })"
+                                            @click="acceptResource(resource)">
+                                            {{ t('teamhub', 'Accept') }}
+                                        </NcButton>
+                                        <NcButton
+                                            variant="tertiary"
+                                            :disabled="resource._loading"
+                                            :aria-label="t('teamhub', 'Ignore resource {id}', { id: resource.resourceId })"
+                                            @click="ignoreResource(resource)">
+                                            {{ t('teamhub', 'Ignore') }}
+                                        </NcButton>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+
+                            <!-- v4.5.41 — rows we checked and found dead. Same row
+                                 shape as above so the block never changes layout;
+                                 only the explanation and the action differ. -->
+                            <div v-if="unavailablePendingResources.length > 0" class="pending-resources-list">
+                                <p class="manage-section-desc manage-section-desc--inline">
+                                    {{ t('teamhub', 'These resources can no longer be reviewed. Dismiss each one to remove it from this list.') }}
+                                </p>
+                                <div
+                                    v-for="resource in unavailablePendingResources"
+                                    :key="resource.id"
+                                    class="pending-resource-item pending-resource-item--unavailable">
+                                    <div class="pending-resource-info">
+                                        <span class="pending-resource-app">{{ appLabel(resource.appId) }}</span>
+                                        <span class="pending-resource-name" :title="resource.resourceId">
+                                            {{ resource.displayName || resource.resourceId }}
+                                        </span>
+                                        <span class="pending-resource-reason">
+                                            {{ availabilityLabel(resource.availability) }}
+                                        </span>
+                                    </div>
+                                    <div class="pending-resource-actions">
+                                        <NcButton
+                                            variant="tertiary"
+                                            :disabled="resource._loading"
+                                            :aria-label="t('teamhub', 'Dismiss resource {id}', { id: resource.resourceId })"
+                                            @click="dismissResource(resource)">
+                                            <!-- TRANSLATORS: button label to remove a stale review request from the list -->
+                                            {{ t('teamhub', 'Dismiss') }}
+                                        </NcButton>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
                     </div>
 
                     <!-- At-risk resources — shown at top so admins see problems first -->
@@ -803,11 +1018,28 @@
                         </div>
                     </div>
 
+                    <!-- v4.4.8 — the four app sections share the same shape:
+                         header stripe with the app name on the left and add-
+                         resource buttons on the right, then one row per active
+                         resource, then a tight empty-state line when there
+                         are none. The previous layout put the buttons in a
+                         separate 44 px "actions row" below the resources,
+                         which turned an empty Talk section into ~130 px of
+                         nothing. -->
+
                     <!-- Talk — 1:1, no multi-resource -->
                     <div v-if="installedApps.talk" class="team-app-section">
                         <div class="team-app-section__header">
                             <MessageIcon :size="18" aria-hidden="true" />
                             <span class="team-app-section__name">{{ t('teamhub', 'Talk') }}</span>
+                            <div v-if="activeResourcesByApp('talk').length === 0" class="team-app-section__actions">
+                                <NcButton variant="tertiary" @click="openConnectPicker('talk')">
+                                    {{ t('teamhub', '+ Connect existing') }}
+                                </NcButton>
+                                <NcButton variant="tertiary" @click="createResource('talk')">
+                                    {{ t('teamhub', '+ Create new') }}
+                                </NcButton>
+                            </div>
                         </div>
                         <div v-for="row in activeResourcesByApp('talk')" :key="row.id" class="resource-row">
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
@@ -823,29 +1055,36 @@
                         <div v-if="activeResourcesByApp('talk').length === 0" class="resource-row resource-row--empty">
                             <span class="resource-row__empty-label">{{ t('teamhub', 'No Talk room connected') }}</span>
                         </div>
-                        <div v-if="activeResourcesByApp('talk').length === 0" class="resource-row resource-row--actions">
-                            <NcButton variant="tertiary" @click="openConnectPicker('talk')">
-                                {{ t('teamhub', '+ Connect existing') }}
-                            </NcButton>
-                            <NcButton variant="tertiary" @click="createResource('talk')">
-                                {{ t('teamhub', '+ Create new') }}
-                            </NcButton>
-                        </div>
                     </div>
 
-                    <!-- Files — 1:1 -->
+                    <!-- Files — 1:1. Header actions only when no team folder
+                         is active (mirrors the previous `!activeFilesIsGf`
+                         condition on the separate actions row). -->
                     <div class="team-app-section">
                         <div class="team-app-section__header">
                             <FolderIcon :size="18" aria-hidden="true" />
                             <span class="team-app-section__name">{{ t('teamhub', 'Files') }}</span>
+                            <div v-if="!activeFilesIsGf" class="team-app-section__actions">
+                                <NcButton variant="tertiary" @click="openConnectPicker('files')">
+                                    {{ activeFilesIsShared
+                                        ? t('teamhub', '+ Connect team folder')
+                                        : t('teamhub', '+ Connect existing') }}
+                                </NcButton>
+                                <NcButton
+                                    v-if="installedApps.groupfolders"
+                                    variant="tertiary"
+                                    @click="createResource('files')">
+                                    {{ t('teamhub', '+ Create new team folder') }}
+                                </NcButton>
+                            </div>
                         </div>
                         <div v-for="row in activeResourcesByApp('files')" :key="row.id" class="resource-row">
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
                             <span
                                 class="resource-type-badge"
                                 :class="row.resourceId.startsWith('gf:') ? 'resource-type-badge--gf' : 'resource-type-badge--shared'"
-                                :aria-label="row.resourceId.startsWith('gf:') ? t('teamhub', 'Group folder') : t('teamhub', 'Shared folder')">
-                                {{ row.resourceId.startsWith('gf:') ? t('teamhub', 'Group folder') : t('teamhub', 'Shared folder') }}
+                                :aria-label="row.resourceId.startsWith('gf:') ? t('teamhub', 'Team folder') : t('teamhub', 'Shared folder')">
+                                {{ row.resourceId.startsWith('gf:') ? t('teamhub', 'Team folder') : t('teamhub', 'Shared folder') }}
                             </span>
                             <div class="resource-row__actions">
                                 <NcButton
@@ -859,22 +1098,6 @@
                         <div v-if="activeResourcesByApp('files').length === 0" class="resource-row resource-row--empty">
                             <span class="resource-row__empty-label">{{ t('teamhub', 'No shared folder connected') }}</span>
                         </div>
-                        <!-- Show add buttons when no GF is active.
-                             When a shared folder is active, these trigger the migration flow.
-                             When a GF is active, no buttons shown (already on the best option). -->
-                        <div v-if="!activeFilesIsGf" class="resource-row resource-row--actions">
-                            <NcButton variant="tertiary" @click="openConnectPicker('files')">
-                                {{ activeFilesIsShared
-                                    ? t('teamhub', '+ Connect group folder')
-                                    : t('teamhub', '+ Connect existing') }}
-                            </NcButton>
-                            <NcButton
-                                v-if="installedApps.groupfolders"
-                                variant="tertiary"
-                                @click="createResource('files')">
-                                {{ t('teamhub', '+ Create new group folder') }}
-                            </NcButton>
-                        </div>
                     </div>
 
                     <!-- Calendar — multi-resource -->
@@ -882,6 +1105,14 @@
                         <div class="team-app-section__header">
                             <CalendarIcon :size="18" aria-hidden="true" />
                             <span class="team-app-section__name">{{ t('teamhub', 'Calendar') }}</span>
+                            <div class="team-app-section__actions">
+                                <NcButton variant="tertiary" @click="openConnectPicker('calendar')">
+                                    {{ t('teamhub', '+ Connect existing') }}
+                                </NcButton>
+                                <NcButton variant="tertiary" @click="createResource('calendar')">
+                                    {{ t('teamhub', '+ Create new') }}
+                                </NcButton>
+                            </div>
                         </div>
                         <div v-for="row in activeResourcesByApp('calendar')" :key="row.id" class="resource-row">
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
@@ -902,13 +1133,8 @@
                                 </NcButton>
                             </div>
                         </div>
-                        <div class="resource-row resource-row--actions">
-                            <NcButton variant="tertiary" @click="openConnectPicker('calendar')">
-                                {{ t('teamhub', '+ Connect existing') }}
-                            </NcButton>
-                            <NcButton variant="tertiary" @click="createResource('calendar')">
-                                {{ t('teamhub', '+ Create new') }}
-                            </NcButton>
+                        <div v-if="activeResourcesByApp('calendar').length === 0" class="resource-row resource-row--empty">
+                            <span class="resource-row__empty-label">{{ t('teamhub', 'No calendars connected') }}</span>
                         </div>
                     </div>
 
@@ -917,6 +1143,14 @@
                         <div class="team-app-section__header">
                             <CardTextIcon :size="18" aria-hidden="true" />
                             <span class="team-app-section__name">{{ t('teamhub', 'Deck') }}</span>
+                            <div class="team-app-section__actions">
+                                <NcButton variant="tertiary" @click="openConnectPicker('deck')">
+                                    {{ t('teamhub', '+ Connect existing') }}
+                                </NcButton>
+                                <NcButton variant="tertiary" @click="createResource('deck')">
+                                    {{ t('teamhub', '+ Create new') }}
+                                </NcButton>
+                            </div>
                         </div>
                         <div v-for="row in activeResourcesByApp('deck')" :key="row.id" class="resource-row">
                             <span class="resource-row__name">{{ row.displayName || row.resourceId }}</span>
@@ -937,13 +1171,8 @@
                                 </NcButton>
                             </div>
                         </div>
-                        <div class="resource-row resource-row--actions">
-                            <NcButton variant="tertiary" @click="openConnectPicker('deck')">
-                                {{ t('teamhub', '+ Connect existing') }}
-                            </NcButton>
-                            <NcButton variant="tertiary" @click="createResource('deck')">
-                                {{ t('teamhub', '+ Create new') }}
-                            </NcButton>
+                        <div v-if="activeResourcesByApp('deck').length === 0" class="resource-row resource-row--empty">
+                            <span class="resource-row__empty-label">{{ t('teamhub', 'No boards connected') }}</span>
                         </div>
                     </div>
 
@@ -953,7 +1182,7 @@
                         :key="app.id"
                         class="team-app-item">
                         <div class="team-app-icon">
-                            <component :is="app.icon" :size="22" />
+                            <component :is="app.icon" :size="18" />
                         </div>
                         <div class="team-app-info">
                             <span class="team-app-name">{{ app.label }}</span>
@@ -969,8 +1198,101 @@
                         </NcCheckboxRadioSwitch>
                     </div>
 
+                    <!-- Collective (v4.4.14 rename — was "Wiki") — separate
+                         row (v4.3.5).
+                         Not part of toggleApps because storage lives in
+                         appconfig keys via /collectives/config, not in
+                         teamhub_team_apps. Auto-creates the collective on
+                         first toggle-on; toggle-off respects the admin
+                         archive policy (hard/soft delete).
+                         v4.3.6 — icon container uses team-app-icon--neutral
+                         so BookOpenOutline inherits the main text color
+                         instead of --color-primary-element (which was
+                         rendering brand-green while every other icon in
+                         this list showed neutral).
+                         v4.4.14 — label follows the create-team wizard,
+                         where the app was renamed Wiki → Collective this
+                         session. Icon size dropped 22 → 18 to sit at the
+                         same visual weight as the resource-section headers
+                         above (Talk, Files, Calendar, Deck).
+                         v4.6.9 — Collective → Collectives, so every surface
+                         carries the Nextcloud app's own name. -->
+                    <div class="team-app-item">
+                        <div class="team-app-icon team-app-icon--neutral">
+                            <BookOpenOutline :size="18" />
+                        </div>
+                        <!-- v4.6.25 — description dropped. Every other row in
+                             this list is a name and a toggle; a three-sentence
+                             paragraph on one of them made the row twice the
+                             height of its neighbours and read as if Collectives
+                             needed more explaining than the rest. -->
+                        <div class="team-app-info">
+                            <span class="team-app-name">{{ t('teamhub', 'Collectives') }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            :model-value="!!collectivesConfig?.collectives_enabled"
+                            :disabled="togglingWiki || collectivesConfig?.collectives_installed !== true"
+                            type="switch"
+                            :aria-label="t('teamhub', 'Enable {name}', { name: t('teamhub', 'Collectives') })"
+                            @update:model-value="toggleWiki($event)">
+                            {{ wikiToggleLabel }}
+                        </NcCheckboxRadioSwitch>
+                    </div>
+
                 </div>
             </div>
+
+            <!-- Collectives toggle-off confirm — reuses the archive policy
+                 so a single admin decision covers this and every other
+                 destructive team-lifecycle path (v4.3.5). -->
+            <NcDialog
+                v-if="wikiOffConfirm.open"
+                :name="t('teamhub', 'Disable Collectives?')"
+                :open="wikiOffConfirm.open"
+                @update:open="wikiOffConfirm.open = $event">
+                <div class="wiki-off-confirm">
+                    <div v-if="wikiOffConfirm.loading" class="wiki-off-confirm__loading">
+                        {{ t('teamhub', 'Checking archive policy') }}
+                    </div>
+
+                    <template v-else-if="wikiOffConfirm.policy && wikiOffConfirm.policy.dataLossWarning">
+                        <div class="wiki-off-confirm__alert" role="alert">
+                            <AlertOctagon :size="28" aria-hidden="true" />
+                            <div>
+                                <h3>{{ t('teamhub', 'The collective and all its pages will be lost.') }}</h3>
+                                <p>{{ t('teamhub', 'Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove this team\'s collective, its page tree, and every attachment — nothing can be restored.') }}</p>
+                                <p>{{ t('teamhub', 'The team itself and every other resource are unaffected. Only Collectives is being removed.') }}</p>
+                            </div>
+                        </div>
+                        <div class="wiki-off-confirm__footer">
+                            <NcButton variant="secondary" @click="wikiOffConfirm.open = false">
+                                {{ t('teamhub', 'Cancel') }}
+                            </NcButton>
+                            <NcButton variant="error" @click="confirmWikiOff">
+                                {{ t('teamhub', 'Continue anyway') }}
+                            </NcButton>
+                        </div>
+                    </template>
+
+                    <template v-else-if="wikiOffConfirm.policy">
+                        <p class="wiki-off-confirm__ok">
+                            {{ wikiOffDescription }}
+                        </p>
+                        <div class="wiki-off-confirm__footer">
+                            <NcButton variant="secondary" @click="wikiOffConfirm.open = false">
+                                {{ t('teamhub', 'Cancel') }}
+                            </NcButton>
+                            <NcButton variant="primary" @click="confirmWikiOff">
+                                {{ t('teamhub', 'Continue') }}
+                            </NcButton>
+                        </div>
+                    </template>
+
+                    <div v-else-if="wikiOffConfirm.error" class="wiki-off-confirm__error">
+                        {{ wikiOffConfirm.error }}
+                    </div>
+                </div>
+            </NcDialog>
 
             <!-- Connect existing resource picker (inline) -->
             <NcDialog
@@ -994,13 +1316,13 @@
                         <span
                             v-if="item.type === 'group_folder'"
                             class="teamhub-resource-picker__badge teamhub-resource-picker__badge--gf"
-                            aria-label="Group Folder">
-                            {{ t('teamhub', 'Group Folder') }}
+                            :aria-label="t('teamhub', 'Team Folder')">
+                            {{ t('teamhub', 'Team Folder') }}
                         </span>
                         <span
                             v-else-if="item.type === 'shared_folder'"
                             class="teamhub-resource-picker__badge teamhub-resource-picker__badge--shared"
-                            aria-label="Shared folder">
+                            :aria-label="t('teamhub', 'Shared folder')">
                             {{ t('teamhub', 'Shared') }}
                         </span>
                         <span class="teamhub-resource-picker__name">{{ item.name }}</span>
@@ -1107,7 +1429,7 @@
             </div>
         </div>
 
-        <!-- TAB: Integration settings (Decisions block + Timeline/Milestones block) -->
+        <!-- TAB: Module settings (Decisions block + Timeline/Milestones block) -->
         <div v-else-if="activeTab === 'integration-settings'" class="manage-tab-content">
 
             <!-- ── Messages block (v3.104.1) — always rendered. When the
@@ -1117,24 +1439,29 @@
             <div v-if="!messagesEnabled" class="manage-section" data-section="messages">
                 <h3>{{ t('teamhub', 'Messages') }}</h3>
                 <p class="manage-section-desc manage-section-desc--inline">
-                    {{ t('teamhub', 'Messages are disabled for this team. Enable the module under the Integrations tab to configure pin and post role limits.') }}
+                    {{ t('teamhub', 'Messages are disabled for this team. Switch the module on under Modules & integrations to configure pin and post role limits.') }}
                 </p>
             </div>
 
             <div v-if="messagesEnabled" class="manage-section" data-section="messages">
                 <h3>{{ t('teamhub', 'Messages') }}</h3>
 
-                <!-- Pin min-role -->
+                <!-- Manage min-role.
+                     v4.7.4 — one floor for moderating the stream: pinning,
+                     and editing or deleting somebody else's message or
+                     comment. Replaces the pin-only row; see
+                     MessageService::getManageMinLevel for why raising the
+                     two into one setting needed a new config key. -->
                 <div class="manage-section__row">
                     <div class="manage-section__row-info">
-                        <span class="manage-section__row-title">{{ t('teamhub', 'Minimum role to pin') }}</span>
-                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can pin or unpin a message. One message can be pinned at a time.') }}</span>
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Minimum role to manage posts') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can pin a message, and edit or delete a message or comment written by someone else. Authors can always edit and delete their own. Every edit is shown under the post with who made it.') }}</span>
                     </div>
                     <select
-                        v-model="messageSettingsForm.pinMinLevel"
+                        v-model="messageSettingsForm.manageMinLevel"
                         :disabled="savingMessageSettings"
                         class="teamhub-dec-level-select"
-                        :aria-label="t('teamhub', 'Minimum role to pin')"
+                        :aria-label="t('teamhub', 'Minimum role to manage posts')"
                         @change="saveMessageSettingsAuto">
                         <option value="member">{{ t('teamhub', 'Member') }}</option>
                         <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
@@ -1160,6 +1487,69 @@
                     </select>
                 </div>
 
+                <!-- Comment min-role (v4.3.1) -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Minimum role to comment') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Who can post comments on messages, questions, and polls. Indirect members (via a group or sub-team) count as members.') }}</span>
+                    </div>
+                    <select
+                        v-model="messageSettingsForm.commentMinLevel"
+                        :disabled="savingMessageSettings"
+                        class="teamhub-dec-level-select"
+                        :aria-label="t('teamhub', 'Minimum role to comment')"
+                        @change="saveMessageSettingsAuto">
+                        <option value="member">{{ t('teamhub', 'Member') }}</option>
+                        <option value="moderator">{{ t('teamhub', 'Moderator') }}</option>
+                        <option value="admin">{{ t('teamhub', 'Admin / Owner') }}</option>
+                    </select>
+                </div>
+
+                <!-- Comments per message type (v4.5.38) — a separate control
+                     from the role floor above, because the two answer different
+                     questions. The floor decides who may write; this decides
+                     whether the type has a comment thread at all. Off means the
+                     count and the section are gone, not greyed out.
+
+                     Two types have no checkbox, for different reasons. A
+                     question's comments are its answers, so there is nothing to
+                     switch off. A decision is no longer a type you can pick in
+                     the composer — since v4.5.42 every proposal starts from the
+                     Decisions page — so a switch in *message* settings governed
+                     something nobody could create there. Both are listed in
+                     MessageService::COMMENTS_ALWAYS_ON_TYPES, which is what
+                     makes a previously-stored "off" inert rather than stranded
+                     with no control left to clear it. -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Allow comments on') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Message types that can be commented on. When a type is off, its messages show no comment count and no comment section. Questions and decisions always allow comments.') }}</span>
+                    </div>
+                    <div
+                        class="manage-section__checkbox-stack"
+                        role="group"
+                        :aria-label="t('teamhub', 'Allow comments on')">
+                        <NcCheckboxRadioSwitch
+                            v-model="messageSettingsForm.commentsEnabled.normal"
+                            :disabled="savingMessageSettings"
+                            type="checkbox"
+                            @update:model-value="saveMessageSettingsAuto">
+                            <!-- TRANSLATORS: message type — a plain post to the team stream, as opposed to a question, poll or decision -->
+                            {{ t('teamhub', 'Messages') }}
+                        </NcCheckboxRadioSwitch>
+                        <NcCheckboxRadioSwitch
+                            v-model="messageSettingsForm.commentsEnabled.poll"
+                            :disabled="savingMessageSettings"
+                            type="checkbox"
+                            @update:model-value="saveMessageSettingsAuto">
+                            {{ t('teamhub', 'Polls') }}
+                        </NcCheckboxRadioSwitch>
+                        <span class="manage-section__checkbox-note">
+                            {{ t('teamhub', 'Questions and decisions: always on') }}
+                        </span>
+                    </div>
+                </div>
+
                 <!-- v4.2.11 — Allow members to publish messages outside the
                      team. When on, PostMessageForm renders a Public checkbox
                      for plain messages. Default off: public visibility is
@@ -1168,10 +1558,22 @@
                     <div class="manage-section__row-info">
                         <span class="manage-section__row-title">{{ t('teamhub', 'Allow public messages') }}</span>
                         <span class="manage-section__row-desc">{{ t('teamhub', 'When on, members see a Public checkbox on the message composer. Public messages appear in every user’s personal feed, including users outside this team.') }}</span>
+                        <!-- v4.8.17 — TRACK-F2-DESIGN §4.4: read-only, never
+                             hidden. A team admin has to be able to see what
+                             their classification is doing; a control that
+                             disappears reads as a setting that does not exist,
+                             and the 403 behind it would then arrive unexplained.
+                             This is the only ENFORCED field in PolicyField, so
+                             it is the only place in the app where a team setting
+                             is genuinely locked rather than merely reported. -->
+                        <span v-if="publicMessagesPolicyName" class="manage-section__row-locked">
+                            <LockOutline :size="iconInline" aria-hidden="true" />
+                            {{ t('teamhub', 'Set by the “{profile}” classification. Only a Nextcloud administrator can change it.', { profile: publicMessagesPolicyName }) }}
+                        </span>
                     </div>
                     <NcCheckboxRadioSwitch
                         v-model="messageSettingsForm.allowPublicMessages"
-                        :disabled="savingMessageSettings"
+                        :disabled="savingMessageSettings || !!publicMessagesPolicy"
                         type="switch"
                         :aria-label="t('teamhub', 'Allow members to publish public messages')"
                         @update:model-value="saveMessageSettingsAuto">
@@ -1207,7 +1609,7 @@
                 <div v-if="!decisionsEnabled" class="manage-section">
                     <h3>{{ t('teamhub', 'Decisions') }}</h3>
                     <p class="manage-section-desc manage-section-desc--inline">
-                        {{ t('teamhub', 'Decisions are disabled for this team. Enable the module under the Integrations tab to start managing categories.') }}
+                        {{ t('teamhub', 'Decisions are disabled for this team. Switch the module on under Modules & integrations to start managing categories.') }}
                     </p>
                 </div>
 
@@ -1251,7 +1653,7 @@
                 </div>
 
                 <!-- Categories sub-section (v3.104.6 — merged into the parent
-                     Decisions section so Integration Settings has one block
+                     Decisions section so Module settings has one block
                      per integration rather than two adjacent Decisions blocks). -->
                 <h4 class="manage-section__subhead">{{ t('teamhub', 'Categories') }}</h4>
                 <p class="manage-section-desc">
@@ -1634,7 +2036,7 @@
                 </p>
             </div>
 
-            <!-- Milestones — moved here from Integration Settings (v3.97.4).
+            <!-- Milestones — moved here from Module settings (v3.97.4).
                  Milestones own the Deck-card ownership intervals the
                  project-health widget's Milestones pillar reads. Timeline
                  also renders them as red marker lines when enabled. -->
@@ -1645,7 +2047,7 @@
                 </p>
 
                 <p v-if="!timelineEnabled" class="manage-section-desc manage-section-desc--inline">
-                    {{ t('teamhub', 'Timeline is disabled for this team — milestones you add here still drive the project-health widget, but will not appear on the Timeline tab until Timeline is enabled under Integration Settings.') }}
+                    {{ t('teamhub', 'Timeline is disabled for this team — milestones you add here still drive the project-health widget, but will not appear on the Timeline tab until Timeline is switched on under Modules & integrations.') }}
                 </p>
 
                 <div v-if="loadingMilestones" class="section-loading">
@@ -2027,6 +2429,207 @@
         <!-- TAB: Danger Zone -->
         <div v-else-if="activeTab === 'danger'" class="manage-tab-content">
 
+            <!-- ── Expiration date (v4.6.13) ──────────────────────────────
+                 Shown only for Collaboration and Project teams that actually
+                 have a date. A Department, or an eligible team with no date,
+                 renders nothing at all: there is no action to offer, and an
+                 empty panel explaining that would be noise on the one tab
+                 people arrive at to do something specific. -->
+            <div v-if="expiryStatus && expiryStatus.expiry" class="manage-section" data-section="expiry">
+                <h3>{{ t('teamhub', 'Expiration date') }}</h3>
+                <!-- v4.6.27 — one paragraph where there were two. The second
+                     one lived under the form's sub-head and said "an
+                     administrator decides" a screenful after the first had
+                     said "ask for the date to be extended"; both facts a
+                     reader needs before asking now arrive together. -->
+                <p class="manage-section-desc">
+                    {{ t('teamhub', 'A Nextcloud administrator set this date. Nothing is deleted when it passes — the team keeps working — but if the team is still needed, ask for more time. An administrator decides, and may grant a shorter date than the one asked for.') }}
+                </p>
+
+                <!-- v4.6.27 — the date and the fate of the last request share
+                     one row. The outcome used to be a three-line notice under
+                     the date: for a question that has already been answered,
+                     the headline is what belongs on the page and the detail
+                     (who decided, their note, a grant shorter than asked for)
+                     belongs behind it. What is still actionable does NOT move
+                     — the withdraw button stays in the row, so the dialog is
+                     read-only detail and never the only way to act. -->
+                <div class="manage-expiry-bar">
+                    <!-- v4.6.26 — this row is the ONE place the date is stated.
+                         Nothing below it repeats the date, because the reader
+                         can already see it here. -->
+                    <div
+                        class="manage-expiry-state"
+                        :class="{
+                            'manage-expiry-state--warning': expiryStatus.expiry.warning,
+                            'manage-expiry-state--expired': expiryStatus.expiry.expired,
+                        }"
+                        role="status">
+                        <!-- Icon + words carry the state, not colour alone. -->
+                        <AlertIcon
+                            v-if="expiryStatus.expiry.warning || expiryStatus.expiry.expired"
+                            :size="iconToolbar"
+                            aria-hidden="true" />
+                        <CalendarClock v-else :size="iconToolbar" aria-hidden="true" />
+                        <span class="manage-expiry-state__text">
+                            <template v-if="expiryStatus.expiry.expired">
+                                {{ t('teamhub', 'Expired on {date}', { date: expiryStatus.expiry.expiresOn }) }}
+                            </template>
+                            <template v-else>
+                                {{ t('teamhub', 'Expires on {date}', { date: expiryStatus.expiry.expiresOn }) }}
+                                ·
+                                {{ n('teamhub', '{n} day left', '{n} days left',
+                                     expiryStatus.expiry.daysRemaining,
+                                     { n: expiryStatus.expiry.daysRemaining }) }}
+                            </template>
+                        </span>
+                    </div>
+
+                    <!-- Outcome of the most recent request, whichever way it
+                         went. Icon AND word, so the three are told apart
+                         without relying on hue (WCAG 1.4.1); the colour sits
+                         on the chip rather than on a filled panel, which is
+                         what let an approval read as amber before. -->
+                    <NcButton
+                        v-if="expiryRequestState"
+                        class="manage-expiry-outcome"
+                        :class="'manage-expiry-outcome--' + expiryRequestState"
+                        variant="tertiary"
+                        :title="t('teamhub', 'Show the details of this request')"
+                        @click="expiryOutcomeOpen = true">
+                        <template #icon>
+                            <ClockOutline v-if="expiryRequestState === 'pending'" :size="iconToolbar" />
+                            <CheckCircle v-else-if="expiryRequestState === 'approved'" :size="iconToolbar" />
+                            <CloseCircle v-else :size="iconToolbar" />
+                        </template>
+                        {{ expiryOutcomeLabel }}
+                    </NcButton>
+
+                    <NcButton
+                        v-if="expiryRequestState === 'pending'"
+                        variant="tertiary"
+                        :disabled="expiryBusy"
+                        @click="withdrawExpiryRequest">
+                        {{ t('teamhub', 'Withdraw request') }}
+                    </NcButton>
+                </div>
+
+                <!-- Everything the row's chip stands for. Guarded on the state
+                     as well as the flag: withdrawing while this is open clears
+                     the request, and a dialog reading a null one would throw. -->
+                <NcDialog
+                    v-if="expiryOutcomeOpen && expiryRequestState"
+                    :name="expiryOutcomeLabel"
+                    :open="expiryOutcomeOpen"
+                    @update:open="expiryOutcomeOpen = false">
+                    <template #default>
+                        <p class="manage-expiry-detail__line">
+                            {{ t('teamhub', 'Asked for {date} by {name}.', {
+                                date: expiryStatus.request.proposedOn,
+                                name: expiryStatus.request.requestedName,
+                            }) }}
+                        </p>
+                        <p v-if="expiryRequestState === 'pending'" class="manage-expiry-detail__line">
+                            {{ t('teamhub', 'Waiting for a Nextcloud administrator to decide.') }}
+                        </p>
+                        <!-- The granted date is only worth stating when it is
+                             NOT the one that was asked for — otherwise it is
+                             the date already shown in the state row. A shorter
+                             grant is the case the reader cannot infer. -->
+                        <p v-if="expiryApprovalWasShortened" class="manage-expiry-detail__line">
+                            {{ t('teamhub', 'Granted until {granted}, not the {proposed} that was asked for.', {
+                                granted: expiryStatus.request.grantedOn,
+                                proposed: expiryStatus.request.proposedOn,
+                            }) }}
+                        </p>
+                        <p v-if="expiryStatus.request.decidedName" class="manage-expiry-detail__line">
+                            {{ t('teamhub', 'Decided by {name}.', { name: expiryStatus.request.decidedName }) }}
+                        </p>
+
+                        <!-- Two notes, and they are not interchangeable: one is
+                             what the team wrote when asking, the other what the
+                             administrator wrote when answering. Unlabelled they
+                             read as one person's. -->
+                        <template v-if="expiryStatus.request.reason">
+                            <!-- TRANSLATORS: heading over the reason the team wrote when it asked for more time -->
+                            <p class="manage-expiry-detail__label">{{ t('teamhub', 'Reason given') }}</p>
+                            <p class="manage-expiry-detail__note">{{ expiryStatus.request.reason }}</p>
+                        </template>
+                        <template v-if="expiryStatus.request.decisionNote">
+                            <!-- TRANSLATORS: heading over what the Nextcloud administrator wrote when deciding -->
+                            <p class="manage-expiry-detail__label">{{ t('teamhub', 'Note from the administrator') }}</p>
+                            <p class="manage-expiry-detail__note">{{ expiryStatus.request.decisionNote }}</p>
+                        </template>
+
+                        <p v-if="expiryRequestState === 'denied'" class="manage-expiry-detail__line">
+                            {{ t('teamhub', 'You can ask again with a different date or more context.') }}
+                        </p>
+                    </template>
+                    <template #actions>
+                        <NcButton variant="primary" @click="expiryOutcomeOpen = false">{{ t('teamhub', 'Got it') }}</NcButton>
+                    </template>
+                </NcDialog>
+
+                <!-- Request form — hidden while one is already in flight.
+                     v4.6.26 — behind its own sub-head. Without one the first
+                     field ran straight on from the status block above and read
+                     as another line of status rather than the start of
+                     something to fill in. -->
+                <template v-if="expiryRequestState !== 'pending'">
+                    <h4 class="manage-section__subhead">{{ t('teamhub', 'Request an extension') }}</h4>
+
+                    <div class="manage-expiry-form">
+                        <!-- v4.6.27 — the two controls sit on one line and
+                             both labels are visually hidden. "New date" over a
+                             date picker under a heading that already says
+                             "Request an extension" named nothing the control
+                             did not; the reason field says its own question in
+                             the placeholder. The `<label for>` elements stay in
+                             the DOM — a placeholder is not an accessible name
+                             (SKILLS.md § WCAG), and `label-outside` is what
+                             stops NcTextArea drawing a second one on top. -->
+                        <div class="manage-expiry-form__fields">
+                            <div class="manage-expiry-form__field manage-expiry-form__field--date">
+                                <label for="manage-expiry-date" class="hidden-visually">
+                                    {{ t('teamhub', 'New date') }}
+                                </label>
+                                <input
+                                    id="manage-expiry-date"
+                                    v-model="expiryProposedOn"
+                                    type="date"
+                                    class="manage-date-input"
+                                    :min="expiryMinProposal" />
+                            </div>
+
+                            <div class="manage-expiry-form__field manage-expiry-form__field--reason">
+                                <label for="manage-expiry-reason" class="hidden-visually">
+                                    {{ t('teamhub', 'Why does this team need more time?') }}
+                                </label>
+                                <NcTextArea
+                                    id="manage-expiry-reason"
+                                    v-model="expiryReason"
+                                    label-outside
+                                    resize="vertical"
+                                    :placeholder="t('teamhub', 'Why does this team need more time?')"
+                                    :rows="2" />
+                            </div>
+                        </div>
+
+                        <div class="manage-expiry-form__actions">
+                            <NcButton
+                                variant="primary"
+                                :disabled="expiryBusy || !expiryProposedOn"
+                                @click="submitExpiryRequest">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="expiryBusy" :size="iconNav" />
+                                </template>
+                                {{ t('teamhub', 'Request extension') }}
+                            </NcButton>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
             <!-- Set Owner section — only visible to current owner -->
             <div v-if="currentUserIsOwner" class="manage-section">
                 <h3>{{ t('teamhub', 'Transfer ownership') }}</h3>
@@ -2053,6 +2656,14 @@
                             @mousedown.prevent="selectOwnerSuggestion(u)">
                             <NcAvatar :user="u.id" :display-name="u.displayName" :size="24" :show-user-status="false" :disable-menu="true" />
                             <span class="manage-owner-suggestion__name">{{ u.displayName }}</span>
+                            <!-- v4.8.35 — an inherited candidate says where they
+                                 come from, so it is clear before choosing that
+                                 this person reaches the team through a group and
+                                 will be given a direct membership by the
+                                 transfer. Reuses the Members tab's own string. -->
+                            <span v-if="u.via" class="manage-owner-suggestion__via">
+                                {{ t('teamhub', 'via {source}', { source: u.via }) }}
+                            </span>
                             <span class="manage-owner-suggestion__uid">{{ u.id }}</span>
                         </li>
                     </ul>
@@ -2082,8 +2693,14 @@
             </div>
 
             <!-- Danger Zone: Delete (always archives first per admin policy) -->
+            <!-- v4.4.14 — was "Danger Zone" with a redundant inner "Delete
+                 team" title inside a single-action panel. The section IS the
+                 delete action, so the heading now names it directly and the
+                 nested title is gone. `manage-section--danger` class is
+                 kept so the existing 3 px error border-left and other
+                 danger-scoped styling still applies. -->
             <div class="manage-section manage-section--danger">
-                <h3>{{ t('teamhub', 'Danger Zone') }}</h3>
+                <h3>{{ t('teamhub', 'Delete team') }}</h3>
 
                 <!-- Pending deletion — team is hidden, grace period is running -->
                 <div
@@ -2114,7 +2731,10 @@
 
                 <div class="manage-danger-row">
                     <div class="manage-danger-info">
-                        <span class="manage-danger-title">{{ t('teamhub', 'Delete team') }}</span>
+                        <!-- v4.4.14 — the inner "Delete team" title used to
+                             sit here, one line under the section h3 with the
+                             same words. Retired; the section heading now
+                             owns that label. -->
                         <span class="manage-danger-desc">{{ deleteTeamDescription }}</span>
                         <span class="manage-danger-warning" role="note">
                             <AlertIcon :size="16" aria-hidden="true" />
@@ -2210,7 +2830,7 @@
                     {{ t('teamhub', 'Disabling {name} will permanently delete all data associated with this team:', { name: pendingDisableApp.label }) }}
                 </p>
                 <ul style="margin: 0 0 12px; padding-left: 20px;">
-                    <li v-if="pendingDisableApp.id === 'spreed'">{{ t('teamhub', 'The Talk chat room and all messages') }}</li>
+                    <li v-if="pendingDisableApp.id === 'talk'">{{ t('teamhub', 'The Talk chat room and all messages') }}</li>
                     <li v-if="pendingDisableApp.id === 'files'">{{ t('teamhub', 'The shared team folder and all files inside it') }}</li>
                     <li v-if="pendingDisableApp.id === 'calendar'">{{ t('teamhub', 'The team calendar and all events') }}</li>
                     <li v-if="pendingDisableApp.id === 'deck'">{{ t('teamhub', 'The Deck board and all cards') }}</li>
@@ -2259,7 +2879,7 @@
                     </label>
                     <div v-if="enableAppMode === 'connect'" class="enable-app-picker">
                         <ResourcePicker
-                            :app="pendingEnableApp.id === 'spreed' ? 'talk' : pendingEnableApp.id"
+                            :app="pendingEnableApp.id"
                             v-model="enableAppResourceId" />
                     </div>
                 </div>
@@ -2288,6 +2908,8 @@ import { getCurrentUser } from '@nextcloud/auth'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
+import { teamImageUrl, uploadTeamsAvatar, removeTeamsAvatar } from '../lib/teamAvatar.js'
+import { shiftToday, shiftIsoDate, epochDateToIso, formatIsoDate } from '../lib/localDate.js'
 import { mapState, mapMutations } from 'vuex'
 import { NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
@@ -2304,6 +2926,8 @@ import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
 import CardTextIcon from 'vue-material-design-icons/CardText.vue'
 import FileDocumentOutlineIcon from 'vue-material-design-icons/FileDocumentOutline.vue'
+import BookOpenOutline from 'vue-material-design-icons/BookOpenOutline.vue'
+import AlertOctagon from 'vue-material-design-icons/AlertOctagon.vue'
 import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import TextIcon from 'vue-material-design-icons/Text.vue'
@@ -2311,6 +2935,12 @@ import TuneIcon from 'vue-material-design-icons/Tune.vue'
 import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
 import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
 import AlertIcon from 'vue-material-design-icons/Alert.vue'
+// v4.6.13 — the team's expiration date on the Maintenance tab.
+import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
+// v4.6.26 — one icon per extension-request outcome, so the three notices are
+// distinguishable without relying on their background colour (WCAG 1.4.1).
+import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
+import CloseCircle from 'vue-material-design-icons/CloseCircle.vue'
 import ImageIcon from 'vue-material-design-icons/Image.vue'
 import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
@@ -2319,10 +2949,18 @@ import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
 import ArchiveTeamModal from './ArchiveTeamModal.vue'
 import ResourcePicker from './ResourcePicker.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
+// v4.9.3 — OpenProject Phase 1.
+import OpenProjectSettingsPanel from './OpenProjectSettingsPanel.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
 import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import BriefcaseIcon from 'vue-material-design-icons/Briefcase.vue'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
+import LockOutline from 'vue-material-design-icons/LockOutline.vue'
+import { ICON_INLINE, ICON_TOOLBAR, ICON_NAV } from '../constants/uiTokens.js'
+// v4.8.17 — resolves a seeded profile's translated name against an admin's own
+// wording. The server sends the key, the stored label and `isSeeded`; this is
+// the one function that turns those three into the name a user should read.
+import { FIELD as POLICY_FIELD, dependencyNote, profileDisplayName } from '../constants/policy.js'
 
 // Circles config bitmask constants — canonical values from circlesConfig.js.
 // These MUST match OCA\Circles\Model\Circle::CFG_* in the Circles app.
@@ -2335,6 +2973,7 @@ import {
     CFG_VISIBLE,
     CFG_PROTECTED,
     CFG_ROOT,
+    CFG_FEDERATED,
 } from '../constants/circlesConfig.js'
 
 export default {
@@ -2342,25 +2981,28 @@ export default {
     components: {
         NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
-        MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon,
+        MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon, BookOpenOutline, AlertOctagon,
         ChevronRight, ChevronDown,
         ImageIcon, TrashCanOutline, TrashCan, UploadIcon, AccountArrowRight,
-        TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon,
+        TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon, CalendarClock,
+        ClockOutline, CloseCircle,
         ArchiveTeamModal,
         ResourcePicker,
         InviteMemberModal,
+        OpenProjectSettingsPanel,
         AccountPlusIcon, PencilIcon, PlusIcon, GavelIcon, BriefcaseIcon,
+        LockOutline,
     },
     props: {
         team: { type: Object, required: true },
     },
-    emits: ['description-updated', 'team-deleted'],
+    emits: ['description-updated', 'team-deleted', 'ownership-transferred'],
     data() {
         return {
             activeTab: 'description',
             editedDescription: this.team.description || '',
             // Structured member data from /members/manage endpoint
-            manageMembers: { direct: [], groups: [], circles: [], effective_count: 0 },
+            manageMembers: { direct: [], groups: [], circles: [], inherited: [], effective_count: 0 },
             pendingRequests: [],
             loadingMembers: false,
             loadingPending: false,
@@ -2380,12 +3022,33 @@ export default {
                 visible: false,
                 protected: false,
                 preventSubMembership: false,
+                federated: false,
             },
             integrationRegistry: [],
             loadingWidgets: false,
             togglingWidget: null,
             // Message settings
-            messageSettingsForm: { pinMinLevel: 'moderator', postMinLevel: 'member', linkMinLevel: 'admin', allowPublicMessages: false },
+            // commentsEnabled (v4.5.38) is initialised with every key present so
+            // the checkbox v-models bind to something before the settings GET
+            // lands — an undefined key would render unchecked and then flip.
+            messageSettingsForm: { manageMinLevel: 'admin', postMinLevel: 'member', linkMinLevel: 'admin', commentMinLevel: 'member', commentsEnabled: { normal: true, poll: true, question: true, decision: true }, allowPublicMessages: false },
+            /**
+             * v4.8.17 — the profile governing `allowPublicMessages`, or null.
+             * Deliberately outside `messageSettingsForm`: that object is the
+             * request body, and this is not a setting the client may send.
+             * @type {?{profileKey: string, label: string, isSeeded: boolean, value: boolean}}
+             */
+            publicMessagesPolicy: null,
+            /**
+             * v4.8.17 — the team's classification and the fields it governs,
+             * from `GET .../config`. Null for an unclassified team.
+             * @type {?{profileKey: string, label: string, isSeeded: boolean, values: Object}}
+             */
+            circlePolicy: null,
+            // v4.9.2 — the resolved federation state from GET .../config.
+            // Defaults to locked-off so a failed load cannot render an
+            // editable control that the backend would refuse to honour.
+            federation: { enabled: false, locked: true, lockedBy: null },
             loadingMessageSettings: false,
             savingMessageSettings: false,
             messageSettingsSaved: false,
@@ -2395,6 +3058,13 @@ export default {
             installedApps: {},
             loadingApps: false,
             togglingApp: null,
+            // Wiki (Collectives) toggle state (v4.3.5). togglingWiki mirrors
+            // togglingApp for the single Wiki row so its switch disables while
+            // the archive-policy check + PUT are in flight. wikiOffConfirm
+            // holds the modal's transient state — only relevant during the
+            // disable-flow. Not persisted.
+            togglingWiki: false,
+            wikiOffConfirm: { open: false, loading: false, policy: null, error: '' },
             // Pending / ignored resources (discovered externally)
             pendingResourceRows: [],   // raw rows from /resources/panel grouped by app, flattened
             loadingPendingResources: false,
@@ -2441,6 +3111,15 @@ export default {
             // Archive status (fetched when danger tab opens)
             archiveStatusRow: null,
             archiveStatusLoading: false,
+            // ── Expiration date (v4.6.13) ──────────────────────────────────
+            // { eligible, expiry, request, warningDays } from
+            // GET /teams/{id}/expiry. Null until the Maintenance tab is opened.
+            expiryStatus: null,
+            expiryProposedOn: '',
+            expiryReason: '',
+            expiryBusy: false,
+            // v4.6.27 — the detail dialog behind the outcome chip.
+            expiryOutcomeOpen: false,
             // Presence config (B3) — loaded when settings tab opens
             presenceEnabled:     false,
             presenceHideReasons: false,
@@ -2450,6 +3129,12 @@ export default {
             decisionsLevelEnabled: false,
             decisionsActionMinLevel: 1,  // Session B: default = Member
             savingDecisionsConfig: false,
+            // File reviews (v4.8.18) — per-team switch. Unlike Decisions, the
+            // global flag is not in the store: the same endpoint returns both,
+            // so there is nothing for a store entry to keep in sync.
+            fileReviewsModuleEnabled: false,
+            fileReviewsEnabled:       false,
+            savingFileReviewsConfig:  false,
             // Timeline config (v3.77.20) — per-team enable flag. Default true
             // matches the backend default so first paint doesn't flicker the
             // toggle off before loadTimelineConfig() resolves.
@@ -2517,7 +3202,39 @@ export default {
         }
     },
     computed: {
-        ...mapState(['intravoxAvailable', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'project', 'projectTabFocus', 'manageTeamDeepLink', 'dashboardConfig', 'availableTabs', 'dashboardWidgetCatalog']),
+        // v4.6.15 — presenceConfig / decisionsConfig / timelineConfig joined the
+        // list so the watchers below see the toggles this view itself commits.
+        ...mapState(['intravoxAvailable', 'collectivesConfig', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'presenceConfig', 'decisionsConfig', 'timelineConfig', 'project', 'projectTabFocus', 'manageTeamDeepLink', 'dashboardConfig', 'availableTabs', 'dashboardWidgetCatalog', 'teamType', 'openProjectConfig']),
+
+        /**
+         * v4.5.35 — the Collective toggle has three states, not two.
+         *
+         * `collectives_installed` is `null` until a layout bundle answers. It
+         * used to boot at `false`, so the window before the first bundle — and
+         * permanently, if that request failed or never ran — rendered
+         * **"Not installed"**: a definite claim about the whole instance made
+         * from no information, and one the admin cannot act on because it is
+         * not true. Since the value comes from `IAppManager::isInstalled`, it
+         * also cannot legitimately differ between two teams, so "installed for
+         * that team but not this one" was never a state that could exist.
+         *
+         * Unknown now says unknown. The switch stays disabled in that state —
+         * enabling a wiki against an install we haven't confirmed is exactly
+         * the request that fails halfway.
+         */
+        wikiToggleLabel() {
+            const installed = this.collectivesConfig?.collectives_installed
+            if (installed === false) {
+                return t('teamhub', 'Not installed')
+            }
+            if (installed !== true) {
+                // TRANSLATORS: shown on the Collective toggle while TeamHub is still finding out whether the Collectives app is installed
+                return t('teamhub', 'Checking…')
+            }
+            return this.collectivesConfig?.collectives_enabled
+                ? t('teamhub', 'Enabled')
+                : t('teamhub', 'Disabled')
+        },
 
         /** Set of widget ids the owner/admin has hidden from the dashboard. */
         dashboardHiddenSet() {
@@ -2551,9 +3268,10 @@ export default {
          * the store's project fact. Drives the Save button disabled state.
          */
         projectDatesDirty() {
-            const toIso = ts => (ts && Number.isFinite(ts))
-                ? new Date(ts * 1000).toISOString().slice(0, 10)
-                : ''
+            // epochDateToIso, not todayIso-style local reading: project dates
+            // are floating dates stored at UTC midnight (see saveProjectDates),
+            // so UTC on both sides is the correct round trip, not a bug.
+            const toIso = ts => (ts && Number.isFinite(ts)) ? epochDateToIso(ts) : ''
             return this.projectDatesForm.startDate !== toIso(this.project?.startDate)
                 || this.projectDatesForm.targetEnd !== toIso(this.project?.targetEnd)
         },
@@ -2575,6 +3293,27 @@ export default {
         // Category icon helpers — used by the MDI icon picker and list rendering
         categoryIconList() { return CATEGORY_ICONS },
         categoryIconMap()  { return CATEGORY_ICON_MAP },
+
+        // Icon-size scale (src/constants/uiTokens.js), exposed as computeds to
+        // match the pattern in App.vue / MyWorkView.vue. Applied to the expiry
+        // panel in v4.6.26; the rest of this file still carries raw :size
+        // numbers, logged in HANDOFF as a per-site design decision.
+        iconInline()  { return ICON_INLINE },
+        iconToolbar() { return ICON_TOOLBAR },
+        iconNav()     { return ICON_NAV },
+
+        /**
+         * The classification governing this team's public-messages switch, as a
+         * name to show — or '' when nothing governs it (v4.8.17).
+         *
+         * Empty string rather than null so the template's `v-if` and the note's
+         * placeholder read the same value, and so a profile row that arrives
+         * without a label degrades to its key instead of to a blank quote.
+         */
+        publicMessagesPolicyName() {
+            const p = this.publicMessagesPolicy
+            return p ? profileDisplayName(p.profileKey, p.label, p.isSeeded) : ''
+        },
 
         // Group + filter icons for the picker UI.
         // Returns [{ name, icons: [...] }, ...] for groups that have matches.
@@ -2628,7 +3367,7 @@ export default {
             return this.activeFilesRows.some(r => !r.resourceId.startsWith('gf:'))
         },
 
-        /** True when any active files resource is a group folder. */
+        /** True when any active files resource is a team folder. */
         activeFilesIsGf() {
             return this.activeFilesRows.some(r => r.resourceId.startsWith('gf:'))
         },
@@ -2636,6 +3375,33 @@ export default {
         /** Toggle-driven apps (not resource-backed) — Intravox only. Shared Files is always-on via the File Center widget. */
         toggleApps() {
             return (this.teamAppsList || []).filter(a => ['intravox'].includes(a.id))
+        },
+
+        /**
+         * Copy for the Wiki toggle-off confirm dialog when the archive
+         * policy is NOT the destructive one (dataLossWarning === false).
+         * Wiki-scoped rewording of ArchivePolicyWarningModal's own
+         * policyDescription. Mode/flag combinations:
+         *
+         *   archiveBeforeDelete=true + hard  → "archive first, then permanently deleted"
+         *   archiveBeforeDelete=true + soft* → "archive first, then trashed with a grace period"
+         *   archiveBeforeDelete=false + soft* → "trashed, restorable from Collectives' trash"
+         *
+         * The dataLossWarning branch (archive off + hard) is handled by
+         * the alert block above and never renders this description.
+         */
+        wikiOffDescription() {
+            const p = this.wikiOffConfirm.policy
+            if (!p) return ''
+            const mode = p.archiveMode
+            if (p.archiveBeforeDelete) {
+                if (mode === 'soft30') return t('teamhub', 'An archive of the collective will be produced, then it will be moved to Collectives\' trash for a 30-day grace period before being permanently deleted.')
+                if (mode === 'soft60') return t('teamhub', 'An archive of the collective will be produced, then it will be moved to Collectives\' trash for a 60-day grace period before being permanently deleted.')
+                return t('teamhub', 'An archive of the collective will be produced and the collective will be permanently deleted immediately after.')
+            }
+            if (mode === 'soft30') return t('teamhub', 'The collective will be moved to Collectives\' trash. An NC administrator can restore it from there within the retention period. No archive bundle is produced.')
+            if (mode === 'soft60') return t('teamhub', 'The collective will be moved to Collectives\' trash. An NC administrator can restore it from there within the retention period. No archive bundle is produced.')
+            return t('teamhub', 'The collective will be permanently deleted immediately. No archive bundle is produced.')
         },
 
         /** Title for the connect picker dialog. */
@@ -2702,6 +3468,24 @@ export default {
             return this.pendingResourceRows.filter(r => r.status === 'pending' && !r.isDualFolderPending)
         },
 
+        /**
+         * Pending rows still worth a decision (v4.5.41).
+         *
+         * `availability` is absent on a payload from an older server, and
+         * `unknown` means the backend could not verify. Both keep their
+         * Accept/Ignore buttons — only a definite `resource_gone` or
+         * `team_detached` moves a row to the unavailable list, so a failed
+         * check never takes a live connection off the screen.
+         */
+        reviewablePendingResources() {
+            return this.normalPendingResources.filter(r => !this.isResourceUnavailable(r))
+        },
+
+        /** Pending rows whose resource is gone, or no longer attached to the team. */
+        unavailablePendingResources() {
+            return this.normalPendingResources.filter(r => this.isResourceUnavailable(r))
+        },
+
         // Description text under "Delete team" — depends on archive setting + mode
         deleteTeamDescription() {
             if (this.archiveSettings.archiveBeforeDelete) {
@@ -2732,6 +3516,81 @@ export default {
             }
         },
 
+        /**
+         * v4.6.13 — the state of the team's most recent extension request:
+         * 'pending' | 'approved' | 'denied' | null.
+         *
+         * A superseded request (the date was changed by another route) reports
+         * null on purpose. From the team's side nothing was decided about what
+         * they asked — the question stopped existing — and telling them their
+         * request was "superseded" would explain an internal state rather than
+         * anything they can act on. The new date is already shown above.
+         */
+        expiryRequestState() {
+            const req = this.expiryStatus?.request
+            if (!req) return null
+            if (['pending', 'approved', 'denied'].includes(req.status)) {
+                return req.status
+            }
+            return null
+        },
+
+        /**
+         * v4.6.26 — did the administrator grant something other than what was
+         * asked for?
+         *
+         * Only then is the granted date worth printing. When the grant matches
+         * the request, the resulting date is already the one in the state row
+         * at the top of the panel, and repeating it there put the same date on
+         * screen twice, two lines apart. `approveRequest()` takes an optional
+         * `$grantedOn`, so a shorter grant than requested is a real case, and
+         * it is the one the reader cannot work out for themselves.
+         *
+         * Both sides are pre-formatted display strings from `serializeRequest`,
+         * so this compares like with like. A missing value on either side reads
+         * as "nothing to point out" rather than as a difference.
+         */
+        expiryApprovalWasShortened() {
+            const req = this.expiryStatus?.request
+            if (!req?.grantedOn || !req?.proposedOn) return false
+            return req.grantedOn !== req.proposedOn
+        },
+
+        /**
+         * v4.6.27 — the chip's label and the dialog's title, from one place.
+         *
+         * The empty default never renders: both sites are guarded on
+         * `expiryRequestState` being truthy, which is the same set of three
+         * values this switches on. It exists so a status the API grows later
+         * produces nothing rather than a chip labelled `undefined` — see
+         * DESIGN §2.88 on default arms that render.
+         */
+        expiryOutcomeLabel() {
+            switch (this.expiryRequestState) {
+            // TRANSLATORS: "extension" here is more time before the team's
+            // expiration date, never a file extension. Status of a request
+            // still waiting for a Nextcloud administrator to decide.
+            case 'pending':  return t('teamhub', 'Extension requested')
+            // TRANSLATORS: the administrator granted the team more time
+            case 'approved': return t('teamhub', 'Extension approved')
+            // TRANSLATORS: the administrator refused the team more time
+            case 'denied':   return t('teamhub', 'Extension denied')
+            default:         return ''
+            }
+        },
+
+        /**
+         * The proposed date must be later than the current expiry — the server
+         * enforces it, and the picker refusing first saves a round trip.
+         * Falls back to tomorrow when there is somehow no date to beat.
+         */
+        expiryMinProposal() {
+            const current = this.expiryStatus?.expiry?.expiresOn
+            return current
+                ? shiftIsoDate(current, { days: 1 })
+                : shiftToday({ days: 1 })
+        },
+
         tabs() {
             const list = [
                 { key: 'description',  label: t('teamhub', 'General'),  icon: 'TextIcon' },
@@ -2740,32 +3599,93 @@ export default {
             ]
             // Project tab — only for teams created from the Project template.
             // A project isn't an integration that can be enabled/disabled, so
-            // it gets its own tab rather than living under Integration settings.
+            // it gets its own tab rather than living under Module settings.
             if (this.project && this.project.isProject) {
                 list.push({ key: 'project', label: t('teamhub', 'Project'), icon: 'BriefcaseIcon' })
             }
-            list.push({ key: 'integrations', label: t('teamhub', 'Integrations'), icon: 'PuzzleIcon' })
-            // Integration settings tab — Decisions config (when the module is
+            // v4.8.33 — the tab holds both kinds, so it names both. The `key`
+            // stays `integrations`: it is a stored/routed value, not a label,
+            // and renaming it would break a bookmarked tab for no gain.
+            list.push({ key: 'integrations', label: t('teamhub', 'Modules & integrations'), icon: 'PuzzleIcon' })
+            // Module settings tab — Decisions config (when the module is
             // enabled) plus Timeline Milestones (always available, gated only
             // by the per-team Timeline toggle inside the tab itself). Unlike
             // the old Decisions-only tab, this one is always shown.
-            list.push({ key: 'integration-settings', label: t('teamhub', 'Integration settings'), icon: 'GavelIcon' })
+            // Holds Messages, Decisions and Timeline settings — all three ours,
+            // so "integration settings" was the wrong half of the vocabulary.
+            list.push({ key: 'integration-settings', label: t('teamhub', 'Module settings'), icon: 'GavelIcon' })
             list.push({ key: 'danger', label: t('teamhub', 'Maintenance'), icon: 'AlertIcon' })
             return list
         },
 
+        // `field` (v4.8.17) maps each toggle to the policy field that can govern
+        // it, so one lookup greys out the right controls. The keys come from
+        // `constants/policy.js` rather than being retyped — that file is the
+        // mirror of `PolicyField.php` and the strings travel over the wire.
         invitationOptions() {
             return [
-                { key: 'open',    label: t('teamhub', 'Anyone can join (no invitation needed)') },
-                { key: 'invite',  label: t('teamhub', 'Members can invite others') },
-                { key: 'request', label: t('teamhub', 'Membership requests must be approved by a Moderator (requires "Anyone can join")') },
+                { key: 'open',    field: POLICY_FIELD.CFG_OPEN,    label: t('teamhub', 'Anyone can join (no invitation needed)') },
+                { key: 'invite',  field: POLICY_FIELD.CFG_INVITE,  label: t('teamhub', 'Members can invite others') },
+                {
+                    key: 'request',
+                    field: POLICY_FIELD.CFG_REQUEST,
+                    label: t('teamhub', 'Membership requests must be approved by a Moderator (requires "Anyone can join")'),
+                    // v4.8.30 — the same dependency `PolicyField::CFG_REQUEST`
+                    // declares and the profile editor already honours: Circles
+                    // reads CFG_OPEN as the gate and CFG_REQUEST only modulates
+                    // what happens once you are through it, so with "Anyone can
+                    // join" off this setting is not "closed but askable" — it is
+                    // simply ignored. `dependsOnKey` is the local
+                    // `circleConfig` key; `dependsOnField` is the policy field,
+                    // for the note's wording.
+                    dependsOnKey: 'open',
+                    dependsOnField: POLICY_FIELD.CFG_OPEN,
+                },
             ]
         },
         privacyOptions() {
             return [
-                { key: 'visible',   label: t('teamhub', 'Visible to everyone') },
-                { key: 'protected', label: t('teamhub', 'Enforce password protection on files shared with this team') },
+                { key: 'visible',   field: POLICY_FIELD.CFG_VISIBLE,   label: t('teamhub', 'Visible to everyone') },
+                { key: 'protected', field: POLICY_FIELD.CFG_PROTECTED, label: t('teamhub', 'Enforce password protection on files shared with this team') },
             ]
+        },
+
+        /**
+         * The classification governing this team's Circles settings, as a name
+         * to show — or '' when the team is unclassified (v4.8.17).
+         */
+        /**
+         * Why the federation control is greyed out (v4.9.2).
+         *
+         * Two different administrators, two different remedies: an instance lock
+         * is changed under Administration → TeamHub → Team creation, a profile
+         * lock by reclassifying the team. Saying "set by the classification" for
+         * an instance-wide setting would send an owner to the wrong screen.
+         */
+        federationLockTitle() {
+            if (this.federation.lockedBy === 'instance') {
+                return t('teamhub', 'Switched off for this server under “Allowed invite types”')
+            }
+            if (this.federation.lockedBy === 'profile') {
+                return t('teamhub', 'Set by the “{profile}” classification', { profile: this.circlePolicyName })
+            }
+            return ''
+        },
+        circlePolicyName() {
+            const p = this.circlePolicy
+            return p ? profileDisplayName(p.profileKey, p.label, p.isSeeded) : ''
+        },
+
+        /**
+         * Does the profile fix at least one of the settings on this panel?
+         *
+         * Drives the banner. A profile that governs only `public_messages`
+         * must not put a notice over the Circles toggles it says nothing about.
+         */
+        anyCircleSettingGoverned() {
+            return [...this.invitationOptions, ...this.privacyOptions]
+                .concat([{ field: POLICY_FIELD.CFG_ROOT }, { field: POLICY_FIELD.CFG_FEDERATED }])
+                .some(opt => this.isConfigGoverned(opt.field))
         },
         configValue() {
             let v = 0
@@ -2775,6 +3695,7 @@ export default {
             if (this.circleConfig.visible)       v |= CFG_VISIBLE
             if (this.circleConfig.protected)     v |= CFG_PROTECTED
             if (this.circleConfig.preventSubMembership) v |= CFG_ROOT
+            if (this.circleConfig.federated)     v |= CFG_FEDERATED
             // CFG_SINGLE (1) intentionally omitted — managed internally by Circles
             return v
         },
@@ -2788,8 +3709,21 @@ export default {
         currentUserIsOwner() {
             return this.currentUserLevel >= 9
         },
+
         isAdminOrOwner() {
             return this.currentUserLevel >= 8
+        },
+        /**
+         * Who may set/remove the team picture. On NC 34+ the picture is the
+         * Nextcloud Teams avatar, which Circles restricts to circle admins
+         * (level >= 8), so we hide the controls below that — matching the
+         * backend gate. On NC 32/33 (TeamHub's own storage) keep prior behaviour.
+         */
+        canSetTeamImage() {
+            if (this.team && this.team.nc_avatar_supported) {
+                return this.isAdminOrOwner
+            }
+            return true
         },
 
         /**
@@ -2807,7 +3741,13 @@ export default {
         teamAppsList() {
             const definitions = [
                 {
-                    id: 'spreed',
+                    // v4.8.27 — `talk`, not `spreed`. The server answers in the
+                    // resource registry's spelling, which is canonical since
+                    // lib/Constants/TeamApps.php; looking up `spreed` against a
+                    // `talk` row missed and fell back to "enabled", which is the
+                    // bug that made every app look switched on. The PUT path is
+                    // unaffected — appIdToResourceKey() maps both.
+                    id: 'talk',
                     label: t('teamhub', 'Talk'),
                     description: t('teamhub', 'Team chat and video calls'),
                     icon: MessageIcon,
@@ -2836,8 +3776,8 @@ export default {
                 },
                 {
                     id: 'intravox',
-                    label: t('teamhub', 'Pages'),
-                    description: t('teamhub', 'Team wiki and pages (Intravox)'),
+                    label: t('teamhub', 'Intranet'),
+                    description: t('teamhub', 'Structured team documentation page with sub-pages. Best for a single team briefing, contract, or knowledge landing spot.'),
                     icon: FileDocumentOutlineIcon,
                     installed: !!this.intravoxAvailable,
                 },
@@ -2846,6 +3786,11 @@ export default {
                 .filter(def => def.installed)
                 .map(def => {
                     const row = this.teamApps.find(a => a.app_id === def.id)
+                    // v4.8.27 — the server now sends a row for every canonical
+                    // app with a real `enabled`, derived from the resource
+                    // registry. The `: true` fallback is kept only for a server
+                    // older than this version, where a missing row genuinely
+                    // meant "no stored toggle, assume on".
                     const enabled = row ? row.enabled : true
                     return { ...def, enabled }
                 })
@@ -2876,11 +3821,20 @@ export default {
             this.archiveStatusRow = null
             this.loadAll()
         },
-        // When the warning block button is clicked, auto-switch to settings tab.
+        // v4.6.15 — the Integrations toggles on this very screen decide which
+        // tabs exist, and the Settings → Dashboard picker two tabs over has to
+        // agree with them. TeamView carries watchers for exactly this, but
+        // App.vue unmounts it while Manage Team is open, so the republish has
+        // to happen here. Cheap: no request, just a rebuild from store facts.
+        collectivesConfig: { deep: true, handler() { this.republishTeamTabs() } },
+        presenceConfig:    { deep: true, handler() { this.republishTeamTabs() } },
+        decisionsConfig:   { deep: true, handler() { this.republishTeamTabs() } },
+        timelineConfig:    { deep: true, handler() { this.republishTeamTabs() } },
+        // Warning-strip click while this view is already open. The usual
+        // path is the mounted() hook — see focusResourceReview() for why.
         resourceWarningFocus(focused) {
-            if (focused && this.activeTab !== 'settings') {
-                this.activeTab = 'settings'
-                // The activeTab watcher handles the scroll + flag clear.
+            if (focused) {
+                this.focusResourceReview()
             }
         },
         // "Open Project settings" in ProjectPhaseGuide (v3.90.x) — same
@@ -2903,12 +3857,7 @@ export default {
             const section = payload.section
             this.$nextTick(() => {
                 if (section && section !== 'top') {
-                    const el = this.$el.querySelector(`[data-section="${section}"]`)
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                        el.classList.add('manage-section--highlight')
-                        setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
-                    }
+                    this.revealManageSection(section)
                 }
                 this.$store.commit('SET_MANAGE_TEAM_DEEP_LINK', null)
             })
@@ -2917,10 +3866,18 @@ export default {
             if (tab === 'danger') {
                 this.loadArchiveStatus()
                 this.loadArchiveSettings()
+                // v4.6.13 — expiration state and the team's latest extension
+                // request. Fetched on tab entry rather than read from the
+                // layout bundle's `teamExpiry`, because this tab also needs the
+                // request and its decision note, which the bundle does not
+                // carry (it is loaded for every member; a decision note is
+                // team-admin material).
+                this.loadExpiryStatus()
             }
             if (tab === 'integrations') {
                 this.loadPresenceConfig()
                 this.loadDecisionsConfig()
+                this.loadFileReviewsConfig()
                 this.loadTimelineConfig()
                 this.loadMessagesConfig()
                 this.loadBudgetConfig()
@@ -2942,25 +3899,12 @@ export default {
             if (tab === 'project') {
                 this.loadBudget()
                 this.loadTime()
-                // v3.97.4 — milestone management moved here from Integration Settings.
+                // v3.97.4 — milestone management moved here from Module settings.
                 this.loadMilestones()
                 // v3.98.1 — dates form appears here now; hydrate it from
                 // the store's project fact on every enter (project may
                 // have been updated on another tab).
                 this.hydrateProjectDatesForm()
-            }
-            // If the warning block sent us here with focus flag set, scroll to at-risk section.
-            if (tab === 'settings' && this.resourceWarningFocus) {
-                this.$nextTick(() => {
-                    const el = this.$el.querySelector('.manage-section--atrisk-inline') ||
-                               this.$el.querySelector('.manage-section--atrisk')
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                        el.classList.add('manage-section--highlight')
-                        setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
-                    }
-                    this.SET_RESOURCE_WARNING_FOCUS(false)
-                })
             }
         },
     },
@@ -2985,15 +3929,24 @@ export default {
             const section = payload.section
             this.$nextTick(() => {
                 if (section && section !== 'top') {
-                    const el = this.$el.querySelector(`[data-section="${section}"]`)
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                        el.classList.add('manage-section--highlight')
-                        setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
-                    }
+                    // v4.6.16 — the retrying helper, not a single querySelector.
+                    // This is the path a My Work deep-link actually takes (the
+                    // payload is committed before this component mounts, so the
+                    // watcher never fires), and it is the path that has to wait
+                    // for an async section like the expiry panel.
+                    this.revealManageSection(section)
                 }
                 this.$store.commit('SET_MANAGE_TEAM_DEEP_LINK', null)
             })
+        }
+
+        // v4.5.36 — the resource-warning strip has exactly the race the
+        // Compass deep-link above already closed: TeamWidgetGrid commits
+        // SET_RESOURCE_WARNING_FOCUS and *then* emits `manage-team`, which is
+        // what makes App.vue render this component. The flag is therefore
+        // already true at mount and the watcher never sees a transition.
+        if (this.resourceWarningFocus) {
+            this.focusResourceReview()
         }
     },
 
@@ -3003,7 +3956,7 @@ export default {
     methods: {
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT_TAB_FOCUS']),
+        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_TIMELINE_CONFIG', 'SET_MESSAGES_CONFIG', 'SET_COLLECTIVES_CONFIG', 'SET_BUDGET_CONFIG', 'SET_TIME_CONFIG', 'SET_PROJECT_TAB_FOCUS']),
 
         loadAll() {
             this.loadMembers()
@@ -3014,10 +3967,11 @@ export default {
             this.loadMeetingSettings()
             this.loadPresenceConfig()
             this.loadDecisionsConfig()
+            this.loadFileReviewsConfig()
             this.loadTimelineConfig()
             this.loadMessagesConfig()
             // Message role settings (pin/post/link) moved from the Permissions
-            // tab in v3.104.1 — pin/post live in Integration Settings → Messages,
+            // tab in v3.104.1 — pin/post live in Module settings → Messages,
             // link lives in Settings → Custom links. Load once so both tabs see
             // populated selects on first render.
             this.loadMessageSettings()
@@ -3039,6 +3993,22 @@ export default {
 
         canRemoveMember(member) {
             return member.userId !== this.currentUserId && member.level < 9
+        },
+
+        /**
+         * May the viewer raise this inherited member's role? (v4.7.14, GitHub #87)
+         *
+         * Promotion only. Circles keeps the HIGHEST level across every path to a
+         * team, so a direct row set below what the group already grants changes
+         * nothing — offering a lower option would be a control that silently does
+         * not work. To reduce someone, change the group's level or take them out
+         * of it. Anyone already at Admin has nothing left to offer.
+         */
+        canPromoteInherited(member) {
+            if (this.currentUserLevel < 8) return false
+            if (member.userId === this.currentUserId) return false
+            if (member.level >= 8) return false
+            return true
         },
 
         async changeLevel(member, newLevel) {
@@ -3090,12 +4060,64 @@ export default {
                 this.circleConfig.visible       = !!(v & CFG_VISIBLE)
                 this.circleConfig.protected     = !!(v & CFG_PROTECTED)
                 this.circleConfig.preventSubMembership = !!(v & CFG_ROOT)
+                // Federation is bound to the RESOLVED value, not the raw bit.
+                // At the team level the two are the same; when an instance or a
+                // profile decides, the resolved answer is what actually applies
+                // and the stored bit may disagree with it. Showing the bit there
+                // would show the team a setting that is not in force.
+                this.federation = data.federation || { enabled: false, locked: true, lockedBy: null }
+                this.circleConfig.federated = !!this.federation.enabled
                 // CFG_SINGLE (1) not read — it is managed internally by Circles
+                // v4.8.17 — which of these the team's profile fixes. Null for an
+                // unclassified team, which is every team until an administrator
+                // assigns one.
+                this.circlePolicy = data.policy || null
             } catch (e) {
             } finally {
                 this.loadingConfig = false
             }
         },
+
+        /**
+         * Is this Circles setting fixed by the team's classification? (v4.8.17)
+         *
+         * **Key presence, not truthiness** — `values` carries only the fields the
+         * profile governs, and a field fixed to *off* is stored as `false`. A
+         * truthiness test would leave every "Always off" setting editable, which
+         * is exactly the half that matters.
+         *
+         * These fields are ASSERTED, not enforced: `updateTeamConfig()`'s overlay
+         * already discards a governed bit a client sends, so before this the
+         * toggle moved and the value silently did not. Greying it out is what
+         * makes the two agree. It is not a lock — Contacts and the Teams app can
+         * still write these, which is what the drift reporting is for.
+         */
+        isConfigGoverned(field) {
+            return !!this.circlePolicy && field in (this.circlePolicy.values || {})
+        },
+
+        /**
+         * Whether a setting's precondition on this same panel is satisfied
+         * (v4.8.30).
+         *
+         * Only `cfg_request` has one today, and it is Circles' rule rather than
+         * TeamHub's: without CFG_OPEN the team is simply closed and CFG_REQUEST
+         * is never read. `PolicyAdminPanel` has honoured this since v4.8.17 and
+         * this panel did not, so a team admin saw an editable tick-box that
+         * changed nothing — and on a classified team it was the one control in
+         * the group that stayed editable, which read as an oversight in the
+         * classification rather than a property of the platform.
+         *
+         * Deliberately independent of the profile: a team with "Anyone can
+         * join" off by its own choice is in exactly the same position as one
+         * that has it off because a profile says so.
+         */
+        configDependencyMet(opt) {
+            if (!opt.dependsOnKey) return true
+            return this.circleConfig[opt.dependsOnKey] === true
+        },
+
+        dependencyNote,
 
         async saveConfig() {
             try {
@@ -3132,6 +4154,7 @@ export default {
                     direct:          Array.isArray(data.direct)  ? data.direct  : [],
                     groups:          Array.isArray(data.groups)  ? data.groups  : [],
                     circles:         Array.isArray(data.circles) ? data.circles : [],
+                    inherited:       Array.isArray(data.inherited) ? data.inherited : [],
                     effective_count: data.effective_count || 0,
                 }
             } catch (e) {
@@ -3204,9 +4227,29 @@ export default {
                 this.ownerSuggestions = []
                 return
             }
-            // Team owners can only transfer ownership to an existing direct member.
-            const matches = this.manageMembers.direct
+            // Team owners can only transfer ownership to an existing member —
+            // by any route, since v4.8.35. Someone who reaches the team through
+            // a group IS a member of it, and leaving them out meant promoting
+            // them to a direct member on the Members tab first and then coming
+            // back here: two steps for one intention, with nothing on screen
+            // saying so. `assignOwner()` writes the direct row as part of the
+            // transfer anyway, so this only stops making the owner do it by hand.
+            //
+            // Deliberately not the same as putting Owner in the Members tab's
+            // role picker, which stays out on purpose: that is a long list where
+            // a mis-click is an accident. This is behind a search, an explicit
+            // selection and a confirmation dialog.
+            //
+            // Direct first, so a person holding both routes is offered once,
+            // with their direct role rather than the inherited one.
+            const seen = new Set()
+            const matches = [...this.manageMembers.direct, ...this.manageMembers.inherited]
                 .filter(m => m.userId && m.userId !== this.currentUserId)
+                .filter(m => {
+                    if (seen.has(m.userId)) return false
+                    seen.add(m.userId)
+                    return true
+                })
                 .filter(m => {
                     const name = (m.displayName || '').toLowerCase()
                     const uid  = (m.userId || '').toLowerCase()
@@ -3216,6 +4259,9 @@ export default {
                 .map(m => ({
                     id:          m.userId,
                     displayName: m.displayName || m.userId,
+                    // Carried so the dropdown can say where an inherited
+                    // candidate comes from. Null for a direct member.
+                    via:         m.via || null,
                 }))
             this.ownerSuggestions = matches
         },
@@ -3251,10 +4297,19 @@ export default {
                     params.toString(),
                     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
                 )
-                showSuccess(t('teamhub', '{name} is now the team owner', { name: target.displayName }))
+                showSuccess(t('teamhub', '{name} is now the team owner. You are now a moderator.', { name: target.displayName }))
                 this.clearOwnerSelection()
-                // Reload members so level badges update
-                await this.loadMembers()
+                // v4.6.20 — leave Manage team instead of reloading the member
+                // list. This endpoint is gated on `requireOwnerLevel`, so the
+                // caller is always the outgoing owner, and `assignOwner()`
+                // demotes them to moderator (level 4) as part of the transfer.
+                // Every member surface on this screen needs level 8, so the
+                // reload that used to run here answered 403 and the user was
+                // left on a screen they no longer had rights to, reading
+                // "Failed to get manage members" directly under a success
+                // toast. The transfer had in fact worked — the error was
+                // entirely this reload.
+                this.$emit('ownership-transferred')
             } catch (e) {
                 const msg = e.response?.data?.error || ''
                 showError(msg ? t('teamhub', 'Failed to transfer ownership: {error}', { error: msg }) : t('teamhub', 'Failed to transfer ownership'))
@@ -3282,6 +4337,75 @@ export default {
                 this.archiveSettings = data
             } catch (err) {
                 this.archiveSettings = {}
+            }
+        },
+
+        // ------------------------------------------------------------------
+        // Expiration date (v4.6.13)
+        // ------------------------------------------------------------------
+
+        async loadExpiryStatus() {
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/expiry`)
+                )
+                this.expiryStatus = data
+                // Prefill the proposal with six months past the current date, so
+                // the common "we need another half-year" is one click. Only when
+                // the field is untouched and no request is already in flight.
+                if (!this.expiryProposedOn && data?.expiry?.expiresOn && data?.request?.status !== 'pending') {
+                    this.expiryProposedOn = shiftIsoDate(data.expiry.expiresOn, { months: 6 })
+                }
+            } catch (err) {
+                // Non-fatal: a member who is not a team admin gets a 403 here,
+                // and the whole panel is admin-only anyway. Showing nothing is
+                // the correct outcome, not an error banner on a tab they opened
+                // to do something else.
+                this.expiryStatus = null
+            }
+        },
+
+        async submitExpiryRequest() {
+            if (!this.expiryProposedOn) return
+            this.expiryBusy = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/expiry/request`),
+                    { proposedOn: this.expiryProposedOn, reason: this.expiryReason }
+                )
+                showSuccess(t('teamhub', 'Extension requested. A Nextcloud administrator will decide.'))
+                this.expiryReason = ''
+                // The dialog describes one specific request. Both writes below
+                // replace the one it is showing, so it closes rather than
+                // silently re-pointing at a different request under the reader.
+                this.expiryOutcomeOpen = false
+                await this.loadExpiryStatus()
+            } catch (err) {
+                const msg = err.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Failed to request an extension: {error}', { error: msg })
+                    : t('teamhub', 'Failed to request an extension'))
+            } finally {
+                this.expiryBusy = false
+            }
+        },
+
+        async withdrawExpiryRequest() {
+            this.expiryBusy = true
+            try {
+                await axios.delete(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/expiry/request`)
+                )
+                showSuccess(t('teamhub', 'Extension request withdrawn.'))
+                this.expiryOutcomeOpen = false
+                await this.loadExpiryStatus()
+            } catch (err) {
+                const msg = err.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Failed to withdraw the request: {error}', { error: msg })
+                    : t('teamhub', 'Failed to withdraw the request'))
+            } finally {
+                this.expiryBusy = false
             }
         },
 
@@ -3393,16 +4517,57 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/settings`)
                 )
                 this.messageSettingsForm = {
-                    pinMinLevel:  resp.data.pinMinLevel  || 'moderator',
-                    postMinLevel: resp.data.postMinLevel || 'member',
-                    linkMinLevel: resp.data.linkMinLevel || 'admin',
+                    manageMinLevel:  resp.data.manageMinLevel  || 'admin',
+                    postMinLevel:    resp.data.postMinLevel    || 'member',
+                    linkMinLevel:    resp.data.linkMinLevel    || 'admin',
+                    commentMinLevel: resp.data.commentMinLevel || 'member',
+                    // Absent key = enabled, matching the store getter and the
+                    // server's own default. A pre-4.5.38 server sends no map at
+                    // all and every box must come back ticked.
+                    commentsEnabled: {
+                        normal:   resp.data.commentsEnabled?.normal   !== false,
+                        poll:     resp.data.commentsEnabled?.poll     !== false,
+                        // Always-on server-side, so pinned true here rather
+                        // than read: a pre-4.5.51 server still returns a
+                        // stored `false` for decision, and echoing that back
+                        // on the next auto-save would rewrite the setting
+                        // from a checkbox that no longer exists.
+                        question: true,
+                        decision: true,
+                    },
                     allowPublicMessages: !!resp.data.allowPublicMessages,
                 }
+                // v4.8.17 — null unless a profile governs the switch. Read
+                // outside the form object on purpose: it is not part of the
+                // request body, and a client must never be able to send it.
+                this.publicMessagesPolicy = resp.data.publicMessagesPolicy || null
             } catch (e) {
                 showError(t('teamhub', 'Failed to load message settings'))
             } finally {
                 this.loadingMessageSettings = false
             }
+        },
+
+        /**
+         * The request body both message-settings saves send (v4.8.17).
+         *
+         * `allowPublicMessages` is forced back to the profile's value whenever a
+         * profile governs it. The switch is disabled, so the form already holds
+         * that value in the ordinary case — this covers the two where it might
+         * not: a profile applied in another tab since this form loaded, and a
+         * team whose stored value predates the profile being applied. Without
+         * it, either case makes *every* save on this team a 403, so one governed
+         * field would lock the entire settings form.
+         *
+         * Sending the governed value rather than dropping the key is deliberate:
+         * the endpoint reads an absent `allowPublicMessages` as false, which is
+         * itself a refused write against any profile that governs it as on.
+         */
+        messageSettingsPayload() {
+            if (!this.publicMessagesPolicy) {
+                return this.messageSettingsForm
+            }
+            return { ...this.messageSettingsForm, allowPublicMessages: !!this.publicMessagesPolicy.value }
         },
 
         async saveMessageSettings() {
@@ -3411,21 +4576,25 @@ export default {
             try {
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/settings`),
-                    this.messageSettingsForm
+                    this.messageSettingsPayload()
                 )
-                // Update the store so PostMessageForm and canPost/canPin reflect the new settings immediately
+                // Update the store so PostMessageForm and canPost/canManageMessages
+                // reflect the new settings immediately
                 this.$store.dispatch('fetchMessageSettings', this.team.id)
                 this.messageSettingsSaved = true
                 setTimeout(() => { this.messageSettingsSaved = false }, 2500)
             } catch (e) {
-                showError(t('teamhub', 'Failed to save message settings'))
+                // A §4.4 policy refusal explains itself and names the profile;
+                // the generic message would tell an admin nothing about why the
+                // save failed.
+                showError(e?.response?.data?.error || t('teamhub', 'Failed to save message settings'))
             } finally {
                 this.savingMessageSettings = false
             }
         },
 
         /**
-         * Auto-save variant (v3.104.1) used by the Integration Settings
+         * Auto-save variant (v3.104.1) used by the Module settings
          * Messages block and the Settings tab Custom-links row. Same POST as
          * saveMessageSettings but silent on success — no toast, no "Saved"
          * badge — because it fires on every select change and would spam.
@@ -3436,11 +4605,11 @@ export default {
             try {
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/messages/settings`),
-                    this.messageSettingsForm
+                    this.messageSettingsPayload()
                 )
                 this.$store.dispatch('fetchMessageSettings', this.team.id)
             } catch (e) {
-                showError(t('teamhub', 'Failed to save message settings'))
+                showError(e?.response?.data?.error || t('teamhub', 'Failed to save message settings'))
             } finally {
                 this.savingMessageSettings = false
             }
@@ -3461,6 +4630,40 @@ export default {
             } finally {
                 this.clearingImageCache = false
             }
+        },
+
+        /**
+         * Open the review blocks after a click on the Teaminfo widget's
+         * "N resources need review" strip (v4.5.36).
+         *
+         * Both blocks — "Resources pending review" and "Resources at risk" —
+         * live in the **Integrations** tab. The old target was `settings`,
+         * which carries neither, so the click landed on a tab with nothing on
+         * it, the querySelector found nothing, and the focus flag was cleared
+         * on the way past. Nothing on screen ever said the trip had failed.
+         *
+         * Pending wins over at-risk when both are rendered: a resource waiting
+         * on an accept/ignore decision is the one with an action attached to
+         * it, and it is the reason this path exists.
+         */
+        async focusResourceReview() {
+            this.activeTab = 'integrations'
+            // Neither block renders until /resources/panel has answered.
+            // loadAll() has already asked, but awaiting our own call is what
+            // makes the ordering deterministic rather than a race against it.
+            // One extra round trip on a deliberate click is the right trade.
+            await this.loadPendingResources()
+            await this.$nextTick()
+
+            const el = this.$el.querySelector('.manage-section--pending-inline')
+                || this.$el.querySelector('.manage-section--atrisk-inline')
+                || this.$el.querySelector('.manage-section--atrisk')
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                el.classList.add('manage-section--highlight')
+                setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
+            }
+            this.SET_RESOURCE_WARNING_FOCUS(false)
         },
 
         async loadPendingResources() {
@@ -3484,41 +4687,127 @@ export default {
             }
         },
 
-        async acceptResource(resource) {
+        /**
+         * Accept / ignore / un-ignore a discovered resource (v4.5.36).
+         *
+         * Was three near-identical bodies, each swallowing its error in an
+         * empty catch — a refused accept looked exactly like a successful one,
+         * the row just quietly stayed where it was. That cost little while
+         * every resource type was already connected and the row was pure
+         * bookkeeping. It costs a lot now: accepting a collective is what
+         * switches the Wiki tab on, and the server can genuinely refuse it.
+         *
+         * @param {object} resource   a row from /resources/panel
+         * @param {string} action     'accept' | 'ignore' | 'unignore'
+         * @param {string} nextStatus the status to show once the server agrees
+         */
+        async applyResourceDecision(resource, action, nextStatus) {
             resource._loading = true
             try {
                 await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/accept`)
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/${action}`)
                 )
                 // Update status in-place to keep UI reactive without a full reload.
-                resource.status = 'active'
+                resource.status = nextStatus
+
+                // A collective's registry row is bookkeeping; what actually
+                // puts the Wiki tab on screen is collectivesConfig. Mirror the
+                // write the server just made so the tab appears (or leaves)
+                // without a reload. `collectives_installed` is carried over
+                // rather than recomputed — it is an instance-global fact with a
+                // deliberate third state, `null` = not known yet (v4.5.35).
+                if (resource.appId === 'collectives') {
+                    this.SET_COLLECTIVES_CONFIG({
+                        ...this.collectivesConfig,
+                        collectives_enabled: nextStatus === 'active',
+                    })
+                }
+
+                // The "N resources need review" strip counts server-side, so
+                // it only drops this row once the resources bundle is re-read.
+                this.$store.dispatch('fetchResources', this.team.id)
             } catch (e) {
+                const msg = e?.response?.data?.error
+                showError(msg
+                    ? t('teamhub', 'Failed to update resource: {error}', { error: msg })
+                    : t('teamhub', 'Failed to update resource'))
             } finally {
                 resource._loading = false
             }
         },
 
-        async ignoreResource(resource) {
-            resource._loading = true
-            try {
-                await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/ignore`)
-                )
-                resource.status = 'ignored'
-            } catch (e) {
-            } finally {
-                resource._loading = false
+        acceptResource(resource) {
+            return this.applyResourceDecision(resource, 'accept', 'active')
+        },
+
+        ignoreResource(resource) {
+            return this.applyResourceDecision(resource, 'ignore', 'ignored')
+        },
+
+        unignoreResource(resource) {
+            return this.applyResourceDecision(resource, 'unignore', 'active')
+        },
+
+        /**
+         * True when the backend checked this pending row and found it dead.
+         *
+         * Absent (`undefined`, from a pre-4.5.41 server) and `unknown` both
+         * read as available on purpose: a row we could not verify keeps its
+         * Accept/Ignore buttons, because wrongly hiding a live connection
+         * costs more than one confusing row. Mirrors the server-side
+         * asymmetry in ResourceDiscoveryService::resolveAvailability.
+         */
+        isResourceUnavailable(resource) {
+            return resource.availability === 'resource_gone'
+                || resource.availability === 'team_detached'
+        },
+
+        /** Why a pending row can no longer be acted on. */
+        availabilityLabel(availability) {
+            switch (availability) {
+            case 'resource_gone':
+                // TRANSLATORS: shown when the resource behind a review request has been deleted
+                return t('teamhub', 'This resource no longer exists.')
+            case 'team_detached':
+                // TRANSLATORS: shown when the team was disconnected from the resource before the request was reviewed
+                return t('teamhub', 'This team is no longer connected to this resource.')
+            default:
+                return t('teamhub', 'This resource is not available anymore.')
             }
         },
 
-        async unignoreResource(resource) {
+        /**
+         * Drop a pending row whose resource is gone or detached.
+         *
+         * Not `applyResourceDecision`: that one sets a status on a row that
+         * survives, and this row is deleted server-side. The refetch it shares
+         * is the part that matters — the "N resources need review" strip on
+         * Team info counts server-side, so dismissing only clears the banner
+         * once the resources bundle is re-read.
+         */
+        async dismissResource(resource) {
             resource._loading = true
             try {
                 await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/unignore`)
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/dismiss`)
                 )
-                resource.status = 'active'
+                this.pendingResourceRows = this.pendingResourceRows.filter(r => r.id !== resource.id)
+                this.$store.dispatch('fetchResources', this.team.id)
             } catch (e) {
+                const msg = e?.response?.data?.error
+                if (msg === 'resource_available_again') {
+                    // The panel was stale — the server re-checked and found the
+                    // resource reachable after all. Says what happened rather
+                    // than "failed", because nothing failed.
+                    showError(t('teamhub', 'This resource is available again. Accept or ignore it instead.'))
+                } else {
+                    showError(msg
+                        ? t('teamhub', 'Failed to dismiss resource: {error}', { error: msg })
+                        : t('teamhub', 'Failed to dismiss resource'))
+                }
+                // Either way the row on screen now has the wrong buttons, so
+                // re-read the panel rather than leaving it there.
+                this.loadPendingResources()
             } finally {
                 resource._loading = false
             }
@@ -3659,6 +4948,10 @@ export default {
                 files:    t('teamhub', 'Files'),
                 calendar: t('teamhub', 'Calendar'),
                 deck:     t('teamhub', 'Deck'),
+                // Matches the toggle row below and the create-team wizard,
+                // renamed Wiki → Collective in v4.4.14 and Collective →
+                // Collectives in v4.6.9.
+                collectives: t('teamhub', 'Collectives'),
             }
             return labels[appId] || appId
         },
@@ -3743,6 +5036,46 @@ export default {
                 }
             } catch (err) {
                 // Non-fatal — defaults stay at false.
+            }
+        },
+
+        // ── File reviews config (v4.8.18) ───────────────────────────
+
+        /**
+         * One call answers both questions: is the module on for the instance,
+         * and is it on for this team. The row renders only when both are
+         * knowable, so a failed load hides it rather than showing a switch
+         * whose state is a guess.
+         */
+        async loadFileReviewsConfig() {
+            if (!this.team?.id) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/file-reviews/config`)
+                )
+                this.fileReviewsModuleEnabled = !!data.module_enabled
+                this.fileReviewsEnabled       = !!data.file_reviews_enabled
+            } catch (err) {
+                // Non-fatal — the row stays hidden.
+                this.fileReviewsModuleEnabled = false
+            }
+        },
+
+        async setFileReviewsEnabled(val) {
+            this.savingFileReviewsConfig = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/file-reviews/config`),
+                    { fileReviewsEnabled: !!val }
+                )
+                this.fileReviewsEnabled       = !!data.file_reviews_enabled
+                this.fileReviewsModuleEnabled = !!data.module_enabled
+            } catch (err) {
+                showError(t('teamhub', 'Failed to save: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.savingFileReviewsConfig = false
             }
         },
 
@@ -4013,9 +5346,10 @@ export default {
          * Converts Unix timestamps (backend) to ISO 'YYYY-MM-DD' (date input).
          */
         hydrateProjectDatesForm() {
-            const toIso = ts => (ts && Number.isFinite(ts))
-                ? new Date(ts * 1000).toISOString().slice(0, 10)
-                : ''
+            // epochDateToIso, not todayIso-style local reading: project dates
+            // are floating dates stored at UTC midnight (see saveProjectDates),
+            // so UTC on both sides is the correct round trip, not a bug.
+            const toIso = ts => (ts && Number.isFinite(ts)) ? epochDateToIso(ts) : ''
             this.projectDatesForm.startDate = toIso(this.project?.startDate)
             this.projectDatesForm.targetEnd = toIso(this.project?.targetEnd)
             this.projectDatesError = ''
@@ -4344,15 +5678,12 @@ export default {
             }
         },
 
-        /** dateStr is 'YYYY-MM-DD' (as returned by MilestoneService::serialize). */
+        /**
+         * dateStr is 'YYYY-MM-DD' (as returned by MilestoneService::serialize)
+         * — a floating date, so it renders through the zone-immune path.
+         */
         formatMilestoneDate(dateStr) {
-            try {
-                const d = new Date(dateStr + 'T00:00:00')
-                const locale = document.documentElement.lang || 'en'
-                return d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
-            } catch (err) {
-                return dateStr
-            }
+            return formatIsoDate(dateStr, { day: 'numeric', month: 'short', year: 'numeric' })
         },
 
         async setDecisionsLevelEnabled(val) {
@@ -4537,7 +5868,7 @@ export default {
             }
             // For the four connectable apps, ask whether to Create or Connect.
             // For any other app (intravox, ...) just enable directly.
-            const connectable = ['spreed', 'files', 'calendar', 'deck']
+            const connectable = ['talk', 'files', 'calendar', 'deck']
             if (connectable.includes(app.id)) {
                 this.pendingEnableApp = app
                 this.enableAppMode = 'create'
@@ -4578,8 +5909,11 @@ export default {
             }
             this.togglingApp = app.id
             try {
-                // Map app_id to the resource key used by the connect endpoint.
-                const resourceKey = app.id === 'spreed' ? 'talk' : app.id
+                // v4.8.27 — the app id IS the resource key now that the panel
+                // speaks the registry's vocabulary. Kept as a named variable
+                // because the endpoint's segment is a resource key, not an app
+                // id, and the two are only equal by convention.
+                const resourceKey = app.id
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resourceKey}/connect`),
                     { resourceId }
@@ -4653,6 +5987,80 @@ export default {
         },
 
         // ------------------------------------------------------------------
+        // Wiki (Collectives) toggle (v4.3.5)
+        //
+        // Enable path: PUT /collectives/config with collectives_enabled=1.
+        // Backend auto-creates the collective on first-time enable, binds it
+        // to the team-circle via Collectives' CircleExistsException fallback.
+        //
+        // Disable path: opens wikiOffConfirm, fetches the admin archive
+        // policy (same endpoint the team-delete flow uses), and shows either
+        // the destructive-warning modal (hard delete without archive bundle)
+        // or a plain summary of what will happen (soft-delete grace or
+        // archive-first-then-delete). Confirming fires the PUT with
+        // collectives_enabled=0; the backend dispatches to
+        // deleteCollective / trashCollective based on that same policy.
+        //
+        // The Wiki widget's cache is invalidated on both branches so the
+        // Home view reflects the new state immediately after the PUT lands.
+        // ------------------------------------------------------------------
+
+        async toggleWiki(enabled) {
+            if (enabled) {
+                await this._writeWikiConfig(true)
+                return
+            }
+            // Toggle-off flow — open the confirm modal and fetch policy.
+            this.wikiOffConfirm.open    = true
+            this.wikiOffConfirm.loading = true
+            this.wikiOffConfirm.policy  = null
+            this.wikiOffConfirm.error   = ''
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/project/closing/archive-policy`)
+                )
+                this.wikiOffConfirm.policy = data
+            } catch (e) {
+                this.wikiOffConfirm.error = e?.response?.data?.error || e?.message
+                    || t('teamhub', 'Failed to read archive policy')
+            } finally {
+                this.wikiOffConfirm.loading = false
+            }
+        },
+
+        async confirmWikiOff() {
+            this.wikiOffConfirm.open = false
+            await this._writeWikiConfig(false)
+        },
+
+        async _writeWikiConfig(enabled) {
+            this.togglingWiki = true
+            try {
+                const params = new URLSearchParams()
+                params.set('collectives_enabled', enabled ? '1' : '0')
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/collectives/config`),
+                    params.toString(),
+                    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+                )
+                this.$store.commit('SET_COLLECTIVES_CONFIG', {
+                    collectives_enabled:   !!data.collectives_enabled,
+                    collectives_installed: !!data.collectives_installed,
+                })
+                showSuccess(enabled
+                    ? t('teamhub', 'Collectives enabled')
+                    : t('teamhub', 'Collectives disabled'))
+            } catch (e) {
+                const msg = e?.response?.data?.error || e?.message || ''
+                showError(msg
+                    ? t('teamhub', 'Failed to update Collectives: {error}', { error: msg })
+                    : t('teamhub', 'Failed to update Collectives'))
+            } finally {
+                this.togglingWiki = false
+            }
+        },
+
+        // ------------------------------------------------------------------
         // Meeting permissions
         // ------------------------------------------------------------------
 
@@ -4704,6 +6112,54 @@ export default {
         /** Persist the default tab opened when a member enters the team. */
         async saveDefaultTab(tabKey) {
             await this.saveDashboardConfig({ default_tab: tabKey })
+        },
+
+        /**
+         * Rebuild the Dashboard section's pickers from current store facts.
+         * Called when a toggle on this screen changes which tabs exist — see
+         * the watchers above for why TeamView cannot do it while we are open.
+         */
+        republishTeamTabs() {
+            this.$store.dispatch('publishTeamTabs', { teamId: this.team?.id || null })
+        },
+
+        /**
+         * Scroll a deep-linked section into view, highlight it, and put focus
+         * on the first control inside it.
+         *
+         * v4.6.16 — this used to be one `querySelector` on `$nextTick`, which
+         * worked only for sections that render synchronously with their tab.
+         * The expiry panel does not: switching to Maintenance *starts*
+         * `loadExpiryStatus()`, and the panel is behind `v-if="expiryStatus…"`,
+         * so on the tick the deep link fired there was nothing to find and the
+         * scroll silently did nothing. That is why the My Work row felt like it
+         * led nowhere. It now retries on animation frames until the section
+         * appears, giving up after ~2 s rather than spinning forever on a
+         * section name that does not exist on this tab.
+         *
+         * Focus moves as well as the scroll: a keyboard user who followed a
+         * link to a form should not have to tab back through the whole tab.
+         */
+        revealManageSection(section, attempt = 0) {
+            const MAX_ATTEMPTS = 120 // ~2 s at 60 fps
+            const el = this.$el?.querySelector(`[data-section="${section}"]`)
+            if (!el) {
+                if (attempt < MAX_ATTEMPTS) {
+                    requestAnimationFrame(() => this.revealManageSection(section, attempt + 1))
+                }
+                return
+            }
+
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            el.classList.add('manage-section--highlight')
+            setTimeout(() => el.classList.remove('manage-section--highlight'), 1800)
+
+            const focusable = el.querySelector(
+                'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]',
+            )
+            if (focusable) {
+                focusable.focus({ preventScroll: true })
+            }
         },
 
         /**
@@ -4787,6 +6243,25 @@ export default {
 
             this.imageUploading = true
             try {
+                // NC 34+: store the picture as the Nextcloud Teams avatar
+                // (circle-admin gated) instead of TeamHub's own app-data image.
+                if (this.team.nc_avatar_supported) {
+                    await uploadTeamsAvatar(this.team.id, file)
+                    // v4.6.25 — TeamHub's own serve route reads the Teams
+                    // avatar too, so the picture is addressable by plain URL
+                    // and no longer has to be pulled down as a blob. The
+                    // cache-buster matters: the URL is unchanged by the upload
+                    // and the response carries a one-day max-age.
+                    const url = teamImageUrl(this.team.id)
+                    this.imagePreviewUrl = url
+                    this.$store.commit('UPDATE_TEAM_IMAGE', {
+                        teamId: this.team.id,
+                        imageUrl: url,
+                    })
+                    showSuccess(t('teamhub', 'Team image updated'))
+                    return
+                }
+
                 const formData = new FormData()
                 formData.append('image', file)
 
@@ -4823,6 +6298,30 @@ export default {
         async removeTeamImage() {
             this.imageRemoving = true
             try {
+                // NC 34+: remove the Nextcloud Teams avatar, and TeamHub's own
+                // copy with it.
+                //
+                // v4.6.25 — both, because the serve route now falls back to the
+                // legacy image. A team that still had one would have kept
+                // showing it after "Remove", and the next page load would have
+                // migrated that same picture straight back into Teams. Removing
+                // the picture has to mean removing it from both stores. The
+                // TeamHub delete is silent when there is nothing to delete,
+                // which is the usual case.
+                if (this.team.nc_avatar_supported) {
+                    await removeTeamsAvatar(this.team.id)
+                    await axios.delete(
+                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/image`)
+                    )
+                    this.imagePreviewUrl = null
+                    this.$store.commit('UPDATE_TEAM_IMAGE', {
+                        teamId: this.team.id,
+                        imageUrl: null,
+                    })
+                    showSuccess(t('teamhub', 'Team image removed'))
+                    return
+                }
+
                 await axios.delete(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/image`)
                 )
@@ -5007,7 +6506,7 @@ export default {
 
 .manage-section-desc {
     /* v3.104.9 — off-scale 13px replaced by --th-font-meta (12px) so section
-       descs match the row-desc used under Permissions / Integration Settings. */
+       descs match the row-desc used under Permissions / Module settings. */
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: -8px 0 16px;
@@ -5134,7 +6633,11 @@ export default {
     font-size: var(--th-font-micro);
     letter-spacing: 0.4px;
 }
-.teamhub-budget-cfg__lanes .hidden-visually {
+/* One definition, two users: the lane table's column headers and (v4.6.27) the
+   expiry form's two field labels. Scoped rather than bare `.hidden-visually`
+   so it cannot collide with the server's own copy of the class. */
+.teamhub-budget-cfg__lanes .hidden-visually,
+[data-section="expiry"] .hidden-visually {
     position: absolute;
     width: 1px; height: 1px;
     overflow: hidden;
@@ -5284,10 +6787,30 @@ export default {
        render at 14px like every other content string on the page. */
     font-size: var(--th-font-body);
 }
+
+/* v4.6.25 — the same problem on the other axis, and everywhere rather than
+   only in Circle Settings. NcCheckboxRadioSwitch sets both font properties on
+   its own root: `font-size: var(--default-font-size)` and
+   `font-weight: var(--font-weight-element)`, which a stock NC theme resolves
+   to 500. Beside our 14px/400 body text that reads as bold, and it is the
+   wrong element to emphasise — the weight belongs to the row title above the
+   control, not to the option being chosen.
+   v4.0.0 pinned only the size, and only inside .manage-settings-group, so
+   every checkbox and switch in an Module settings row kept both. Setting
+   it on the component root covers the label text without needing to know the
+   component's internal class names; the label selectors below stay because
+   they are cheap and survive a markup change upstream.
+   Sites this covers: Circle Settings, Messages → "Allow comments on" /
+   "Allow public messages", Decisions → "Decision level field", and the
+   Dashboard widget toggles, which all showed the same thing. */
+.manage-settings-group :deep(.checkbox-radio-switch),
 .manage-settings-group :deep(.checkbox-radio-switch__label),
 .manage-settings-group :deep(.checkbox-radio-switch label),
-.manage-settings-group :deep(label span) {
+.manage-settings-group :deep(label span),
+.manage-section__row :deep(.checkbox-radio-switch),
+.manage-section__row :deep(.checkbox-radio-switch__label) {
     font-size: var(--th-font-body);
+    font-weight: var(--th-font-weight-regular);
 }
 .manage-settings-group h4 {
     font-size: var(--th-font-meta);
@@ -5348,15 +6871,74 @@ export default {
 .team-apps-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    /* v4.4.8 — was 6px + a 10px margin-bottom per section = 16px real gap.
+       Rely on gap only so the two sources of vertical space stop compounding. */
+    gap: 4px;
 }
 .team-app-item {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
+    /* v4.4.8 — 10px 12px → 6px 12px so toggle-driven rows line up with the
+       tightened section-header height above. */
+    padding: 6px 12px;
     border-radius: var(--border-radius-large);
     background: var(--color-background-dark);
+}
+
+/* ── Wiki toggle-off confirm modal (v4.3.5) ─────────────────────── */
+.wiki-off-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 8px 4px 4px;
+    min-width: 380px;
+}
+.wiki-off-confirm__loading {
+    color: var(--color-text-maxcontrast);
+    font-size: 13px;
+}
+.wiki-off-confirm__alert {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: var(--color-error);
+    color: var(--color-error-text);
+    border-radius: var(--border-radius);
+}
+.wiki-off-confirm__alert h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    font-weight: 700;
+}
+.wiki-off-confirm__alert p {
+    margin: 0 0 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.wiki-off-confirm__alert p:last-child {
+    margin-bottom: 0;
+}
+.wiki-off-confirm__ok {
+    margin: 0;
+    padding: 12px;
+    background: var(--color-background-hover);
+    border-radius: var(--border-radius);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-main-text);
+}
+.wiki-off-confirm__error {
+    padding: 8px 12px;
+    background: var(--color-error);
+    color: var(--color-error-text);
+    border-radius: var(--border-radius);
+    font-size: 13px;
+}
+.wiki-off-confirm__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
 }
 .team-app-section-title {
     font-size: var(--th-font-meta);
@@ -5371,8 +6953,11 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    /* v4.4.14 — well shrunk 36 → 28 to sit at the same visual weight as
+       the 18 px inline icons in the resource-section headers above. The
+       icon inside is 18 px, matching the section headers. */
+    width: 28px;
+    height: 28px;
     border-radius: var(--border-radius);
     /* v3.100.14: neutral surface for the decorative app-icon tile
        (the primary-coloured MDI glyph inside is the accent). Was
@@ -5380,6 +6965,14 @@ export default {
     background: var(--color-background-dark);
     color: var(--color-primary-element);
     flex-shrink: 0;
+}
+/* v4.3.6 — opt-out for icons whose SVG stroke uses currentColor and
+   contrasts poorly against the theme's brand accent. Used by the Wiki
+   row: BookOpenOutline was showing as full brand-green while every
+   other MDI glyph in this list rendered neutral because their SVGs
+   ignore currentColor. Keep the same background tile, drop the tint. */
+.team-app-icon--neutral {
+    color: var(--color-main-text);
 }
 .team-app-info {
     flex: 1;
@@ -5443,6 +7036,13 @@ export default {
 .manage-section--atrisk-inline.manage-section--highlight {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-error) 40%, transparent);
 }
+/* v4.5.41 — the pending block never had one. focusResourceWarning() prefers
+   .manage-section--pending-inline as its scroll target, so following the
+   "N resources need review" strip landed here and added a class with no rule
+   behind it: the page jumped and nothing confirmed where it had jumped to. */
+.manage-section--pending-inline.manage-section--highlight {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-info) 40%, transparent);
+}
 .atrisk-resources-list {
     display: flex;
     flex-direction: column;
@@ -5488,29 +7088,55 @@ export default {
     color: var(--color-warning-text);
 }
 
-/* Inline variant — inside team-apps-list, above app rows */
+/* Inline variant — inside team-apps-list, above app rows.
+
+   v4.5.41 — ONE background, ONE text colour for the whole block, and no child
+   may override either. It previously carried three backgrounds (--color-warning
+   from the base rule, --color-info from this one, --color-primary-element on
+   the dual-folder notice) and four text colours, including
+   --color-text-maxcontrast — a token tuned for muted text on the *main*
+   background — sitting on a saturated field. That is the unreadable
+   combination.
+
+   The full-saturation notice style used by .manage-archive-notice--pending is
+   deliberately NOT used here: its --color-*-text partner is also meant for the
+   main background, so it only holds up by luck of the theme. A neutral surface
+   with --color-main-text cannot fail in either theme, and the informational
+   signal survives in the left border and the ℹ glyph — which is also what
+   keeps this off WCAG 1.4.1, since the heading says what the block is. */
 .manage-section--pending-inline {
     margin-bottom: 4px;
-    border-color: var(--color-info);
-    background: var(--color-info);
-    color: var(--color-info-text);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-info);
+    border-radius: var(--border-radius-large);
+    background: var(--color-background-hover);
+    color: var(--color-main-text);
 }
 
-.manage-section--pending-inline .team-app-section__header--info {
-    color: var(--color-info-text);
+/* Every descendant inherits. The one accent is the icon in the header. */
+.manage-section--pending-inline,
+.manage-section--pending-inline .team-app-section__header--info,
+.manage-section--pending-inline .manage-section-desc--inline,
+.manage-section--pending-inline .dual-folder-notice,
+.manage-section--pending-inline .dual-folder-notice__header,
+.manage-section--pending-inline .dual-folder-notice__body,
+.manage-section--pending-inline .pending-resource-app,
+.manage-section--pending-inline .pending-resource-name,
+.manage-section--pending-inline .pending-resource-reason {
+    color: var(--color-main-text);
 }
 
-/* Dual-folder migration notice — informational, full-saturation primary. */
+/* Dual-folder migration notice — same surface as its parent, separated by a
+   rule rather than by a colour of its own. */
 .dual-folder-notice {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    border: 1px solid var(--color-primary-element);
-    border-radius: var(--border-radius);
+    padding: 10px 0 12px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--color-border);
+    background: transparent;
 }
 
 .dual-folder-notice__header {
@@ -5518,13 +7144,11 @@ export default {
     align-items: center;
     gap: 8px;
     font-weight: 600;
-    color: var(--color-main-text);
 }
 
 .dual-folder-notice__body {
     margin: 0;
     font-size: 13px;
-    color: var(--color-text-maxcontrast);
     line-height: 1.5;
 }
 
@@ -5540,8 +7164,12 @@ export default {
     gap: 8px;
     font-weight: 600;
     font-size: 13px;
-    color: var(--color-info-text, var(--color-main-text));
     padding: 8px 0 4px;
+}
+
+/* The one place colour still carries meaning inside the block. */
+.manage-section--pending-inline .team-app-section__header--info > [aria-hidden] {
+    color: var(--color-info);
 }
 
 
@@ -5563,6 +7191,20 @@ export default {
     background: var(--color-background-hover);
     border-radius: var(--border-radius);
 }
+/* v4.5.41 — scoped, not global: the pending block's own surface is now
+   --color-background-hover, so a row painted the same colour would vanish into
+   it. --color-main-background reads as a card on top. The ignored list reuses
+   .pending-resource-item outside this block, where the rule above is still the
+   right one — hence the override rather than a change to the base. */
+.manage-section--pending-inline .pending-resource-item {
+    background: var(--color-main-background);
+}
+/* v4.5.41 — a row that can only be dismissed. Same layout, same colours; the
+   dashed border says "this is not a live row" without introducing a second
+   text colour, and the reason line says it in words. */
+.pending-resource-item--unavailable {
+    border: 1px dashed var(--color-border-dark);
+}
 .pending-resource-info {
     display: flex;
     flex-direction: column;
@@ -5575,10 +7217,13 @@ export default {
 }
 .pending-resource-name {
     font-size: var(--th-font-micro);
-    color: var(--color-text-maxcontrast);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.pending-resource-reason {
+    font-size: var(--th-font-micro);
+    font-style: italic;
 }
 .pending-resource-actions {
     display: flex;
@@ -5608,37 +7253,56 @@ export default {
 .team-app-section {
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-large);
-    margin-bottom: 10px;
+    /* v4.4.8 — margin-bottom retired; .team-apps-list gap owns the spacing. */
     overflow: hidden;
 }
 .team-app-section__header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 14px;
+    /* v4.4.8 — 10px 14px → 4px 8px 4px 12px. NcButtons pin the effective row
+       height at their 34 px touch target, so a padding-driven header on top
+       of that only inflates the stripe. */
+    padding: 4px 8px 4px 12px;
     background: var(--color-background-dark);
     font-weight: 500;
     font-size: 13px;
 }
 .team-app-section__name {
     flex: 1;
+    min-width: 0;
+    /* Long team labels don't push the buttons off the edge. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* v4.4.8 — Connect / Create actions moved out of a dedicated 44 px row and
+   into the section header. flex-shrink:0 so they never lose their labels
+   when the team name is long; the header's flex-wrap kicks in first. */
+.team-app-section__actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 .resource-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 8px 14px;
+    /* v4.4.8 — 8px 14px → 4px 12px; min-height retired. NcButtons enforce
+       their own 44 px touch target; the row does not need to. */
+    padding: 4px 12px;
     border-top: 1px solid var(--color-border);
-    min-height: 44px;
 }
 .resource-row--empty {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
-}
-.resource-row--actions {
-    gap: 6px;
-    justify-content: flex-start;
+    font-size: var(--th-font-meta);
+    font-style: italic;
+    /* No buttons here, no need for the 44 px comfortable click zone —
+       an empty-state line is the tightest row on the page by design. */
+    padding: 6px 12px;
 }
 .resource-row__name {
     font-size: 13px;
@@ -5825,6 +7489,19 @@ export default {
     color: var(--color-text-maxcontrast);
     min-width: 110px;
     text-align: center;
+}
+
+/* v4.7.14 — the route by which an inherited member reaches the team. Quiet:
+   it is an explanation sitting under a name, not a second heading. */
+.member-via {
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+.inherited-hint {
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+    line-height: var(--th-line-height-body);
+    margin: 0 0 12px;
 }
 
 /* Pending requests */
@@ -6056,6 +7733,36 @@ export default {
     font-size: var(--th-font-body);
 }
 
+/* v4.6.26 — an approved extension request is the one outcome that is
+   unambiguously good news, and it was rendering in --pending's amber, i.e.
+   the colour the panel uses for "waiting on somebody". Full-saturation
+   success per DESIGN §2.37, matching its two siblings above. */
+.manage-archive-notice--success {
+    background: var(--color-success);
+    border: 2px solid var(--color-success);
+    color: var(--color-success-text);
+}
+
+.manage-archive-notice--success strong {
+    color: var(--color-success-text);
+    font-size: var(--th-font-body);
+}
+
+/* v4.6.26 — the notice titles carry a per-outcome icon so pending / denied /
+   approved are told apart without reading the background colour. */
+.manage-archive-notice__title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* The notice is a column flex with default `align-items: stretch`, which
+   makes a button child as wide as the notice. */
+.manage-archive-notice__action {
+    align-self: flex-start;
+    margin-top: 2px;
+}
+
 .manage-archive-notice__reason {
     font-family: monospace;
     font-size: var(--th-font-micro);
@@ -6064,6 +7771,184 @@ export default {
     padding: 4px 6px;
     word-break: break-word;
     color: inherit;
+}
+
+/* v4.6.26 — a human note from the administrator, as opposed to
+   __reason's machine failure text. Same inset, but prose metrics: monospace
+   on a sentence somebody typed reads as a stack trace. */
+.manage-archive-notice__note {
+    font-size: var(--th-font-meta);
+    background: rgba(0, 0, 0, 0.07);
+    border-radius: var(--th-radius-chip);
+    padding: 6px 8px;
+    word-break: break-word;
+    color: inherit;
+}
+
+/* ── Expiration date (v4.6.13) ─────────────────────────────────── */
+
+/* v4.6.27 — the date, the fate of the last request, and (while one is open)
+   the withdraw action on one line. Wraps rather than compresses: the state box
+   keeps a readable floor and the chip drops under it on a narrow panel. */
+.manage-expiry-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.manage-expiry-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Grows into the row, but never below the width its own sentence needs. */
+    flex: 1 1 18em;
+    padding: 10px 12px;
+    border: 2px solid var(--color-border);
+    border-radius: var(--border-radius);
+    font-size: var(--th-font-body);
+}
+
+/* Full-saturation state colours per SKILLS.md, matching the archive notices
+   directly above. The icon and the wording carry the state as well, so the
+   colour is reinforcement rather than the signal (WCAG 1.4.1). */
+.manage-expiry-state--warning {
+    background: var(--color-warning);
+    border-color: var(--color-warning);
+    color: var(--color-warning-text);
+}
+
+.manage-expiry-state--expired {
+    background: var(--color-error);
+    border-color: var(--color-error);
+    color: var(--color-error-text);
+}
+
+.manage-expiry-state__text {
+    font-weight: var(--th-font-weight-medium);
+}
+
+/* v4.6.26 — one width for the whole panel.
+   The state row and the outcome notice ran full-bleed while the form was
+   capped at 560px, so the section stepped in halfway down for no reason the
+   reader could see. `em`-based so the cap tracks the type scale. */
+[data-section="expiry"] .manage-expiry-bar,
+[data-section="expiry"] .manage-expiry-form {
+    max-width: 46em;
+}
+
+/* v4.6.27 — the outcome chip. Tertiary rather than one of NcButton's filled
+   state variants: this reports what already happened, and a filled green
+   button beside a date reads as the thing to press. The state colour lands on
+   the icon and label instead — `--color-*-text` is the darkened variant meant
+   for text on the main background, not the one used inside a filled notice. */
+.manage-expiry-outcome {
+    flex: 0 0 auto;
+}
+
+.manage-expiry-outcome--approved :deep(.button-vue__icon),
+.manage-expiry-outcome--approved :deep(.button-vue__text) {
+    color: var(--color-success-text);
+}
+
+.manage-expiry-outcome--denied :deep(.button-vue__icon),
+.manage-expiry-outcome--denied :deep(.button-vue__text) {
+    color: var(--color-error-text);
+}
+
+.manage-expiry-outcome--pending :deep(.button-vue__icon),
+.manage-expiry-outcome--pending :deep(.button-vue__text) {
+    color: var(--color-warning-text);
+}
+
+/* Detail dialog behind the chip. Prose metrics, not the notice's — these are
+   sentences somebody typed, and the labels above them are what separates the
+   requester's words from the administrator's. */
+.manage-expiry-detail__line {
+    margin: 0 0 8px;
+}
+
+.manage-expiry-detail__label {
+    margin: 12px 0 4px;
+    font-size: var(--th-font-meta);
+    font-weight: var(--th-font-weight-semibold);
+    color: var(--color-text-maxcontrast);
+}
+
+.manage-expiry-detail__note {
+    margin: 0;
+    padding: 6px 8px;
+    border-radius: var(--th-radius-chip);
+    background: var(--color-background-dark);
+    font-size: var(--th-font-meta);
+    word-break: break-word;
+}
+
+.manage-expiry-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+}
+
+/* v4.6.27 — date and reason on one line. Both labels are visually hidden, so
+   the 6px label gap that used to justify a column here is gone with them. */
+.manage-expiry-form__fields {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.manage-expiry-form__field {
+    display: flex;
+    flex-direction: column;
+}
+
+/* A date is a fixed-width value; the reason takes whatever is left and drops
+   to its own line before it gets too narrow to write a sentence in. */
+.manage-expiry-form__field--date {
+    flex: 0 0 auto;
+}
+
+.manage-expiry-form__field--reason {
+    flex: 1 1 18em;
+    min-width: 14em;
+}
+
+/* v4.6.26 — the submit button sat in the same rhythm as the fields, so it
+   read as a third field rather than the thing that closes the form. */
+.manage-expiry-form__actions {
+    display: flex;
+    margin-top: 4px;
+}
+
+.manage-date-input {
+    /* Native <input type="date"> rather than an NC component, matching the
+       house pattern documented at .ctv__date-input in CreateTeamView.vue: the
+       value is a plain calendar date with no time component, which is exactly
+       what the native control produces and what the server parses. The metrics
+       below mirror NcTextField's so the two fields in this form read as the
+       same kind of control. */
+    min-height: 44px;
+    padding: 0 12px;
+    border: 2px solid var(--color-border-maxcontrast);
+    border-radius: var(--th-radius-control);
+    background-color: var(--color-main-background);
+    color: var(--color-main-text);
+    font-size: var(--th-font-body);
+}
+
+.manage-date-input:focus {
+    /* NC form-field convention: no outline, primary border on focus, with a
+       :focus-visible ring on top — SKILLS.md § Focus visibility standard. */
+    outline: none;
+    border-color: var(--color-primary-element);
+}
+
+.manage-date-input:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-primary-element);
 }
 
 /* ── Team image ────────────────────────────────────────────────── */
@@ -6179,6 +8064,18 @@ export default {
 
 .manage-owner-suggestion__uid {
     font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+
+/* v4.8.35 — the "via <group>" note on an inherited candidate. Sits between the
+   name and the uid, and shrinks before either of them does. */
+.manage-owner-suggestion__via {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
 }
 
@@ -6381,10 +8278,35 @@ export default {
    parent section still reads as one block, with a small top margin to
    separate it from the preceding row group. */
 .manage-section__subhead {
-    margin: 18px 0 0;
+    /* v4.6.25 — 18px was measured against the row above, which already
+       contributes 12px of its own bottom padding; it read as cramped next to
+       the 36px every sibling section gets. 24px gives "Categories" a visible
+       break from the "Minimum role for actions" row without promoting it to
+       a section of its own. */
+    margin: 24px 0 0;
     font-size: var(--th-font-body);
     font-weight: var(--th-font-weight-semibold);
     color: var(--color-main-text);
+}
+
+/* v4.6.25 — .manage-section-desc carries `margin-top: -8px` because it is
+   written for an <h3>, whose `margin-bottom: 16px` it exists to claw back.
+   Under a sub-head that arithmetic is wrong in both directions: the sub-head
+   has no bottom margin, so the -8px pulled the description up into the
+   heading and the pair lost the 8px gap every other heading + description
+   shows. 8px is that same gap arrived at honestly: an h3 pair collapses to
+   16 + (-8); a sub-head contributes no bottom margin, so the 8 is stated
+   outright. */
+.manage-section__subhead + .manage-section-desc {
+    margin-top: 8px;
+}
+
+/* v4.6.27 — the sub-head has no bottom margin because it was always followed
+   by a `.manage-section-desc`. The expiry form no longer has one (its second
+   paragraph moved into the section intro), so the first field would otherwise
+   sit flush against the heading. Same 8px the paragraph would have taken. */
+.manage-section__subhead + .manage-expiry-form {
+    margin-top: 8px;
 }
 /* ── Decision categories sub-panel (Session G) ── */
 .teamhub-dec-cats__info {
@@ -6590,6 +8512,78 @@ export default {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin-top: 2px;
+}
+
+/* v4.8.17 — the Circle Settings panel's policy notice, and the lock beside each
+   governed toggle. The notice carries the explanation once; the locks say which
+   rows it applies to. Icon plus text, never colour alone (WCAG 1.4.1). */
+.manage-settings-governed {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: var(--th-font-meta);
+    color: var(--color-main-text);
+    background: var(--color-background-hover);
+    border-inline-start: 3px solid var(--color-primary-element);
+    border-radius: var(--th-radius-control);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    max-width: 80ch;
+}
+
+.manage-settings-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Sits next to a disabled control, so it is never the only thing conveying the
+   state — the checkbox's own disabled rendering does that, and the panel notice
+   above explains it. Decorative here by design. */
+.manage-settings-lock {
+    color: var(--color-text-maxcontrast);
+    flex: 0 0 auto;
+}
+
+/* v4.8.30 — the reason a control is greyed when no profile is involved: the
+   platform ignores it until its precondition is met. Text, not an icon, because
+   unlike the lock beside it there is nothing to recognise at a glance — the
+   sentence is the whole content. Wraps rather than truncating; the row is a
+   flex line and this is the part that should give. */
+.manage-settings-note {
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+    line-height: var(--th-line-height-body);
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* v4.8.17 — the note under a setting a policy profile governs. Icon plus text,
+   never colour alone: WCAG 1.4.1, and the lock glyph is what carries the
+   meaning for a reader who cannot see the contrast difference. */
+.manage-section__row-locked {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+    margin-top: 4px;
+}
+
+/* v4.5.38 — the "Allow comments on" checkbox column. `flex: 0 0 auto` because
+   the row is a flex container and the info block already owns `flex: 1`; the
+   stack must size to its labels rather than splitting the row in half. */
+.manage-section__checkbox-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    flex: 0 0 auto;
+}
+.manage-section__checkbox-note {
+    font-size: var(--th-font-micro);
+    color: var(--color-text-maxcontrast);
+    padding-inline-start: 4px;
 }
 
 /* Icon picker popover — searchable, grouped, scrollable */

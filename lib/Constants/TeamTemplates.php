@@ -60,7 +60,10 @@ final class TeamTemplates {
      * as its own constant so the CSV validator can name the allowed set
      * without depending on the service.
      */
-    public const TEMPLATES = ['collaboration', 'project', 'department'];
+    // v4.9.3 — 'openproject': a project whose engine is OpenProject rather
+    // than TeamHub's own project module. Seeded by Version000409004; the
+    // wizard requires an OpenProject project to be picked at creation.
+    public const TEMPLATES = ['collaboration', 'project', 'department', 'openproject'];
 
     /** App resource keys a template may provision. */
     public const APPS = ['talk', 'files', 'calendar', 'deck'];
@@ -89,6 +92,15 @@ final class TeamTemplates {
             'apps'    => ['talk' => true, 'files' => true, 'calendar' => true,  'deck' => false],
             'config'  => ['open' => false, 'invite' => false, 'request' => false, 'visible' => true,  'protected' => false],
             'modules' => ['decisions' => true, 'presence' => true,  'timeline' => false, 'messages' => true, 'pages' => true, 'wiki' => false],
+        ],
+        // v4.9.3 — OpenProject project. No Deck and no Timeline: work packages
+        // and the Gantt live in OpenProject, and a second task board would be
+        // the duplication the integration exists to avoid. Mirrored verbatim
+        // into Version000409004's literal seed.
+        'openproject' => [
+            'apps'    => ['talk' => true, 'files' => true, 'calendar' => true,  'deck' => false],
+            'config'  => ['open' => false, 'invite' => true,  'request' => false, 'visible' => false, 'protected' => false],
+            'modules' => ['decisions' => true, 'presence' => false, 'timeline' => false, 'messages' => true, 'pages' => true, 'wiki' => false],
         ],
     ];
 

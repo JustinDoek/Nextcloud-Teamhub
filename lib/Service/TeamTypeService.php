@@ -9,7 +9,7 @@ use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
 /**
- * Per-team template label — 'collaboration' | 'project' | 'department'.
+ * Per-team template label — 'collaboration' | 'project' | 'department' | 'openproject'.
  *
  * Written once by CreateTeamView after team creation. Read by the Team info
  * widget (via the layout bundle) and by BrowseTeamsView (via the browse
@@ -18,7 +18,7 @@ use Psr\Log\LoggerInterface;
  */
 class TeamTypeService {
 
-    public const ALLOWED = ['collaboration', 'project', 'department'];
+    public const ALLOWED = ['collaboration', 'project', 'department', 'openproject'];
 
     public function __construct(
         private TeamTypeMapper   $mapper,

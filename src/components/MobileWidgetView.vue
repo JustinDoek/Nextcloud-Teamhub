@@ -82,7 +82,7 @@
 
             <!-- ─── Tasks ─────────────────────────────────────────── -->
             <div v-if="activeWidget === 'widget-deck'" class="teamhub-mobile-canvas-body">
-                <DeckWidget />
+                <DeckWidget ref="deckWidget" @openproject-actions="openProjectWorkActions = $event" />
             </div>
 
             <!-- ─── Activity ──────────────────────────────────────── -->
@@ -90,12 +90,13 @@
                 <ActivityWidget @show-more="$emit('set-view', 'activity')" />
             </div>
 
-            <!-- ─── Pages (Intravox) ──────────────────────────────── -->
+            <!-- ─── Pages (Intranet + Wiki, unified v4.3.7) ───────── -->
             <div v-if="activeWidget === 'widget-pages'" class="teamhub-mobile-canvas-body">
                 <IntravoxWidget
                     ref="intravoxWidget"
                     :can-act="isTeamModerator"
-                    @pages-loaded="$emit('pages-loaded', $event)" />
+                    @pages-loaded="$emit('pages-loaded', $event)"
+                    @collective-loaded="$emit('collective-loaded', $event)" />
             </div>
 
             <!-- ─── File Center (tabbed: Favourites / Recent / Shared) ── -->
@@ -110,6 +111,12 @@
             <!-- v3.97.0 — Project Health widget on mobile -->
             <div v-if="activeWidget === 'widget-project-health'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
                 <ProjectHealthWidget @open-tab="$emit('set-view', $event)" />
+            </div>
+
+            <!-- v4.9.3 — Project info on mobile. Its links into OpenProject
+                 come through `actions` and feed the FAB (v4.9.5). -->
+            <div v-if="activeWidget === 'widget-openproject'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <OpenProjectOverviewWidget ref="openProjectWidget" @actions="openProjectActions = $event" />
             </div>
 
             <!-- ─── External integration widgets ──────────────────── -->
@@ -249,6 +256,15 @@ import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
 import ProjectHealthWidget  from './ProjectHealthWidget.vue'
 import ViewDashboard        from 'vue-material-design-icons/ViewDashboard.vue'
+// v4.9.3 — OpenProject Phase 1: the Project info widget and (v4.9.5) the
+// icons of its FAB actions.
+import OpenProjectOverviewWidget from './OpenProjectOverviewWidget.vue'
+import BriefcaseOutline          from 'vue-material-design-icons/BriefcaseOutline.vue'
+import OpenInNew                 from 'vue-material-design-icons/OpenInNew.vue'
+import FormatListChecks          from 'vue-material-design-icons/FormatListChecks.vue'
+import PlusBoxOutline            from 'vue-material-design-icons/PlusBoxOutline.vue'
+import FolderOutline             from 'vue-material-design-icons/FolderOutline.vue'
+import Refresh                   from 'vue-material-design-icons/Refresh.vue'
 
 export default {
     name: 'MobileWidgetView',
@@ -261,12 +277,14 @@ export default {
         AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
         FileDocumentOutline, FilePlus, Folder, LocationExit, Plus, Puzzle,
-        TrashCan, VideoIcon, ViewDashboard,
+        TrashCan, VideoIcon, ViewDashboard, BriefcaseOutline,
+        OpenInNew, FormatListChecks, PlusBoxOutline, FolderOutline, Refresh,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
         IntravoxWidget, IntegrationWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
         ProjectHealthWidget,
+        OpenProjectOverviewWidget,
     },
 
     props: {
@@ -284,8 +302,8 @@ export default {
     emits: [
         'manage-team', 'copy-link', 'invite', 'leave-team',
         'schedule-meeting', 'add-event', 'add-meeting',
-        'add-deck-task', 'add-personal-task',
-        'create-page', 'delete-page', 'pages-loaded',
+        'add-deck-task', 'add-personal-task', 'add-openproject-work-package',
+        'create-page', 'delete-page', 'create-wiki-page', 'pages-loaded', 'collective-loaded',
         'set-view',
         'widget-actions-loaded',
     ],
@@ -297,6 +315,11 @@ export default {
             // false whenever the active widget changes (a stale-open menu
             // from a previous widget would otherwise show wrong actions).
             actionsMenuOpen: false,
+            // v4.9.5 — the Project info widget's links, as it reports them.
+            openProjectActions: { projectUrl: null, workPackagesUrl: null, newWorkPackageUrl: null, filesUrl: null },
+            // v4.9.15 — the Upcoming tasks widget's report of the viewer's
+            // OpenProject rights; the FAB's create item shows when true.
+            openProjectWorkActions: { canCreate: false },
         }
     },
 
@@ -308,11 +331,18 @@ export default {
             // v3.104.1 — drops msgstream from the icon bar / canvas when
             // Messages is off for the team.
             'messagesConfig',
+            // v4.3.5 — Wiki (Collectives) toggle. Contributes to the
+            // widget-pages icon-bar gate (widget renders when EITHER
+            // Intranet or Wiki is enabled). Kept in mapState so the
+            // reactive gate re-evaluates when the toggle flips.
+            'collectivesConfig',
             // Team-wide dashboard customization — hidden_widgets also drops
             // widgets from the mobile icon bar so mobile matches desktop.
             'dashboardConfig',
             // v3.97.0 — same gate as TeamWidgetGrid for the Project Health widget.
             'budgetConfig', 'timeConfig', 'project',
+            // v4.9.3 — same gate as TeamWidgetGrid for the OpenProject widgets.
+            'openProjectConfig',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -388,7 +418,9 @@ export default {
                 icon: 'ClockOutline',
             })
 
-            if (this.resources.intravox) {
+            // v4.3.7 — unified Pages widget: shown when EITHER provider
+            // is active. IntravoxWidget renders both sections internally.
+            if (this.resources.intravox || this.collectivesConfig?.collectives_enabled) {
                 list.push({
                     key: 'widget-pages',
                     title: t('teamhub', 'Pages'),
@@ -427,6 +459,17 @@ export default {
                     // TRANSLATORS: mobile navigation label for the Project health widget
                     title: t('teamhub', 'Project health'),
                     icon: 'ViewDashboard',
+                })
+            }
+
+            // v4.9.3 — the Project info widget. Same gate as TeamWidgetGrid.
+            if (this.openProjectConfig?.eligible && this.openProjectConfig?.linked) {
+                list.push({
+                    key: 'widget-openproject',
+                    // TRANSLATORS: mobile navigation label for the linked OpenProject project's overview widget
+                    title: t('teamhub', 'Project info'),
+                    shortTitle: t('teamhub', 'Project'),
+                    icon: 'BriefcaseOutline',
                 })
             }
 
@@ -568,21 +611,61 @@ export default {
                             handler: () => this.$emit('add-personal-task'),
                         })
                     }
+                    // v4.9.15 — only when OpenProject grants "add work
+                    // packages" to this viewer, as the widget reported.
+                    if (this.openProjectWorkActions.canCreate) {
+                        actions.push({
+                            key: 'add-openproject-work-package',
+                            label: t('teamhub', 'Create work package'),
+                            icon: 'BriefcaseOutline',
+                            handler: () => this.$emit('add-openproject-work-package'),
+                        })
+                    }
                     return actions
                 }
 
-                case 'widget-pages':
+                // v4.9.5 — the Project info widget's links into OpenProject,
+                // the same set the desktop header menu offers, from the same
+                // event. Each opens a new tab: OpenProject refuses to be
+                // framed, and every OpenProject hand-off in TeamHub does this.
+                case 'widget-openproject': {
+                    const links = [
+                        ['open-project',     this.openProjectActions.projectUrl,        t('teamhub', 'Open project'),     'OpenInNew'],
+                        ['work-packages',    this.openProjectActions.workPackagesUrl,   t('teamhub', 'Work packages'),    'FormatListChecks'],
+                        ['new-work-package', this.openProjectActions.newWorkPackageUrl, t('teamhub', 'New work package'), 'PlusBoxOutline'],
+                        ['project-files',    this.openProjectActions.filesUrl,          t('teamhub', 'Project files'),    'FolderOutline'],
+                    ]
+                    const actions = links
+                        .filter(([, url]) => !!url)
+                        .map(([key, url, label, icon]) => ({
+                            key, label, icon,
+                            handler: () => window.open(url, '_blank', 'noopener,noreferrer'),
+                        }))
+                    actions.push({
+                        key: 'refresh-openproject',
+                        label: t('teamhub', 'Refresh project data'),
+                        icon: 'Refresh',
+                        handler: () => {
+                            const widget = this.$refs.openProjectWidget
+                            if (widget && typeof widget.refresh === 'function') widget.refresh()
+                        },
+                    })
+                    return actions
+                }
+
+                case 'widget-pages': {
                     if (!this.isTeamModerator) return []
-                    return [
-                        {
+                    const actions = []
+                    if (this.resources.intravox) {
+                        actions.push({
                             key: 'create-page',
-                            label: t('teamhub', 'Create page'),
+                            label: t('teamhub', 'Create Intranet page'),
                             icon: 'FilePlus',
                             handler: () => this.$emit('create-page'),
-                        },
-                        {
+                        })
+                        actions.push({
                             key: 'delete-page',
-                            label: t('teamhub', 'Delete page'),
+                            label: t('teamhub', 'Delete Intranet page'),
                             icon: 'TrashCan',
                             disabled: !this.pagesData.teamPage,
                             handler: () => {
@@ -590,8 +673,18 @@ export default {
                                     this.$emit('delete-page')
                                 }
                             },
-                        },
-                    ]
+                        })
+                    }
+                    if (this.collectivesConfig?.collectives_enabled) {
+                        actions.push({
+                            key: 'create-wiki-page',
+                            label: t('teamhub', 'Create Collectives page'),
+                            icon: 'FilePlus',
+                            handler: () => this.$emit('create-wiki-page'),
+                        })
+                    }
+                    return actions
+                }
 
                 // Widgets without actions: activity, files-*, integration widgets.
                 // (Integration widgets may register dynamic actions per registry_id,

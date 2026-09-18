@@ -7,6 +7,7 @@ use OCA\TeamHub\Db\PresenceSlot;
 use OCA\TeamHub\Db\PresenceSlotMapper;
 use OCA\TeamHub\Db\PresenceTypeMapper;
 use OCA\TeamHub\Db\RoomMapper;
+use OCA\TeamHub\Util\IcalText;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use Psr\Container\ContainerInterface;
@@ -682,16 +683,9 @@ class PresenceCalendarService {
         }
     }
 
-    /**
-     * Escape text for use in iCal property values.
-     * Per RFC 5545: backslash, semicolon, comma, newline must be escaped.
-     */
+    /** Escape text for use in iCal property values — the shared helper since v4.9.11. */
     private function escapeText(string $text): string {
-        $text = str_replace('\\', '\\\\', $text);
-        $text = str_replace(';', '\\;', $text);
-        $text = str_replace(',', '\\,', $text);
-        $text = str_replace(["\r\n", "\n", "\r"], '\\n', $text);
-        return $text;
+        return IcalText::escape($text);
     }
 
     /** Lazy-load CalDavBackend via the container — avoids circular DI at boot. */

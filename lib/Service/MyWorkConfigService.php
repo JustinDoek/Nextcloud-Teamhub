@@ -467,7 +467,7 @@ class MyWorkConfigService {
         );
 
         $groupBy = (string)($stored['groupBy'] ?? 'category');
-        if (!in_array($groupBy, ['category', 'date', 'team', 'resource_type'], true)) {
+        if (!in_array($groupBy, ['category', 'date', 'team', 'resource_type', 'project'], true)) {
             $groupBy = 'category';
         }
 

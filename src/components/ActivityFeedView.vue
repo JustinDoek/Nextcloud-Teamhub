@@ -57,7 +57,27 @@
                                     :show-user-status="false"
                                     :disable-menu="true"
                                     class="activity-feed__avatar" />
-                                <span class="activity-feed__subject">{{ item.subjectText }}</span>
+                                <!--
+                                    File activities make the subject itself the
+                                    affordance — the filename is what the user is
+                                    reaching for, and the 11px icon on the second
+                                    line was too small a target to find.
+
+                                    An <a> rather than a <button>: this navigates
+                                    to a resource, so ctrl/middle-click gets a
+                                    real new tab for free, and it escapes NC's
+                                    global button reset (min-height: 44px would
+                                    have stretched every row).
+                                -->
+                                <a
+                                    v-if="itemTarget(item)"
+                                    :href="itemLink(item)"
+                                    class="activity-feed__subject activity-feed__subject--open"
+                                    :title="itemTitle(item)"
+                                    @click="onItemOpen($event, item)">
+                                    {{ item.subjectText }}
+                                </a>
+                                <span v-else class="activity-feed__subject">{{ item.subjectText }}</span>
                             </div>
                             <div class="activity-feed__meta">
                                 <span class="activity-feed__app-label">{{ appLabel(item.app) }}</span>
@@ -65,10 +85,11 @@
                                 <span class="activity-feed__time">{{ formatTime(item.datetime) }}</span>
                                 <a
                                     v-if="item.link"
-                                    :href="item.link"
+                                    :href="itemLink(item)"
                                     target="_blank"
                                     rel="noopener"
-                                    class="activity-feed__link">
+                                    class="activity-feed__link"
+                                    @click="onItemOpen($event, item)">
                                     <OpenInNew :size="11" />
                                 </a>
                             </div>
@@ -83,7 +104,9 @@
 <script>
 import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatTime as fmtTime, formatIsoDate, zonedIsoDate, todayIso, shiftIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
+import { fileIdFromUrl, isPlainClick, resolveInternalTarget } from '../lib/internalLinks.js'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcEmptyContent, NcAvatar, NcButton } from '@nextcloud/vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
@@ -136,14 +159,15 @@ function formatMinorMoney(minor) {
 }
 
 function dayLabel(dateStr) {
-    const d   = new Date(dateStr)
-    const now = new Date()
-    const today     = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const yesterday = new Date(today - 86400000)
-    const day       = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-    if (day.getTime() === today.getTime())     return 'Today'
-    if (day.getTime() === yesterday.getTime()) return 'Yesterday'
-    return day.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+    // Which day an instant falls on is a question about the reader's
+    // calendar, so both the value and "today" are resolved in their zone
+    // rather than the browser's.
+    const iso = zonedIsoDate(dateStr)
+    if (!iso) return ''
+    const today = todayIso()
+    if (iso === today) return 'Today'
+    if (iso === shiftIsoDate(today, { days: -1 })) return 'Yesterday'
+    return formatIsoDate(iso, { weekday: 'long', month: 'short', day: 'numeric' })
 }
 
 /**
@@ -215,6 +239,75 @@ export default {
         },
         iconComponent(name) { return ICON_MAP[name] || Bell },
         appLabel(app) { return APP_LABELS[app] || app },
+
+        /**
+         * File id for a file activity, or null for anything else (v4.5.6).
+         * NC's activity rows use object_type 'files' with the file id in
+         * object_id; where that is missing we fall back to parsing the link,
+         * which NC builds as /f/{id} for file events.
+         */
+        itemFileId(item) {
+            // Three sources, most reliable first, because a single field has
+            // proven not to be enough across NC versions and event types:
+            //  1. oc_activity's own object reference — NC's file listeners
+            //     publish setObject('files', fileId), and TeamHub passes both
+            //     straight through. Also accept app === 'files', since some
+            //     event types set the app but a different object_type.
+            //  2. the row's link, which NC builds via
+            //     files.viewcontroller.showFile → /f/{id}.
+            //  3. nothing — a Deck, Calendar or Talk activity. Left as a
+            //     plain, non-clickable subject with NC's own link.
+            if (item.object_type === 'files' || item.app === 'files') {
+                const id = Number(item.object_id)
+                if (Number.isSafeInteger(id) && id > 0) {
+                    return id
+                }
+            }
+            return fileIdFromUrl(item.link)
+        },
+
+        /**
+         * What this activity points at, if TeamHub can open it (v4.5.11).
+         * 4.5.8 handled files only, so Deck and Calendar entries still escaped
+         * into a new window — the resolver covers all three.
+         *
+         * The object reference is preferred for files because it is the most
+         * reliable source; everything else is recognised from the row's link,
+         * which NC builds with the app's own deep-link route.
+         */
+        itemTarget(item) {
+            const fileId = this.itemFileId(item)
+            if (fileId !== null) {
+                return { type: 'file', fileId }
+            }
+            const target = resolveInternalTarget(item.link)
+            return target && this.$store.getters.canOpenInEmbed(target) ? target : null
+        },
+
+        /** Native href — the fallback for ctrl/middle-click. */
+        itemLink(item) {
+            return item.link
+        },
+
+        /** Tooltip: files gain the conversation, the rest just stay in the team. */
+        itemTitle(item) {
+            return this.itemTarget(item)?.type === 'file'
+                ? t('teamhub', 'Open with the team conversation')
+                : t('teamhub', 'Open in TeamHub')
+        },
+
+        /**
+         * Open the activity's subject in the tab that owns it, instead of a new
+         * browser tab. Modified clicks keep the native behaviour.
+         */
+        onItemOpen(event, item) {
+            const target = this.itemTarget(item)
+            if (!target || !isPlainClick(event)) {
+                return
+            }
+            event.preventDefault()
+            this.$store.dispatch('openInEmbed', target)
+        },
         formatSubject(item) {
             const s = item.subject || ''
             const user = item.user || ''
@@ -351,7 +444,7 @@ export default {
             return fallback
         },
         formatTime(datetime) {
-            return new Date(datetime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+            return fmtTime(datetime, { hour: '2-digit', minute: '2-digit' })
         },
     },
 }
@@ -476,6 +569,26 @@ export default {
     font-size: 13.5px;
     color: var(--color-main-text);
     line-height: 1.4;
+}
+
+/* Clickable subject for file activities. Sits in the row exactly as the plain
+   <span> does — the only visible difference is the hover underline and the
+   focus ring, so the feed keeps its rhythm. */
+.activity-feed__subject--open {
+    color: var(--color-main-text);
+    text-decoration: none;
+    cursor: pointer;
+    border-radius: var(--border-radius);
+}
+.activity-feed__subject--open:hover {
+    text-decoration: underline;
+}
+/* Split from :hover per SKILLS.md § focus visibility — grouping them would
+   silence the keyboard focus ring. */
+.activity-feed__subject--open:focus-visible {
+    text-decoration: underline;
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
 }
 
 .activity-feed__meta {

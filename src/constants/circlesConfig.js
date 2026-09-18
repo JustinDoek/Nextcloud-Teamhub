@@ -35,10 +35,12 @@ export const CFG_APP           = 131072
  * Bits TeamHub exposes as user toggles. Writes are masked to these only.
  */
 export const MANAGED_BITS =
-      CFG_VISIBLE   //    8
-    | CFG_OPEN      //   16
-    | CFG_INVITE    //   32
-    | CFG_REQUEST   //   64
-    | CFG_PROTECTED // 256
-    | CFG_ROOT      // 8192 — same bit Contacts uses for "Prevent sub-membership"
-// = 8568
+      CFG_VISIBLE    //     8
+    | CFG_OPEN       //    16
+    | CFG_INVITE     //    32
+    | CFG_REQUEST    //    64
+    | CFG_PROTECTED  //   256
+    | CFG_ROOT       //  8192 — same bit Contacts uses for "Prevent sub-membership"
+    | CFG_FEDERATED  // 32768 — v4.9.2, same bit Contacts writes from its own
+                     //         per-team federation switch
+// = 41336

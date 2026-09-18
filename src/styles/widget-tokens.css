@@ -40,12 +40,20 @@
        one of these tokens instead of a raw px value.
 
        Role → token mapping:
+       - a single number read at a glance → --th-font-display
        - view-level heading (H1)   → --th-font-heading-lg
        - section heading   (H2/H3) → --th-font-heading
        - body / labels / buttons   → --th-font-body
        - hint / meta / help text   → --th-font-meta
        - timestamp / pill / caption→ --th-font-micro
+
+       v4.5.39 added --th-font-display, above the heading scale rather
+       than inside it. It is not a heading size: the only thing that
+       may use it is a bare figure whose job is to be legible across
+       the room — today the My Work summary counts. Reach for
+       --th-font-heading-lg for any text that is words.
     */
+    --th-font-display:     30px;
     --th-font-heading-lg:  20px;
     --th-font-heading:     16px;
     --th-font-body:        14px;
@@ -111,6 +119,106 @@
        (light/dark/branded) instead of pinning specific hex values.
        See gui.md § 2. */
 
+    /* ── My Work category accents (v4.5.22) ───────────────────────────
+       The one place in the app where a *set* of colours has to be
+       distinguishable from each other at a glance — five categories on
+       one screen, each with an icon chip, a section header and a filter
+       card. NC's semantic tokens only supply three usable hues
+       (primary / success / error), which is not enough, so this is a
+       deliberate, documented extension of the scale rather than the
+       usual "reach for --color-*".
+
+       The palette is TeamHub's own brand set (marketing/brand.html —
+       the same values the sidebar mark uses), so the view reads as
+       ours rather than as a generic dashboard:
+         Signal Orange #FB5000, Coral #FE7161,
+         Hub Blue #328FB7, Cyan #7FDDEE.
+
+       Each category gets THREE tokens:
+         -accent  strong hue, for the icon glyph and the left rail
+         -soft    tint for the icon chip background
+         -border  the accent at card-border weight
+
+       Colour is never the only signal: every category also carries its
+       own icon and its name in words (WCAG 1.4.1). The accents are used
+       for glyphs and 3px rails, not as text-on-fill, so they are not
+       required to pass 4.5:1 as body text — the one place text sits on
+       an accent (the urgent pill) uses NC's --color-error pair instead.
+
+       Dark theme: the soft tints are alpha-composited over whatever
+       background is behind them, so they work on both themes without a
+       second set of values. */
+    --th-mywork-action-accent:   #d63b1f;
+    --th-mywork-action-soft:     rgba(254, 113, 97, 0.16);
+    --th-mywork-today-accent:    #c24000;
+    --th-mywork-today-soft:      rgba(251, 80, 0, 0.14);
+    --th-mywork-upcoming-accent: #2a7ba0;
+    --th-mywork-upcoming-soft:   rgba(50, 143, 183, 0.16);
+    --th-mywork-waiting-accent:  #4a8fa3;
+    --th-mywork-waiting-soft:    rgba(127, 221, 238, 0.24);
+    /* v4.5.45 — Team admin. A muted violet: distinct from the four work tones
+       either side of it, and deliberately the least insistent of the set,
+       because housekeeping should read as present rather than as pressing. */
+    --th-mywork-admin-accent:    #6b5ca8;
+    --th-mywork-admin-soft:      rgba(107, 92, 168, 0.16);
+    --th-mywork-done-accent:     #2f7d4f;
+    --th-mywork-done-soft:       rgba(47, 125, 79, 0.14);
+
+    /* Team badge tints. A team is identified by a coloured pill, and the
+       colour is derived deterministically from the team id (see
+       teamBadgeTone() in src/constants/myWork.js) so the same team is
+       always the same colour for every user, without storing anything.
+       Six is enough to disambiguate the handful of teams one person is
+       realistically in, while staying visually calm. Text sits on these,
+       so each pairs a soft fill with a dark ink that clears 4.5:1. */
+    --th-mywork-team-1-bg:  rgba(50, 143, 183, 0.16);   /* hub blue   */
+    --th-mywork-team-1-ink: #23617c;
+    --th-mywork-team-2-bg:  rgba(251, 80, 0, 0.13);     /* signal     */
+    --th-mywork-team-2-ink: #a83800;
+    --th-mywork-team-3-bg:  rgba(106, 90, 205, 0.15);   /* violet     */
+    --th-mywork-team-3-ink: #4b3f9e;
+    --th-mywork-team-4-bg:  rgba(47, 125, 79, 0.14);    /* green      */
+    --th-mywork-team-4-ink: #256340;
+    --th-mywork-team-5-bg:  rgba(196, 120, 0, 0.15);    /* amber      */
+    --th-mywork-team-5-ink: #8a5300;
+    --th-mywork-team-6-bg:  rgba(190, 60, 130, 0.14);   /* magenta    */
+    --th-mywork-team-6-ink: #8f2f63;
+
+    /* ── "What's new" feed item tones (v4.5.26).
+
+       Each kind of feed item gets a soft-tinted glyph chip so the eye can
+       sort the list by shape before reading a word of it. Same three-part
+       structure as the My Work category tones above (-soft fill, -ink
+       glyph) and the same hues, because the two pages sit next to each
+       other in the sidebar and a second palette would read as a second
+       product.
+
+       Colour is never the only signal here either: every card carries a
+       distinct icon AND a named badge in words (WCAG 1.4.1). The ink
+       values sit on their own soft fill and clear 4.5:1 in the light
+       theme; the dark-theme block further down lightens each one, because
+       an alpha tint over a dark surface is dark and the light-theme inks
+       would disappear into it. */
+    --th-feed-message-soft:  rgba(50, 143, 183, 0.16);   /* hub blue   */
+    --th-feed-message-ink:   #23617c;
+    --th-feed-question-soft: rgba(196, 120, 0, 0.15);    /* amber      */
+    --th-feed-question-ink:  #8a5300;
+    --th-feed-poll-soft:     rgba(106, 90, 205, 0.15);   /* violet     */
+    --th-feed-poll-ink:      #4b3f9e;
+    --th-feed-decision-soft: rgba(190, 60, 130, 0.14);   /* magenta    */
+    --th-feed-decision-ink:  #8f2f63;
+    --th-feed-public-soft:   rgba(47, 125, 79, 0.14);    /* green      */
+    --th-feed-public-ink:    #256340;
+    --th-feed-talk-soft:     rgba(127, 221, 238, 0.24);  /* cyan       */
+    --th-feed-talk-ink:      #2a6d7d;
+    --th-feed-system-soft:   rgba(130, 130, 130, 0.16);  /* neutral    */
+    --th-feed-system-ink:    #5b5b5b;
+    /* v4.9.7 — OpenProject activity: a teal one step off Talk's cyan and
+       away from every My Work tone; the badge word and the briefcase glyph
+       carry the meaning, the tint only groups. */
+    --th-feed-openproject-soft: rgba(26, 103, 108, 0.16);  /* teal       */
+    --th-feed-openproject-ink:  #145a5e;
+
     /* ── Widget typography aliases — point at the app-wide typography
        scale above so widget CSS keeps working. Size is the primary
        signal, weight is secondary. Pills keep a raw 10px because they
@@ -136,12 +244,102 @@
     --th-widget-row-padding:       10px 14px;
     --th-widget-row-gap:           12px;
 
+    /* Spacing scale (v4.9.3). Until now every gap and padding in a scoped
+       style was a raw px, which the "no new hard-coded px" rule could only
+       forbid, not replace. This is the replacement — a 4 px grid plus one
+       hairline step. New code reaches for these; existing raw values are
+       migrated as their files are touched, not in a sweep.
+       Role → token mapping:
+       - hairline (chip inner gap, icon-to-text)      → --th-space-xxs (2px)
+       - tight (inline gaps, list rows)               → --th-space-xs  (4px)
+       - default (between controls, tile padding)     → --th-space-sm  (8px)
+       - roomy (card padding, section gaps)           → --th-space-md  (12px)
+       - section (between blocks)                     → --th-space-lg  (16px)
+       - panel (dialog / panel padding)               → --th-space-xl  (24px) */
+    --th-space-xxs: 2px;
+    --th-space-xs:  4px;
+    --th-space-sm:  8px;
+    --th-space-md:  12px;
+    --th-space-lg:  16px;
+    --th-space-xl:  24px;
+    /* The state-coloured left edge every cockpit tile carries (v4.9.3;
+       ProjectHealthWidget wrote it as a raw 3px). */
+    --th-accent-border: 3px;
+
     /* Aliases used elsewhere in the codebase.
        v3.100.16: --th-widget-success-strong was defined but had no
        consumers, so it was removed alongside the underlying --th-color-*
        hex tokens it wrapped. */
     --th-widget-meta-color:        var(--color-text-maxcontrast);
     --th-widget-empty-color:       var(--color-text-maxcontrast);
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * My Work — dark-theme accents (v4.5.22)
+ *
+ * The accents and inks above are tuned for dark text on a light surface.
+ * On a dark surface the same values disappear, so each is lifted to a
+ * brighter, less saturated variant. The *soft* fills are alpha and need
+ * no override — they composite over whatever is behind them.
+ *
+ * Nextcloud's two dark signals, both required: `dark` covers an explicitly
+ * chosen dark theme, and the media query covers "default theme + OS is
+ * dark". Matching only one of them leaves half of dark-mode users with
+ * unreadable badges.
+ * ────────────────────────────────────────────────────────────────────── */
+
+body[data-themes*='dark'],
+body[data-theme-dark],
+body[data-theme-dark-highcontrast] {
+    --th-mywork-action-accent:   #ff8a76;
+    --th-mywork-today-accent:    #ff9153;
+    --th-mywork-upcoming-accent: #6fc0e0;
+    --th-mywork-waiting-accent:  #8fd8e8;
+    --th-mywork-admin-accent:    #a99ae0;
+    --th-mywork-done-accent:     #63c88c;
+
+    --th-mywork-team-1-ink: #8ecbe6;
+    --th-mywork-team-2-ink: #ffa070;
+    --th-mywork-team-3-ink: #b0a4f0;
+    --th-mywork-team-4-ink: #7fd0a0;
+    --th-mywork-team-5-ink: #e8b45c;
+    --th-mywork-team-6-ink: #e88ec0;
+
+    --th-feed-message-ink:  #8ecbe6;
+    --th-feed-question-ink: #e8b45c;
+    --th-feed-poll-ink:     #b0a4f0;
+    --th-feed-decision-ink: #e88ec0;
+    --th-feed-public-ink:   #7fd0a0;
+    --th-feed-talk-ink:     #8fd8e8;
+    --th-feed-system-ink:   #b0b0b0;
+    --th-feed-openproject-ink: #7fd3d8;
+}
+
+@media (prefers-color-scheme: dark) {
+    body[data-themes*='default'] {
+        --th-mywork-action-accent:   #ff8a76;
+        --th-mywork-today-accent:    #ff9153;
+        --th-mywork-upcoming-accent: #6fc0e0;
+        --th-mywork-waiting-accent:  #8fd8e8;
+        --th-mywork-admin-accent:    #a99ae0;
+        --th-mywork-done-accent:     #63c88c;
+
+        --th-mywork-team-1-ink: #8ecbe6;
+        --th-mywork-team-2-ink: #ffa070;
+        --th-mywork-team-3-ink: #b0a4f0;
+        --th-mywork-team-4-ink: #7fd0a0;
+        --th-mywork-team-5-ink: #e8b45c;
+        --th-mywork-team-6-ink: #e88ec0;
+
+        --th-feed-message-ink:  #8ecbe6;
+        --th-feed-question-ink: #e8b45c;
+        --th-feed-poll-ink:     #b0a4f0;
+        --th-feed-decision-ink: #e88ec0;
+        --th-feed-public-ink:   #7fd0a0;
+        --th-feed-talk-ink:     #8fd8e8;
+        --th-feed-system-ink:   #b0b0b0;
+        --th-feed-openproject-ink: #7fd3d8;
+    }
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -316,3 +514,32 @@
 .th-widget__pill--outline.th-widget__pill--warning { color: var(--color-warning-text); }
 .th-widget__pill--outline.th-widget__pill--error   { color: var(--color-error-text); }
 .th-widget__pill--outline.th-widget__pill--neutral { color: var(--color-text-maxcontrast); }
+
+/* ── NcModal: one scroller per dialog (v4.9.18) ─────────────────────────
+   Justin, 2026-09-15: the Edit template dialog showed two scrollbars side
+   by side. @nextcloud/vue 9.8's NcModal puts `overflow: auto` on BOTH
+   `.modal-container` (a row flexbox with a max-height and no height) and
+   `.modal-container__content` (its one in-flow flex item). Whether the
+   item is stretched to the *clamped* container height is the single-line
+   flex clamp — Chromium does it, so only the content scrolls there; an
+   engine that does not leaves the content at its natural height, and then
+   the container scrolls over it as well.
+
+   The engine-proof shape is the one NcDialog itself uses: the container is
+   a column flexbox that never scrolls, and the content shrinks into it
+   (`flex: 1 1 auto; min-height: 0` — `min-height: auto` would otherwise
+   pin it at its content height) and is the only scroller. The absolutely
+   positioned close button stays put because its container no longer
+   scrolls. NcDialog's own `:deep` rules (display, padding, the content's
+   flex-direction) are untouched — nothing here sets the properties they
+   set. Unscoped on purpose: 30 NcModals across 22 components, and the rule
+   is about the framework's dialog, not any one of ours. Specificity
+   (0,4,0) beats NcModal's scoped (0,3,0) without `!important`. */
+.modal-mask[role="dialog"] .modal-wrapper .modal-container {
+    flex-direction: column;
+    overflow: hidden;
+}
+.modal-mask[role="dialog"] .modal-wrapper .modal-container > .modal-container__content {
+    flex: 1 1 auto;
+    min-height: 0;
+}

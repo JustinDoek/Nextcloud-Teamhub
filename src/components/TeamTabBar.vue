@@ -1,5 +1,17 @@
 <template>
-    <div class="teamhub-tab-bar" role="tablist" :aria-label="t('teamhub', 'Team navigation')">
+    <!--
+        v4.5.10 — hover/focus on a tab starts its iframe loading before the
+        click lands, which is what makes an app tab feel instant. Delegated on
+        the container rather than bound per tab: every tab already carries
+        id="tab-{view}", so this covers the built-ins, the project tabs and any
+        integration tab without touching them individually.
+    -->
+    <div
+        class="teamhub-tab-bar"
+        role="tablist"
+        :aria-label="t('teamhub', 'Team navigation')"
+        @mouseover="onTabIntent"
+        @focusin="onTabIntent">
         <!--
             Home tab — always first, not reorderable.
         -->
@@ -137,6 +149,27 @@
                     <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
                     <GavelIcon :size="16" />
                     {{ t('teamhub', 'Decisions') }}
+                </button>
+
+                <!-- Built-in: Wiki (Collectives) (v4.3.9). Mirrors the
+                     Decisions block above — same drag-reorder, same active-
+                     class, same setView pattern. Adding this button block
+                     was the missing piece for the tab actually rendering. -->
+                <button
+                    v-else-if="tab.key === 'collectives'"
+                    id="tab-collectives"
+                    :key="'tab-collectives'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'collectives' }"
+                    :aria-selected="currentView === 'collectives' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('collectives')"
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
+                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
+                    <BookOpenOutline :size="16" />
+                    {{ t('teamhub', 'Collectives') }}
                 </button>
 
                 <!-- Timeline tab — unified visual timeline of Calendar, Deck and Decisions -->
@@ -351,6 +384,7 @@ import ViewDashboardEdit from 'vue-material-design-icons/ViewDashboardEdit.vue'
 import Web from 'vue-material-design-icons/Web.vue'
 import OfficeBuildingIcon from 'vue-material-design-icons/OfficeBuilding.vue'
 import GavelIcon          from 'vue-material-design-icons/Gavel.vue'
+import BookOpenOutline    from 'vue-material-design-icons/BookOpenOutline.vue'
 import TimelineIcon       from 'vue-material-design-icons/TimelineCheckOutline.vue'
 import WalletOutlineIcon  from 'vue-material-design-icons/WalletOutline.vue'
 import ClockOutlineIcon   from 'vue-material-design-icons/ClockOutline.vue'
@@ -367,7 +401,7 @@ export default {
         NcButton,
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
-        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon,
+        OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon, BookOpenOutline,
         TimelineIcon, WalletOutlineIcon, ClockOutlineIcon, ChevronDown, DragVariant,
     },
 
@@ -383,7 +417,7 @@ export default {
         canManageLinks: { type: Boolean, default: false },
     },
 
-    emits: ['update:modelValue', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker'],
+    emits: ['update:modelValue', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker', 'preload'],
 
     data() {
         return {
@@ -551,6 +585,12 @@ export default {
                 return true
             case 'decisions':
                 return true
+            case 'collectives':
+                // v4.3.9 — Wiki tab. buildAllTabDescriptors already gates
+                // insertion on collectivesConfig.collectives_enabled, so
+                // by the time the descriptor reaches this switch the
+                // team-app is on and the tab should render.
+                return true
             case 'timeline':
                 return true
             case 'budget':
@@ -564,14 +604,32 @@ export default {
         },
 
         setView(view) {
-            // Clicking the Files tab always returns to the team folder, even if
-            // a file widget had embedded a specific file. (SET_VIEW only clears
-            // the override when switching to a *different* view, so clicking the
-            // already-active Files tab would otherwise keep showing the file.)
+            // Clicking a tab always returns to that tab's own default, even if a
+            // widget had pinned one specific thing into it. SET_VIEW only clears
+            // an override when switching to a *different* view, so clicking the
+            // already-active tab would otherwise keep showing the pinned item.
             if (view === 'files') {
                 this.$store.commit('SET_FILES_EMBED_FILE_URL', null)
+            } else if (view === 'calendar') {
+                this.$store.commit('SET_CALENDAR_EMBED_EVENT', null)
+            } else if (view === 'deck') {
+                this.$store.commit('SET_DECK_EMBED_CARD_URL', null)
             }
             this.$store.commit('SET_VIEW', view)
+        },
+
+        /**
+         * Hovering or focusing a tab is a strong signal it is about to be
+         * clicked — start its iframe now. Tabs are identified by their existing
+         * `id="tab-{view}"`; anything else on the bar (drag handles, the
+         * overflow menu) resolves to no tab and is ignored.
+         */
+        onTabIntent(event) {
+            const tab = event.target?.closest?.('.teamhub-tab')
+            const id = tab?.id || ''
+            if (id.startsWith('tab-')) {
+                this.$emit('preload', id.slice(4))
+            }
         },
 
         onCalendarTabClick() {
@@ -776,6 +834,7 @@ export default {
             case 'deck': return 'CardText'
             case 'presence': return 'OfficeBuildingIcon'
             case 'decisions': return 'GavelIcon'
+            case 'collectives': return 'BookOpenOutline'
             case 'timeline': return 'TimelineIcon'
             case 'budget': return 'WalletOutlineIcon'
             case 'time': return 'ClockOutlineIcon'

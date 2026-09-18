@@ -351,6 +351,7 @@
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatIsoDate, toIsoDate }             from '../lib/localDate.js'
 import { generateUrl }                          from '@nextcloud/router'
 import { mapState }                              from 'vuex'
 import axios                                     from '@nextcloud/axios'
@@ -445,7 +446,11 @@ function subPeriod(d, mode) {
     return r
 }
 function fmtDate(d, opts) {
-    return new Intl.DateTimeFormat(document.documentElement.lang || undefined, opts).format(d)
+    // Every caller passes a locally-built Date — window bounds, axis ticks and
+    // milestone positions — and the swimlane geometry is computed in local
+    // time too. A label has to name the same day as the bar underneath it, so
+    // this takes the floating-date path rather than the viewer's zone.
+    return formatIsoDate(toIsoDate(d), opts)
 }
 
 /**
@@ -465,15 +470,38 @@ function fmtDate(d, opts) {
  * @returns {Array<{points: string}>}
  */
 function buildDependencyEdges(supported, deckEvents, cardAnchor) {
-    if (!supported) return []
+    // v4.3.18 — dropped the `if (!supported) return []` gate. `supported`
+    // is derived from timelineConfig.card_dependencies_supported which
+    // in turn came from DbIntrospectionService — that helper returned
+    // false-negatives on NC 34 even when the table existed, killing
+    // the whole render even when the backend HAD attached
+    // blockedByCardIds to events. Now we just iterate whatever events
+    // came in; if none carry deps we naturally produce zero edges.
+    // The `supported` param is retained in the signature so callers
+    // don't need updating.
+    // eslint-disable-next-line no-unused-vars
+    const _supported = supported
     const CORNER_MARGIN = 12
     const edges = []
+    // v4.3.15 — iterate any deck event carrying blockedByCardIds, not
+    // just 'created' events. Backend used to attach the meta only to
+    // 'created' events, but a card created weeks ago whose 'created'
+    // event fell outside the visible time window then had no meta
+    // anywhere on-screen and no line was drawn even though the card's
+    // due bar was visible. Backend now attaches the meta to every
+    // event of a card with dependencies; here we dedupe by cardId so
+    // multiple events for the same card produce one set of edges.
+    const seenBlockedCards = new Set()
     for (const ev of deckEvents) {
-        if (ev.type !== 'created') continue
         const meta = ev.meta || {}
-        const blockedAnchor = cardAnchor.get(meta.cardId)
+        const cardId = meta.cardId
+        if (!cardId || seenBlockedCards.has(cardId)) continue
+        const blockerIds = meta.blockedByCardIds
+        if (!blockerIds || blockerIds.length === 0) continue
+        const blockedAnchor = cardAnchor.get(cardId)
         if (!blockedAnchor) continue
-        for (const blockerId of (meta.blockedByCardIds || [])) {
+        seenBlockedCards.add(cardId)
+        for (const blockerId of blockerIds) {
             const blockerAnchor = cardAnchor.get(blockerId)
             if (!blockerAnchor) continue
             const from = blockerAnchor.right   // predecessor ends

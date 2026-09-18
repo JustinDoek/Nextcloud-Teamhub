@@ -442,6 +442,8 @@
 import { mapState } from 'vuex'
 import { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch } from '@nextcloud/vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatIsoDate } from '../lib/localDate.js'
+import { todayIso } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
@@ -473,8 +475,7 @@ export default {
         lockAttendees:        { type: Boolean, default: false },
     },
     data() {
-        const today = new Date()
-        const iso = today.toISOString().slice(0, 10)
+        const iso = todayIso()
         return {
             step: 1,
             members: [],
@@ -907,8 +908,7 @@ export default {
         },
 
         formatSuggestion(s) {
-            const d = new Date(`${s.date}T00:00:00`)
-            const dayLabel = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+            const dayLabel = formatIsoDate(s.date, { weekday: 'short', day: 'numeric', month: 'short' })
             const half = s.half === 0 ? t('teamhub', 'morning') : t('teamhub', 'afternoon')
             return `${dayLabel} — ${half}`
         },
@@ -943,8 +943,7 @@ export default {
             const haveTimes = this.eventDate && this.eventStart && this.eventEnd
             if (!haveTimes) return t('teamhub', '— not chosen yet —')
             if (!this.presenceAvailable || this.chosenIndex !== null) {
-                const d = new Date(`${this.eventDate}T00:00:00`)
-                const dayLabel = d.toLocaleDateString(undefined,
+                const dayLabel = formatIsoDate(this.eventDate,
                     { weekday: 'long', day: 'numeric', month: 'long' })
                 return `${dayLabel} · ${this.eventStart}–${this.eventEnd}`
             }

@@ -49,11 +49,13 @@
                 <PhoneIcon :size="18" aria-hidden="true" />
             </a>
             <a
-                v-if="member.email"
-                :href="`mailto:${member.email}`"
+                v-if="emailHref"
+                :href="emailHref"
+                :target="mailAvailable ? '_blank' : null"
+                :rel="mailAvailable ? 'noopener noreferrer' : null"
                 class="th-member-row__icon"
-                :title="t('teamhub', 'Email {email}', { email: member.email })"
-                :aria-label="t('teamhub', 'Email {name} at {email}', { name: member.displayName, email: member.email })">
+                :title="emailTitle"
+                :aria-label="emailAriaLabel">
                 <EmailIcon :size="18" aria-hidden="true" />
             </a>
         </div>
@@ -86,6 +88,14 @@ export default {
          * isn't installed or isn't enabled for the viewer.
          */
         talkAvailable: { type: Boolean, default: false },
+        /**
+         * Whether the *viewer* can compose in Nextcloud Mail — the Mail app is
+         * enabled for them AND they have an account configured. This is about
+         * the person clicking, not the person being contacted: the member only
+         * needs an address. False keeps the pre-4.5.34 behaviour, a plain
+         * `mailto:` handed off to whatever the OS has registered.
+         */
+        mailAvailable: { type: Boolean, default: false },
     },
 
     computed: {
@@ -151,6 +161,59 @@ export default {
          */
         talkUrl() {
             return generateUrl('/apps/spreed/') + '?callUser=' + encodeURIComponent(this.member.userId)
+        },
+
+        /**
+         * The member's address, but only when it is a plain addr-spec we can
+         * safely drop into a URL.
+         *
+         * A `mailto:` URI reads everything after `?` as headers, so an address
+         * carrying `?bcc=…` would silently copy a third party on every message
+         * a colleague sends from this row. The address comes from the member's
+         * own NC profile, so they control it — a weak vector, but the check is
+         * one regex and it protects the Mail query string too. Anything that
+         * fails renders no icon at all, exactly as a member with no address.
+         *
+         * The excluded set is deliberately only what can change the meaning of
+         * the URL: `? & #` (headers and fragment), `, ;` (extra recipients),
+         * `< > "` (angle-addr and quoting), backslash, whitespace, and a second
+         * `@`. Apostrophes stay legal — `o'brien@…` is a real address and is
+         * harmless once encoded, so excluding it would cost that member their
+         * email icon for nothing.
+         */
+        safeEmail() {
+            const raw = (this.member?.email || '').trim()
+            return /^[^\s<>"?&#,;\\@]+@[^\s<>"?&#,;\\@]+$/.test(raw) ? raw : null
+        },
+
+        /**
+         * Where the email icon points. Nextcloud Mail's `/mailto` route reads
+         * `to` / `cc` / `bcc` / `subject` / `body` off the query string and
+         * opens its composer — verified against Mail's `src/router.js` and
+         * `src/views/Home.vue`. `generateUrl` keeps the webroot and any
+         * index.php prefix correct, so this is never a hardcoded path.
+         */
+        emailHref() {
+            if (!this.safeEmail) return null
+            if (this.mailAvailable) {
+                return generateUrl('/apps/mail/mailto') + '?to=' + encodeURIComponent(this.safeEmail)
+            }
+            return 'mailto:' + this.safeEmail
+        },
+
+        emailTitle() {
+            return this.mailAvailable
+                // TRANSLATORS: tooltip on the email icon — opens Nextcloud Mail's composer. "Nextcloud Mail" is a product name and stays untranslated.
+                ? t('teamhub', 'Email {email} in Nextcloud Mail', { email: this.safeEmail })
+                : t('teamhub', 'Email {email}', { email: this.safeEmail })
+        },
+
+        emailAriaLabel() {
+            const name = this.member.displayName
+            return this.mailAvailable
+                // TRANSLATORS: accessible name for the email icon — opens Nextcloud Mail's composer. "Nextcloud Mail" is a product name and stays untranslated.
+                ? t('teamhub', 'Email {name} at {email} in Nextcloud Mail', { name, email: this.safeEmail })
+                : t('teamhub', 'Email {name} at {email}', { name, email: this.safeEmail })
         },
     },
 

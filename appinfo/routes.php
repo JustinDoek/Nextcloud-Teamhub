@@ -252,6 +252,9 @@ return [
         // /maintenance/teams GET is irrelevant here: the paths differ by depth,
         // not by prefix ambiguity.
         ['name' => 'maintenance#setTeamExpiry',        'url' => '/api/v1/admin/maintenance/teams/{teamId}/expiry',              'verb' => 'PUT'],
+        // v4.9.4 — the one route that removes a team's OpenProject link
+        // (OPENPROJECT.md §3.4). NC admin only; nothing in OpenProject changes.
+        ['name' => 'maintenance#unlinkOpenProject',    'url' => '/api/v1/admin/maintenance/teams/{teamId}/openproject-link',    'verb' => 'DELETE'],
         ['name' => 'maintenance#listExpiryRequests',   'url' => '/api/v1/admin/maintenance/expiry-requests',                    'verb' => 'GET'],
         ['name' => 'maintenance#approveExpiryRequest', 'url' => '/api/v1/admin/maintenance/expiry-requests/{requestId}/approve','verb' => 'POST'],
         ['name' => 'maintenance#denyExpiryRequest',    'url' => '/api/v1/admin/maintenance/expiry-requests/{requestId}/deny',   'verb' => 'POST'],
@@ -697,6 +700,72 @@ return [
         ['name' => 'fileReview#show',     'url' => '/api/v1/teams/{teamId}/file-reviews/{reviewId}',            'verb' => 'GET'],
         ['name' => 'fileReview#complete', 'url' => '/api/v1/teams/{teamId}/file-reviews/{reviewId}/complete',   'verb' => 'POST'],
         ['name' => 'fileReview#close',    'url' => '/api/v1/teams/{teamId}/file-reviews/{reviewId}/close',      'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
+        // OpenProject integration, Phase 1 (v4.9.3) — OPENPROJECT.md
+        // ----------------------------------------------------------------
+        // `capabilities` is per user, not per team: whether the official
+        // integration app is usable does not depend on which team asks.
+        // `projects` is per user too — the creation wizard's picker runs
+        // before the team exists — and is gated on the right to create one.
+        ['name' => 'openProject#capabilities',   'url' => '/api/v1/openproject/capabilities',               'verb' => 'GET'],
+        ['name' => 'openProject#searchProjects', 'url' => '/api/v1/openproject/projects',                   'verb' => 'GET'],
+        // Team-scoped. Reads are member-gated; the connection test is
+        // team-admin gated. No link write here (v4.9.4): the link is made
+        // by `POST /teams` (`openProjectId`, with the `openproject`
+        // template) as part of creating the team, and removed only by an NC
+        // admin through maintenance#unlinkOpenProject above. There is no
+        // change and no re-link route: the project is configured at
+        // creation only. The one member-level write (v4.9.15) is
+        // createWorkPackage below — as the viewer, OpenProject deciding.
+        ['name' => 'openProject#getLink',        'url' => '/api/v1/teams/{teamId}/openproject/link',        'verb' => 'GET'],
+        ['name' => 'openProject#testConnection', 'url' => '/api/v1/teams/{teamId}/openproject/test',        'verb' => 'POST'],
+        ['name' => 'openProject#overview',       'url' => '/api/v1/teams/{teamId}/openproject/overview',    'verb' => 'GET'],
+        ['name' => 'openProject#work',           'url' => '/api/v1/teams/{teamId}/openproject/work',        'verb' => 'GET'],
+        // Phase 3 (v4.9.7) — cross-team intelligence. The project's upcoming
+        // meetings for the Upcoming events widget (shown beside the calendar,
+        // never copied into it); the attention block is the Project info
+        // widget's summary of the viewer's own work, from the My Work
+        // provider's read. Both member-gated. OPENPROJECT.md §6.
+        ['name' => 'openProject#meetings',       'url' => '/api/v1/teams/{teamId}/openproject/meetings',    'verb' => 'GET'],
+        ['name' => 'openProject#attention',      'url' => '/api/v1/teams/{teamId}/openproject/attention',   'verb' => 'GET'],
+        // v4.9.15 — the Upcoming tasks widget's "Create OpenProject work
+        // package": OpenProject's own form (types, assignees) and the create.
+        ['name' => 'openProject#workPackageForm',   'url' => '/api/v1/teams/{teamId}/openproject/work-packages/form', 'verb' => 'GET'],
+        ['name' => 'openProject#createWorkPackage', 'url' => '/api/v1/teams/{teamId}/openproject/work-packages',      'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
+        // OpenProject integration, Phase 2 (v4.9.6) — blueprint-driven
+        // provisioning. OPENPROJECT.md §5.
+        // ----------------------------------------------------------------
+        // The wizard's reads, per creator, gated on the right to create a
+        // team. `options` probes the integration and lists the OpenProject
+        // templates the creator may copy; `preview` matches members to
+        // OpenProject users without creating anything.
+        ['name' => 'provisioning#options',    'url' => '/api/v1/provisioning/options',       'verb' => 'GET'],
+        ['name' => 'provisioning#parents',    'url' => '/api/v1/provisioning/parents',       'verb' => 'GET'],
+        ['name' => 'provisioning#identifier', 'url' => '/api/v1/provisioning/identifier',    'verb' => 'GET'],
+        ['name' => 'provisioning#preview',    'url' => '/api/v1/provisioning/preview',       'verb' => 'POST'],
+        // The operation: start records it; `run` is the browser pump
+        // (ProvisioningJob is the safety net); status is what a reload
+        // reads; retry and rollback are the recovery tools. Creator or
+        // NC admin for the writes, plus the team's admins for the read.
+        ['name' => 'provisioning#mine',       'url' => '/api/v1/provisioning',               'verb' => 'GET'],
+        ['name' => 'provisioning#start',      'url' => '/api/v1/provisioning',               'verb' => 'POST'],
+        ['name' => 'provisioning#status',     'url' => '/api/v1/provisioning/{id}',          'verb' => 'GET', 'requirements' => ['id' => '\d+']],
+        ['name' => 'provisioning#run',        'url' => '/api/v1/provisioning/{id}/run',      'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'provisioning#retry',      'url' => '/api/v1/provisioning/{id}/retry',    'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'provisioning#rollback',   'url' => '/api/v1/provisioning/{id}/rollback', 'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        // The team page's banner (members) and the membership tools (team admins).
+        ['name' => 'provisioning#forTeam',         'url' => '/api/v1/teams/{teamId}/provisioning',                  'verb' => 'GET'],
+        ['name' => 'provisioning#membershipDrift', 'url' => '/api/v1/teams/{teamId}/openproject/membership-drift', 'verb' => 'GET'],
+        ['name' => 'provisioning#membershipSync',  'url' => '/api/v1/teams/{teamId}/openproject/membership-sync',  'verb' => 'POST'],
+        // Administration: the operations list and the blueprint editor.
+        ['name' => 'provisioning#adminList',      'url' => '/api/v1/admin/provisioning',                                 'verb' => 'GET'],
+        ['name' => 'provisioning#adminRoles',     'url' => '/api/v1/admin/policy/openproject-roles',                     'verb' => 'GET'],
+        ['name' => 'provisioning#getBlueprint',   'url' => '/api/v1/admin/policy/templates/{templateKey}/blueprint',     'verb' => 'GET'],
+        ['name' => 'provisioning#saveBlueprint',  'url' => '/api/v1/admin/policy/templates/{templateKey}/blueprint',     'verb' => 'PUT'],
+        ['name' => 'provisioning#resetBlueprint', 'url' => '/api/v1/admin/policy/templates/{templateKey}/blueprint',     'verb' => 'DELETE'],
     ],
 ];
 // Note: just checking structure

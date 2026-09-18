@@ -55,9 +55,7 @@ class MessageMapper {
 
         $qb->select('m.*', $qb->createFunction('COALESCE(c.comment_count, 0) AS comment_count'))
             ->from('teamhub_messages', 'm')
-            ->leftJoin('m', $qb->createFunction(
-                '(SELECT message_id, COUNT(*) as comment_count FROM oc_teamhub_comments GROUP BY message_id)'
-            ), 'c', 'm.id = c.message_id')
+            ->leftJoin('m', $qb->createFunction($this->commentCountSubquery()), 'c', 'm.id = c.message_id')
             ->where($qb->expr()->eq('m.team_id', $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->eq('m.pinned', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
             ->orderBy('m.created_at', 'DESC')
@@ -138,9 +136,7 @@ class MessageMapper {
 
         $qb->select('m.*', $qb->createFunction('COALESCE(c.comment_count, 0) AS comment_count'))
             ->from('teamhub_messages', 'm')
-            ->leftJoin('m', $qb->createFunction(
-                '(SELECT message_id, COUNT(*) as comment_count FROM oc_teamhub_comments GROUP BY message_id)'
-            ), 'c', 'm.id = c.message_id')
+            ->leftJoin('m', $qb->createFunction($this->commentCountSubquery()), 'c', 'm.id = c.message_id')
             ->where($qb->expr()->eq('m.team_id', $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->eq('m.pinned', $qb->createNamedParameter(1, IQueryBuilder::PARAM_INT)))
             ->setMaxResults(1);
@@ -150,6 +146,27 @@ class MessageMapper {
         $result->closeCursor();
 
         return $row ? $this->rowToArray($row) : null;
+    }
+
+    /**
+     * `(SELECT message_id, COUNT(*) AS comment_count FROM teamhub_comments
+     * GROUP BY message_id)` — the derived table `findByTeamId()` and
+     * `findPinnedByTeamId()` LEFT JOIN for their `comment_count` column.
+     *
+     * Built with the QueryBuilder, not written out (v4.9.11, issue #100):
+     * the literal SQL that stood here named `oc_teamhub_comments`, which is
+     * the table only on an instance whose `dbtableprefix` is the default —
+     * anywhere else the message board died with "Base table or view not
+     * found". `from()` emits the `*PREFIX*` placeholder, and the connection
+     * expands it over the whole statement at execute time, subquery included.
+     */
+    private function commentCountSubquery(): string {
+        $sub = $this->db->getQueryBuilder();
+        $sub->select('message_id')
+            ->selectAlias($sub->func()->count('*'), 'comment_count')
+            ->from('teamhub_comments')
+            ->groupBy('message_id');
+        return '(' . $sub->getSQL() . ')';
     }
 
     /**
@@ -463,13 +480,10 @@ class MessageMapper {
     /**
      * v4.5.26 — comment counts for a set of message ids.
      *
-     * `findByTeamId` gets its `comment_count` from a LEFT JOIN onto a
-     * `createFunction('(SELECT … FROM oc_teamhub_comments …)')` subquery, which
-     * hardcodes the `oc_` table prefix. That works on a default install and
-     * silently returns nothing on one configured with another prefix. Rather
-     * than copy the idiom into the feed, the counts come from one grouped query
-     * over the page's ids — prefix-safe through the QueryBuilder, and bounded
-     * because the page is at most 100 rows.
+     * `findByTeamId` gets its `comment_count` from a LEFT JOIN onto a derived
+     * table (`commentCountSubquery()`, which until 4.9.11 hardcoded the `oc_`
+     * prefix — issue #100). The feed keeps its own path: one grouped query
+     * over the page's ids, bounded because the page is at most 100 rows.
      *
      * @param int[] $messageIds
      * @return array<int,int> message id → comment count (ids with none are absent)

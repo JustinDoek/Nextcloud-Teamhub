@@ -114,6 +114,15 @@ final class WorkQuery {
      *                                  which disables the instance-scope bypass
      * @param string[] $instanceScopedProviderIds providers allowed past the
      *                                  membership filter for this viewer
+     * @param array<string, string[]> $metadataFilters (v4.9.7) restrict to
+     *                                  items whose `metadata[key]` is one of
+     *                                  the listed values — how a filter that
+     *                                  only some sources understand (an
+     *                                  OpenProject project, a work-package
+     *                                  type) reaches the queue without a
+     *                                  field per source on this class. An
+     *                                  item without the key is excluded when
+     *                                  the key is filtered on.
      */
     public function __construct(
         public readonly string $userId,
@@ -140,6 +149,7 @@ final class WorkQuery {
         public readonly bool $isInstanceAdmin = false,
         public readonly bool $teamFilterActive = false,
         public readonly array $instanceScopedProviderIds = [],
+        public readonly array $metadataFilters = [],
     ) {
     }
 

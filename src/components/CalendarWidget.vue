@@ -4,28 +4,40 @@
             <span class="th-widget__spinner" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
-        <div v-else-if="events.length === 0" class="th-widget__state th-widget__state--empty">
+        <div v-else-if="rows.length === 0" class="th-widget__state th-widget__state--empty">
             <CalendarIcon :size="18" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'No upcoming events') }}</span>
         </div>
         <ul v-else class="th-widget__rows">
-            <li v-for="event in events" :key="event.id" class="th-widget__row">
+            <li v-for="event in rows" :key="event.id" class="th-widget__row">
                 <!-- Date badge -->
                 <div class="th-cal__date-badge" aria-hidden="true">
-                    <span class="th-cal__date-badge-month">{{ formatMonth(event.start) }}</span>
-                    <span class="th-cal__date-badge-day">{{ formatDay(event.start) }}</span>
+                    <span class="th-cal__date-badge-month">{{ formatMonth(event.start, event.allDay) }}</span>
+                    <span class="th-cal__date-badge-day">{{ formatDay(event.start, event.allDay) }}</span>
                 </div>
 
                 <!-- Main content -->
                 <div class="th-cal__body">
                     <div class="th-cal__title-row">
+                        <!-- v4.9.7 — an OpenProject meeting opens in OpenProject,
+                             in a new tab; the title says so. -->
                         <a
-                            v-if="event.editUrl"
-                            :href="event.editUrl"
+                            v-if="event.source === 'openproject' && event.url"
+                            :href="event.url"
                             target="_blank"
                             rel="noopener noreferrer"
                             class="th-cal__title"
-                            :title="t('teamhub', 'Open in Calendar')">
+                            :title="t('teamhub', 'Opens in OpenProject')">
+                            {{ event.title }}
+                        </a>
+                        <a
+                            v-else-if="event.editUrl"
+                            :href="eventUrl(event)"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="th-cal__title"
+                            :title="t('teamhub', 'Open in Calendar')"
+                            @click="onOpenEvent($event, event)">
                             {{ event.title }}
                         </a>
                         <span v-else class="th-cal__title">{{ event.title }}</span>
@@ -57,20 +69,43 @@
                             :title="event.calendarName">
                             {{ truncate(event.calendarName, 20) }}
                         </span>
-                        <span class="th-widget__pill th-widget__pill--outline th-widget__pill--primary">
-                            {{ t('teamhub', 'Calendar') }}
+                        <span
+                            v-if="event.source === 'openproject'"
+                            class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral"
+                            :title="t('teamhub', 'A meeting scheduled in OpenProject')">
+                            {{ t('teamhub', 'OpenProject') }}
                         </span>
+                        <template v-else>
+                            <span class="th-widget__pill th-widget__pill--outline th-widget__pill--primary">
+                                {{ t('teamhub', 'Calendar') }}
+                            </span>
+                            <!-- v4.9.10 — a copy the OpenProject meeting sync wrote
+                                 into the team calendar: both pills, one row. -->
+                            <span
+                                v-if="event.openProjectMeetingId"
+                                class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral"
+                                :title="t('teamhub', 'A meeting scheduled in OpenProject, copied into the team calendar')">
+                                {{ t('teamhub', 'OpenProject') }}
+                            </span>
+                        </template>
                     </div>
                 </div>
             </li>
         </ul>
+        <!-- v4.9.7 — the OpenProject meetings are read live as the viewer
+             and merged above; a failed read costs the meetings, never the
+             events, and shows no line here: the Project info widget carries
+             the OpenProject state for the whole team home (Justin,
+             2026-09-14). -->
     </div>
 </template>
 
 <script>
 import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatTime, formatIsoDate, zonedIsoDate, todayIso, shiftIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
+import { isPlainClick } from '../lib/internalLinks.js'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon } from '@nextcloud/vue'
 import CalendarIcon  from 'vue-material-design-icons/Calendar.vue'
@@ -81,23 +116,102 @@ export default {
     name: 'CalendarWidget',
     components: { NcLoadingIcon, CalendarIcon, MapMarkerIcon, VideoIcon },
     data() {
-        return { loading: false, events: [] }
+        return {
+            loading: false,
+            events: [],
+            /**
+             * v4.9.7 — the linked OpenProject project's upcoming meetings,
+             * fetched beside the calendar's events (never merged into the
+             * calendar itself). A failed read is silent here — the Project
+             * info widget carries the OpenProject state for the team home.
+             */
+            opMeetings: [],
+        }
     },
     computed: {
-        ...mapState(['currentTeamId', 'resources']),
+        ...mapState(['currentTeamId', 'resources', 'widgetRefreshNonce', 'openProjectConfig']),
+
+        /** v4.9.7 — the team is linked to an OpenProject project. */
+        openProjectLinked() {
+            return !!(this.openProjectConfig?.linked && !this.openProjectConfig?.stale)
+        },
+
+        /**
+         * v4.9.7 — calendar events and OpenProject meetings as one list,
+         * soonest first. Each row keeps its source: the pill, the link and
+         * the open behaviour differ.
+         */
+        rows() {
+            // v4.9.10 — once a meeting has been copied into the team
+            // calendar, the calendar's row is the one to show: the live
+            // OpenProject row would be the same meeting twice.
+            const copied = new Set(
+                this.events.map((e) => e.openProjectMeetingId).filter((id) => id != null),
+            )
+            const live = this.opMeetings.filter((m) => !copied.has(m.meetingId))
+            const all = [...this.events, ...live]
+            all.sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')))
+            return all
+        },
+
+        /**
+         * v4.5.9 — reload trigger. Combining the team and the home-view nonce
+         * into one key means a team switch (which changes both) still fires a
+         * single load rather than two.
+         */
+        reloadKey() {
+            return `${this.currentTeamId}|${this.widgetRefreshNonce}`
+        },
     },
     watch: {
-        currentTeamId: { immediate: true, handler() { this.loadEvents() } },
+        // Fires on mount, on team switch, and whenever the user lands back on
+        // the home view — the widget stays mounted behind v-show, so without
+        // the nonce it would keep showing whatever it fetched hours ago.
+        reloadKey: { immediate: true, handler() { this.loadEvents() } },
     },
     methods: {
         t,
+
+        /**
+         * Absolute URL for an event. The backend hands us a root-relative path
+         * (`/apps/calendar/…`), which breaks on a sub-directory install unless
+         * it goes through generateUrl — it was previously used raw in the href.
+         */
+        eventUrl(event) {
+            return event.editUrl ? generateUrl(event.editUrl) : ''
+        },
+
+        /**
+         * Open the event inside TeamHub's calendar iframe rather than navigating
+         * away to the Calendar app. Modified clicks (ctrl/cmd/shift/middle) fall
+         * through to the native new tab.
+         *
+         * Hands over the backend's own URL — it targets the personal Calendar
+         * app, which is the only place the event id resolves — plus the calendar
+         * the event belongs to, so the tab can return to *that* agenda once the
+         * event is closed rather than leaving the user in their own calendar.
+         */
+        onOpenEvent(domEvent, event) {
+            if (!event.editUrl || !isPlainClick(domEvent)) {
+                return
+            }
+            domEvent.preventDefault()
+            this.$store.dispatch('openEventInEmbed', {
+                url:        this.eventUrl(event),
+                calendarId: event.calendarId ?? null,
+            })
+        },
 
         truncate(str, max) {
             if (!str) return ''
             return str.length > max ? str.slice(0, max) + '…' : str
         },
 
-        async loadEvents() {
+        /**
+         * @param {boolean} withMeetings false for the one reload the
+         *   meeting sync asks for — the meetings were just fetched.
+         */
+        async loadEvents(withMeetings = true) {
             if (!this.currentTeamId) return
             this.loading = true
             try {
@@ -110,6 +224,58 @@ export default {
             } finally {
                 this.loading = false
             }
+            // Behind the calendar's own rows, never ahead of them: the widget
+            // renders the events as soon as they are in.
+            if (withMeetings) {
+                this.loadOpenProjectMeetings()
+            }
+        },
+
+        /**
+         * v4.9.7 — the linked project's upcoming meetings, as the viewer.
+         * Shaped like a calendar row (`start`/`end` are instants, `allDay`
+         * false, `editUrl` null) plus `source` and the OpenProject `url`.
+         */
+        async loadOpenProjectMeetings() {
+            const teamId = this.currentTeamId
+            if (!teamId || !this.openProjectLinked) {
+                this.opMeetings = []
+                return
+            }
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/openproject/meetings`),
+                )
+                if (this.currentTeamId !== teamId) return
+                this.opMeetings = (data?.items || []).map((m) => ({
+                    id: 'op-meeting-' + m.id,
+                    meetingId: m.id,
+                    title: m.title,
+                    start: m.start,
+                    end: m.end,
+                    location: m.location,
+                    description: null,
+                    allDay: false,
+                    editUrl: null,
+                    calendarId: null,
+                    calendarName: '',
+                    source: 'openproject',
+                    url: /^https?:\/\//i.test(m.url || '') ? m.url : null,
+                }))
+                // v4.9.10 — the read copied something into the team calendar
+                // (or took a copy away): the calendar's rows are stale by
+                // exactly that much, so fetch them once more — without the
+                // meetings, which were fetched a moment ago.
+                const sync = data?.sync
+                if (sync && (sync.created + sync.updated + sync.removed) > 0 && this.currentTeamId === teamId) {
+                    this.loadEvents(false)
+                }
+            } catch (e) {
+                // Silent, whatever the reason: the Project info widget
+                // carries the OpenProject state (connect hint, broken
+                // connection); two widgets nagging is one too many.
+                this.opMeetings = []
+            }
         },
 
         /**
@@ -120,41 +286,52 @@ export default {
             return this.loadEvents()
         },
 
-        formatMonth(start) {
-            if (!start) return ''
-            return new Date(start).toLocaleDateString([], { month: 'short' }).toUpperCase()
+        /**
+         * The calendar day an event belongs on, `YYYY-MM-DD`.
+         *
+         * ActivityService emits `format('c')` for every event and carries
+         * all-day as a separate flag — unlike CalendarService, which sends a
+         * bare `Y-m-d`. So an all-day start arrives here already pinned to a
+         * zone at midnight, and re-reading it through the reader's zone would
+         * move it to the previous day west of Greenwich. Its date part is
+         * taken verbatim instead. A timed event is a real instant and is read
+         * in the reader's zone.
+         */
+        eventIsoDay(start, allDay) {
+            return allDay ? String(start).slice(0, 10) : zonedIsoDate(start)
         },
 
-        formatDay(start) {
+        formatMonth(start, allDay) {
             if (!start) return ''
-            return new Date(start).getDate()
+            return formatIsoDate(this.eventIsoDay(start, allDay), { month: 'short' }).toUpperCase()
+        },
+
+        formatDay(start, allDay) {
+            if (!start) return ''
+            return formatIsoDate(this.eventIsoDay(start, allDay), { day: 'numeric' })
         },
 
         formatTimeRange(start, end, allDay) {
             if (!start) return ''
-            const s = new Date(start)
-            const now = new Date()
-            const today    = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1)
-            const eventDay = new Date(s.getFullYear(), s.getMonth(), s.getDate())
+            const iso = this.eventIsoDay(start, allDay)
+            const today = todayIso()
 
             let dateLabel = ''
-            if (eventDay.getTime() === today.getTime()) {
+            if (iso === today) {
                 dateLabel = t('teamhub', 'Today')
-            } else if (eventDay.getTime() === tomorrow.getTime()) {
+            } else if (iso === shiftIsoDate(today, { days: 1 })) {
                 dateLabel = t('teamhub', 'Tomorrow')
             } else {
-                dateLabel = s.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+                dateLabel = formatIsoDate(iso, { weekday: 'short', month: 'short', day: 'numeric' })
             }
 
             if (allDay) return dateLabel
 
             const timeOpts = { hour: '2-digit', minute: '2-digit' }
-            const startStr = s.toLocaleTimeString([], timeOpts)
+            const startStr = formatTime(start, timeOpts)
 
             if (end) {
-                const e = new Date(end)
-                const endStr = e.toLocaleTimeString([], timeOpts)
+                const endStr = formatTime(end, timeOpts)
                 return `${dateLabel}  ${startStr} – ${endStr}`
             }
 

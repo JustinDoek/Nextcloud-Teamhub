@@ -1,0 +1,34 @@
+# Semgrep scan scope for the TeamHub release repo (mirrored from the working
+# copy by scripts/publish-to-release.js — edit it there, not on GitHub).
+#
+# Added 2026-09-18 after the first Semgrep run on v4.9.1: 13 of 34 findings were
+# in js/chunks/*.mjs — compiled, minified third-party code (@nextcloud/dialogs'
+# FilePicker and friends) matched by Express-specific rules on browser code.
+# Our own code is scanned where it is written, in src/ and lib/; third-party
+# code is covered by Semgrep Supply Chain on package-lock.json.
+#
+# A project .semgrepignore REPLACES Semgrep's built-in default list, so the
+# defaults worth keeping are restated below rather than assumed.
+
+# ── Semgrep's own defaults, restated ────────────────────────────────────────
+:include .gitignore
+.git/
+node_modules/
+vendor/
+*.min.js
+# Unit tests and their stubs (mirrored since 4.10.0). Semgrep skips tests/ by
+# default; a fixture that looks like a secret or an injection is the test.
+tests/
+
+# ── TeamHub-specific ────────────────────────────────────────────────────────
+# Compiled output. The source is src/.
+js/
+css/
+
+# Maintainer-side build and publish tooling. Runs on the developer's machine on
+# paths it derives from __dirname and readdirSync(); is not in the shipped
+# package (scripts/lib/app-files.js PUBLISHABLE) and never sees request data.
+scripts/
+
+# Not code.
+screenshots/

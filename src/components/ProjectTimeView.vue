@@ -521,6 +521,7 @@ import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { todayIso as localTodayIso, formatEpochDate, epochDateToIso } from '../lib/localDate.js'
 import { mapState, mapGetters, mapMutations } from 'vuex'
 
 import {
@@ -887,19 +888,17 @@ export default {
             return t('teamhub', '{h}h {m}m', { h, m: rem })
         },
 
+        // workedAt is a floating date snapped to UTC midnight
+        // (TimeService::normalizeWorkedAt), so it must be read back with UTC
+        // getters. Formatting it in the viewer's zone moved every log entry
+        // to the previous day for anyone west of Greenwich.
         formatDate(unixTs) {
             if (!unixTs) return t('teamhub', '—')
-            try {
-                return new Intl.DateTimeFormat(undefined, {
-                    year: 'numeric', month: 'short', day: 'numeric',
-                }).format(new Date(unixTs * 1000))
-            } catch (_) {
-                return ''
-            }
+            return formatEpochDate(unixTs)
         },
 
         todayIso() {
-            return new Date().toISOString().slice(0, 10)
+            return localTodayIso()
         },
 
         // ── Lookups from the current payload ──────────────────────────
@@ -968,9 +967,9 @@ export default {
                 hours: h,
                 mins: m,
                 description: log.description || '',
-                workedAt: log.workedAt
-                    ? new Date(log.workedAt * 1000).toISOString().slice(0, 10)
-                    : this.todayIso(),
+                // UTC round trip on purpose — workedAt is a floating date
+                // snapped to UTC midnight by TimeService::normalizeWorkedAt.
+                workedAt: log.workedAt ? epochDateToIso(log.workedAt) : this.todayIso(),
             }
             this.formError = ''
             this.logModalOpen = true

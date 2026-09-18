@@ -113,10 +113,39 @@ class TeamTemplateMapper {
         $qb->executeStatement();
     }
 
+    /**
+     * v4.9.6 — write the template's blueprint (Phase 2). Its own method
+     * rather than a parameter of `update()`: the blueprint is edited on its
+     * own admin surface, and the general edit must not clear it.
+     *
+     * @param array<string,mixed>|null $blueprint null clears it — the template
+     *        is then read exactly as a pre-4.9.6 row (derived blueprint)
+     */
+    public function updateBlueprint(string $templateKey, ?array $blueprint, string $actor, int $now): void {
+        $qb = $this->db->getQueryBuilder();
+        $qb->update(self::TABLE)
+            ->set('blueprint_json', $qb->createNamedParameter(
+                $blueprint === null ? null : json_encode($blueprint, JSON_UNESCAPED_UNICODE),
+            ))
+            ->set('updated_by', $qb->createNamedParameter($actor))
+            ->set('updated_at', $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT))
+            ->where($qb->expr()->eq('template_key', $qb->createNamedParameter($templateKey)));
+        $qb->executeStatement();
+    }
+
     /** @return array<string,mixed> */
     private function hydrate(array $row): array {
         $apps    = (string)($row['apps'] ?? '');
         $modules = (string)($row['modules'] ?? '');
+        // v4.9.6 — the declarative blueprint, or null for a template that has
+        // none (every pre-Phase-2 row). The column may be absent on an
+        // instance that has not run Version000409006 yet; the isset guards
+        // that too.
+        $blueprint = null;
+        if (isset($row['blueprint_json']) && (string)$row['blueprint_json'] !== '') {
+            $decoded   = json_decode((string)$row['blueprint_json'], true);
+            $blueprint = is_array($decoded) ? $decoded : null;
+        }
 
         return [
             'templateKey'       => (string)$row['template_key'],
@@ -136,6 +165,7 @@ class TeamTemplateMapper {
             'isSeeded'          => (int)$row['is_seeded'] === 1,
             'updatedBy'         => $row['updated_by'] !== null ? (string)$row['updated_by'] : null,
             'updatedAt'         => $row['updated_at'] !== null ? (int)$row['updated_at'] : null,
+            'blueprint'         => $blueprint,
         ];
     }
 }

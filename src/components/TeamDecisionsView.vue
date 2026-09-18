@@ -396,8 +396,13 @@
                     <!-- Subject — v3.71.3 moved from above the metadata grid
                          to sit directly above the Final proposal block, so
                          the reader sees the question right next to its
-                         resolved answer. -->
-                    <h2 class="th-dv__detail-question">{{ selected.question || t('teamhub', 'Untitled decision') }}</h2>
+                         resolved answer.
+
+                         Suppressed on the proposer's own open proposal: there
+                         the subject belongs to the drafting block, above the
+                         context and the buttons that act on both. Rendering
+                         it here as well would print the question twice. -->
+                    <h2 v-if="!isMyOpenProposal" class="th-dv__detail-question">{{ selected.question || t('teamhub', 'Untitled decision') }}</h2>
 
                     <!-- Final proposal block -->
                     <div v-if="(selected.status === 'approved' || selected.status === 'finalized' || selected.status === 'decided') && selected.selectedAnswer" class="th-dv__detail-answer">
@@ -480,6 +485,130 @@
                                 </button>
                             </li>
                         </ul>
+                    </div>
+
+                    <!-- ── Drafting block (v4.5.42) ──
+                         The proposer's side of an open proposal: where the
+                         discussion is happening, the editor for acting on what
+                         came back, and the button that ends drafting.
+
+                         Only the proposer sees it — DecisionService refuses
+                         both writes from anyone else, so rendering it for
+                         others would be a button that 404s (SKILLS.md
+                         § Permissions: hide what the role cannot do). -->
+                    <div v-if="isMyOpenProposal" class="th-dv__drafting">
+                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Your proposal') }}</span>
+
+                    <!-- v4.5.46 — two columns: the proposal's own controls on
+                         the left, the lifecycle rail on the right. The rail is
+                         a progress indicator, so reading order reaches the
+                         controls first and it stacks under them on narrow
+                         screens. -->
+                    <div class="th-dv__drafting-body">
+                        <div class="th-dv__drafting-main">
+
+                        <!-- Subject and context, above the buttons that act on
+                             them. Both are hidden while the editor is open —
+                             the editor holds the same two fields, and showing
+                             the saved copy beside the box you are changing it
+                             in invites you to edit the wrong one. -->
+                        <template v-if="!editingProposal">
+                            <h2 class="th-dv__detail-question th-dv__drafting-question">
+                                {{ selected.question || t('teamhub', 'Untitled decision') }}
+                            </h2>
+
+                            <!-- Safe: renderViewerMarkdown() runs the text
+                                 through DOMPurify with a tight allowlist,
+                                 same as the final-proposal block below. -->
+                            <!-- eslint-disable-next-line vue/no-v-html -->
+                            <div
+                                v-if="renderedProposalBody"
+                                class="th-dv__drafting-context"
+                                v-html="renderedProposalBody" />
+                        </template>
+
+                        <!-- Editor — closed by default so the panel still reads
+                             as a record rather than a form. -->
+                        <template v-if="editingProposal">
+                            <label class="th-dv__drafting-label" :for="`th-dv-edit-q-${selected.id}`">
+                                {{ t('teamhub', 'Question') }}
+                            </label>
+                            <input
+                                :id="`th-dv-edit-q-${selected.id}`"
+                                v-model="editQuestion"
+                                type="text"
+                                class="th-dv__drafting-input"
+                                :disabled="savingProposal"
+                                :maxlength="4000">
+
+                            <label class="th-dv__drafting-label" :for="`th-dv-edit-b-${selected.id}`">
+                                {{ t('teamhub', 'Proposal') }}
+                            </label>
+                            <textarea
+                                :id="`th-dv-edit-b-${selected.id}`"
+                                v-model="editBody"
+                                class="th-dv__drafting-textarea"
+                                rows="8"
+                                :disabled="savingProposal"
+                                :maxlength="4000" />
+
+                            <div class="th-dv__drafting-actions">
+                                <NcButton
+                                    variant="primary"
+                                    :disabled="!editQuestion.trim() || savingProposal"
+                                    @click="saveProposal(selected)">
+                                    {{ savingProposal ? t('teamhub', 'Saving…') : t('teamhub', 'Save changes') }}
+                                </NcButton>
+                                <NcButton variant="tertiary" :disabled="savingProposal" @click="cancelEditProposal">
+                                    {{ t('teamhub', 'Cancel') }}
+                                </NcButton>
+                            </div>
+                        </template>
+
+                        <div v-else class="th-dv__drafting-actions">
+                            <NcButton variant="secondary" @click="startEditProposal(selected)">
+                                <template #icon><PencilIcon :size="16" /></template>
+                                {{ t('teamhub', 'Edit proposal') }}
+                            </NcButton>
+                            <NcButton
+                                variant="primary"
+                                :disabled="finalizingProposal"
+                                @click="onFinalizeProposal(selected)">
+                                <template #icon><GavelIcon :size="16" /></template>
+                                {{ finalizingProposal ? t('teamhub', 'Finalizing…') : t('teamhub', 'Finalize') }}
+                            </NcButton>
+                            <!-- v4.5.46 — replaces the "Being discussed with…"
+                                 sentence. Where the discussion is happening is
+                                 something you act on, not something you read;
+                                 the button says it and takes you there. Absent
+                                 when the proposal has no conversation, which is
+                                 every `immediate` proposal. -->
+                            <NcButton
+                                v-if="selected.talkToken"
+                                variant="secondary"
+                                :href="talkUrl(selected.talkToken)"
+                                target="_blank"
+                                rel="noreferrer noopener">
+                                <template #icon><ForumIcon :size="16" /></template>
+                                <!-- TRANSLATORS: button — opens the Talk conversation or thread where the proposal is being discussed -->
+                                {{ t('teamhub', 'Discussion') }}
+                            </NcButton>
+                        </div>
+
+                        <p class="th-dv__drafting-hint">
+                            {{ t('teamhub', 'Finalizing locks the wording and sends the proposal to the category approvers.') }}
+                        </p>
+
+                        </div><!-- /th-dv__drafting-main -->
+
+                        <div class="th-dv__drafting-rail">
+                            <!-- Discuss and Finalize are deliberately *both*
+                                 active: on an open proposal the proposer can
+                                 edit again or finalize, and neither is more
+                                 current than the other. -->
+                            <DecisionProgressRail :active="['discuss', 'finalize']" />
+                        </div>
+                    </div><!-- /th-dv__drafting-body -->
                     </div>
 
                     <!-- Actions -->
@@ -735,7 +864,8 @@
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     class="th-dv__link-row"
-                                    :title="row.url">
+                                    :title="row.url"
+                                    @click="onExternalLinkOpen">
                                     <OpenInNewIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ externalLinkDisplay(row) }}</span>
                                     <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-external">
@@ -1086,8 +1216,10 @@
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatDate, formatDateTime } from '../lib/localDate.js'
 import { mapState, mapMutations }                from 'vuex'
 import { generateUrl }                           from '@nextcloud/router'
+import { handleInternalLinkClick }               from '../lib/internalLinks.js'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
 import { showError, showSuccess }                from '@nextcloud/dialogs'
 import { NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon } from '@nextcloud/vue'
@@ -1119,8 +1251,12 @@ import FormatListBulletedIcon  from 'vue-material-design-icons/FormatListBullete
 import CalendarPlusIcon        from 'vue-material-design-icons/CalendarPlus.vue'
 import CalendarClockIcon       from 'vue-material-design-icons/CalendarClock.vue'
 import FlagOutlineIcon         from 'vue-material-design-icons/FlagOutline.vue'
+// v4.5.42 — the proposer's drafting block.
+import PencilIcon              from 'vue-material-design-icons/Pencil.vue'
+import ForumIcon               from 'vue-material-design-icons/Forum.vue'
 import AddTaskModal             from './AddTaskModal.vue'
 import SuggestMeetingWizard     from './SuggestMeetingWizard.vue'
+import DecisionProgressRail     from './DecisionProgressRail.vue'
 
 const PAGE_SIZE = 50
 
@@ -1137,7 +1273,8 @@ export default {
         FolderOutlineIcon, MagnifyIcon, FormatListBulletedIcon,
         LinkVariantIcon, CalendarPlusIcon, CalendarClockIcon,
         FlagOutlineIcon,
-        AddTaskModal, SuggestMeetingWizard,
+        PencilIcon, ForumIcon,
+        AddTaskModal, SuggestMeetingWizard, DecisionProgressRail,
     },
 
     emits: ['propose-decision', 'propose-decision-superseding'],
@@ -1188,6 +1325,20 @@ export default {
             approvalReason:    '',
             approvalReasonMax: 500,
             approvalForDecisionId: null,
+
+            // v4.5.42 — the proposer's drafting block on an open proposal.
+            editingProposal:    false,
+            editQuestion:       '',
+            editBody:           '',
+            savingProposal:     false,
+            finalizingProposal: false,
+
+            // The proposal's context text, fetched per selection. `null` is
+            // "not loaded yet" and `''` is "loaded, and there is none" — the
+            // two have to be distinguishable or an empty context renders the
+            // same as a pending fetch.
+            proposalBody:           null,
+            proposalBodyDecisionId: null,
 
             // v3.74.10 — Schedule approver meeting flow.
             // When showApproverMeetingWizard is true, SuggestMeetingWizard
@@ -1394,6 +1545,32 @@ export default {
             return this.renderViewerMarkdown(this.selected.selectedAnswer)
         },
 
+        /**
+         * Is the open proposal on screen one this user can still act on?
+         *
+         * Named once because two places have to agree: the drafting block
+         * renders on it, and the standalone subject heading is suppressed on
+         * it — the subject moves *into* the block in that case, and rendering
+         * both would print the question twice.
+         */
+        isMyOpenProposal() {
+            return !!this.selected
+                && this.isOpenProposal(this.selected)
+                && this.isMyProposal(this.selected)
+        },
+
+        /**
+         * The proposal's context text as sanitized HTML.
+         *
+         * Same pipeline as the final proposal below it, because it is the
+         * same markdown — what the proposer wrote. Empty while the fetch is
+         * in flight, so the block renders nothing rather than 'null'.
+         */
+        renderedProposalBody() {
+            if (!this.proposalBody) return ''
+            return this.renderViewerMarkdown(this.proposalBody)
+        },
+
         grouped() {
             const NO_CAT = t('teamhub', 'General')
             const map = new Map()
@@ -1428,6 +1605,22 @@ export default {
 
         currentUserId() {
             return window.OC?.currentUser || ''
+        },
+
+        /**
+         * v4.5.42 — an open proposal, under either spelling.
+         *
+         * `proposed` is the legacy synonym for `open` and both are still in
+         * the data. HANDOFF's 4.5.30 note applies: if you touch decision
+         * status anywhere, grep for both names.
+         */
+        isOpenProposal() {
+            return decision => decision
+                && (decision.status === 'open' || decision.status === 'proposed')
+        },
+
+        isMyProposal() {
+            return decision => !!decision && decision.proposedBy === this.currentUserId
         },
 
         /**
@@ -1562,6 +1755,19 @@ export default {
                     this.decLinksLoading = false
                 }
             }
+            // The proposal's own context text. `GET /decisions` omits it —
+            // it lives on the backing message and would cost a query per row
+            // — so the panel fetches it for the one proposal on screen. Same
+            // reasoning as startEditProposal(), which is where the only
+            // previous fetch lived; that is why the context was invisible
+            // until you pressed Edit.
+            if (id !== this.proposalBodyDecisionId) {
+                this.proposalBodyDecisionId = id
+                this.proposalBody = null
+                if (id) {
+                    this.loadProposalBody(newVal)
+                }
+            }
             // v3.74.10: load scheduled approver meetings whenever the
             // selected decision changes. Clears when no decision is selected.
             if (id) {
@@ -1645,6 +1851,16 @@ export default {
     methods: {
         t, n, generateUrl,
         ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_PRESELECT_STATUS']),
+
+        /**
+         * A decision's "External" link is an arbitrary URL somebody pasted, so
+         * most of them genuinely are external and open in a new tab as before.
+         * But people do paste links to their own Nextcloud — a file, a Deck
+         * card, a wiki page — and those should stay in the team (v4.5.11).
+         */
+        onExternalLinkOpen(event) {
+            handleInternalLinkClick(event, this.$store)
+        },
 
         // ── Landing view ────────────────────────────────────────────
 
@@ -1938,6 +2154,134 @@ export default {
         // confirmApprove (reason-less) + openDeny/closeDeny/confirmDeny modal
         // pattern is gone — the modal-based reason capture for deny moved
         // inline alongside approve.
+
+        // ── v4.5.42 — the proposer's drafting block ──────────────────────
+
+        /** Deep link to a Talk conversation by token. */
+        talkUrl(token) {
+            return generateUrl(`/call/${token}`)
+        },
+
+        /**
+         * Open the editor, fetching the current proposal text first.
+         *
+         * `selectDecision` puts the **list row** in `selected`, and the list
+         * comes from `GET /decisions`, whose serialiser deliberately omits the
+         * proposal body — it lives on the backing message and would cost a
+         * query per row. Only `GET /decisions/{id}` returns `proposalBody`.
+         *
+         * Without this fetch the textarea would open empty and Save would
+         * blank the proposal. Fetching is also the right thing on its own: it
+         * picks up an edit made in another tab rather than overwriting it.
+         */
+        async startEditProposal(decision) {
+            this.editQuestion = decision.question || ''
+            this.editBody = ''
+            this.editingProposal = true
+            this.savingProposal = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}`)
+                )
+                this.editQuestion = data.question || ''
+                this.editBody = data.proposalBody ?? ''
+                this.applyDecisionUpdate(data)
+            } catch (err) {
+                const msg = err?.response?.data?.error || err.message
+                showError(t('teamhub', 'Could not load the proposal text: {error}', { error: msg }))
+                // Closed rather than left open on an empty box the user could
+                // save over the top of.
+                this.cancelEditProposal()
+            } finally {
+                this.savingProposal = false
+            }
+        },
+
+        /**
+         * Fetch the context text of the proposal now on screen.
+         *
+         * Only for an open proposal of the viewer's own: every other status
+         * shows its wording in the Final proposal block, and fetching for
+         * those would be a request per selection for something already on
+         * the page.
+         *
+         * A failure is silent. The context is supporting text next to a
+         * subject and three buttons that all still work without it, so a
+         * toast here would report a problem the user cannot act on and
+         * cannot dismiss by doing anything differently. The reason goes to
+         * the console instead. **Edit proposal deliberately keeps its
+         * toast** — there, a failed fetch means the editor would open empty
+         * and Save would blank the proposal.
+         */
+        async loadProposalBody(decision) {
+            if (!decision || !this.isOpenProposal(decision) || !this.isMyProposal(decision)) return
+
+            const requestedId = decision.id
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${requestedId}`)
+                )
+                // The selection can move while this is in flight; a late
+                // response must not write another proposal's text under the
+                // subject now on screen.
+                if (this.selected?.id !== requestedId) return
+                this.proposalBody = data.proposalBody ?? ''
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] loadProposalBody error:', err)
+                if (this.selected?.id === requestedId) {
+                    this.proposalBody = ''
+                }
+            }
+        },
+
+        cancelEditProposal() {
+            this.editingProposal = false
+            this.editQuestion = ''
+            this.editBody = ''
+        },
+
+        async saveProposal(decision) {
+            const question = this.editQuestion.trim()
+            if (!question || !decision) return
+
+            this.savingProposal = true
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/proposal`),
+                    { question, body: this.editBody }
+                )
+                this.applyDecisionUpdate(data)
+                // Set from what we just saved rather than refetched: the id
+                // has not changed, so the selection watcher will not fire and
+                // the panel would otherwise keep showing the pre-edit text.
+                this.proposalBody = this.editBody
+                this.cancelEditProposal()
+                showSuccess(t('teamhub', 'Proposal updated.'))
+            } catch (err) {
+                const msg = err?.response?.data?.error || err.message
+                showError(t('teamhub', 'Could not save the proposal: {error}', { error: msg }))
+            } finally {
+                this.savingProposal = false
+            }
+        },
+
+        async onFinalizeProposal(decision) {
+            if (!decision) return
+            this.finalizingProposal = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/finalize-proposal`)
+                )
+                this.applyDecisionUpdate(data)
+                this.cancelEditProposal()
+                showSuccess(t('teamhub', 'Proposal finalized. It is now with the approvers.'))
+            } catch (err) {
+                const msg = err?.response?.data?.error || err.message
+                showError(t('teamhub', 'Could not finalize the proposal: {error}', { error: msg }))
+            } finally {
+                this.finalizingProposal = false
+            }
+        },
 
         async onApproveWithReason(decision) {
             const reason = this.approvalReason.trim()
@@ -2424,21 +2768,39 @@ export default {
          */
         openSourceUrl(url) {
             if (!url) return
-            // Best-effort label: hostname for http(s) URLs, raw string otherwise.
-            let label = url
+            // v4.7.0 — this value ends up in `:href` and in the viewer's
+            // `<iframe :src>`, so the protocol is checked at the sink and not
+            // only on the way in. The server refuses a scriptable scheme on
+            // write (DecisionService::assertSourceRefSchemeSafe), but that
+            // cannot reach a row stored before the check existed, and this is
+            // the point where a `javascript:` ref would actually execute.
+            // Parsed rather than string-matched: `java\tscript:` and a
+            // leading newline both survive a naive startsWith test.
+            let parsed = null
             try {
-                const u = new URL(url)
-                label = u.hostname + (u.pathname && u.pathname !== '/' ? u.pathname : '')
+                parsed = new URL(url)
             } catch {
-                // Not a parseable absolute URL — fall back to raw.
+                parsed = null
             }
+            if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
+                showError(t('teamhub', 'That source link cannot be opened — only http and https addresses are allowed.'))
+                return
+            }
+            // Best-effort label: hostname + path.
+            const label = parsed.hostname + (parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '')
             this.viewerFile = {
                 file_id:      null,
                 name:         label,
                 mime:         'text/html',
                 size:         0,
                 is_proposal:  false,
-                external_url: url,
+                // The normalised value, not the raw input: `new URL()` is what
+                // was validated, so it is what should reach `:href`/`:src`.
+                // A tab or newline inside the raw string survives into the
+                // attribute otherwise — harmless in practice, since browsers
+                // strip them too, but it means the checked value and the used
+                // value are not the same string.
+                external_url: parsed.href,
             }
         },
 
@@ -2639,6 +3001,10 @@ export default {
                 decision_linked:   t('teamhub', 'Linked decision'),
                 // TRANSLATORS: audit event verb — a decision link was removed
                 decision_unlinked: t('teamhub', 'Unlinked decision'),
+                // TRANSLATORS: audit event verb — the proposer changed the proposal text while it was open
+                proposal_updated:  t('teamhub', 'Edited proposal'),
+                // TRANSLATORS: audit event verb — the proposal was opened for discussion in Talk
+                shared_for_discussion: t('teamhub', 'Opened for discussion'),
             }
             return map[ev.transition] || ev.transition
         },
@@ -2856,15 +3222,10 @@ export default {
          */
         formatMeetingTime(unixSeconds) {
             if (!unixSeconds) return ''
-            const d = new Date(unixSeconds * 1000)
-            try {
-                return d.toLocaleString(undefined, {
-                    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-                    hour: '2-digit', minute: '2-digit',
-                })
-            } catch (e) {
-                return d.toISOString()
-            }
+            return formatDateTime(unixSeconds * 1000, {
+                weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+            })
         },
 
         levelLabel(level) {
@@ -2901,13 +3262,13 @@ export default {
             if (days === 0) return t('teamhub', 'Today')
             if (days === 1) return t('teamhub', 'Yesterday')
             if (days < 7)  return n('teamhub', '{n} day ago', '{n} days ago', days, { n: days })
-            return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            return formatDate(ms, { month: 'short', day: 'numeric' })
         },
 
         fullDate(ts) {
             if (!ts) return ''
             const ms = typeof ts === 'number' ? ts * 1000 : Date.parse(ts)
-            return isNaN(ms) ? '' : new Date(ms).toLocaleString()
+            return isNaN(ms) ? '' : formatDateTime(ms)
         },
     },
 }
@@ -3897,6 +4258,149 @@ export default {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--color-text-maxcontrast);
+}
+
+/* ── Drafting block (v4.5.42) ─────────────────────────────────────────
+   The proposer's controls on an open proposal. Same card shape as the
+   approval block on the other side of the panel, so the two read as the
+   two ends of one lifecycle rather than as unrelated widgets. */
+.th-dv__drafting {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--th-radius-card);
+    background: var(--color-background-hover);
+}
+
+/* v4.5.46 — controls left, lifecycle rail right. */
+.th-dv__drafting-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.th-dv__drafting-main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    /* Stops a long proposal body from pushing the rail off the panel. */
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.th-dv__drafting-rail {
+    flex: 0 0 auto;
+    max-width: 130px;
+}
+
+/* The detail panel is already a two-column layout on wide screens, so the
+   drafting block gets narrow early. Stack the rail under the controls rather
+   than squeezing both. */
+@media (max-width: 900px) {
+    .th-dv__drafting-body {
+        flex-direction: column;
+    }
+    .th-dv__drafting-rail {
+        max-width: none;
+    }
+}
+
+/* Subject and context inside the drafting block.
+
+   The standalone heading carries `padding: 16px 0 12px`, which separates it
+   from the meta grid it normally sits under. In here it is the first thing
+   in a block that already has its own padding and an 8px flex gap, so that
+   padding would read as a stray gap under the "YOUR PROPOSAL" label. */
+.th-dv__drafting-question {
+    padding: 0;
+}
+
+/* Base typography matches the final-proposal block deliberately: it is the
+   same text at a different point in its life.
+
+   The child rules need `:deep()`. This is a `v-html` subtree, and scoped CSS
+   puts the scope attribute on the *last* compound selector — so a plain
+   `.th-dv__drafting-context p` compiles to `p[data-v-…]`, which nothing
+   inside rendered HTML ever carries. The element itself is in the template
+   and does get the attribute, which is why the base rule works without it.
+   (The `.th-dv__detail-answer-text--md` rules above have the same problem
+   and are inert for the same reason — pre-existing, logged, not fixed here.) */
+.th-dv__drafting-context {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-main-text);
+    margin: 0;
+}
+
+.th-dv__drafting-context :deep(> :first-child) { margin-top: 0; }
+.th-dv__drafting-context :deep(> :last-child)  { margin-bottom: 0; }
+.th-dv__drafting-context :deep(p)  { margin: 0 0 8px; }
+.th-dv__drafting-context :deep(ul),
+.th-dv__drafting-context :deep(ol) { margin: 0 0 8px; padding-left: 24px; }
+.th-dv__drafting-context :deep(li) { margin: 2px 0; }
+.th-dv__drafting-context :deep(a) {
+    color: var(--color-primary-element);
+    text-decoration: underline;
+}
+.th-dv__drafting-context :deep(code) {
+    font-family: var(--font-face-mono, monospace);
+    background: var(--color-background-dark);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: var(--th-font-meta);
+}
+
+.th-dv__drafting-label {
+    font-size: var(--th-font-meta);
+    font-weight: var(--th-font-weight-semibold);
+    color: var(--color-main-text);
+}
+
+.th-dv__drafting-input,
+.th-dv__drafting-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    font-size: var(--th-font-body);
+    font-family: inherit;
+    color: var(--color-main-text);
+    background: var(--color-main-background);
+    border: 2px solid var(--color-border-dark);
+    border-radius: var(--th-radius-control);
+    /* NC's form-field pattern: no outline, a primary border on focus.
+       Documented as acceptable in SKILLS.md § Focus visibility standard. */
+    outline: none;
+}
+
+.th-dv__drafting-textarea {
+    resize: vertical;
+    line-height: var(--th-line-height-body);
+}
+
+.th-dv__drafting-input:focus,
+.th-dv__drafting-textarea:focus {
+    border-color: var(--color-primary-element);
+}
+
+.th-dv__drafting-input:focus-visible,
+.th-dv__drafting-textarea:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-primary-element);
+}
+
+.th-dv__drafting-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.th-dv__drafting-hint {
+    margin: 0;
+    font-size: var(--th-font-micro);
+    color: var(--color-text-maxcontrast);
+    line-height: var(--th-line-height-body);
 }
 
 /* ── Approval block ──────────────────────────────────────────────────── */

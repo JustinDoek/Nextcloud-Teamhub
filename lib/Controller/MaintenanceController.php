@@ -5,6 +5,7 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MyWorkService;
+use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
 use OCA\TeamHub\Service\TeamExpiryService;
 use OCA\TeamHub\Service\TelemetryService;
 use OCP\AppFramework\Controller;
@@ -38,6 +39,8 @@ class MaintenanceController extends Controller {
         private TeamExpiryService  $expiryService,
         private TelemetryService   $telemetryService,
         private MyWorkService      $myWorkService,
+        // v4.9.4 — the one route to removing a team's OpenProject link.
+        private TeamOpenProjectLinkService $openProjectLinks,
         private IUserManager       $userManager,
         private IUserSession       $userSession,
         private LoggerInterface    $logger,
@@ -524,6 +527,32 @@ class MaintenanceController extends Controller {
             return new JSONResponse(['expiry' => $expiry]);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to save the expiration date', ['teamId' => $teamId]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // OpenProject link (v4.9.4)
+    // -------------------------------------------------------------------------
+
+    /**
+     * DELETE /api/v1/admin/maintenance/teams/{teamId}/openproject-link
+     *
+     * Remove a team's link to its OpenProject project. The only route that
+     * unlinks — Manage team is read-only by decision, and the wizard links
+     * once, at creation. Idempotent: a team without a link answers
+     * `{ removed: null }`. Nothing in OpenProject changes; the project
+     * becomes linkable by a new team. The service checks NC admin again.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function unlinkOpenProject(string $teamId): JSONResponse {
+        $teamId = trim($teamId);
+        if ($teamId === '') {
+            return new JSONResponse(['error' => 'teamId is required'], Http::STATUS_BAD_REQUEST);
+        }
+        try {
+            return new JSONResponse(['removed' => $this->openProjectLinks->adminUnlink($teamId)]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to unlink the OpenProject project', ['teamId' => $teamId]);
         }
     }
 

@@ -64,7 +64,9 @@ function walk(dir, out) {
         return
     }
     for (const entry of entries) {
-        const abs = path.join(dir, entry.name)
+        // `dir` descends from ROOT (the CI's own assembled folder) and
+        // `entry.name` is readdirSync's listing of it — no request data here.
+        const abs = path.join(dir, entry.name) // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
         const rel = path.relative(ROOT, abs).split(path.sep).join('/')
         if (EXCLUDE_RELATIVE_PATHS.has(rel)) continue
         if (EXCLUDE_FILE_PATTERNS.some(re => re.test(entry.name))) continue

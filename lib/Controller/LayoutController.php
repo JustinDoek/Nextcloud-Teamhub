@@ -5,9 +5,11 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\LayoutMapper;
+use OCA\TeamHub\Db\ProvisioningMapper;
 use OCA\TeamHub\Service\BudgetService;
 use OCA\TeamHub\Service\CollectivesService;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
 use OCA\TeamHub\Service\ProjectService;
@@ -159,6 +161,26 @@ class LayoutController extends Controller {
             'hSaved'      => 4,
             'autoFit'     => true,
         ],
+        // v4.9.3 — OpenProject Phase 1: the Project info widget, rendered
+        // only when the team is linked to an OpenProject project (gated in
+        // src/lib/activeWidgets.js on openProjectConfig.linked). Appended at
+        // the bottom of the right column; mergeNewWidgets does the same for
+        // existing users, so nobody's saved arrangement moves.
+        //
+        // v4.9.5 — the second widget of 4.9.3, `widget-openproject-work`, is
+        // gone: the viewer's own work packages moved to My Work and the
+        // project's went into the Upcoming tasks widget. Its id is pruned
+        // from saved layouts in mergeNewWidgets like the legacy files ones.
+        [
+            'i'           => 'widget-openproject',
+            'x'           => 9, 'y' => 28,
+            'w'           => 3, 'h' => 5,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 5,
+            'autoFit'     => true,
+        ],
     ];
 
     private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck', 'collectives', 'timeline'];
@@ -191,10 +213,14 @@ class LayoutController extends Controller {
         'widget-files-center',
         'widget-decisions',
         'widget-project-health',
+        // v4.9.3 — OpenProject Phase 1. Gates on the team's link.
+        'widget-openproject',
         // Legacy — kept so saves from old clients are not rejected mid-migration.
         'widget-files-favorites',
         'widget-files-recent',
         'widget-files-shared',
+        // v4.9.5 — the removed My OpenProject work widget; pruned on GET.
+        'widget-openproject-work',
     ];
 
     // Allowed built-in tab keys.
@@ -218,6 +244,10 @@ class LayoutController extends Controller {
         private TeamTypeService $teamTypeService,
         private TeamExpiryService $teamExpiryService,
         private CollectivesService $collectivesService,
+        private TeamOpenProjectLinkService $openProjectLinks,
+        // v4.9.6 — a DI leaf (IDBConnection only); the summary read is two
+        // cheap queries, so it rides the bundle rather than a second fetch.
+        private ProvisioningMapper $provisioningMapper,
     ) {
         parent::__construct($appName, $request);
     }
@@ -326,6 +356,13 @@ class LayoutController extends Controller {
                 'can_view_time'  => $this->timeService->canUserViewTimeTab($teamId, $userId),
             ],
             'project'                => $this->projectFacts($teamId),
+            // v4.9.3 — OpenProject link facts. Cheap (one row, no HTTP) and
+            // per team, so the Project info widget can gate itself
+            // the same way the Wiki widget does on collectivesConfig.
+            'openProjectConfig'      => $this->openProjectLinks->factsForBundle($teamId),
+            // v4.9.6 — is this team's provisioning finished (null for a team
+            // that was never provisioned). The team page's banner reads it.
+            'provisioning'           => $this->provisioningMapper->latestSummaryForTeam($teamId),
         ]);
         }
 
@@ -401,6 +438,13 @@ class LayoutController extends Controller {
                 'can_view_time'  => $this->timeService->canUserViewTimeTab($teamId, $userId),
             ],
             'project'                => $this->projectFacts($teamId),
+            // v4.9.3 — OpenProject link facts. Cheap (one row, no HTTP) and
+            // per team, so the Project info widget can gate itself
+            // the same way the Wiki widget does on collectivesConfig.
+            'openProjectConfig'      => $this->openProjectLinks->factsForBundle($teamId),
+            // v4.9.6 — is this team's provisioning finished (null for a team
+            // that was never provisioned). The team page's banner reads it.
+            'provisioning'           => $this->provisioningMapper->latestSummaryForTeam($teamId),
         ]);
     }
 
@@ -687,7 +731,9 @@ class LayoutController extends Controller {
         // widget-collectives → widget-pages (v4.3.7 — Wiki content now renders
         // inside the unified Pages widget instead of a standalone card).
         // Filter them out before merging so the new consolidated widget is added.
-        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared', 'widget-collectives'];
+        // widget-openproject-work → gone (v4.9.5 — its rows moved to My Work
+        // and to the Upcoming tasks widget).
+        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared', 'widget-collectives', 'widget-openproject-work'];
         $pruned = false;
         $layout = array_values(array_filter($layout, static function (array $item) use ($legacyIds, &$pruned): bool {
             if (in_array($item['i'], $legacyIds, true)) {

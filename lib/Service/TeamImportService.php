@@ -660,6 +660,11 @@ class TeamImportService {
             $errors[] = 'Template is required. Allowed: ' . implode(', ', $allowedTemplates) . '.';
         } elseif (!in_array($template, $allowedTemplates, true)) {
             $errors[] = 'Unknown template "' . $template . '". Allowed: ' . implode(', ', $allowedTemplates) . '.';
+        } elseif ($template === 'openproject') {
+            // v4.9.3 — an OpenProject team needs its OpenProject project picked
+            // by the person creating it, as themselves, and a CSV has no way to
+            // do that. The wizard's single-team mode is the only path.
+            $errors[] = 'The openproject template cannot be used in a bulk import: the OpenProject project is chosen in the team-creation wizard.';
         }
 
         // ── project_mode ─────────────────────────────────────────────────

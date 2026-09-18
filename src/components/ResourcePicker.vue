@@ -38,7 +38,7 @@ import axios from '@nextcloud/axios'
  * ResourcePicker — pick an existing resource for connecting to a team.
  *
  * All apps (files, calendar, deck, talk) use a server-driven list from
- * /api/v1/pickers/{app}. For files, the endpoint returns group folders
+ * /api/v1/pickers/{app}. For files, the endpoint returns team folders
  * (type=group_folder) first, then shared folders (type=shared_folder).
  *
  * Emits 'update:modelValue' (v-model) with the selected resource ID (string or int).
@@ -51,7 +51,7 @@ export default {
             required: true,
             validator: v => ['talk', 'files', 'calendar', 'deck'].includes(v),
         },
-        // teamId required for files to scope group folder results to team membership
+        // teamId required for files to scope team folder results to team membership
         teamId: {
             type: String,
             default: '',
@@ -77,11 +77,11 @@ export default {
     computed: {
         placeholderText() {
             switch (this.app) {
-            case 'files':    return t('teamhub', 'Select a folder\u2026')
-            case 'calendar': return t('teamhub', 'Select a calendar\u2026')
-            case 'deck':     return t('teamhub', 'Select a board\u2026')
-            case 'talk':     return t('teamhub', 'Select a conversation\u2026')
-            default:         return t('teamhub', 'Select\u2026')
+            case 'files':    return t('teamhub', 'Select a folder…')
+            case 'calendar': return t('teamhub', 'Select a calendar…')
+            case 'deck':     return t('teamhub', 'Select a board…')
+            case 'talk':     return t('teamhub', 'Select a conversation…')
+            default:         return t('teamhub', 'Select…')
             }
         },
         ariaLabel() {
@@ -127,8 +127,8 @@ export default {
         resourceLabel(r) {
             if (this.app === 'files') {
                 if (r.type === 'group_folder') {
-                    // TRANSLATORS: badge prefix for a Group Folder item in the file folder picker
-                    return t('teamhub', '[Group Folder] {name}', { name: r.name || r.id })
+                    // TRANSLATORS: badge prefix for a Team Folder item in the file folder picker
+                    return t('teamhub', '[Team Folder] {name}', { name: r.name || r.id })
                 }
                 if (r.type === 'shared_folder') {
                     // TRANSLATORS: badge prefix for a personal shared folder in the file folder picker

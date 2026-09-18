@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import MyPresencePanel from './components/MyPresencePanel.vue'
+import PersonalSettingsPanel from './components/PersonalSettingsPanel.vue'
 
 // Shared design tokens (typography, radii, colour assignments).
 // Same import as main.js — each entry point owns its own CSS chunk
@@ -7,33 +7,32 @@ import MyPresencePanel from './components/MyPresencePanel.vue'
 // per entry to land in that entry's stylesheet.
 import './styles/widget-tokens.css'
 
-// [TeamHub][personal] debug: remove at session end
-
 const el = document.getElementById('teamhub-personal-settings')
 if (el) {
-	// Only mount when the NC admin has enabled the presence module.
-	const enabled = el.dataset.presenceModuleEnabled === '1'
-	if (enabled) {
-		const app = createApp(MyPresencePanel)
+	// v4.4.12 — mount unconditionally. Previously this only mounted when the
+	// Presence module was enabled instance-wide, which left Settings →
+	// Personal → TeamHub as a blank page on every instance with Presence off.
+	// The presence panel is now gated inside PersonalSettingsPanel instead, so
+	// the user-scoped preferences above it always render.
+	const app = createApp(PersonalSettingsPanel, {
+		presenceModuleEnabled: el.dataset.presenceModuleEnabled === '1',
+		initialGettingStartedHint: el.dataset.gettingStartedHint !== '0',
+	})
 
-		// Match the t/n shim applied in admin.js.
-		app.config.globalProperties.t = (appId, str, vars) => {
-			if (vars) {
-				return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
-			}
-			return str
+	// Match the t/n shim applied in admin.js.
+	app.config.globalProperties.t = (appId, str, vars) => {
+		if (vars) {
+			return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
 		}
-		app.config.globalProperties.n = (appId, singular, plural, count, vars) => {
-			const str = count === 1 ? singular : plural
-			if (vars) {
-				return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
-			}
-			return str
-		}
-
-		app.mount(el)
+		return str
 	}
-	// When disabled: the div stays empty — the NC settings section
-	// still appears in the sidebar but shows nothing. NC doesn't provide
-	// a way to hide a registered ISettings section dynamically.
+	app.config.globalProperties.n = (appId, singular, plural, count, vars) => {
+		const str = count === 1 ? singular : plural
+		if (vars) {
+			return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
+		}
+		return str
+	}
+
+	app.mount(el)
 }

@@ -146,6 +146,7 @@
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { todayIso, toIsoDate, shiftIsoDate, formatIsoDate } from '../lib/localDate.js'
 import { NcButton, NcLoadingIcon, NcAvatar } from '@nextcloud/vue'
 import ChevronLeftIcon  from 'vue-material-design-icons/ChevronLeft.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
@@ -213,7 +214,7 @@ export default {
                 return {
                     iso,
                     label: dayNames[i],
-                    dateLabel: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    dateLabel: formatIsoDate(iso, { month: 'short', day: 'numeric' }),
                 }
             })
         },
@@ -316,29 +317,25 @@ export default {
         // ── Date helpers ──────────────────────────────────────────────
 
         isoToday() {
-            return new Date().toISOString().slice(0, 10)
+            return todayIso()
         },
 
         dateToIso(d) {
-            return d.toISOString().slice(0, 10)
+            return toIsoDate(d)
         },
 
         shiftDate(iso, days) {
-            const d = new Date(iso + 'T12:00:00')
-            d.setDate(d.getDate() + days)
-            return this.dateToIso(d)
+            return shiftIsoDate(iso, { days })
         },
 
+        // Presence slots are floating dates, so both of these go through the
+        // zone-immune path — a half-day on the 11th is the 11th everywhere.
         formatDateShort(iso) {
-            const [y, m, d] = iso.split('-').map(Number)
-            return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-                month: 'short', day: 'numeric',
-            })
+            return formatIsoDate(iso, { month: 'short', day: 'numeric' })
         },
 
         formatDateLong(iso) {
-            const [y, m, d] = iso.split('-').map(Number)
-            return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+            return formatIsoDate(iso, {
                 weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
             })
         },

@@ -5,6 +5,8 @@ namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
+use OCA\TeamHub\Constants\CirclesMemberType;
+use OCA\TeamHub\Constants\PolicyField;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
@@ -1827,23 +1829,62 @@ class MemberService {
         $results = [];
         foreach ($members as $entry) {
             // Support both plain string (legacy) and {id, type} object
+            $isFederated = false;
             if (is_string($entry)) {
                 $memberId   = $entry;
-                $memberType = 1; // user
+                $memberType = CirclesMemberType::TYPE_USER;
+                // Legacy callers pass a bare uid and never a federated address.
+                // Left local deliberately: a uid containing '@' is legitimate on
+                // instances that use email addresses as user IDs, so the shape of
+                // the string cannot decide this. Only an explicit 'federated' type
+                // does.
             } else {
                 $memberId   = $entry['id'] ?? '';
                 $typeStr    = $entry['type'] ?? 'user';
+                // v4.9.2 — corrected against OCA\Circles\Model\Member::TYPE_*.
+                // The previous map read 'federated' => 4 and 'email' => 7. Circles
+                // has no TYPE_FEDERATED and no type 7 at all: 4 is TYPE_MAIL, so
+                // every "federated" invite was asking for a mail member, and every
+                // "email" invite passed a type matching no constant.
+                //
+                // A federated account is TYPE_USER with a remote instance —
+                // generateFederatedUser() splits 'alice@remote.tld' on the last '@'
+                // and stores user_id='alice', instance='remote.tld', type unchanged.
+                // So federation cannot ride on the type; it travels beside it.
                 $memberType = match($typeStr) {
-                    'group'     => 2,   // NC group
-                    'federated' => 4,   // federated NC user
-                    'email'     => 7,   // email (requires Circles federation)
-                    'circle'    => 16,  // another NC circle/team
-                    default     => 1,   // local NC user
+                    'group'     => CirclesMemberType::TYPE_GROUP,  //  2
+                    'federated' => CirclesMemberType::TYPE_USER,   //  1 + remote instance
+                    'email'     => CirclesMemberType::TYPE_MAIL,   //  4
+                    'circle'    => CirclesMemberType::TYPE_CIRCLE, // 16
+                    default     => CirclesMemberType::TYPE_USER,   //  1
                 };
+                $isFederated = ($typeStr === 'federated');
             }
 
             if (!$memberId || ($memberType === 1 && $memberId === $user->getUID())) {
                 continue;
+            }
+
+            // Federation gates — authoritative (v4.9.2).
+            //
+            // searchUsers() already hides remotes the instance does not trust,
+            // or that this team does not accept. That is a picker affordance;
+            // this is the boundary. Exactly the reasoning recorded for the
+            // circular-nesting gate a few lines below: search results go stale,
+            // and this endpoint is reachable directly.
+            //
+            // Order matters for the message the caller gets back. The team bit
+            // is asked first because it is the one an owner can act on; an
+            // untrusted server is an instance-level fact they cannot.
+            if ($isFederated) {
+                if (!$this->resolveFederationSetting($teamId)['enabled']) {
+                    $results[$memberId] = 'failed: this team does not allow federated members';
+                    continue;
+                }
+                if (!$this->isRemoteServerTrusted($memberId)) {
+                    $results[$memberId] = 'failed: that server is not a trusted server on this instance';
+                    continue;
+                }
             }
 
             try {
@@ -1945,11 +1986,16 @@ class MemberService {
                     }
 
                     $alreadyInvited = true;
-                    $currentStatus  = $memberType === 1
+                    // Local users only. A federated row stores user_id='alice',
+                    // not 'alice@remote.tld', so looking it up by the id we were
+                    // given cannot match — federated invite resend is a separate
+                    // gap, unchanged by v4.9.2 and noted in HANDOFF.
+                    $isLocalUser    = $memberType === CirclesMemberType::TYPE_USER && !$isFederated;
+                    $currentStatus  = $isLocalUser
                         ? $this->fetchAnyMemberStatus($db, $teamId, $memberId)
                         : null;
 
-                    if ($memberType === 1
+                    if ($isLocalUser
                         && $currentStatus !== null
                         && strcasecmp($currentStatus, 'Invited') === 0
                     ) {
@@ -2017,7 +2063,12 @@ class MemberService {
                 // because (a) we are scoped to the current team only, (b) we only
                 // touch 'Invited' rows (not already-confirmed members), and (c) we
                 // run this only after addMember() succeeds.
-                if ($memberType !== 1) {
+                // v4.9.2 — was `!== 1`, which also caught mail members and, under
+                // the old type map, federated ones. The block below only ever
+                // matches Invited rows with user_type IN(2,16), so for anything
+                // else it was a no-op with a retry loop attached. Now it says what
+                // the comment above always claimed.
+                if (in_array($memberType, CirclesMemberType::CONTAINERS, true)) {
                     try {
                         // v4.7.12 (GitHub #87) — write, then CHECK, then rewrite.
                         //
@@ -2156,7 +2207,11 @@ class MemberService {
                 // MemberJoinedEvent — not here.
                 //
                 // Fix for v3.100.8 regression reported against W-5.
-                if ($memberType === 1) {
+                // Local users only — fetchMemberStatus() and
+                // syncUserToTeamTalkRoom() both key on the bare uid, which a
+                // federated row does not carry. Federated Talk membership is the
+                // reconciler's job (TalkService::reconcileEffectiveTalkRoomMembers).
+                if ($memberType === CirclesMemberType::TYPE_USER && !$isFederated) {
                     $status = $this->fetchMemberStatus($db, $teamId, $memberId);
                     if ($status === 'Member') {
                         $this->logger->debug('[TeamHub][MemberService] inviteMembers: syncing new user to Talk room', [
@@ -3000,17 +3055,28 @@ class MemberService {
     // -------------------------------------------------------------------------
 
     /**
-     * Search users by display name or user ID (for member picker).
-     * Respects the admin 'inviteTypes' setting.
-     */
-    /**
-     * Search users/groups/teams for the invite picker.
+     * Search users, groups, email addresses, federated users and teams for the
+     * invite picker.
+     *
+     * People come from Nextcloud's collaborator autocomplete (ISearch), so every
+     * instance-level restriction on user enumeration, group sharing and
+     * federation trust applies here without TeamHub restating it. Teams come
+     * from a separate query, because Circles registers no collaborator plugin.
+     *
+     * Filtered, in this order:
+     *   1. the instance's own sharing and enumeration settings (inside ISearch)
+     *   2. the admin 'inviteTypes' setting (TeamHub's own policy)
+     *   3. federation: remote server trusted, and the team allows federation
+     *   4. teams: not itself, not already a member, not a nesting cycle
      *
      * @param string $query    Search term (minimum 2 chars enforced at controller level)
-     * @param int    $limit    Max results per type (default 10)
+     * @param int    $limit    Max people returned; teams are limited separately
      * @param string $teamId   Optional — parent team ID. When provided, 'circle' results
      *                         exclude the team itself, teams already added, and teams
-     *                         that would create a direct circular nesting (A→B→A).
+     *                         that would create a direct circular nesting (A→B→A);
+     *                         and federated results require the team's CFG_FEDERATED.
+     *                         Without it the per-team federation gate cannot be
+     *                         evaluated here and lands in inviteMembers() instead.
      */
     public function searchUsers(string $query, int $limit = 10, string $teamId = ''): array {
 
@@ -3019,96 +3085,147 @@ class MemberService {
         $allowedTypes = $this->getAllowedInviteTypes();
         $results      = [];
 
-        // Local NC users (Circles member type 1).
-        // Use searchDisplayName() + search() — both are DB-backed with LIKE queries
-        // and respect the $limit parameter. Avoids iterating ALL users in PHP.
-        if (in_array('user', $allowedTypes, true)) {
-            $seen = [];
+        // Local users, groups, email addresses and federated (remote) users all
+        // come from Nextcloud's own collaborator autocomplete —
+        // `OCP\Collaboration\Collaborators\ISearch`, the service behind the sharee
+        // OCS endpoint that every share dialog in Nextcloud uses, and the same
+        // source the Contacts app's team member picker reads.
+        //
+        // v4.9.2 — this replaced hand-rolled `IUserManager` / `IGroupManager`
+        // lookups plus a regex that turned any `user@host.tld` string into a
+        // federated invite candidate. Running the real plugins in-process (no
+        // loopback HTTP — SKILLS.md § PHP coding standards) means the picker now
+        // inherits every decision the administrator has already made:
+        //
+        //   UserPlugin    shareapi_allow_share_dialog_user_enumeration
+        //                 shareapi_restrict_user_enumeration_to_group / _to_phone
+        //                 shareapi_restrict_user_enumeration_full_match*
+        //                 shareapi_only_share_with_group_members (+ exclude list)
+        //   GroupPlugin   shareapi_allow_group_sharing
+        //                 IGroup::hideFromCollaboration()
+        //   RemotePlugin  isTrustedServer, via OCA\Federation\TrustedServers
+        //
+        // None of those were honoured before. On an instance that had tightened
+        // user enumeration, TeamHub's member picker was the one surface left that
+        // still enumerated the entire user directory.
+        //
+        // Nextcloud Teams (Circles) registers no collaborator plugin, so team
+        // results are gathered separately below — and have to be, because the
+        // circular-nesting gates there are TeamHub's own and no generic plugin
+        // knows about them.
+        //
+        // getAllowedInviteTypes() still applies on top. It is TeamHub's admin
+        // policy layered over the instance's, never a substitute for it.
+        $shareTypeToInviteType = [
+            \OCP\Share\IShare::TYPE_USER   => 'user',
+            \OCP\Share\IShare::TYPE_GROUP  => 'group',
+            \OCP\Share\IShare::TYPE_EMAIL  => 'email',
+            \OCP\Share\IShare::TYPE_REMOTE => 'federated',
+        ];
 
-            // Search by display name first (most user-friendly matches).
-            $byDisplay = $this->userManager->searchDisplayName($query, $limit + 1);
-            foreach ($byDisplay as $user) {
-                if (count($results) >= $limit) {
-                    break;
-                }
-                if ($user->getUID() === $currentUid) {
-                    continue;
-                }
-                $seen[$user->getUID()] = true;
-                $results[] = [
-                    'id'          => $user->getUID(),
-                    'displayName' => $user->getDisplayName() ?: $user->getUID(),
-                    'type'        => 'user',
-                    'icon'        => 'user',
-                ];
-            }
-
-            // Also search by user ID to catch UIDs that don't match the display name.
-            if (count($results) < $limit) {
-                $byUid = $this->userManager->search($query, $limit + 1);
-                foreach ($byUid as $user) {
-                    if (count($results) >= $limit) {
-                        break;
-                    }
-                    if ($user->getUID() === $currentUid) {
-                        continue;
-                    }
-                    if (isset($seen[$user->getUID()])) {
-                        continue; // already added from display name search
-                    }
-                    $results[] = [
-                        'id'          => $user->getUID(),
-                        'displayName' => $user->getDisplayName() ?: $user->getUID(),
-                        'type'        => 'user',
-                        'icon'        => 'user',
-                    ];
-                }
+        $wantedShareTypes = [];
+        foreach ($shareTypeToInviteType as $shareType => $inviteType) {
+            if (in_array($inviteType, $allowedTypes, true)) {
+                $wantedShareTypes[] = $shareType;
             }
         }
 
-        // NC Groups (Circles member type 2)
-        if (in_array('group', $allowedTypes, true)) {
+        if ($wantedShareTypes !== []) {
+            // Federation is gated twice, the same two gates the Contacts app
+            // applies: the team must carry CFG_FEDERATED, and the remote server
+            // must be trusted by this instance. Both are re-checked in
+            // inviteMembers(), which is the authoritative point — search results
+            // go stale and the endpoint is also called directly.
+            //
+            // With no team in context (the create-team wizard, the CSV importer)
+            // the per-team bit cannot be read, so only the trust gate applies
+            // here and the team gate lands at invite time.
+            $teamFederationKnown  = $teamId !== '';
+            $teamAllowsFederation = $teamFederationKnown && $this->resolveFederationSetting($teamId)['enabled'];
+
             try {
-                $groupManager = $this->container->get(\OCP\IGroupManager::class);
-                $groups = $groupManager->search($query, $limit);
-                foreach ($groups as $group) {
-                    if (count($results) >= $limit * 2) {
-                        break;
+                /** @var \OCP\Collaboration\Collaborators\ISearch $collaboratorSearch */
+                $collaboratorSearch = $this->container->get(\OCP\Collaboration\Collaborators\ISearch::class);
+
+                // $lookup = false — the global lookup server publishes the query
+                // to a third party and is a separate opt-in. Never enable it
+                // implicitly from here.
+                [$searchResult] = $collaboratorSearch->search($query, $wantedShareTypes, false, $limit, 0);
+
+                // ISearch groups results by plugin result type ('users', 'groups',
+                // 'remotes', 'emails') and repeats exact matches under 'exact'.
+                // Exact matches lead; the rest follow in plugin order.
+                $buckets = [];
+                foreach (($searchResult['exact'] ?? []) as $entries) {
+                    if (is_array($entries)) {
+                        $buckets[] = $entries;
                     }
-                    $results[] = [
-                        'id'          => $group->getGID(),
-                        'displayName' => $group->getDisplayName() ?: $group->getGID(),
-                        'type'        => 'group',
-                        'icon'        => 'group',
-                    ];
+                }
+                foreach ($searchResult as $bucketKey => $entries) {
+                    if ($bucketKey !== 'exact' && is_array($entries)) {
+                        $buckets[] = $entries;
+                    }
+                }
+
+                $seen = [];
+                foreach ($buckets as $entries) {
+                    foreach ($entries as $entry) {
+                        if (count($results) >= $limit) {
+                            break 2;
+                        }
+
+                        $value     = $entry['value'] ?? [];
+                        $shareType = $value['shareType'] ?? null;
+                        $shareWith = (string)($value['shareWith'] ?? '');
+
+                        if ($shareWith === '' || !isset($shareTypeToInviteType[$shareType])) {
+                            continue;
+                        }
+                        $inviteType = $shareTypeToInviteType[$shareType];
+
+                        // Never offer the caller themselves.
+                        if ($inviteType === 'user' && $shareWith === $currentUid) {
+                            continue;
+                        }
+
+                        if ($shareType === \OCP\Share\IShare::TYPE_REMOTE) {
+                            // Untrusted server — dropped regardless of team config.
+                            // RemotePlugin resolves this from the federation app's
+                            // trusted-server list; a null TrustedServers (federation
+                            // app disabled) yields false, which is the safe answer.
+                            if (($value['isTrustedServer'] ?? false) !== true) {
+                                continue;
+                            }
+                            // Team is known and does not allow federation.
+                            if ($teamFederationKnown && !$teamAllowsFederation) {
+                                continue;
+                            }
+                        }
+
+                        $dedupeKey = $inviteType . ':' . $shareWith;
+                        if (isset($seen[$dedupeKey])) {
+                            continue;
+                        }
+                        $seen[$dedupeKey] = true;
+
+                        $results[] = [
+                            'id'          => $shareWith,
+                            'displayName' => (string)($entry['label'] ?? $shareWith),
+                            'type'        => $inviteType,
+                            'icon'        => $inviteType === 'federated' ? 'federation' : $inviteType,
+                        ];
+                    }
                 }
             } catch (\Throwable $e) {
-                // GroupManager not available
+                // Collaborator search unavailable — return no people rather than
+                // falling back to an unfiltered directory scan. A silent fallback
+                // would reinstate exactly the enumeration bypass this replaced.
+                // Team results below are unaffected.
+                $this->logger->warning('[TeamHub][MemberService] Collaborator search unavailable', [
+                    'exception' => $e,
+                    'app'       => Application::APP_ID,
+                ]);
             }
-        }
-
-        // Email — if query looks like an email address and email type is allowed
-        if (in_array('email', $allowedTypes, true) && filter_var($query, FILTER_VALIDATE_EMAIL)) {
-            $results[] = [
-                'id'          => $query,
-                'displayName' => $query,
-                'type'        => 'email',
-                'icon'        => 'email',
-            ];
-        }
-
-        // Federated user — if query contains '@' with domain and federated type is allowed
-        // Format: user@remote.example.com
-        if (in_array('federated', $allowedTypes, true)
-            && preg_match('/^[^@]+@[^@]+\.[^@]+$/', $query)
-            && !filter_var($query, FILTER_VALIDATE_EMAIL)
-        ) {
-            $results[] = [
-                'id'          => $query,
-                'displayName' => $query,
-                'type'        => 'federated',
-                'icon'        => 'federation',
-            ];
         }
 
         // TeamHub teams / Circles (user_type=16)
@@ -3237,6 +3354,184 @@ class MemberService {
         $config = $this->container->get(\OCP\IConfig::class);
         $raw    = $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group');
         return array_filter(array_map('trim', explode(',', $raw)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Federation gates (v4.9.2)
+    //
+    // Two independent questions, asked in this order everywhere:
+    //
+    //   1. Does the instance trust this remote server?   isRemoteServerTrusted()
+    //   2. May this team have federated members at all?  resolveFederationSetting()
+    //
+    // The second is itself three-level — instance, then profile, then the team's
+    // own bit — and that precedence lives in resolveFederationSetting() so the
+    // picker, the invite endpoint and the settings screen cannot disagree.
+    //
+    // Both mirror the gates the Contacts app applies to its own team member
+    // picker, so a team behaves the same whichever app you manage it from.
+    // Contacts enforces them in the browser only; TeamHub enforces them in
+    // searchUsers() for the picker AND in inviteMembers() for the API, because
+    // search results go stale and the endpoint is also called directly — the
+    // same reasoning already recorded for the circular-nesting gate.
+    // -------------------------------------------------------------------------
+
+
+    /**
+     * Resolve whether a team may have federated members, and who decided.
+     *
+     * Three levels, in this precedence — decided 2026-09-10:
+     *
+     *   1. **Instance.** The "Allowed invite types" admin setting. If `federated`
+     *      is not in it, no team on this instance may have federated members and
+     *      nothing below can grant it.
+     *   2. **Profile.** A classification that governs `cfg_federated` fixes the
+     *      value for every team it classifies. It can only decide within what
+     *      the instance already allows.
+     *   3. **Team.** Otherwise the team's own CFG_FEDERATED bit, owner-editable,
+     *      off by default.
+     *
+     * Each level can only narrow the one above it, which is why the answer is
+     * computed here rather than assembled by the caller: the search path, the
+     * invite path and the settings screen must not be able to disagree about it.
+     *
+     * `locked` means the team cannot change it — the Manage Team screen greys
+     * the control and shows `lockedBy` as the reason. It is not an enforcement
+     * claim: like the other Circles bits, Contacts and the Teams app can still
+     * write CFG_FEDERATED, which is what the drift reporting is for.
+     *
+     * @return array{enabled: bool, locked: bool, lockedBy: ?string}
+     *         lockedBy is 'instance', 'profile', or null when the team decides.
+     */
+    public function resolveFederationSetting(string $teamId): array {
+        // ── 1. Instance ──────────────────────────────────────────────────────
+        if (!in_array('federated', $this->getAllowedInviteTypes(), true)) {
+            return ['enabled' => false, 'locked' => true, 'lockedBy' => 'instance'];
+        }
+
+        // ── 2. Profile ───────────────────────────────────────────────────────
+        // Resolved through the container rather than the constructor: this is
+        // the only place MemberService needs PolicyService, and injecting it
+        // would put a service that reads teams into the constructor of the
+        // service that writes their members.
+        try {
+            $policyService = $this->container->get(PolicyService::class);
+            $governed      = $policyService->governedForTeam($teamId);
+            if (array_key_exists(PolicyField::CFG_FEDERATED, $governed)) {
+                return [
+                    'enabled'  => (bool)$governed[PolicyField::CFG_FEDERATED],
+                    'locked'   => true,
+                    'lockedBy' => 'profile',
+                ];
+            }
+        } catch (\Throwable $e) {
+            // A profile lookup that fails must not silently grant federation.
+            // Fall through to the team's own bit, which is off by default.
+            $this->logger->warning('[TeamHub][MemberService] Could not read federation policy', [
+                'teamId'    => $teamId,
+                'exception' => $e,
+                'app'       => Application::APP_ID,
+            ]);
+        }
+
+        // ── 3. Team ──────────────────────────────────────────────────────────
+        return [
+            'enabled'  => $this->teamCarriesFederatedBit($teamId),
+            'locked'   => false,
+            'lockedBy' => null,
+        ];
+    }
+
+    /**
+     * Whether the team carries Circles' CFG_FEDERATED bit — the raw stored
+     * value, level 3 of the precedence in resolveFederationSetting().
+     *
+     * Callers deciding whether federation is actually permitted want that
+     * method, not this one: an instance or a profile can forbid federation on a
+     * team whose own bit is set. This answers only "what does the row say".
+     *
+     * The same bit the Contacts app writes from its per-team federation switch.
+     * It joined CirclesConfig::MANAGED_BITS in v4.9.2, so updateTeamConfig()
+     * now writes it; before that TeamHub preserved it verbatim.
+     *
+     * Reads the stored config directly rather than going through the Circles
+     * API: this is called once per member search, and getCircle() hydrates the
+     * whole circle plus its members to answer a single-bit question.
+     *
+     * @param string $teamId Circle unique_id. Caller must have validated it.
+     * @return bool false when the team is unknown — an unknown team allows nothing.
+     */
+    private function teamCarriesFederatedBit(string $teamId): bool {
+        if ($teamId === '') {
+            return false;
+        }
+
+        try {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('config')
+                ->from('circles_circle')
+                ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+
+            if ($row === false) {
+                return false;
+            }
+
+            return ((int)$row['config'] & CirclesConfig::CFG_FEDERATED) !== 0;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] Could not read team federation flag', [
+                'teamId'    => $teamId,
+                'exception' => $e,
+                'app'       => Application::APP_ID,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Whether this instance trusts the server behind a federated cloud ID.
+     *
+     * Delegates to the federation app's trusted-server list — the same source
+     * `OC\Collaboration\Collaborators\RemotePlugin` reads when it stamps
+     * `isTrustedServer` onto autocomplete results. Asking the same authority
+     * twice is deliberate: the picker filters on the plugin's answer, and this
+     * re-asks it at invite time, when the answer is the one that matters.
+     *
+     * Returns false when the federation app is disabled or the address cannot
+     * be parsed. Both mean "no basis to trust it", which is the safe answer.
+     *
+     * @param string $cloudId A federated address, e.g. alice@cloud.example.com
+     */
+    private function isRemoteServerTrusted(string $cloudId): bool {
+        try {
+            if (!$this->appManager->isInstalled('federation')) {
+                return false;
+            }
+
+            $cloudIdManager = $this->container->get(\OCP\Federation\ICloudIdManager::class);
+            if (!$cloudIdManager->isValidCloudId($cloudId)) {
+                return false;
+            }
+
+            $remote = $cloudIdManager->resolveCloudId($cloudId)->getRemote();
+            if ($remote === '') {
+                return false;
+            }
+
+            /** @var \OCA\Federation\TrustedServers $trustedServers */
+            $trustedServers = $this->container->get(\OCA\Federation\TrustedServers::class);
+            return $trustedServers->isTrustedServer($remote);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] Could not verify remote server trust', [
+                'exception' => $e,
+                'app'       => Application::APP_ID,
+            ]);
+            return false;
+        }
     }
 
     /**

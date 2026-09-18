@@ -193,6 +193,7 @@ import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { todayIso, toIsoDate, formatIsoDate } from '../lib/localDate.js'
 import { NcButton, NcLoadingIcon, NcDialog } from '@nextcloud/vue'
 import CheckIcon            from 'vue-material-design-icons/Check.vue'
 import ContentSaveIcon      from 'vue-material-design-icons/ContentSave.vue'
@@ -247,8 +248,7 @@ export default {
         },
         pickerTitle() {
             if (this.picker.mode === 'override' && this.picker.iso) {
-                const [y, m, d] = this.picker.iso.split('-').map(Number)
-                const dateStr = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+                const dateStr = formatIsoDate(this.picker.iso, { weekday: 'short', month: 'short', day: 'numeric' })
                 const half = this.picker.overrideHalf === 0 ? t('teamhub', 'Morning') : t('teamhub', 'Afternoon')
                 return `${dateStr} — ${half}`
             }
@@ -296,14 +296,25 @@ export default {
             this.draft = JSON.parse(JSON.stringify(cells))
         },
 
+        /**
+         * The slot window the panel loads: today through the end of the
+         * fourth month out. Local-calendar dates — `slot_date` is a floating
+         * date, so deriving it through UTC asked for the wrong first day
+         * during the viewer's early hours.
+         *
+         * @return {{from: string, to: string}}
+         */
+        slotWindow() {
+            const end = new Date()
+            end.setMonth(end.getMonth() + 4)
+            end.setDate(0) // last day of the 4th month from now
+            return { from: todayIso(), to: toIsoDate(end) }
+        },
+
         async loadSlots() {
             this.loadingSlots = true
             try {
-                const today = new Date().toISOString().slice(0, 10)
-                const d4 = new Date()
-                d4.setMonth(d4.getMonth() + 4)
-                d4.setDate(0) // last day of 4th month from now
-                const endDate = d4.toISOString().slice(0, 10)
+                const { from: today, to: endDate } = this.slotWindow()
                 const { data } = await axios.get(
                     generateUrl('/apps/teamhub/api/v1/presence/slots'),
                     { params: { from: today, to: endDate } },
@@ -325,11 +336,7 @@ export default {
             try {
                 await axios.post(generateUrl('/apps/teamhub/api/v1/presence/slots/materialise'))
                 // Reload slots after materialisation.
-                const today = new Date().toISOString().slice(0, 10)
-                const d4 = new Date()
-                d4.setMonth(d4.getMonth() + 4)
-                d4.setDate(0)
-                const endDate = d4.toISOString().slice(0, 10)
+                const { from: today, to: endDate } = this.slotWindow()
                 const { data } = await axios.get(
                     generateUrl('/apps/teamhub/api/v1/presence/slots'),
                     { params: { from: today, to: endDate } },

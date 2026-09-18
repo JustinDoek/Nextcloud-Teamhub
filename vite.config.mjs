@@ -9,9 +9,10 @@ import { defineConfig } from 'vite'
  * So ESM output works fine — we just need .mjs file extensions.
  *
  * Util::addScript references must match WITHOUT the extension:
- *   Util::addScript('teamhub', 'teamhub')  → js/teamhub.mjs
- *   Util::addScript('teamhub', 'admin')    → js/admin.mjs
- *   Util::addScript('teamhub', 'personal') → js/personal.mjs
+ *   Util::addScript('teamhub', 'teamhub')      → js/teamhub.mjs
+ *   Util::addScript('teamhub', 'admin')        → js/admin.mjs
+ *   Util::addScript('teamhub', 'personal')     → js/personal.mjs
+ *   Util::addScript('teamhub', 'filesactions') → js/filesactions.mjs
  *
  * ── CSS DELIVERY (the 3.53 fix) ───────────────────────────────────────────
  * The old Vue 2 / webpack build used `vue-style-loader`, which injected all
@@ -48,6 +49,13 @@ import { defineConfig } from 'vite'
  *   css/vite-teamhub.chunk.css + css/vite-index.chunk.css ← templates/main.php
  *   css/vite-admin.chunk.css   + css/vite-index.chunk.css ← templates/admin.php
  *   css/vite-personal.chunk.css+ css/vite-index.chunk.css ← templates/personal.php
+ *   css/vite-filesactions.chunk.css + css/vite-index.chunk.css
+ *                                           ← FilesScriptsListener (v4.8.18)
+ *
+ * The fourth entry is the only one with no template of its own: it runs inside
+ * the **Files app's** page, so its two Util::addStyle calls live in
+ * `lib/Listener/FilesScriptsListener.php` instead. Same rule, different door —
+ * an entry whose CSS nobody loads is exactly the 3.55.2 bug above.
  *
  * vite-config's css-entry-points-plugin splits each entry into a small @import
  * stub plus chunk files; we load the .chunk.css files directly (the @import stub
@@ -59,6 +67,9 @@ export default createAppConfig(
 		teamhub: 'src/main.js',
 		admin: 'src/admin.js',
 		personal: 'src/personal.js',
+		// v4.8.18 — the "Request review" file action, loaded into the Files
+		// app rather than into a TeamHub page.
+		filesactions: 'src/filesactions.js',
 	},
 	{
 		// Extract CSS to files (vite-config default — inlineCSS removed). Each

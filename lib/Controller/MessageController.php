@@ -318,6 +318,13 @@ class MessageController extends Controller {
             // v4.5.29 — decisions get their own Show row, and only open ones
             // are listed. See MessageService::applyDecisionFilter().
             'includeDecisions' => $this->parseBoolParam('includeDecisions', true),
+            // v4.9.7 — OpenProject news: its own Show row and a list of
+            // OpenProject project ids (digits only; anything else dropped).
+            'includeOpenProject' => $this->parseBoolParam('includeOpenProject', true),
+            'projectIds'         => array_values(array_filter(
+                $this->parseListParam('projectIds', null, 50),
+                static fn (string $id): bool => ctype_digit($id) && (int)$id > 0,
+            )),
         ];
     }
 

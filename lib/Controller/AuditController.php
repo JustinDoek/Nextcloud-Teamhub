@@ -285,7 +285,8 @@ class AuditController extends Controller {
 
             $zip = new \ZipArchive();
             if ($zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-                @unlink($tmpFile);
+                // $tmpFile is tempnam()'s own path (above), never request data.
+                @unlink($tmpFile); // nosemgrep: php.lang.security.unlink-use.unlink-use
                 return new JSONResponse(['error' => 'Could not open zip for writing'], Http::STATUS_INTERNAL_SERVER_ERROR);
             }
 
@@ -296,7 +297,8 @@ class AuditController extends Controller {
             $zip->close();
 
             $bytes = file_get_contents($tmpFile);
-            @unlink($tmpFile);
+            // Same tempnam() path as above.
+            @unlink($tmpFile); // nosemgrep: php.lang.security.unlink-use.unlink-use
 
             if ($bytes === false) {
                 return new JSONResponse(['error' => 'Could not read zip file'], Http::STATUS_INTERNAL_SERVER_ERROR);

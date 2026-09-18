@@ -63,7 +63,9 @@ class MyWorkController extends Controller {
      *   search           — free text
      *   dueFrom, dueTo   — Unix seconds
      *   includeSnoozed   — 1/0
-     *   groupBy          — category | date | team | resource_type
+     *   groupBy          — category | date | team | resource_type | project (v4.9.7)
+     *   projectIds, workTypes — (v4.9.7) narrow to items whose metadata names
+     *                    one of these OpenProject projects / work-package types
      *   sortBy           — deadline | priority | team | recent (within a group)
      *   limit            — 1..200, default 50
      *   offset           — ≥0
@@ -88,6 +90,10 @@ class MyWorkController extends Controller {
                 'priorities'     => $this->request->getParam('priorities', []),
                 'statuses'       => $this->request->getParam('statuses', []),
                 'teamIds'        => $this->request->getParam('teamIds', []),
+                // v4.9.7 — source-specific narrowing (OpenProject project,
+                // work-package type); MyWorkService bounds and applies them.
+                'projectIds'     => $this->request->getParam('projectIds', []),
+                'workTypes'      => $this->request->getParam('workTypes', []),
                 'search'         => (string)$this->request->getParam('search', ''),
                 'dueFrom'        => $this->intOrNull($this->request->getParam('dueFrom')),
                 'dueTo'          => $this->intOrNull($this->request->getParam('dueTo')),
@@ -143,11 +149,16 @@ class MyWorkController extends Controller {
      * GET /api/v1/mywork/providers
      *
      * Provider descriptors for the filter chips: id, translated name, icon
-     * key, capabilities, and whether each is currently usable.
+     * key, capabilities, whether each is currently usable, and (v4.9.17) its
+     * source group — `files`, `teams`, `administration` or null for a
+     * provider that is its own tab.
      *
      * Member-callable on purpose — the filter bar needs it — so it carries no
      * administrative detail beyond availability. The last-error message is
-     * admin-only and lives on the admin endpoint instead.
+     * admin-only and lives on the admin endpoint instead. Since v4.9.17 the
+     * list is the **viewer's**: the instance-scoped providers (the
+     * Administration group) are left out for anybody who is not a Nextcloud
+     * administrator, so that tab is hidden rather than shown at zero.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
@@ -167,7 +178,7 @@ class MyWorkController extends Controller {
                 // instance's last sync time or its error strings.
                 unset($p['lastSyncAt'], $p['lastErrorAt'], $p['lastError'], $p['configSchema'], $p['diagnostics']);
                 return $p;
-            }, $this->myWorkService->describeProviders());
+            }, $this->myWorkService->describeProvidersForViewer($uid));
 
             return new JSONResponse(['providers' => $providers]);
         } catch (\Throwable $e) {

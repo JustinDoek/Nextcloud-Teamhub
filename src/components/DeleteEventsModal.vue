@@ -110,6 +110,7 @@
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatTime as fmtTime, formatIsoDate, toIsoDate, zonedIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
@@ -150,7 +151,8 @@ export default {
         weekLabel() {
             const end = new Date(this.weekStart)
             end.setDate(end.getDate() + 6)
-            const fmt = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+            // Calendar positions built by local arithmetic — floating path.
+            const fmt = (d) => formatIsoDate(toIsoDate(d), { day: 'numeric', month: 'short', year: 'numeric' })
             return `${fmt(this.weekStart)} – ${fmt(end)}`
         },
 
@@ -158,10 +160,14 @@ export default {
         groupedByDay() {
             const buckets = {}
             for (const ev of this.events) {
-                const d = new Date(ev.start)
-                const key = d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+                // Sort on the ISO day, not on the rendered label. The previous
+                // sortKey was `toDateString()` — "Mon Aug 11 2026" — so the
+                // comparison ran on the weekday name and ordered the buckets
+                // Fri, Mon, Sat, Sun, Thu… rather than chronologically.
+                const iso = this.eventIsoDay(ev.start)
+                const key = formatIsoDate(iso, { weekday: 'long', day: 'numeric', month: 'long' })
                 if (!buckets[key]) {
-                    buckets[key] = { label: key, sortKey: d.toDateString(), events: [] }
+                    buckets[key] = { label: key, sortKey: iso, events: [] }
                 }
                 buckets[key].events.push(ev)
             }
@@ -275,8 +281,20 @@ export default {
             }
         },
 
+        /**
+         * The calendar day an event sits on. CalendarService sends a bare
+         * `Y-m-d` for an all-day event and `format('c')` for a timed one, so
+         * the shape of the value says which it is — a bare date is already
+         * the answer, and reading it through a zone would move it to the
+         * previous day west of Greenwich.
+         */
+        eventIsoDay(start) {
+            const s = String(start || '')
+            return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : zonedIsoDate(s)
+        },
+
         formatTime(start, end) {
-            const fmt = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+            const fmt = (iso) => fmtTime(iso, { hour: '2-digit', minute: '2-digit' })
             if (!start) return ''
             if (!end)   return fmt(start)
             return `${fmt(start)} – ${fmt(end)}`

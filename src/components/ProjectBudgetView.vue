@@ -416,6 +416,7 @@ import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatEpochDate, epochDateToIso } from '../lib/localDate.js'
 import { mapState, mapGetters, mapMutations } from 'vuex'
 
 import {
@@ -788,15 +789,13 @@ export default {
             }
         },
 
+        // incurredAt is a floating date stored at UTC midnight (see the
+        // Date.parse(iso + 'T00:00:00Z') on save), so it is read back with UTC
+        // getters. Formatting it in the viewer's zone moved the expense to the
+        // previous day for anyone west of Greenwich.
         formatDate(unixTs) {
             if (!unixTs) return t('teamhub', '—')
-            try {
-                return new Intl.DateTimeFormat(undefined, {
-                    year: 'numeric', month: 'short', day: 'numeric',
-                }).format(new Date(unixTs * 1000))
-            } catch (_) {
-                return ''
-            }
+            return formatEpochDate(unixTs)
         },
 
         // ── Expense modal ────────────────────────────────────────────
@@ -832,9 +831,9 @@ export default {
                 description: expense.description,
                 projected: expense.projectedMinor / 100,
                 real: expense.realMinor !== null ? expense.realMinor / 100 : null,
-                incurredAt: expense.incurredAt
-                    ? new Date(expense.incurredAt * 1000).toISOString().slice(0, 10)
-                    : '',
+                // UTC round trip on purpose — incurredAt is a floating date
+                // stored at UTC midnight, not an instant.
+                incurredAt: expense.incurredAt ? epochDateToIso(expense.incurredAt) : '',
             }
             this.formError = ''
             this.expenseModalOpen = true

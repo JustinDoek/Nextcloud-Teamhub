@@ -27,7 +27,7 @@
                         <NcAvatar
                             v-if="item.user"
                             :user="item.user"
-                            :display-name="item.user"
+                            :display-name="item.displayName || item.user"
                             :size="20"
                             :show-user-status="false"
                             :disable-menu="true"
@@ -45,7 +45,8 @@
                             :href="item.link"
                             target="_blank"
                             rel="noopener"
-                            class="activity-widget__link">
+                            class="activity-widget__link"
+                            @click="onItemOpen">
                             <OpenInNew :size="11" />
                         </a>
                     </div>
@@ -77,7 +78,9 @@
 <script>
 import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
+import { formatDate, formatDateTime } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
+import { handleInternalLinkClick } from '../lib/internalLinks.js'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcAvatar, NcButton } from '@nextcloud/vue'
 
@@ -199,6 +202,16 @@ export default {
     methods: {
         t,
 
+        /**
+         * Keep an activity's link in TeamHub when it points at something one of
+         * our tabs owns — a file, a Deck card, a calendar event, a wiki page
+         * (v4.5.11). Anything else, and anything the team has no tab for, falls
+         * through to the original link untouched.
+         */
+        onItemOpen(event) {
+            handleInternalLinkClick(event, this.$store)
+        },
+
         async load() {
             if (!this.currentTeamId) return
             this.loading = true
@@ -231,7 +244,9 @@ export default {
          */
         formatSubject(item) {
             const s = item.subject || ''
-            const user = item.user || ''
+            // Prefer server-resolved display name; fall back to uid so a
+            // deleted user still shows something rather than a blank line.
+            const user = item.displayName || item.user || ''
             const file = item.file ? item.file.split('/').pop() : (item.object_id || '')
             const detail = s.replace(/_/g, ' ')
             // TRANSLATORS: fallback activity line, e.g. "alice · card moved". {user} is a name, {detail} is a machine-generated description.
@@ -363,11 +378,11 @@ export default {
             if (diff < 3600) return t('teamhub', '{n}m ago', { n: Math.floor(diff / 60) })
             if (diff < 86400)return t('teamhub', '{n}h ago', { n: Math.floor(diff / 3600) })
             if (diff < 604800) return t('teamhub', '{n}d ago', { n: Math.floor(diff / 86400) })
-            return new Date(datetime).toLocaleDateString()
+            return formatDate(datetime)
         },
 
         formatAbsoluteTime(datetime) {
-            return new Date(datetime).toLocaleString()
+            return formatDateTime(datetime)
         },
     },
 }

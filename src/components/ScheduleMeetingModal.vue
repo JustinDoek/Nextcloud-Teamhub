@@ -93,7 +93,9 @@ export default {
     components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, VideoIcon, CalendarPlus },
     props: {
         teamId:        { type: String, required: true },
-        calendarToken: { type: String, default: null },  // public_token for the team calendar
+        // v4.6.20 — `calendarToken` removed. It carried the calendar's public
+        // share token and no caller ever passed it; the tokens themselves are
+        // gone as of this version.
     },
     emits: ['close'],
     data() {

@@ -1069,7 +1069,9 @@ class ArchiveService {
 
             // ── 14a. Move ZIP into NC Files ────────────────────────────────────
             $ncPath = $this->writeZipToNcFiles($archiveFolder, $filename, $tmpZip, $archiveDisplayPath);
-            @unlink($tmpZip);
+            // $tmpZip: sys_get_temp_dir() + slugify()'d team name (letters,
+            // digits, '-') + a formatted date — no user-controlled separator.
+            @unlink($tmpZip); // nosemgrep: php.lang.security.unlink-use.unlink-use
 
             // Get actual size from the written NC Files node.
             $archiveBytes = 0;
