@@ -30,7 +30,8 @@
 			<dl class="svc-stats-w__figures">
 				<div v-for="figure in figures" :key="figure.key" class="svc-stats-w__figure">
 					<dt class="svc-stats-w__label">{{ figure.label }}</dt>
-					<!-- The number sits behind its label, in the same inverted
+					<!-- v4.11.2 — the number sits under its label, both centred
+					     in the tile (Justin, 2026-09-29). It keeps the inverted
 					     bubble the queue widget's tabs use; a duration is a
 					     phrase, not a count, and stays plain text. -->
 					<dd class="svc-stats-w__value">
@@ -235,24 +236,33 @@ export default {
 	margin: 0;
 }
 
-/* Label and number on one line, the number right behind the label (Justin,
-   2026-09-24) — the same reading as the queue widget's tabs. */
+/* v4.11.2 — a stat tile: the label, then its figure, both centred on the
+   tile's axis (Justin, 2026-09-29). Until now the two sat on one line and
+   wrapped wherever the label ran out of room, so no two tiles in a row began
+   at the same place. Centring both makes the column of figures read down the
+   grid. */
 .svc-stats-w__figure {
 	display: flex;
-	flex-wrap: wrap;
+	flex-direction: column;
 	align-items: center;
-	gap: var(--th-space-xs, 4px) var(--th-space-sm, 8px);
-	padding: var(--th-space-sm, 8px);
+	justify-content: center;
+	gap: var(--th-space-sm, 8px);
+	padding: var(--th-space-md, 12px) var(--th-space-sm, 8px);
 	border-radius: var(--th-radius-control, var(--border-radius-element));
 	background: var(--color-background-hover);
+	text-align: center;
 }
 
+/* The label carries the tile, so it is set in the same weight as a section
+   heading rather than as supporting text. */
 .svc-stats-w__label {
 	font-size: var(--th-font-meta, 13px);
+	font-weight: var(--th-font-weight-semibold, 600);
 }
 
 .svc-stats-w__value {
-	display: inline-flex;
+	display: flex;
+	justify-content: center;
 	margin: 0;
 }
 

@@ -44,6 +44,7 @@
 					     opens the request; it should read as a title. -->
 					<NcButton
 						variant="tertiary"
+						size="small"
 						class="svc-queue-w__title"
 						:aria-label="t('teamhub', 'Open details of {title}', { title: request.title })"
 						@click="openRequest(request)">
@@ -567,6 +568,13 @@ export default {
 }
 
 .svc-queue-w__row {
+	/* v4.11.2 — where the title's text actually starts. NcButton indents a
+	   text-only label by its own inline padding (a grid baseline plus the
+	   element radius) and the label adds another baseline on top. Every line
+	   under the title starts on that same vertical; a fixed 8px left the task
+	   line hanging to the left of its own title (Justin, 2026-09-29). */
+	--svc-row-indent: calc(2 * var(--default-grid-baseline) + var(--border-radius-element));
+
 	display: flex;
 	align-items: flex-start;
 	gap: var(--th-space-xs, 4px);
@@ -586,6 +594,9 @@ export default {
 	gap: var(--th-space-xs, 4px);
 }
 
+/* v4.11.2 — `size="small"` rather than a min-height override: a full-height
+   button put a 44px control's worth of air between a one-line title and the
+   task line below it. The row is the click target's real size. */
 .svc-queue-w__title {
 	max-width: 100%;
 	font-weight: var(--th-widget-row-primary-weight, 500);
@@ -616,7 +627,7 @@ export default {
 	}
 
 	.svc-queue-w__actions {
-		padding-inline-start: var(--th-space-sm, 8px);
+		padding-inline-start: var(--svc-row-indent);
 	}
 }
 
@@ -624,7 +635,7 @@ export default {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0 var(--th-space-sm, 8px);
-	padding-inline-start: var(--th-space-sm, 8px);
+	padding-inline-start: var(--svc-row-indent);
 	color: var(--th-widget-meta-color, var(--color-text-maxcontrast));
 	font-size: var(--th-font-meta, 13px);
 }
@@ -633,7 +644,7 @@ export default {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--th-space-xs, 4px);
-	padding-inline-start: var(--th-space-sm, 8px);
+	padding-inline-start: var(--svc-row-indent);
 
 	&:empty {
 		display: none;
