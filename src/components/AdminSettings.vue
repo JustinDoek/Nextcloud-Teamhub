@@ -375,18 +375,6 @@
                 </NcNoteCard>
             </NcSettingsSection>
 
-            <!-- v4.10.50 — teams made outside TeamHub (DESIGN §2.149). The
-                 same grid is a widget on the team that holds the Nextcloud
-                 services; notifications and requests link to #team-adoption.
-                 `v-if` so it fetches only while this tab is open. -->
-            <div id="team-adoption">
-                <NcSettingsSection
-                    :name="t('teamhub', 'Teams made outside TeamHub')"
-                    :description="t('teamhub', 'Teams made in Contacts, on the Teams page or by a provisioning tool are not in TeamHub until they are accepted here, with a template and a policy. Without a team creator group they are accepted by themselves; when a team holds the Nextcloud services, its members decide too.')">
-                    <TeamAdoptionGrid v-if="activeTab === 'creation'" />
-                </NcSettingsSection>
-            </div>
-
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
@@ -414,6 +402,21 @@
             id="tab-panel-importexport"
             role="tabpanel"
             class="teamhub-admin-panel">
+
+            <!-- v4.10.50 — teams made outside TeamHub (DESIGN §2.149). The
+                 same grid is a widget on the team that holds the Nextcloud
+                 services; notifications and requests link to #team-adoption.
+                 `v-if` so it fetches only while this tab is open.
+                 Moved from the foot of Team creation to the top of this tab
+                 (Justin, 2026-09-29): accepting a team made elsewhere is
+                 bringing teams in, which is what this tab is for. -->
+            <div id="team-adoption">
+                <NcSettingsSection
+                    :name="t('teamhub', 'Teams made outside TeamHub')"
+                    :description="t('teamhub', 'Teams made in Contacts, on the Teams page or by a provisioning tool are not in TeamHub until they are accepted here, with a template and a policy. Without a team creator group they are accepted by themselves; when a team holds the Nextcloud services, its members decide too.')">
+                    <TeamAdoptionGrid v-if="activeTab === 'importexport'" />
+                </NcSettingsSection>
+            </div>
 
             <NcSettingsSection
                 :name="t('teamhub', 'Bulk team import')"
@@ -4662,7 +4665,7 @@ export default {
         // v4.10.50 — a link to the adoption grid (a notification, a request
         // in My Work) lands on its tab and scrolls to it.
         if (window.location.hash === '#team-adoption') {
-            this.activeTab = 'creation'
+            this.activeTab = 'importexport'
             this.$nextTick(() => {
                 document.getElementById('team-adoption')?.scrollIntoView({ block: 'start' })
             })

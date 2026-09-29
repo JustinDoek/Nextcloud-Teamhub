@@ -4678,7 +4678,7 @@ OC.L10N.register(
     "You cannot decide which teams join TeamHub." : "Vous ne pouvez pas décider quelles équipes rejoignent TeamHub.",
     "{team} was made outside TeamHub" : "{team} a été créée hors de TeamHub",
     "%s was made outside TeamHub" : "%s a été créée hors de TeamHub",
-    "Accept it with a template and a policy, or decline it, in Admin → TeamHub → Team creation." : "Acceptez-la avec un modèle et une politique, ou refusez-la, dans Administration → TeamHub → Création d'équipe.",
+    "Accept it with a template and a policy, or decline it, in Admin → TeamHub → Import/Export." : "Acceptez-la avec un modèle et une politique, ou refusez-la, dans Administration → TeamHub → Import/Export.",
     "{team} is now in TeamHub" : "{team} est maintenant dans TeamHub",
     "%s is now in TeamHub" : "%s est maintenant dans TeamHub",
     "{team} was not added to TeamHub" : "{team} n'a pas été ajoutée à TeamHub",

@@ -5098,7 +5098,7 @@
         "You cannot decide which teams join TeamHub.": "Du kan ikke beslutte, hvilke teams der kommer med i TeamHub.",
         "{team} was made outside TeamHub": "{team} blev oprettet uden for TeamHub",
         "%s was made outside TeamHub": "%s blev oprettet uden for TeamHub",
-        "Accept it with a template and a policy, or decline it, in Admin → TeamHub → Team creation.": "Accepter det med en skabelon og en politik, eller afvis det, i Administration → TeamHub → Teamoprettelse.",
+        "Accept it with a template and a policy, or decline it, in Admin → TeamHub → Import/Export.": "Accepter det med en skabelon og en politik, eller afvis det, i Administration → TeamHub → Import/eksport.",
         "{team} is now in TeamHub": "{team} er nu i TeamHub",
         "%s is now in TeamHub": "%s er nu i TeamHub",
         "{team} was not added to TeamHub": "{team} blev ikke føjet til TeamHub",

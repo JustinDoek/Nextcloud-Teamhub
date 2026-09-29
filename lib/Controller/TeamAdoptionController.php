@@ -17,7 +17,7 @@ use Psr\Log\LoggerInterface;
 /**
  * The grid of teams made outside TeamHub (v4.10.50, DESIGN §2.149).
  *
- * One grid, two homes: Admin → TeamHub (Team creation) and a widget on the
+ * One grid, two homes: Admin → TeamHub (Import/Export) and a widget on the
  * team that holds the Nextcloud services. So every route is
  * `#[NoAdminRequired]` and the service decides who may use it —
  * `TeamAdoptionDecisionService::mayDecide()`: a Nextcloud administrator, or

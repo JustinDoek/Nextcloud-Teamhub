@@ -527,7 +527,7 @@ class Notifier implements INotifier {
                         // TRANSLATORS: notification to Nextcloud administrators; {team} is a team somebody made outside TeamHub
                         $notification->setRichSubject($l->t('{team} was made outside TeamHub'), ['team' => $team]);
                         $notification->setParsedSubject($l->t('%s was made outside TeamHub', [$teamName]));
-                        $notification->setParsedMessage($l->t('Accept it with a template and a policy, or decline it, in Admin → TeamHub → Team creation.'));
+                        $notification->setParsedMessage($l->t('Accept it with a template and a policy, or decline it, in Admin → TeamHub → Import/Export.'));
                         try {
                             $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
                                 'settings.AdminSettings.index',

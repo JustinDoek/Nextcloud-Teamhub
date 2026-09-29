@@ -1,6 +1,7 @@
 <template>
 	<!-- v4.10.50 — the grid of teams made outside TeamHub (DESIGN §2.149).
-	     One component, two homes: Admin → TeamHub → Team creation, and a
+	     One component, two homes: Admin → TeamHub → Import/Export (top of
+	     the tab since 2026-09-29; was the foot of Team creation), and a
 	     widget on the team that holds the Nextcloud services. The requests
 	     in a service queue or in My Work link here, because this is where a
 	     template and a policy are chosen per team before accepting. -->
@@ -80,7 +81,11 @@
 								<span v-if="row.claimedByOther" class="team-adoption__meta">
 									{{ t('teamhub', 'Handled by {name}', { name: row.claimedByName || row.claimedBy }) }}
 								</span>
-								<template v-else>
+								<!-- One row, one weight (Justin, 2026-09-29): the two
+								     answers are equal choices, so neither looks like
+								     the default. NcButton is display: flex, so the
+								     wrapper is what keeps them side by side. -->
+								<div v-else class="team-adoption__buttons">
 									<NcButton
 										variant="secondary"
 										:disabled="busyId === row.id"
@@ -88,12 +93,12 @@
 										{{ t('teamhub', 'Accept') }}
 									</NcButton>
 									<NcButton
-										variant="tertiary"
+										variant="secondary"
 										:disabled="busyId === row.id"
 										@click="askDecline(row)">
 										{{ t('teamhub', 'Decline') }}
 									</NcButton>
-								</template>
+								</div>
 							</td>
 						</tr>
 					</tbody>
@@ -390,7 +395,9 @@ export default {
 }
 
 /* The grid is a rounded card (Justin, 2026-09-26): NC's container radius,
-   and the table scrolls inside it rather than stretching the page. */
+   and the table scrolls inside it rather than stretching the page. The
+   scroll is the narrow-screen fallback only: at admin-page widths the
+   columns fit (see .team-adoption__pick). */
 .team-adoption__table-wrap {
 	overflow-x: auto;
 	border: 1px solid var(--color-border);
@@ -425,16 +432,28 @@ export default {
 	font-weight: var(--th-font-weight-semibold);
 }
 
+/* NcSelect carries its own `min-width: 260px`; two of them per row pushed
+   the table past the page and gave it a horizontal scrollbar (Justin,
+   2026-09-29). The drop-downs take the column's width instead, 144px at
+   least — enough for a template or policy name. */
 .team-adoption__pick {
-	min-width: calc(40 * var(--default-grid-baseline));
+	min-width: calc(36 * var(--default-grid-baseline));
+
+	:deep(.v-select.select) {
+		width: 100%;
+		min-width: calc(36 * var(--default-grid-baseline));
+	}
 }
 
 .team-adoption__actions {
 	white-space: nowrap;
+}
 
-	> * + * {
-		margin-inline-start: var(--th-space-xs);
-	}
+.team-adoption__buttons {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: center;
+	gap: var(--th-space-xs);
 }
 
 .team-adoption__meta {
@@ -464,6 +483,10 @@ export default {
 
 .team-adoption--compact .team-adoption__pick {
 	min-width: calc(32 * var(--default-grid-baseline));
+
+	:deep(.v-select.select) {
+		min-width: calc(32 * var(--default-grid-baseline));
+	}
 }
 
 .team-adoption__sr {

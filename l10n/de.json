@@ -5098,7 +5098,7 @@
         "You cannot decide which teams join TeamHub.": "Sie können nicht entscheiden, welche Teams zu TeamHub kommen.",
         "{team} was made outside TeamHub": "{team} wurde außerhalb von TeamHub erstellt",
         "%s was made outside TeamHub": "%s wurde außerhalb von TeamHub erstellt",
-        "Accept it with a template and a policy, or decline it, in Admin → TeamHub → Team creation.": "Nehmen Sie es mit einer Vorlage und einer Richtlinie an oder lehnen Sie es ab, unter Verwaltung → TeamHub → Teamerstellung.",
+        "Accept it with a template and a policy, or decline it, in Admin → TeamHub → Import/Export.": "Nehmen Sie es mit einer Vorlage und einer Richtlinie an oder lehnen Sie es ab, unter Verwaltung → TeamHub → Import/Export.",
         "{team} is now in TeamHub": "{team} ist jetzt in TeamHub",
         "%s is now in TeamHub": "%s ist jetzt in TeamHub",
         "{team} was not added to TeamHub": "{team} wurde nicht zu TeamHub hinzugefügt",
