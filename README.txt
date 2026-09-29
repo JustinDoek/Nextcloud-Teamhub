@@ -1,5 +1,5 @@
-TeamHub — full app description
-==============================
+TeamHub: full app description
+=============================
 
 This is the long-form version of the Nextcloud App Store listing for TeamHub.
 The listing itself carries only the headlines; everything below is the detail
@@ -18,7 +18,7 @@ Your users are asking for Microsoft Teams. Your auditor is asking who approved
 what, and where it is stored. TeamHub answers both from the Nextcloud you
 already run.
 
-A Nextcloud Team on its own is a membership list — a group you can share a
+A Nextcloud Team on its own is a membership list: a group you can share a
 folder or a calendar with. TeamHub turns that list into a governed workspace.
 Every team gets one page carrying a persistent message stream, decisions,
 presence, an activity timeline and projects, sitting next to the Talk
@@ -30,8 +30,8 @@ cards, Talk for conversations, Files for documents. TeamHub reads across them,
 writes your actions back to them, and records what happened.
 
 
-Control — workspaces come out the way you decided
--------------------------------------------------
+Control: workspaces come out the way you decided
+------------------------------------------------
 
 Templates and policy profiles
     A team is created from a template that fixes its apps and modules, and
@@ -41,7 +41,7 @@ Templates and policy profiles
 No side doors into the estate
     A team created in Contacts, Collectives or `occ` is not a TeamHub team and
     is not shown in TeamHub. A team created in TeamHub cannot be deleted from
-    Nextcloud's own Teams page — the same mechanism Collectives uses.
+    Nextcloud's own Teams page, the same mechanism Collectives uses.
 
 Gates are server-side, not UI-side
     Every controller method carries its own membership and role check.
@@ -73,13 +73,13 @@ Restricted means hidden
     is no greyed-out button to probe.
 
 
-Evidence — what you can hand an auditor
----------------------------------------
+Evidence: what you can hand an auditor
+--------------------------------------
 
 Per-team audit log
     Membership, file, share, resource and configuration events, with actor,
     timestamp and before/after values. The service exposes append and bulk
-    purge only — no code path updates or deletes an individual row, so a
+    purge only: no code path updates or deletes an individual row, so a
     record cannot be silently rewritten before its retention window expires.
     Retention is yours to set between 7 and 3650 days, defaulting to 90. Any
     team exports as a ZIP of JSON.
@@ -107,7 +107,7 @@ ISO/IEC 27001:2022 control report
         A.8.16  Monitoring activities
 
     The report also prints the controls nothing currently evidences. This is
-    input for your Statement of Applicability — it is not a certification, and
+    input for your Statement of Applicability. It is not a certification, and
     it does not claim to be one. A gap you can read beats a green tick you
     cannot check.
 
@@ -142,11 +142,11 @@ Pseudonymised exports
     archive. We call that pseudonymisation rather than anonymisation, on
     purpose: free text such as message bodies and descriptions is not
     scrubbed, organisational structure is retained, and the result therefore
-    remains personal data under the GDPR — with reduced linkability, not none.
+    remains personal data under the GDPR, with reduced linkability, not none.
 
 
-Residency — nothing leaves your server
---------------------------------------
+Residency: nothing leaves your server
+-------------------------------------
 
 TeamHub runs entirely inside your own Nextcloud. There is no hosted version,
 no external service, no callback to us and no sub-processor to add to your
@@ -167,7 +167,7 @@ An unlicensed Community instance sends one daily aggregate containing:
 
 It contains no account IDs, no message bodies, no file names, no file
 contents, no instance URL and no hostname of your server. Custom link URLs are
-reduced to their bare hostname before aggregation — no paths, query strings,
+reduced to their bare hostname before aggregation: no paths, query strings,
 ports, fragments or IP addresses. The complete payload is written to your own
 log at DEBUG level, so you can read exactly what was sent rather than take
 this paragraph on trust.
@@ -230,7 +230,7 @@ For developers
 
 Other Nextcloud apps register their own sidebar widgets or sandboxed iframe
 tabs into a team's home. Registration resolves through Nextcloud's DI
-container and is called in-process — no HTTP round trip, and no call back into
+container and is called in-process: no HTTP round trip, and no call back into
 the same instance over HTTP anywhere in the app.
 
     $teamHub->registerIntegration(
@@ -256,8 +256,8 @@ Requirements
     Required     The Teams (Circles) app, enabled
 
 Database tables are created automatically on first enable. TeamHub ships in
-six languages besides English — Dutch, German, French, Danish, Spanish and
-Italian — and backend notifications and emails are sent in each recipient's
+six languages besides English (Dutch, German, French, Danish, Spanish and
+Italian), and backend notifications and emails are sent in each recipient's
 own language rather than the sender's.
 
 
@@ -270,7 +270,7 @@ anonymous daily aggregate described under Residency above.
 
 A production licence:
 
-    - unlocks the gated modules — the personal layer, Advanced Projects, bulk
+    - unlocks the gated modules: the personal layer, Advanced Projects, bulk
       creation and export, file reviews, OpenProject and Services
     - unlocks the compliance centre
     - turns the app quiet: no feedback prompts, no branding, no telemetry

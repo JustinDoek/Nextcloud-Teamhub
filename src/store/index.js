@@ -1110,7 +1110,7 @@ export default createStore({
                     // Leave the legacy picture in place and try again next
                     // load. It still renders either way — the migration only
                     // decides which app stores it.
-                    console.error('[TeamHub][store] migrateTeamAvatars failed for ' + team.id, e)
+                    console.error('[TeamHub][store] migrateTeamAvatars failed for team:', team.id, e)
                 }
             }))
         },
