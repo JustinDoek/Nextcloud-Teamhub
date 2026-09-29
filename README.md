@@ -5,7 +5,7 @@
 <h1 align="center">TeamHub</h1>
 
 <p align="center">
-  A team collaboration hub for Nextcloud: a shared home for every Nextcloud Team (Circle), with messaging, widgets, an activity feed, and an open integration layer for other apps.
+  A self-hosted team workspace for Nextcloud, and an open-source alternative to Microsoft Teams. Every Nextcloud Team gets one page to work on: messages, decisions, presence, projects and internal services.
 </p>
 
 <p align="center">
@@ -22,9 +22,31 @@
 
 ## What is TeamHub?
 
-Nextcloud's built-in Dashboard is personal. It's about *you*. TeamHub is the team-scoped equivalent. Every team created in TeamHub is a Nextcloud Team (Circle) with its own home: a message stream, a widget-driven overview, and quick access to the apps that team actually uses (Talk, Files, Calendar, Deck), all in one place.
+TeamHub is a self-hosted team workspace for Nextcloud, an open-source alternative to Microsoft Teams that runs inside the Nextcloud you already have. A Nextcloud Team on its own is a membership list: a group you can share a folder or a calendar with. TeamHub turns that list into somewhere to work. Every team gets one page carrying a message stream, decisions, presence, an activity timeline, projects and internal services, beside the Talk conversation, team space, Calendar, Collective and Deck board that team already uses.
 
-It started as a visual mock-up to discuss what team-based working could look like inside Nextcloud, and grew into a full workspace layer built on top of Nextcloud Teams. TeamHub works entirely within your own Nextcloud instance: no external services, no data leaving your server.
+Nothing is copied and nothing has to be migrated. Deck stays the source of truth for cards, Talk for conversations, Files for documents. TeamHub reads across them and writes your actions back to them. It works entirely within your own Nextcloud instance: no external services, no hosted version, no data leaving your server.
+
+Nextcloud's built-in Dashboard is personal. It's about *you*. TeamHub is the team-scoped equivalent. It started as a visual mock-up to discuss what team-based working could look like inside Nextcloud, and grew into a full workspace layer built on top of Nextcloud Teams.
+
+## TeamHub and Microsoft Teams
+
+Organisations replacing Microsoft 365 with Nextcloud find that mail, files, documents, chat and boards are all covered. The row Nextcloud does not cover on its own is Teams itself: the place a team works. That is the row TeamHub fills, without replacing anything already running.
+
+| | Microsoft Teams | TeamHub for Nextcloud |
+|---|---|---|
+| Hosting | Microsoft's cloud | Your own server, self-hosted only |
+| Licence | Proprietary, per user per month | AGPL-3.0. Free to develop with, licensed by seat count to run in production |
+| Data residency | Microsoft's regions and sub-processors | Your instance, no sub-processor to add to your register |
+| Chat | Built in | Nextcloud Talk, which you already run |
+| Files | SharePoint | Nextcloud Files and team spaces |
+| Boards | Planner | Nextcloud Deck, which stays the source of truth for cards |
+| Decisions | Chat threads and meeting notes | A decision log with categories, approvers, the reasoning given, and an append-only trail |
+| Presence | A status dot, about this second | A working location per half day, for the week ahead, synced to each member's calendar |
+| Audit | Purview, depending on the plan | Append-only per-team audit log and an ISO/IEC 27001:2022 control report |
+
+Moving an existing estate across is covered by bulk team import: one CSV, one row per team, with a dry run before anything is created.
+
+TeamHub is not affiliated with or endorsed by Nextcloud GmbH. It is a third-party app published on the Nextcloud App Store.
 
 ## Features
 

@@ -4,7 +4,7 @@
     <id>teamhub</id>
     <name>TeamHub</name>
     <!-- The xsd caps <summary> at 128 characters (type l10n-string). -->
-    <summary>Governed team workspaces for Nextcloud: policy profiles, an append-only audit log, an control report.</summary>
+    <summary>Team workspace for Nextcloud: messages, decisions, presence, projects, services. A self-hosted Microsoft Teams alternative.</summary>
     <description><![CDATA[**Your users are asking for Microsoft Teams. Your auditor is asking who approved what, and where it is stored. TeamHub answers both from the Nextcloud you already run.**
 
 A Nextcloud Team on its own is a membership list. TeamHub turns that list into a governed workspace: messages, decisions, presence, a timeline and projects on one page per team, beside the Talk conversation, team space, Calendar, Collective and Deck board that team already uses. Deck stays the source of truth for cards, Talk for conversations, Files for documents — TeamHub reads across them, writes your actions back to them, and records what happened.

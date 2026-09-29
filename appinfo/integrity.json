@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "app_version": "4.11.1",
-  "generated_at": "2026-09-29T07:27:03.976Z",
+  "generated_at": "2026-09-29T07:36:32.525Z",
   "algorithm": "sha256",
   "files": {
     "announcements/The_journey.md": "b87e87f15045a7d4707abea68e6996940d52c873dae1a0dd010461c3b2bb44fc",
@@ -10,7 +10,7 @@
     "announcements/import.md": "634f2de621e1731b9f14331f297012647cb9fef1ed4bf7b1330905ed08537840",
     "announcements/personal_layer.md": "fdbeb54d8e9e08ba0097a4fb63562742f51da8cbdc4ebfca5f01516475717671",
     "announcements/registry.json": "20eca6a69cde8fdb3b40edec7a2b1781adfd5836d8a4793a727a83806521d7bf",
-    "appinfo/info.xml": "cd3726b312fd802ecfa4952e93a84fa48d861d07efc7440227483d594c5da7c7",
+    "appinfo/info.xml": "826d840b32eca17279b40a17c6b176bdc4d0879fe6a49d3d362f588f9443755b",
     "appinfo/routes.php": "5c7d88cf78938c47bba0454cbbffd0764d7bb1aa9df2540d55ace34db3720a1d",
     "composer.json": "55b8a70299a87a69b099539785c19c247314efbc3754671e6f96a0185be03a6b",
     "css/admin.css": "2f0c165f4ee197b91b542ad2ef43ef4d80aa3a9469824841b2021bbb08776d89",
