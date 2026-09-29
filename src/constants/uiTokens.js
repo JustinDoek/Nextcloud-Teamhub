@@ -20,19 +20,39 @@
  */
 
 // ── Icon size scale ─────────────────────────────────────────────────
-// Role-named so consumers pick by intent, not by raw px.
+// Role-named so consumers pick by intent, not by raw px. v4.10.10: NC 35's
+// foundations put icons at 20px, so body / toolbar / nav share one value;
+// the names survive so a call site still says what the icon is for.
 
-/** Inline with meta text (12px body). Used for inline hint icons. */
-export const ICON_INLINE = 14
+/** Inline with supporting text (13px). Hint icons, chip glyphs. */
+export const ICON_INLINE = 16
 
-/** Inline with body text (14px). The default for most button icons. */
-export const ICON_BODY = 16
+/** The NC icon size: buttons, rows, tabs, navigation, action menus. */
+export const ICON_BODY = 20
 
-/** Toolbar / tab bar. Slightly larger than body so tab targets read at a glance. */
-export const ICON_TOOLBAR = 18
+/** Alias of ICON_BODY — kept so existing tab bars read as before. */
+export const ICON_TOOLBAR = 20
 
-/** NcAppNavigationItem canonical size. Matches NC core's sidebar icon size. */
+/** Alias of ICON_BODY — NcAppNavigationItem's canonical size. */
 export const ICON_NAV = 20
+
+/** Decorative tile / step glyph. */
+export const ICON_LARGE = 32
+
+/** Section illustration (an NcEmptyContent inside a panel). */
+export const ICON_XL = 48
 
 /** NcEmptyContent hero icon. Only used inside the empty-state slot. */
 export const ICON_HERO = 64
+
+// ── Avatar scale (v4.10.7) ──────────────────────────────────────────
+// Mirrors --th-avatar-sm / -md / -lg in widget-tokens.css — NC's 24 / 32 / 44.
+
+/** Table cell, chip, compact person row. */
+export const AVATAR_SM = 24
+
+/** Picker result, member row. */
+export const AVATAR_MD = 32
+
+/** Header / profile. */
+export const AVATAR_LG = 44

@@ -1,19 +1,17 @@
 <?php
 \OCP\Util::addScript('teamhub', 'teamhub');
-// CSS extracted per-entry into the app css/ dir (see vite.config.mjs); load the
-// chunk files directly. index = shared NC component styles; teamhub = app
-// styles; widget-tokens = the design tokens every widget's scoped CSS reads.
-//
-// **`css/teamhub.css` is the manifest.** It is the @import stub the
-// css-entry-points-plugin writes, it is bypassed at runtime (NC does not
-// resolve its relative @imports), and it lists exactly the chunks this entry
-// needs. After any change to the entry list in vite.config.mjs, diff that stub
-// against the calls below — v4.8.18's fourth entry made Rollup hoist
-// widget-tokens into a chunk of its own, nothing loaded it, and every widget
-// lost its `--th-*` variables at once (v4.8.23).
-\OCP\Util::addStyle('teamhub', 'vite-index.chunk');
-\OCP\Util::addStyle('teamhub', 'vite-widget-tokens.chunk');
-\OCP\Util::addStyle('teamhub', 'vite-teamhub.chunk');
+// CSS is extracted per entry into the app css/ dir (see vite.config.mjs).
+// **`css/teamhub.css` is the manifest** — the @import stub the
+// css-entry-points-plugin writes, listing exactly the chunks this entry needs.
+// NC cannot load it as-is (it does not resolve the relative @imports), and
+// until 4.10.11 its list was hand-copied into addStyle() calls here — which
+// went stale every time Rollup regrouped or renamed a shared chunk (4.8.23:
+// widget-tokens hoisted, unloaded; 4.10.9: the admin ⋂ teamhub `myWork`
+// chunk, unloaded; 4.10.11: the NC-component CSS renamed `index` → `localDate`,
+// the whole app unstyled). Now the manifest is read instead of copied; see
+// templates/vite-styles.php.
+require_once __DIR__ . '/vite-styles.php';
+teamhub_add_vite_styles('teamhub');
 ?>
 
 <div id="teamhub-app"></div>

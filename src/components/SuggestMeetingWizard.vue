@@ -2,8 +2,8 @@
     <NcModal size="normal" @close="$emit('close')">
         <div class="suggest-wizard">
             <h2 class="suggest-wizard__heading">
-                <AccountGroupIcon v-if="!lockAttendees" :size="20" aria-hidden="true" />
-                <CalendarClock v-else :size="20" aria-hidden="true" />
+                <AccountGroupIcon v-if="!lockAttendees" :size="ICON_BODY" aria-hidden="true" />
+                <CalendarClock v-else :size="ICON_BODY" aria-hidden="true" />
                 {{ headingLabel }}
             </h2>
 
@@ -30,13 +30,13 @@
                     <label class="suggest-wizard__label" for="meeting-title">
                         {{ t('teamhub', 'Title') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="meeting-title"
                         v-model="title"
-                        type="text"
                         class="suggest-wizard__input"
                         :class="{ 'suggest-wizard__input--error': !!titleError }"
-                        :placeholder="t('teamhub', 'e.g. Weekly sync')" />
+                        :placeholder="t('teamhub', 'e.g. Weekly sync')"
+                        label-outside />
                     <p v-if="titleError" class="suggest-wizard__error">{{ titleError }}</p>
                 </div>
 
@@ -60,7 +60,7 @@
                         <p v-if="!lockAttendees" class="suggest-wizard__hint suggest-wizard__count">
                             {{ n('teamhub', '%n member selected', '%n members selected', selectedCount, { n: selectedCount }) }}
                         </p>
-                        <NcLoadingIcon v-if="loadingMembers" :size="24" />
+                        <NcLoadingIcon v-if="loadingMembers" :size="ICON_LARGE" />
                         <ul v-else class="suggest-wizard__members">
                             <li
                                 v-for="m in displayedMembers"
@@ -80,19 +80,19 @@
                     <section class="suggest-wizard__col" :aria-label="t('teamhub', 'Schedule')">
                         <span class="suggest-wizard__label">{{ t('teamhub', 'Meeting type') }}</span>
                         <div class="suggest-wizard__pills" role="radiogroup" :aria-label="t('teamhub', 'Meeting type')">
-                            <button
+                            <NcButton
                                 v-for="opt in [
                                     { v: 'online', label: t('teamhub', 'Online') },
                                     { v: 'office', label: t('teamhub', 'Office') },
                                 ]"
                                 :key="opt.v"
-                                type="button"
                                 class="suggest-wizard__pill"
                                 :class="{ 'suggest-wizard__pill--selected': meetingType === opt.v }"
-                                :aria-pressed="meetingType === opt.v ? 'true' : 'false'"
-                                @click="onMeetingTypeChange(opt.v)">
+                                @click="onMeetingTypeChange(opt.v)"
+                                :pressed="meetingType === opt.v"
+                                variant="tertiary">
                                 {{ opt.label }}
-                            </button>
+                            </NcButton>
                         </div>
 
                         <!-- Presence-driven suggestion flow (default) -->
@@ -162,7 +162,7 @@
                         <!-- Suggestions list — auto-loaded. Only relevant in
                              the presence-driven flow. -->
                         <div v-if="presenceAvailable && selectedCount > 0" class="suggest-wizard__suggest-block" aria-live="polite">
-                            <NcLoadingIcon v-if="loadingSuggestions" :size="20" />
+                            <NcLoadingIcon v-if="loadingSuggestions" :size="ICON_BODY" />
                             <template v-else>
                                 <p v-if="suggestions.length === 0" class="suggest-wizard__empty">
                                     {{ t('teamhub', 'No suitable half-days near that date. Try another date or meeting type.') }}
@@ -186,19 +186,18 @@
                                         <span class="suggest-wizard__label">{{ t('teamhub', 'Pick a time') }}</span>
                                         <label class="suggest-wizard__duration">
                                             {{ t('teamhub', 'Duration') }}
-                                            <select
+                                            <NcSelect
                                                 v-model.number="durationMinutes"
                                                 class="suggest-wizard__input suggest-wizard__input--inline"
-                                                @change="fetchTimeslots">
-                                                <option :value="30">{{ t('teamhub', '30 min') }}</option>
-                                                <option :value="45">{{ t('teamhub', '45 min') }}</option>
-                                                <option :value="60">{{ t('teamhub', '1 hour') }}</option>
-                                                <option :value="90">{{ t('teamhub', '1.5 hours') }}</option>
-                                                <option :value="120">{{ t('teamhub', '2 hours') }}</option>
-                                            </select>
+                                                :aria-label-combobox="t('teamhub', 'Duration')"
+                                                @update:model-value="fetchTimeslots"
+                                                label-outside
+                                                :options="[{ id: 30, label: t('teamhub', '30 min') }, { id: 45, label: t('teamhub', '45 min') }, { id: 60, label: t('teamhub', '1 hour') }, { id: 90, label: t('teamhub', '1.5 hours') }, { id: 120, label: t('teamhub', '2 hours') }]"
+                                                :reduce="o => o.id"
+                                                :clearable="false" />
                                         </label>
                                     </div>
-                                    <NcLoadingIcon v-if="loadingTimeslots" :size="20" />
+                                    <NcLoadingIcon v-if="loadingTimeslots" :size="ICON_BODY" />
                                     <template v-else>
                                         <p v-if="timeslots.length === 0" class="suggest-wizard__empty">
                                             {{ t('teamhub', 'No conflict-free windows in that half-day.') }}
@@ -238,11 +237,11 @@
                         <strong>{{ title || t('teamhub', '(untitled)') }}</strong>
                     </div>
                     <div class="suggest-wizard__summary-row">
-                        <CalendarClock :size="14" aria-hidden="true" />
+                        <CalendarClock :size="ICON_INLINE" aria-hidden="true" />
                         {{ formatChosenWhen() }}
                     </div>
                     <div class="suggest-wizard__summary-row">
-                        <AccountGroupIcon :size="14" aria-hidden="true" />
+                        <AccountGroupIcon :size="ICON_INLINE" aria-hidden="true" />
                         {{ n('teamhub', '%n attendee', '%n attendees', selectedCount, { n: selectedCount }) }}
                     </div>
                 </div>
@@ -252,30 +251,30 @@
                     <label class="suggest-wizard__label" for="meeting-description">
                         {{ t('teamhub', 'Description (optional)') }}
                     </label>
-                    <textarea
+                    <NcTextArea
                         id="meeting-description"
                         v-model="description"
                         rows="3"
-                        class="suggest-wizard__input suggest-wizard__textarea"></textarea>
+                        class="suggest-wizard__input suggest-wizard__textarea"
+                        label-outside />
                 </div>
 
                 <!-- Room picker — only when RoomVox / CRM rooms are available -->
                 <div v-if="loadingRooms" class="suggest-wizard__field">
-                    <NcLoadingIcon :size="18" /> {{ t('teamhub', 'Looking up rooms…') }}
+                    <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Looking up rooms…') }}
                 </div>
                 <div v-else-if="rooms.length > 0" class="suggest-wizard__field">
                     <label class="suggest-wizard__label" for="meeting-room">
                         {{ t('teamhub', 'Meeting room') }}
                     </label>
-                    <select
-                        id="meeting-room"
+                    <NcSelect
+                        input-id="meeting-room"
+                        label-outside
                         v-model="selectedRoomId"
-                        class="suggest-wizard__input">
-                        <option value="">{{ t('teamhub', '— No room —') }}</option>
-                        <option v-for="r in rooms" :key="r.id" :value="r.id">
-                            {{ r.displayName }}
-                        </option>
-                    </select>
+                        class="suggest-wizard__input"
+                        :options="[{ id: '', label: t('teamhub', '— No room —') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
+                        :reduce="o => o.id"
+                        :clearable="false" />
                     <p v-if="selectedRoomId" class="suggest-wizard__hint">
                         {{ t('teamhub', 'Picking a room books it via RoomVox.') }}
                     </p>
@@ -284,11 +283,11 @@
                     <label class="suggest-wizard__label" for="meeting-location">
                         {{ t('teamhub', 'Location (optional)') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="meeting-location"
                         v-model="location"
-                        type="text"
-                        class="suggest-wizard__input" />
+                        class="suggest-wizard__input"
+                        label-outside />
                 </div>
 
                 <!-- Category — kept for the legacy approver-meeting flow; optional otherwise -->
@@ -296,11 +295,11 @@
                     <label class="suggest-wizard__label" for="meeting-category">
                         {{ t('teamhub', 'Category (optional)') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="meeting-category"
                         v-model="categories"
-                        type="text"
-                        class="suggest-wizard__input" />
+                        class="suggest-wizard__input"
+                        label-outside />
                 </div>
 
                 <!-- Talk toggle -->
@@ -322,7 +321,7 @@
                      simpler /calendar/events path with no notes file. -->
                 <div v-if="!lockAttendees" class="suggest-wizard__notes-block">
                     <div class="suggest-wizard__notes-header">
-                        <FileDocumentIcon :size="16" aria-hidden="true" />
+                        <FileDocumentIcon :size="ICON_BODY" aria-hidden="true" />
                         <h3 class="suggest-wizard__notes-title">{{ t('teamhub', 'Meeting notes') }}</h3>
                     </div>
                     <p class="suggest-wizard__hint suggest-wizard__hint--block">
@@ -333,11 +332,11 @@
                         <label class="suggest-wizard__label" for="meeting-filename">
                             {{ t('teamhub', 'Notes filename') }}
                         </label>
-                        <input
+                        <NcTextField
                             id="meeting-filename"
                             v-model="filename"
-                            type="text"
-                            class="suggest-wizard__input" />
+                            class="suggest-wizard__input"
+                            label-outside />
                         <p class="suggest-wizard__hint">
                             {{ t('teamhub', 'Saved as {filename}.md', { filename: filename || '…' }) }}
                         </p>
@@ -378,26 +377,26 @@
                             <span class="suggest-wizard__label suggest-wizard__label--inline">
                                 {{ t('teamhub', 'From categories') }}
                             </span>
-                            <button
-                                type="button"
+                            <NcButton
                                 class="suggest-wizard__toolbtn"
-                                @click="toggleAllProposalCategories">
+                                @click="toggleAllProposalCategories"
+                                variant="tertiary">
                                 {{ selectedProposalCategories.length === proposalCategories.length
-                                    ? t('teamhub', 'Clear all')
-                                    : t('teamhub', 'Select all') }}
-                            </button>
+                                ? t('teamhub', 'Clear all')
+                                : t('teamhub', 'Select all') }}
+                            </NcButton>
                         </div>
                         <div class="suggest-wizard__cat-chips" role="group" :aria-label="t('teamhub', 'Proposal categories')">
-                            <button
+                            <NcButton
                                 v-for="cat in proposalCategories"
                                 :key="cat"
-                                type="button"
                                 class="suggest-wizard__chip"
                                 :class="{ 'suggest-wizard__chip--selected': selectedProposalCategories.includes(cat) }"
-                                :aria-pressed="selectedProposalCategories.includes(cat) ? 'true' : 'false'"
-                                @click="toggleProposalCategory(cat)">
+                                @click="toggleProposalCategory(cat)"
+                                :pressed="selectedProposalCategories.includes(cat)"
+                                variant="tertiary">
                                 {{ cat }}
-                            </button>
+                            </NcButton>
                         </div>
                         <p class="suggest-wizard__hint">
                             {{ proposalCategoryHint }}
@@ -418,18 +417,18 @@
                 <span class="suggest-wizard__spacer" />
                 <NcButton
                     v-if="step < 2"
-                    type="primary"
+                    variant="primary"
                     :disabled="!canAdvance || busy"
                     @click="next">
                     {{ t('teamhub', 'Next') }}
                 </NcButton>
                 <NcButton
                     v-else
-                    type="primary"
+                    variant="primary"
                     :disabled="busy"
                     @click="submit">
                     <template #icon>
-                        <NcLoadingIcon v-if="busy" :size="18" />
+                        <NcLoadingIcon v-if="busy" :size="ICON_BODY" />
                     </template>
                     {{ busy ? t('teamhub', 'Creating…') : submitLabel }}
                 </NcButton>
@@ -440,7 +439,7 @@
 
 <script>
 import { mapState } from 'vuex'
-import { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch } from '@nextcloud/vue'
+import { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch, NcTextField, NcTextArea, NcSelect } from '@nextcloud/vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatIsoDate } from '../lib/localDate.js'
 import { todayIso } from '../lib/localDate.js'
@@ -451,10 +450,11 @@ import axios from '@nextcloud/axios'
 import AccountGroupIcon from 'vue-material-design-icons/AccountGroup.vue'
 import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 import FileDocumentIcon from 'vue-material-design-icons/FileDocument.vue'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 export default {
     name: 'SuggestMeetingWizard',
-    components: { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch,
+    components: {    NcSelect, NcTextArea, NcTextField, NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch,
         AccountGroupIcon, CalendarClock, FileDocumentIcon },
     props: {
         teamId: { type: String, required: true },
@@ -477,6 +477,9 @@ export default {
     data() {
         const iso = todayIso()
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
             step: 1,
             members: [],
             checked: {},
@@ -519,6 +522,7 @@ export default {
             selectedProposalCategories: [],
         }
     },
+
     computed: {
         ...mapState(['presenceModuleEnabled', 'presenceConfig']),
         /**
@@ -534,7 +538,7 @@ export default {
         headingLabel() {
             return this.lockAttendees
                 ? t('teamhub', 'Meeting wizard')
-                : t('teamhub', 'Add Meeting')
+                : t('teamhub', 'Add meeting')
         },
         submitLabel() {
             return this.lockAttendees
@@ -1112,7 +1116,7 @@ export default {
 }
 .suggest-wizard__stepbar-item {
     flex: 1;
-    padding: 6px 10px;
+    padding: 8px 8px;
     border-radius: var(--border-radius-pill);
     background: var(--color-background-dark);
     color: var(--color-text-maxcontrast);
@@ -1144,20 +1148,6 @@ export default {
     align-items: center;
     justify-content: space-between;
 }
-.suggest-wizard__toolbtn {
-    background: transparent;
-    border: none;
-    color: var(--color-primary-element);
-    cursor: pointer;
-    font-size: 0.85rem;
-    padding: 2px 4px;
-}
-.suggest-wizard__toolbtn:hover { text-decoration: underline; }
-.suggest-wizard__toolbtn:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-    border-radius: 4px;
-}
 .suggest-wizard__count { margin: 0; }
 .suggest-wizard__members {
     max-height: 260px;
@@ -1177,51 +1167,17 @@ export default {
 .suggest-wizard__input {
     width: 100%;
     box-sizing: border-box;
-    padding: 7px 10px;
-    border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-large);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font: inherit;
-    line-height: 1.4;
 }
 .suggest-wizard__input--inline { width: auto; padding: 4px 8px; }
 .suggest-wizard__input:focus,
-.suggest-wizard__input:focus-visible {
-    outline: none;
-    border-color: var(--color-primary-element);
-}
 .suggest-wizard__input--error { border-color: var(--color-error); }
-.suggest-wizard__textarea {
-    resize: vertical;
-    min-height: 64px;
-    font-family: inherit;
-}
 .suggest-wizard__pills {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     margin: 4px 0 8px;
 }
 .suggest-wizard__pill {
     flex: 1;
-    padding: 6px 10px;
-    background: var(--color-main-background);
-    border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-pill);
-    color: var(--color-main-text);
-    cursor: pointer;
-    font-size: 0.9rem;
-}
-.suggest-wizard__pill:hover { background: var(--color-background-hover); }
-.suggest-wizard__pill:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
-.suggest-wizard__pill--selected {
-    background: var(--color-primary-element);
-    border-color: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    font-weight: 600;
 }
 .suggest-wizard__hint {
     color: var(--color-text-maxcontrast);
@@ -1233,10 +1189,10 @@ export default {
     color: var(--color-warning-text);
 }
 .suggest-wizard__hint--info {
-    padding: 6px 10px;
+    padding: 8px 8px;
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     margin-top: 8px;
 }
 .suggest-wizard__time-row {
@@ -1246,7 +1202,7 @@ export default {
 }
 .suggest-wizard__time-col { flex: 1; min-width: 0; }
 .suggest-wizard__error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-size: 0.85rem;
     margin: 4px 0 0;
 }
@@ -1254,22 +1210,22 @@ export default {
 .suggest-wizard__suggestions {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     padding: 0;
     margin: 0;
     list-style: none;
 }
 .suggest-wizard__suggestion {
     width: 100%;
-    text-align: left;
-    padding: 10px 12px;
+    text-align: start;
+    padding: 8px 12px;
     border: 2px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-main-background);
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 .suggest-wizard__suggestion--compact { padding: 6px 10px; }
 .suggest-wizard__suggestion:hover { background: var(--color-background-hover); }
@@ -1288,8 +1244,8 @@ export default {
     margin: 8px 0;
 }
 .suggest-wizard__timeslots-inline {
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid var(--color-border);
 }
 .suggest-wizard__timeslots-header {
@@ -1297,51 +1253,51 @@ export default {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 .suggest-wizard__duration {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 0.85rem;
     color: var(--color-text-maxcontrast);
 }
 .suggest-wizard__prefill-banner {
     background: var(--color-success);
     color: var(--color-success-text);
-    padding: 6px 10px;
-    border-radius: var(--border-radius);
+    padding: 8px 8px;
+    border-radius: var(--border-radius-small);
     margin-bottom: 8px;
     font-size: 0.85rem;
     line-height: 1.4;
 }
 .suggest-wizard__summary {
     background: var(--color-background-dark);
-    border-radius: var(--border-radius-large);
-    padding: 10px 14px;
+    border-radius: var(--border-radius-element);
+    padding: 8px 16px;
     margin-bottom: 8px;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
 }
 .suggest-wizard__summary-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 0.9rem;
     color: var(--color-main-text);
 }
 .suggest-wizard__notes-block {
-    margin-top: 10px;
+    margin-top: 8px;
     padding: 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-background-hover);
 }
 .suggest-wizard__notes-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 4px;
 }
 .suggest-wizard__notes-title {
@@ -1358,50 +1314,29 @@ export default {
     .suggest-wizard__agenda-grid { grid-template-columns: 1fr; }
 }
 .suggest-wizard__cat-block {
-    margin-top: 10px;
-    padding: 8px 10px;
+    margin-top: 8px;
+    padding: 8px 8px;
     border: 1px dashed var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
 }
 .suggest-wizard__cat-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 .suggest-wizard__label--inline { margin: 0; }
 .suggest-wizard__cat-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 4px;
-}
-.suggest-wizard__chip {
-    padding: 4px 10px;
-    background: var(--color-main-background);
-    border: 1px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-pill);
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-    font-size: 0.85rem;
-    line-height: 1.4;
-}
-.suggest-wizard__chip:hover { background: var(--color-background-hover); }
-.suggest-wizard__chip:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
-.suggest-wizard__chip--selected {
-    background: var(--color-primary-element);
-    border-color: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    font-weight: 600;
 }
 .suggest-wizard__footer {
     display: flex;
     align-items: center;
-    margin-top: 18px;
+    margin-top: 16px;
     gap: 8px;
 }
 .suggest-wizard__spacer { flex: 1; }

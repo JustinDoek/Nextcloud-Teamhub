@@ -819,48 +819,40 @@ class TalkService {
      * The room and all messages remain intact. Only the circle entry is removed,
      * so individual user attendee rows are untouched.
      *
-     * Returns the room_id for storage in suspended_resources, or null if no
-     * Talk room exists for this team.
+     * Returns the room ids for storage in suspended_resources — every linked
+     * room (teamRoomIds(), the team room first), or [] if the team has none.
+     * v4.10.48: was the first room with the team's circle in it, so a team
+     * with two rooms kept access to one of them while suspended.
+     *
+     * @return list<int>
      */
-    public function suspendTalkAccess(string $teamId, \OCP\IDBConnection $db): ?int {
+    public function suspendTalkAccess(string $teamId, \OCP\IDBConnection $db): array {
         if (!$this->appManager->isInstalled('spreed')) {
-            return null;
+            return [];
         }
         try {
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('room_id')
-                ->from('talk_attendees')
-                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
+            $roomIds = $this->teamRoomIds($db, $teamId);
 
-            if (!$row) {
-                return null;
+            foreach ($roomIds as $roomId) {
+                // Remove only the circle attendee row — individual users keep their rows.
+                $dqb = $db->getQueryBuilder();
+                $dqb->delete('talk_attendees')
+                    ->where($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('circles')))
+                    ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
+                    ->andWhere($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->executeStatement();
             }
 
-            $roomId = (int)$row['room_id'];
-
-            // Remove only the circle attendee row — individual users keep their rows.
-            $dqb = $db->getQueryBuilder();
-            $dqb->delete('talk_attendees')
-                ->where($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('circles')))
-                ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
-                ->andWhere($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId)))
-                ->executeStatement();
-
             $this->logger->debug('[TeamHub][TalkService] suspendTalkAccess: circle attendee removed', [
-                'teamId' => $teamId, 'roomId' => $roomId, 'app' => Application::APP_ID,
+                'teamId' => $teamId, 'roomIds' => $roomIds, 'app' => Application::APP_ID,
             ]);
 
-            return $roomId;
+            return $roomIds;
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][TalkService] suspendTalkAccess failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            return null;
+            return [];
         }
     }
 
@@ -1099,38 +1091,35 @@ class TalkService {
         }
     }
 
+    /**
+     * Delete the team's Talk rooms — every linked one (teamRoomIds()), which is
+     * what the caller then unlinks (ResourceService::deleteTeamResource()
+     * removes every `talk` row). v4.10.48: was "the first room with the team's
+     * circle in it", which could delete a conversation that was not the
+     * team's and leave the team's own room behind.
+     */
     public function deleteTalkRoom(string $teamId, \OCP\IDBConnection $db): array {
         try {
-            // Find the room_id via the circle attendee row
-            $qb = $db->getQueryBuilder();
-            $res = $qb->select('room_id')
-                ->from('talk_attendees')
-                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-                ->andWhere($qb->expr()->eq('actor_id', $qb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
+            $roomIds = $this->teamRoomIds($db, $teamId);
+            if ($roomIds === []) {
                 return ['deleted' => false, 'detail' => 'No Talk room found for this team'];
             }
 
-            $roomId = (int)$row['room_id'];
+            foreach ($roomIds as $roomId) {
+                // Delete all attendees for this room
+                $daqb = $db->getQueryBuilder();
+                $daqb->delete('talk_attendees')
+                    ->where($daqb->expr()->eq('room_id', $daqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->executeStatement();
 
-            // Delete all attendees for this room
-            $daqb = $db->getQueryBuilder();
-            $daqb->delete('talk_attendees')
-                ->where($daqb->expr()->eq('room_id', $daqb->createNamedParameter($roomId)))
-                ->executeStatement();
+                // Delete the room itself
+                $drqb = $db->getQueryBuilder();
+                $drqb->delete('talk_rooms')
+                    ->where($drqb->expr()->eq('id', $drqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->executeStatement();
+            }
 
-            // Delete the room itself
-            $drqb = $db->getQueryBuilder();
-            $drqb->delete('talk_rooms')
-                ->where($drqb->expr()->eq('id', $drqb->createNamedParameter($roomId)))
-                ->executeStatement();
-
-            return ['deleted' => true, 'detail' => "Talk room {$roomId} deleted"];
+            return ['deleted' => true, 'detail' => 'Talk room(s) ' . implode(', ', $roomIds) . ' deleted'];
 
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][TalkService] deleteTalkRoom failed', [
@@ -1254,399 +1243,120 @@ class TalkService {
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
 
-            // ── 1. Find the Talk room connected to this team ──────────────────
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('room_id')
-                ->from('talk_attendees')
-                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
+            // ── 1. The team's rooms (v4.10.48: every linked one, not the first
+            //       room with the circle in it — see teamRoomIds()) ──────────
+            $roomIds = $this->teamRoomIds($db, $teamId);
+            if ($roomIds === []) {
                 $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: no Talk room for team — skip', [
                     'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);
                 return;
             }
-            $roomId = (int)$row['room_id'];
-
-            // ── 2. Skip if the user already has an attendee row ───────────────
-            $ckQb  = $db->getQueryBuilder();
-            $ckRes = $ckQb->select('id')
-                ->from('talk_attendees')
-                ->where($ckQb->expr()->eq('room_id',
-                    $ckQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($ckQb->expr()->eq('actor_type', $ckQb->createNamedParameter('users')))
-                ->andWhere($ckQb->expr()->eq('actor_id',   $ckQb->createNamedParameter($uid)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $existing = $ckRes->fetch();
-            $ckRes->closeCursor();
-
-            if ($existing) {
-                $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: attendee row already present — skip', [
-                    'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
-                ]);
-                return;
+            foreach ($roomIds as $roomId) {
+                $this->addUserToRoom($db, $teamId, $roomId, $uid);
             }
-
-            // ── 3. Insert individual user attendee row ────────────────────────
-            // v3.100.8 (apps.md W-5) — Talk ParticipantService::addUsers
-            // first so system chat message + push notifications fire; fall
-            // back to raw INSERT when the Talk API refuses (typically
-            // circle-scoped rooms where the acting user isn't a moderator).
-            $addedViaApi = false;
-            try {
-                $roomManager = $this->container->get(\OCA\Talk\Manager::class);
-                $room = $roomManager->getRoomById($roomId);
-                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $userManager = $this->container->get(\OCP\IUserManager::class);
-                $userObj = $userManager->get($uid);
-                if ($userObj !== null) {
-                    $participantService->addUsers($room, [[
-                        'actorType' => 'users',
-                        'actorId'   => $uid,
-                        'displayName' => $userObj->getDisplayName(),
-                    ]]);
-                    $addedViaApi = true;
-                }
-            } catch (\Throwable $e) {
-                $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: ParticipantService::addUsers failed — using DB fallback', [
-                    'uid' => $uid, 'roomId' => $roomId,
-                    'reason' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-            }
-
-            if (!$addedViaApi) {
-                $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
-                $aqb = $db->getQueryBuilder();
-                $aqb->insert('talk_attendees')
-                    ->setValue('room_id',          $aqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                    ->setValue('actor_type',       $aqb->createNamedParameter('users'))
-                    ->setValue('actor_id',         $aqb->createNamedParameter($uid))
-                    ->setValue('display_name',     $aqb->createNamedParameter(''))
-                    ->setValue('participant_type', $aqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)); // PARTICIPANT
-
-                foreach ([
-                    'favorite'               => 0,
-                    'notification_level'     => 0,
-                    'notification_calls'     => 0,
-                    'last_joined_call'       => 0,
-                    'last_read_message'      => 0,
-                    'last_mention_message'   => 0,
-                    'last_mention_direct'    => 0,
-                    'in_call'                => 0,
-                    'permissions'            => 0,
-                    'publishing_permissions' => 0,
-                    'access_token'           => '',
-                    'remote_id'              => '',
-                    'phone_number'           => '',
-                    'phone_states'           => '',
-                ] as $col => $val) {
-                    if (in_array($col, $attendeeCols, true)) {
-                        $aqb->setValue($col, $aqb->createNamedParameter($val));
-                    }
-                }
-                $aqb->executeStatement();
-            }
-
-            $this->logger->info('[TeamHub][TalkService] syncUserToTeamTalkRoom: user added to Talk room', [
-                'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
-                'viaApi' => $addedViaApi,
-                'app'    => Application::APP_ID,
-            ]);
-            $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: inserted attendee', [
-                'uid' => $uid, 'roomId' => $roomId, 'app' => Application::APP_ID,
-            ]);
-
         } catch (\Throwable $e) {
             // Non-fatal — user can still reach the room via the TeamHub tab token link.
             $this->logger->warning('[TeamHub][TalkService] syncUserToTeamTalkRoom failed', [
                 'teamId' => $teamId, 'uid' => $uid,
                 'error'  => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            // The $this->logger->warning above already carries the full context;
-            // no separate error_log needed.
         }
     }
 
     /**
-     * Remove a single member's attendee row(s) from the Talk room connected
-     * to $teamId.
-     *
-     * Called when a direct member (user_type=1 — local, or federated via a
-     * remote instance) leaves or is removed from the team. Talk does not watch for Circles
-     * membership changes, so TeamHub must explicitly remove the row to revoke
-     * access.
-     *
-     * The same identifier can occur under more than one actor_type — a local
-     * user's UID and a federated UID happen to look different, but Talk's
-     * circle-expansion may have created an attendee under either type
-     * depending on how the member was first reached. We therefore delete from
-     * both 'users' AND 'federated_users' for the given actor_id; the
-     * non-matching row is a no-op.
-     *
-     * Room OWNER rows (participant_type=1) are intentionally preserved to
-     * prevent orphaning a Talk room without an owner.
-     *
-     * Non-fatal: failure is logged but does not propagate.
+     * Steps 2–3 of syncUserToTeamTalkRoom() for one room, moved out unchanged
+     * in v4.10.48. Throws on failure; the caller logs.
      */
-    public function removeUserFromTeamTalkRoom(string $teamId, string $uid): void {
-        if (!$this->appManager->isInstalled('spreed')) {
+    private function addUserToRoom(\OCP\IDBConnection $db, string $teamId, int $roomId, string $uid): void {
+        // ── 2. Skip if the user already has an attendee row ───────────────
+        $ckQb  = $db->getQueryBuilder();
+        $ckRes = $ckQb->select('id')
+            ->from('talk_attendees')
+            ->where($ckQb->expr()->eq('room_id',
+                $ckQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($ckQb->expr()->eq('actor_type', $ckQb->createNamedParameter('users')))
+            ->andWhere($ckQb->expr()->eq('actor_id',   $ckQb->createNamedParameter($uid)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $existing = $ckRes->fetch();
+        $ckRes->closeCursor();
+
+        if ($existing) {
+            $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: attendee row already present — skip', [
+                'uid' => $uid, 'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
             return;
         }
 
-        $this->logger->debug('[TeamHub][TalkService] removeUserFromTeamTalkRoom: enter', [
-            'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
-        ]);
-
+        // ── 3. Insert individual user attendee row ────────────────────────
+        // v3.100.8 (apps.md W-5) — Talk ParticipantService::addUsers
+        // first so system chat message + push notifications fire; fall
+        // back to raw INSERT when the Talk API refuses (typically
+        // circle-scoped rooms where the acting user isn't a moderator).
+        $addedViaApi = false;
         try {
-            $db = $this->container->get(\OCP\IDBConnection::class);
-
-            // Find the Talk room connected to this team.
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('room_id')
-                ->from('talk_attendees')
-                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
-                $this->logger->debug('[TeamHub][TalkService] removeUserFromTeamTalkRoom: no Talk room — skip', [
-                    'teamId' => $teamId, 'app' => Application::APP_ID,
-                ]);
-                return;
+            $roomManager = $this->container->get(\OCA\Talk\Manager::class);
+            $room = $roomManager->getRoomById($roomId);
+            $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
+            $userManager = $this->container->get(\OCP\IUserManager::class);
+            $userObj = $userManager->get($uid);
+            if ($userObj !== null) {
+                $participantService->addUsers($room, [[
+                    'actorType' => 'users',
+                    'actorId'   => $uid,
+                    'displayName' => $userObj->getDisplayName(),
+                ]]);
+                $addedViaApi = true;
             }
-            $roomId = (int)$row['room_id'];
-
-            // v3.100.8 (apps.md W-5) — ParticipantService::removeAttendee
-            // first so system leave-message fires; fall back to raw DELETE
-            // when the Talk API refuses.
-            $removedViaApi = false;
-            try {
-                $roomManager = $this->container->get(\OCA\Talk\Manager::class);
-                $room = $roomManager->getRoomById($roomId);
-                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-                $participant = $participantService->getParticipantByActor(
-                    $room, 'users', $uid,
-                );
-                if ($participant !== null
-                    && (int)$participant->getAttendee()->getParticipantType() !== 1 /* preserve OWNER */
-                ) {
-                    $participantService->removeAttendee(
-                        $room,
-                        $participant->getAttendee(),
-                        \OCA\Talk\Room::PARTICIPANT_REMOVED,
-                    );
-                    $removedViaApi = true;
-                }
-            } catch (\Throwable $e) {
-                $this->logger->debug('[TeamHub][TalkService] removeUserFromTeamTalkRoom: ParticipantService::removeAttendee failed — using DB fallback', [
-                    'uid' => $uid, 'roomId' => $roomId,
-                    'reason' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-            }
-
-            $affected = 0;
-            if (!$removedViaApi) {
-                $dqb      = $db->getQueryBuilder();
-                $affected = $dqb->delete('talk_attendees')
-                    ->where($dqb->expr()->eq('room_id',
-                        $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->andWhere($dqb->expr()->in('actor_type', $dqb->createNamedParameter(
-                        ['users', 'federated_users'],
-                        \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
-                    )))
-                    ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
-                    ->andWhere($dqb->expr()->neq('participant_type',
-                        $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))) // preserve OWNER
-                    ->executeStatement();
-            }
-
-            $this->logger->info('[TeamHub][TalkService] removeUserFromTeamTalkRoom: done', [
-                'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
-                'viaApi' => $removedViaApi, 'affected' => $affected,
-                'app' => Application::APP_ID,
-            ]);
-
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][TalkService] removeUserFromTeamTalkRoom failed', [
-                'teamId' => $teamId, 'uid' => $uid,
-                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: ParticipantService::addUsers failed — using DB fallback', [
+                'uid' => $uid, 'roomId' => $roomId,
+                'reason' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            // logger->warning above already carries the failure detail.
-        }
-    }
-
-    /**
-     * Reconcile the Talk room attendee list against current team membership.
-     *
-     * Called when a group or nested circle is removed from the team. In that case
-     * the set of affected users is not known at call time (no single UID), so we
-     * iterate all existing user attendees and evict anyone no longer a direct team
-     * member.
-     *
-     * Must be called AFTER MembershipService::onUpdate() so that
-     * circles_membership reflects the post-removal state.
-     *
-     * Direct membership only (circles_member user_type=1, status='Member').
-     * Room OWNER rows (participant_type=1) are preserved.
-     *
-     * Non-fatal: failure is logged but does not propagate.
-     */
-    public function reconcileTalkRoomMembers(string $teamId): void {
-        if (!$this->appManager->isInstalled('spreed')) {
-            return;
         }
 
-        $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: enter', [
-            'teamId' => $teamId, 'app' => Application::APP_ID,
+        if (!$addedViaApi) {
+            $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
+            $aqb = $db->getQueryBuilder();
+            $aqb->insert('talk_attendees')
+                ->setValue('room_id',          $aqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->setValue('actor_type',       $aqb->createNamedParameter('users'))
+                ->setValue('actor_id',         $aqb->createNamedParameter($uid))
+                ->setValue('display_name',     $aqb->createNamedParameter(''))
+                ->setValue('participant_type', $aqb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)); // PARTICIPANT
+
+            foreach ([
+                'favorite'               => 0,
+                'notification_level'     => 0,
+                'notification_calls'     => 0,
+                'last_joined_call'       => 0,
+                'last_read_message'      => 0,
+                'last_mention_message'   => 0,
+                'last_mention_direct'    => 0,
+                'in_call'                => 0,
+                'permissions'            => 0,
+                'publishing_permissions' => 0,
+                'access_token'           => '',
+                'remote_id'              => '',
+                'phone_number'           => '',
+                'phone_states'           => '',
+            ] as $col => $val) {
+                if (in_array($col, $attendeeCols, true)) {
+                    $aqb->setValue($col, $aqb->createNamedParameter($val));
+                }
+            }
+            $aqb->executeStatement();
+        }
+
+        $this->logger->info('[TeamHub][TalkService] syncUserToTeamTalkRoom: user added to Talk room', [
+            'teamId' => $teamId, 'uid' => $uid, 'roomId' => $roomId,
+            'viaApi' => $addedViaApi,
+            'app'    => Application::APP_ID,
         ]);
-
-        try {
-            $db = $this->container->get(\OCP\IDBConnection::class);
-
-            // ── 1. Find the Talk room ─────────────────────────────────────────
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('room_id')
-                ->from('talk_attendees')
-                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
-                $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: no Talk room — skip', [
-                    'teamId' => $teamId, 'app' => Application::APP_ID,
-                ]);
-                return;
-            }
-            $roomId = (int)$row['room_id'];
-
-            // ── 2. Get all user attendees currently in the room ───────────────
-            $atQb  = $db->getQueryBuilder();
-            $atRes = $atQb->select('actor_id', 'participant_type')
-                ->from('talk_attendees')
-                ->where($atQb->expr()->eq('room_id',
-                    $atQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($atQb->expr()->eq('actor_type', $atQb->createNamedParameter('users')))
-                ->executeQuery();
-            $attendees = $atRes->fetchAll();
-            $atRes->closeCursor();
-
-            if (empty($attendees)) {
-                return;
-            }
-
-            // ── 3. Build the set of current direct team members ───────────────
-            $mQb  = $db->getQueryBuilder();
-            $mRes = $mQb->select('user_id')
-                ->from('circles_member')
-                ->where($mQb->expr()->eq('circle_id', $mQb->createNamedParameter($teamId)))
-                ->andWhere($mQb->expr()->eq('user_type',
-                    $mQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($mQb->expr()->eq('status', $mQb->createNamedParameter('Member')))
-                ->executeQuery();
-
-            $currentMembers = [];
-            while ($mRow = $mRes->fetch()) {
-                $currentMembers[(string)$mRow['user_id']] = true;
-            }
-            $mRes->closeCursor();
-
-            $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: sets loaded', [
-                'attendees' => count($attendees), 'currentMembers' => count($currentMembers),
-                'teamId' => $teamId, 'app' => Application::APP_ID,
-            ]);
-
-            // ── 4. Evict attendees no longer in the team ──────────────────────
-            // v3.100.8 (apps.md W-5) — per-attendee: try ParticipantService
-            // first (fires system leave-message + push), fall back to raw
-            // DELETE if the API refuses.
-            $room = null;
-            $participantService = null;
-            try {
-                $room = $this->container->get(\OCA\Talk\Manager::class)->getRoomById($roomId);
-                $participantService = $this->container->get(\OCA\Talk\Service\ParticipantService::class);
-            } catch (\Throwable $e) {
-                $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: Talk API path unavailable — using DB fallback for all evictions', [
-                    'roomId' => $roomId, 'reason' => $e->getMessage(),
-                    'app' => Application::APP_ID,
-                ]);
-            }
-
-            $removed = 0;
-            foreach ($attendees as $attendee) {
-                $uid  = (string)($attendee['actor_id']        ?? '');
-                $type = (int)   ($attendee['participant_type'] ?? 0);
-
-                if ($uid === '' || $type === 1) {
-                    continue; // skip empty rows and room OWNERs
-                }
-
-                if (isset($currentMembers[$uid])) {
-                    continue;
-                }
-
-                $viaApi = false;
-                if ($room !== null && $participantService !== null) {
-                    try {
-                        $participant = $participantService->getParticipantByActor($room, 'users', $uid);
-                        if ($participant !== null) {
-                            $participantService->removeAttendee(
-                                $room,
-                                $participant->getAttendee(),
-                                \OCA\Talk\Room::PARTICIPANT_REMOVED,
-                            );
-                            $viaApi = true;
-                        }
-                    } catch (\Throwable $e) {
-                        $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: per-attendee API remove failed — falling back for this uid', [
-                            'uid' => $uid, 'roomId' => $roomId,
-                            'reason' => $e->getMessage(),
-                            'app' => Application::APP_ID,
-                        ]);
-                    }
-                }
-                if (!$viaApi) {
-                    $dqb = $db->getQueryBuilder();
-                    $dqb->delete('talk_attendees')
-                        ->where($dqb->expr()->eq('room_id',
-                            $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('users')))
-                        ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($uid)))
-                        ->andWhere($dqb->expr()->neq('participant_type',
-                            $dqb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->executeStatement();
-                }
-                $removed++;
-                $this->logger->debug('[TeamHub][TalkService] reconcileTalkRoomMembers: evicted attendee', [
-                    'uid' => $uid, 'roomId' => $roomId, 'viaApi' => $viaApi,
-                    'app' => Application::APP_ID,
-                ]);
-            }
-
-            $this->logger->info('[TeamHub][TalkService] reconcileTalkRoomMembers: complete', [
-                'teamId' => $teamId, 'roomId' => $roomId,
-                'checked' => count($attendees), 'removed' => $removed,
-                'app'    => Application::APP_ID,
-            ]);
-            // logger->info above already carries the removed count.
-
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][TalkService] reconcileTalkRoomMembers failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            // logger->warning above already carries the failure detail.
-        }
+        $this->logger->debug('[TeamHub][TalkService] syncUserToTeamTalkRoom: inserted attendee', [
+            'uid' => $uid, 'roomId' => $roomId, 'app' => Application::APP_ID,
+        ]);
     }
 
     // =========================================================================
@@ -1878,7 +1588,8 @@ class TalkService {
     /**
      * Reconcile the Talk room for $teamId against the team's EFFECTIVE membership.
      *
-     * Unlike reconcileTalkRoomMembers (which considers direct members only) this
+     * Unlike the direct-members-only reconcileTalkRoomMembers() it replaced
+     * (unused since v4.7.9, deleted in v4.10.48 with removeUserFromTeamTalkRoom()) this
      * walks circles_membership — Circles' denormalised cache — so users reaching
      * the team via an attached group or sub-team are treated as members.
      *
@@ -1939,22 +1650,12 @@ class TalkService {
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
 
-            // ── 1. Find the Talk room connected to this team ──────────────────
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('room_id')
-                ->from('talk_attendees')
-                ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-                ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
+            // ── 1. The rooms to reconcile ─────────────────────────────────────
+            $roomIds = $this->teamRoomIds($db, $teamId);
+            if ($roomIds === []) {
                 // No Talk room connected — nothing to reconcile.
                 return ['added' => 0, 'removed' => 0];
             }
-            $roomId = (int)$row['room_id'];
 
             // ── 2. Compute effective member set from circles_membership ──────
             // circles_membership.single_id resolves to a NC uid by joining
@@ -2008,114 +1709,13 @@ class TalkService {
             }
             $dRes->closeCursor();
 
-            // ── 3. Current talk_attendees rows for this room (managed types) ─
-            $aQb  = $db->getQueryBuilder();
-            $aRes = $aQb->select('actor_type', 'actor_id', 'participant_type')
-                ->from('talk_attendees')
-                ->where($aQb->expr()->eq('room_id',
-                    $aQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($aQb->expr()->in('actor_type', $aQb->createNamedParameter(
-                    $managedActorTypes,
-                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
-                )))
-                ->executeQuery();
-            $current = [];
-            while ($aRow = $aRes->fetch()) {
-                $actorType = (string)($aRow['actor_type'] ?? '');
-                $actorId   = (string)($aRow['actor_id']   ?? '');
-                if ($actorType !== '' && $actorId !== '') {
-                    $current[$actorType . '|' . $actorId] = [
-                        'actor_type'       => $actorType,
-                        'actor_id'         => $actorId,
-                        'participant_type' => (int)($aRow['participant_type'] ?? 0),
-                    ];
-                }
-            }
-            $aRes->closeCursor();
-
-            // ── 4. Add missing attendees ─────────────────────────────────────
-            $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
-            $added = 0;
-            foreach ($effective as $key => $member) {
-                if (isset($current[$key])) {
-                    continue;
-                }
-                $iQb = $db->getQueryBuilder();
-                $iQb->insert('talk_attendees')
-                    ->setValue('room_id',          $iQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                    ->setValue('actor_type',       $iQb->createNamedParameter($member['actor_type']))
-                    ->setValue('actor_id',         $iQb->createNamedParameter($member['actor_id']))
-                    ->setValue('display_name',     $iQb->createNamedParameter(''))
-                    ->setValue('participant_type', $iQb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
-
-                foreach ([
-                    'favorite'               => 0,
-                    'notification_level'     => 0,
-                    'notification_calls'     => 0,
-                    'last_joined_call'       => 0,
-                    'last_read_message'      => 0,
-                    'last_mention_message'   => 0,
-                    'last_mention_direct'    => 0,
-                    'in_call'                => 0,
-                    'permissions'            => 0,
-                    'publishing_permissions' => 0,
-                    'access_token'           => '',
-                    'remote_id'              => '',
-                    'phone_number'           => '',
-                    'phone_states'           => '',
-                ] as $col => $val) {
-                    if (in_array($col, $attendeeCols, true)) {
-                        $iQb->setValue($col, $iQb->createNamedParameter($val));
-                    }
-                }
-                try {
-                    $iQb->executeStatement();
-                    $added++;
-                } catch (\Throwable $e) {
-                    $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: insert failed', [
-                        'teamId' => $teamId, 'roomId' => $roomId,
-                        'actorType' => $member['actor_type'], 'actorId' => $member['actor_id'],
-                        'error'  => $e->getMessage(), 'app' => Application::APP_ID,
-                    ]);
-                }
-            }
-
-            // ── 5. Remove orphans (skip room owners) ─────────────────────────
+            // ── 3–5. Per room: current attendees, add missing, remove orphans ─
+            $added   = 0;
             $removed = 0;
-            foreach ($current as $key => $attendee) {
-                if ($attendee['participant_type'] === 1) {
-                    continue; // never evict a room owner
-                }
-                if (isset($effective[$key])) {
-                    continue; // still a member
-                }
-                try {
-                    $rQb = $db->getQueryBuilder();
-                    $rQb->delete('talk_attendees')
-                        ->where($rQb->expr()->eq('room_id',
-                            $rQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->andWhere($rQb->expr()->eq('actor_type', $rQb->createNamedParameter($attendee['actor_type'])))
-                        ->andWhere($rQb->expr()->eq('actor_id',   $rQb->createNamedParameter($attendee['actor_id'])))
-                        ->andWhere($rQb->expr()->neq('participant_type',
-                            $rQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->executeStatement();
-                    $removed++;
-                } catch (\Throwable $e) {
-                    $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: delete failed', [
-                        'teamId' => $teamId, 'roomId' => $roomId,
-                        'actorType' => $attendee['actor_type'], 'actorId' => $attendee['actor_id'],
-                        'error'  => $e->getMessage(), 'app' => Application::APP_ID,
-                    ]);
-                }
-            }
-
-            if ($added > 0 || $removed > 0) {
-                $this->logger->info('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: drift reconciled', [
-                    'teamId' => $teamId, 'roomId' => $roomId,
-                    'added'  => $added, 'removed' => $removed,
-                    'effective' => count($effective), 'before' => count($current),
-                    'app' => Application::APP_ID,
-                ]);
+            foreach ($roomIds as $roomId) {
+                $r = $this->reconcileRoomAttendees($db, $teamId, $roomId, $effective, $managedActorTypes);
+                $added   += $r['added'];
+                $removed += $r['removed'];
             }
 
             return ['added' => $added, 'removed' => $removed];
@@ -2127,6 +1727,222 @@ class TalkService {
             ]);
             return ['added' => 0, 'removed' => 0];
         }
+    }
+
+    /**
+     * The team's Talk rooms: its **linked** rooms (active `talk` rows in
+     * teamhub_team_app_resources, the source of truth the Talk widget reads),
+     * in their display order, in which the team's circle is a participant
+     * (v4.10.48). The first is *the* team room — the one the widget shows.
+     *
+     * Every "which room is the team's" question in TeamHub asks this. Until
+     * 4.10.48 six places answered it with "the first room that has the team's
+     * circle as an attendee" (`setMaxResults(1)`, no order). A circle is an
+     * attendee of every conversation the team was ever added to, so:
+     *  - the effective-member reconcile kept reconciling an older duplicate
+     *    room while the team's own room never received the members who reached
+     *    the team through a group (found 2026-09-26 on *Marketing_profile*:
+     *    Dick Turner and Inge NC, members since August, absent from room 82
+     *    because room 59 came first);
+     *  - deleteTalkRoom() could delete a conversation that was not the team's
+     *    and leave the team's own room behind;
+     *  - a new direct member was added to that room, and the archive exported it.
+     *
+     * Deliberately not "every room with the circle in it": the reconcile
+     * removes users who are not team members, and in a conversation somebody
+     * else added the team to, that would evict people invited there on purpose.
+     *
+     * Falls back to the old single-room lookup only for a team with no linked
+     * Talk row at all, so a team that predates the registry is not dropped.
+     *
+     * @return list<int> room ids, the team room first
+     */
+    public function teamRoomIds(\OCP\IDBConnection $db, string $teamId): array {
+        $circleRooms = [];
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->selectDistinct('room_id')
+            ->from('talk_attendees')
+            ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
+            ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
+            ->executeQuery();
+        while ($row = $res->fetch()) {
+            $circleRooms[] = (int)$row['room_id'];
+        }
+        $res->closeCursor();
+        if ($circleRooms === []) {
+            return [];
+        }
+
+        $tokens = [];
+        try {
+            $rows = $this->container->get(\OCA\TeamHub\Db\TeamAppResourceMapper::class)
+                ->findActiveByTeamAndApp($teamId, 'talk');
+            foreach ($rows as $row) {
+                $token = (string)$row->getResourceId();
+                if ($token !== '') {
+                    $tokens[] = $token;
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TalkService] linked Talk rooms could not be read', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+
+        if ($tokens === []) {
+            sort($circleRooms);
+            return [$circleRooms[0]];
+        }
+
+        $idByToken = [];
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('id', 'token')
+            ->from('talk_rooms')
+            ->where($qb->expr()->in('token', $qb->createNamedParameter($tokens, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+            ->executeQuery();
+        while ($row = $res->fetch()) {
+            $idByToken[(string)$row['token']] = (int)$row['id'];
+        }
+        $res->closeCursor();
+
+        // In the registry's order, so the first is the widget's room.
+        $rooms = [];
+        foreach ($tokens as $token) {
+            $id = $idByToken[$token] ?? null;
+            if ($id !== null && in_array($id, $circleRooms, true) && !in_array($id, $rooms, true)) {
+                $rooms[] = $id;
+            }
+        }
+        return $rooms;
+    }
+
+    /**
+     * Steps 3–5 of reconcileEffectiveTalkRoomMembers() for one room: read the
+     * room's managed attendees, add every effective member missing one, remove
+     * every non-owner attendee no longer in the effective set. Moved out
+     * unchanged in v4.10.48 so the reconcile can run per linked room.
+     *
+     * @param array<string, array{actor_type: string, actor_id: string}> $effective
+     * @param string[] $managedActorTypes
+     * @return array{added: int, removed: int}
+     *
+     * @see teamRoomIds() for which rooms reach this
+     */
+    private function reconcileRoomAttendees(\OCP\IDBConnection $db, string $teamId, int $roomId, array $effective, array $managedActorTypes): array {
+        // ── 3. Current talk_attendees rows for this room (managed types) ─
+        $aQb  = $db->getQueryBuilder();
+        $aRes = $aQb->select('actor_type', 'actor_id', 'participant_type')
+            ->from('talk_attendees')
+            ->where($aQb->expr()->eq('room_id',
+                $aQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($aQb->expr()->in('actor_type', $aQb->createNamedParameter(
+                $managedActorTypes,
+                \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
+            )))
+            ->executeQuery();
+        $current = [];
+        while ($aRow = $aRes->fetch()) {
+            $actorType = (string)($aRow['actor_type'] ?? '');
+            $actorId   = (string)($aRow['actor_id']   ?? '');
+            if ($actorType !== '' && $actorId !== '') {
+                $current[$actorType . '|' . $actorId] = [
+                    'actor_type'       => $actorType,
+                    'actor_id'         => $actorId,
+                    'participant_type' => (int)($aRow['participant_type'] ?? 0),
+                ];
+            }
+        }
+        $aRes->closeCursor();
+
+
+        // ── 4. Add missing attendees ─────────────────────────────────────
+        $attendeeCols = $this->dbIntrospection->getTableColumns('talk_attendees');
+        $added = 0;
+        foreach ($effective as $key => $member) {
+            if (isset($current[$key])) {
+                continue;
+            }
+            $iQb = $db->getQueryBuilder();
+            $iQb->insert('talk_attendees')
+                ->setValue('room_id',          $iQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->setValue('actor_type',       $iQb->createNamedParameter($member['actor_type']))
+                ->setValue('actor_id',         $iQb->createNamedParameter($member['actor_id']))
+                ->setValue('display_name',     $iQb->createNamedParameter(''))
+                ->setValue('participant_type', $iQb->createNamedParameter(3, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT));
+
+            foreach ([
+                'favorite'               => 0,
+                'notification_level'     => 0,
+                'notification_calls'     => 0,
+                'last_joined_call'       => 0,
+                'last_read_message'      => 0,
+                'last_mention_message'   => 0,
+                'last_mention_direct'    => 0,
+                'in_call'                => 0,
+                'permissions'            => 0,
+                'publishing_permissions' => 0,
+                'access_token'           => '',
+                'remote_id'              => '',
+                'phone_number'           => '',
+                'phone_states'           => '',
+            ] as $col => $val) {
+                if (in_array($col, $attendeeCols, true)) {
+                    $iQb->setValue($col, $iQb->createNamedParameter($val));
+                }
+            }
+            try {
+                $iQb->executeStatement();
+                $added++;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: insert failed', [
+                    'teamId' => $teamId, 'roomId' => $roomId,
+                    'actorType' => $member['actor_type'], 'actorId' => $member['actor_id'],
+                    'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+        // ── 5. Remove orphans (skip room owners) ─────────────────────────
+        $removed = 0;
+        foreach ($current as $key => $attendee) {
+            if ($attendee['participant_type'] === 1) {
+                continue; // never evict a room owner
+            }
+            if (isset($effective[$key])) {
+                continue; // still a member
+            }
+            try {
+                $rQb = $db->getQueryBuilder();
+                $rQb->delete('talk_attendees')
+                    ->where($rQb->expr()->eq('room_id',
+                        $rQb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->andWhere($rQb->expr()->eq('actor_type', $rQb->createNamedParameter($attendee['actor_type'])))
+                    ->andWhere($rQb->expr()->eq('actor_id',   $rQb->createNamedParameter($attendee['actor_id'])))
+                    ->andWhere($rQb->expr()->neq('participant_type',
+                        $rQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                    ->executeStatement();
+                $removed++;
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: delete failed', [
+                    'teamId' => $teamId, 'roomId' => $roomId,
+                    'actorType' => $attendee['actor_type'], 'actorId' => $attendee['actor_id'],
+                    'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
+
+        if ($added > 0 || $removed > 0) {
+            $this->logger->info('[TeamHub][TalkService] reconcileEffectiveTalkRoomMembers: drift reconciled', [
+                'teamId' => $teamId, 'roomId' => $roomId,
+                'added'  => $added, 'removed' => $removed,
+                'effective' => count($effective), 'before' => count($current),
+                'app' => Application::APP_ID,
+            ]);
+        }
+
+        return ['added' => $added, 'removed' => $removed];
     }
 
     // =========================================================================
@@ -3292,6 +3108,15 @@ class TalkService {
      * an API that could not be tested here — the principle recorded in
      * DESIGN.md for ApprovalWorkProvider: when you integrate against something
      * you cannot verify, ship the means to diagnose it.
+     *
+     * **Nothing renders this since v4.10.20.** It was a `<details>` on the My
+     * Work admin tab printing reflection output verbatim — a Talk fact on a
+     * My Work page, shown even when threading works, with no verdict on it
+     * (Justin, 2026-09-22: no need to show all this info in the admin page).
+     * The method stays because it is the one written-down way to answer "did
+     * this proposal open a thread, or post as an ordinary message", which
+     * `startProposalThread()` otherwise reports only as a log warning; call it
+     * from a debug session rather than restoring the panel.
      *
      * @return array<string,mixed>
      */

@@ -4,7 +4,7 @@
         @close="$emit('close')">
         <div class="addtask-modal">
             <h3 class="addtask-modal__title">
-                <ClipboardPlusOutline :size="20" />
+                <ClipboardPlusOutline :size="ICON_BODY" />
                 {{ t('teamhub', 'Create personal task') }}
             </h3>
 
@@ -53,8 +53,8 @@
             <div class="addtask-modal__actions">
                 <NcButton variant="primary" :disabled="saving" @click="submit">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="18" />
-                        <ClipboardPlusOutline v-else :size="18" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <ClipboardPlusOutline v-else :size="ICON_BODY" />
                     </template>
                     {{ saving ? t('teamhub', 'Adding…') : t('teamhub', 'Add task') }}
                 </NcButton>
@@ -73,6 +73,7 @@ import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea } from '@nextcloud/vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 export default {
     name: 'AddPersonalTaskModal',
@@ -87,6 +88,7 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
             saving: false,
             errors: {},
             form: {
@@ -171,15 +173,15 @@ export default {
 .addtask-modal__title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 18px;
+    gap: 8px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     margin: 0 0 8px;
     color: var(--color-main-text);
 }
 
 .addtask-modal__hint {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0 0 20px;
 }
@@ -201,17 +203,17 @@ export default {
 
 .addtask-modal__label {
     display: block;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
-    margin-bottom: 5px;
+    margin-bottom: 4px;
 }
 
 .addtask-modal__input {
     width: 100%;
     padding: 8px 12px;
     border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-main-background);
     color: var(--color-main-text);
     font-size: var(--th-font-body);
@@ -234,8 +236,8 @@ export default {
 }
 
 .addtask-modal__error {
-    font-size: 13px;
-    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-error);
     margin: 0 0 16px;
 }
 

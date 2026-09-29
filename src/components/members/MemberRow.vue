@@ -5,7 +5,7 @@
             <NcAvatar
                 :user="member.userId"
                 :display-name="member.displayName"
-                :show-user-status="false"
+                :hide-status="true"
                 :disable-menu="false"
                 :size="32" />
             <span
@@ -23,7 +23,7 @@
                 {{ member.displayName }}
             </div>
             <div class="th-member-row__status">
-                <span class="th-member-row__status-label">{{ t('teamhub', 'Current Status') }}</span>
+                <span class="th-member-row__status-label">{{ t('teamhub', 'Current status') }}</span>
                 <span class="th-member-row__status-value">{{ statusText }}</span>
             </div>
         </div>
@@ -38,7 +38,7 @@
                 class="th-member-row__icon"
                 :title="t('teamhub', 'Open Talk conversation with {name}', { name: member.displayName })"
                 :aria-label="t('teamhub', 'Open Talk conversation with {name}', { name: member.displayName })">
-                <MessageIcon :size="18" aria-hidden="true" />
+                <MessageIcon :size="ICON_BODY" aria-hidden="true" />
             </a>
             <a
                 v-if="member.phone"
@@ -46,7 +46,7 @@
                 class="th-member-row__icon"
                 :title="t('teamhub', 'Call {phone}', { phone: member.phone })"
                 :aria-label="t('teamhub', 'Call {name} at {phone}', { name: member.displayName, phone: member.phone })">
-                <PhoneIcon :size="18" aria-hidden="true" />
+                <PhoneIcon :size="ICON_BODY" aria-hidden="true" />
             </a>
             <a
                 v-if="emailHref"
@@ -56,7 +56,7 @@
                 class="th-member-row__icon"
                 :title="emailTitle"
                 :aria-label="emailAriaLabel">
-                <EmailIcon :size="18" aria-hidden="true" />
+                <EmailIcon :size="ICON_BODY" aria-hidden="true" />
             </a>
         </div>
     </li>
@@ -66,6 +66,7 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { NcAvatar } from '@nextcloud/vue'
+import { ICON_BODY } from '../../constants/uiTokens.js'
 
 import MessageIcon from 'vue-material-design-icons/MessageOutline.vue'
 import PhoneIcon   from 'vue-material-design-icons/Phone.vue'
@@ -96,6 +97,12 @@ export default {
          * `mailto:` handed off to whatever the OS has registered.
          */
         mailAvailable: { type: Boolean, default: false },
+    },
+
+    data() {
+        return {
+            ICON_BODY,
+        }
     },
 
     computed: {
@@ -225,7 +232,7 @@ export default {
 .th-member-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--color-border);
     min-width: 0;
@@ -242,7 +249,7 @@ export default {
 .th-member-row__dot {
     position: absolute;
     bottom: 0;
-    right: 0;
+    inset-inline-end: 0;
     width: 10px;
     height: 10px;
     border-radius: 50%;
@@ -259,7 +266,7 @@ export default {
 }
 
 .th-member-row__name {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-main-text);
     white-space: nowrap;
@@ -292,7 +299,7 @@ export default {
 .th-member-row__actions {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
@@ -308,7 +315,7 @@ export default {
     border: none;
     cursor: pointer;
     text-decoration: none;
-    transition: background 0.12s, color 0.12s;
+    transition: background var(--animation-quick), color var(--animation-quick);
 }
 .th-member-row__icon:hover {
     background: var(--color-background-dark, var(--color-background-hover));

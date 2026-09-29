@@ -19,6 +19,7 @@ use OCA\TeamHub\Service\MilestoneService;
 use OCA\TeamHub\Service\OpenProject\OpenProjectMessages;
 use OCA\TeamHub\Service\OpenProject\OpenProjectModuleService;
 use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
+use OCA\TeamHub\Service\PersonSearchService;
 use OCA\TeamHub\Service\PolicyService;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\ResourceService;
@@ -50,6 +51,8 @@ class TeamController extends Controller {
         IRequest $request,
         private TeamService $teamService,
         private MemberService $memberService,
+        // v4.10.7 — the one way to look a person up; see searchUsers().
+        private PersonSearchService $personSearch,
         private ResourceService $resourceService,
         // v4.5.36 — Collectives is a discovered resource now, so the Wiki
         // toggle has a registry row to keep in step. See
@@ -196,6 +199,16 @@ class TeamController extends Controller {
         string $templateKey = '',
         int $openProjectId = 0,
     ): JSONResponse {
+        // v4.10.26 — the creation restriction, enforced where the team is
+        // made. Until now only the sidebar button, the OpenProject search and
+        // the provisioning routes asked, so a member outside `createTeamGroup`
+        // could skip "Request a new team" with one POST. Checked here and not
+        // in `TeamService::createTeam()`: the CSV importer (an administrator's
+        // run, replayed as its creator) and provisioning (`ValidateStep`)
+        // carry their own gate, and the service is their shared path.
+        if (!$this->memberService->canCurrentUserCreateTeam()) {
+            return new JSONResponse(['error' => 'You are not allowed to create teams'], Http::STATUS_FORBIDDEN);
+        }
         try {
             $linkOpenProject = $templateKey === TeamOpenProjectLinkService::TEMPLATE || $openProjectId > 0;
             if ($linkOpenProject) {
@@ -344,7 +357,10 @@ class TeamController extends Controller {
             if ($teamId !== '' && !preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $teamId)) {
                 return new JSONResponse([]);
             }
-            $users = $this->memberService->searchUsers($q, 10, $teamId);
+            // v4.10.7 — through PersonSearchService, which adds the subline
+            // that tells two people with the same name apart. Same filters
+            // as before; same shape as the admin picker's endpoint.
+            $users = $this->personSearch->searchForTeam($q, 10, $teamId);
             return new JSONResponse($users);
         } catch (\Throwable $e) {
             // M-4 — log unexpected failures. Return a distinctive envelope

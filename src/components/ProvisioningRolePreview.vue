@@ -35,7 +35,7 @@
         <template v-else-if="entries.length">
             <ul class="prov-roles__members" :aria-label="t('teamhub', 'Members and their OpenProject roles')">
                 <li v-for="e in entries" :key="e.type + ':' + e.id" class="prov-roles__member" :class="'prov-roles__member--' + e.status">
-                    <NcAvatar v-if="e.type === 'user'" :user="e.id" :display-name="e.displayName" :size="24" :show-user-status="false" />
+                    <NcAvatar v-if="e.type === 'user'" :user="e.id" :display-name="e.displayName" :size="24" :hide-status="true" />
                     <span v-else class="prov-roles__avatar-alt"><AccountGroup :size="ICON_BODY" aria-hidden="true" /></span>
                     <span class="prov-roles__member-name">{{ e.displayName }}</span>
                     <span class="prov-roles__member-role">{{ roleLabel(e.teamRole) }}</span>
@@ -60,15 +60,16 @@
                         <label class="prov-roles__sr" :for="'prov-decision-' + e.type + '-' + e.id">
                             {{ t('teamhub', 'What to do with {name}', { name: e.displayName }) }}
                         </label>
-                        <select
-                            :id="'prov-decision-' + e.type + '-' + e.id"
+                        <NcSelect
+                            :input-id="'prov-decision-' + e.type + '-' + e.id"
+                            label-outside
                             class="prov-roles__decision"
-                            :value="decisions[e.type + ':' + e.id] || ''"
-                            @change="decide(e, $event.target.value)">
-                            <option value="" disabled>{{ t('teamhub', 'Choose') }}</option>
-                            <option value="teamhub_only">{{ t('teamhub', 'Add to the team only') }}</option>
-                            <option value="omit">{{ t('teamhub', 'Leave out') }}</option>
-                        </select>
+                            :model-value="decisions[e.type + ':' + e.id] || ''"
+                            @update:model-value="decide(e, $event)"
+                            :options="[{ id: 'teamhub_only', label: t('teamhub', 'Add to the team only') }, { id: 'omit', label: t('teamhub', 'Leave out') }]"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            :placeholder="t('teamhub', 'Choose')" />
                     </template>
                 </li>
             </ul>
@@ -83,7 +84,7 @@
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcAvatar, NcLoadingIcon } from '@nextcloud/vue'
+import { NcAvatar, NcLoadingIcon, NcSelect } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import { ICON_BODY } from '../constants/uiTokens.js'
 import { classifyError } from '../lib/openProject.js'
@@ -103,7 +104,7 @@ import { componentLabel, roleLabel } from '../lib/provisioning.js'
 export default {
     name: 'ProvisioningRolePreview',
 
-    components: { AccountGroup, NcAvatar, NcLoadingIcon },
+    components: {  NcSelect, AccountGroup, NcAvatar, NcLoadingIcon },
 
     props: {
         templateKey: { type: String, default: 'openproject' },
@@ -278,7 +279,7 @@ export default {
 .prov-roles__error {
     margin: 0;
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .prov-roles__members {
@@ -338,24 +339,6 @@ export default {
 .prov-roles__unmatched {
     color: var(--color-warning-text);
     font-weight: var(--th-font-weight-medium);
-}
-
-.prov-roles__decision {
-    min-height: 34px;
-    padding: 0 var(--th-space-sm);
-    border: 2px solid var(--color-border-dark);
-    border-radius: var(--th-radius-control);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    outline: none;
-}
-
-.prov-roles__decision:focus {
-    border-color: var(--color-primary-element);
-}
-
-.prov-roles__decision:focus-visible {
-    box-shadow: 0 0 0 2px var(--color-primary-element-light);
 }
 
 @media (max-width: 700px) {

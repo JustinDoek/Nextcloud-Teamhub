@@ -35,7 +35,16 @@ class GroupFolderService {
         private IConfig           $config,
         private ContainerInterface $container,
         private LoggerInterface   $logger,
+        // v4.10.1 — Nextcloud 35's team spaces. Every mutation below asks it
+        // first; on 33/34 it answers "unavailable" and the plain group-folder
+        // path runs unchanged (DESIGN.md §2.133).
+        private TeamSpaceService  $teamSpaceService,
     ) {}
+
+    /** The team-space seam, for callers that need the version fact itself. */
+    public function teamSpaces(): TeamSpaceService {
+        return $this->teamSpaceService;
+    }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Availability checks
@@ -109,28 +118,100 @@ class GroupFolderService {
     }
 
     /**
+     * v4.10.1 — The team's folder, made the way this Nextcloud makes it.
+     *
+     * On Nextcloud 35 with Team folders the result is the team's *space*
+     * (created through `ITeamFolderProvider`, or the one the team already
+     * has — the provider is idempotent). On 33/34 it is a plain group folder
+     * with the circle assigned, exactly as before. One call site shape for
+     * team creation, bulk import and provisioning, so none of them carries
+     * the version split.
+     *
+     * @return array{folder_id: int, team_space: bool}
+     */
+    public function createTeamFolder(string $teamId, string $mountPoint): array {
+        if ($this->teamSpaceService->isAvailable()) {
+            $space = $this->teamSpaceService->createTeamSpace($teamId, $mountPoint);
+            return ['folder_id' => $space['id'], 'team_space' => true];
+        }
+        $folderId = $this->createGroupFolder($mountPoint);
+        $this->assignCircleToFolder($folderId, $teamId);
+        return ['folder_id' => $folderId, 'team_space' => false];
+    }
+
+    /**
      * Assign a team's circle to a Group Folder.
      * FolderManager::addApplicableGroup detects circles by their single_id automatically.
      *
+     * v4.10.1 — on Nextcloud 35 the folder also becomes the team's space when
+     * the provider allows it (applicable to this circle alone, nobody's space
+     * yet). A folder that is already this team's space is left as it is —
+     * Team folders refuses `addApplicableGroup()` on any space, and there is
+     * nothing to add. A folder that is *another* team's space is refused
+     * outright: connecting it would fail halfway and leave a row pointing at
+     * a folder the team cannot open.
+     *
      * @param int    $folderId        GroupFolders folder ID
      * @param string $circleUniqueId  Team circle's unique_id / single_id
+     * @return bool true when the folder is the team's space afterwards
+     * @throws \RuntimeException when the folder belongs to another team
      */
-    public function assignCircleToFolder(int $folderId, string $circleUniqueId): void {
+    public function assignCircleToFolder(int $folderId, string $circleUniqueId): bool {
         $fm = $this->requireFolderManager();
 
         $this->logger->debug('[TeamHub][GroupFolderService] assignCircleToFolder', [
             'folderId' => $folderId, 'circleUniqueId' => $circleUniqueId, 'app' => Application::APP_ID,
         ]);
 
+        if ($this->teamSpaceService->isAvailable()) {
+            $owner = $this->teamSpaceService->spaceOwnerCircleId($folderId);
+            if ($owner === $circleUniqueId) {
+                return true;
+            }
+            if ($owner !== null) {
+                throw new \RuntimeException('This folder is the team space of another team and cannot be connected.');
+            }
+        }
+
         $fm->addApplicableGroup($folderId, $circleUniqueId);
 
         $this->logger->info('[TeamHub][GroupFolderService] circle assigned to group folder', [
             'folderId' => $folderId, 'circleUniqueId' => $circleUniqueId, 'app' => Application::APP_ID,
         ]);
+
+        if (!$this->teamSpaceService->isAvailable()) {
+            return false;
+        }
+        if ($this->teamSpaceService->getTeamSpace($circleUniqueId) !== null) {
+            // The team already has a space elsewhere; this stays a plain
+            // second folder rather than a second space, which NC forbids.
+            return false;
+        }
+        if (!$this->teamSpaceService->isLinkable($circleUniqueId, $folderId)) {
+            return false;
+        }
+        try {
+            $this->teamSpaceService->linkTeamSpace($circleUniqueId, $folderId);
+            return true;
+        } catch (\Throwable $e) {
+            // The folder is connected either way; being a space is the bonus
+            // that failed, and the reconcile job will offer it again.
+            $this->logger->warning('[TeamHub][GroupFolderService] folder connected but could not be linked as team space', [
+                'folderId' => $folderId, 'circleUniqueId' => $circleUniqueId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
     }
 
     /**
      * Remove a team's circle from a Group Folder.
+     *
+     * v4.10.1 — for the team's own space this is an *unlink*: Team folders
+     * clears the ownership and removes the circle's access in one step, and
+     * keeps the folder with everything in it (the same promise a plain
+     * disconnect always made). Reconnecting is `assignCircleToFolder()`,
+     * which links it again.
      */
     public function removeCircleFromFolder(int $folderId, string $circleUniqueId): void {
         $fm = $this->requireFolderManager();
@@ -138,6 +219,14 @@ class GroupFolderService {
         $this->logger->debug('[TeamHub][GroupFolderService] removeCircleFromFolder', [
             'folderId' => $folderId, 'circleUniqueId' => $circleUniqueId, 'app' => Application::APP_ID,
         ]);
+
+        if ($this->teamSpaceService->isAvailable() && $this->teamSpaceService->isTeamSpaceOf($circleUniqueId, $folderId)) {
+            $this->teamSpaceService->unlinkTeamSpace($circleUniqueId);
+            $this->logger->info('[TeamHub][GroupFolderService] team space unlinked from circle', [
+                'folderId' => $folderId, 'circleUniqueId' => $circleUniqueId, 'app' => Application::APP_ID,
+            ]);
+            return;
+        }
 
         $fm->removeApplicableGroup($folderId, $circleUniqueId);
 
@@ -147,16 +236,84 @@ class GroupFolderService {
     }
 
     /**
+     * v4.10.1 — Take one group or circle off a folder's applicable list.
+     *
+     * The reconcile job's tool for "a team folder is for its team only":
+     * everything else on the list goes, whichever kind of principal it is.
+     * `FolderManager::removeApplicableGroup()` matches the id against both
+     * columns, and refuses only the owning circle of a space — which this
+     * is never asked to remove.
+     *
+     * @return array<int, array{id: string, kind: string}> the folder's applicable
+     *         principals before the removal, so the caller can report them
+     */
+    public function listApplicable(int $folderId): array {
+        $out = [];
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('group_id', 'circle_id')
+                ->from('group_folders_groups')
+                ->where($qb->expr()->eq('folder_id', $qb->createNamedParameter($folderId, IQueryBuilder::PARAM_INT)));
+            $r = $qb->executeQuery();
+            while ($row = $r->fetch()) {
+                $circle = (string)($row['circle_id'] ?? '');
+                $group  = (string)($row['group_id'] ?? '');
+                if ($circle !== '') {
+                    $out[] = ['id' => $circle, 'kind' => 'circle'];
+                } elseif ($group !== '') {
+                    $out[] = ['id' => $group, 'kind' => 'group'];
+                }
+            }
+            $r->closeCursor();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][GroupFolderService] listApplicable failed', [
+                'folderId' => $folderId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+        return $out;
+    }
+
+    public function removeApplicable(int $folderId, string $groupOrCircleId): void {
+        $fm = $this->requireFolderManager();
+        $fm->removeApplicableGroup($folderId, $groupOrCircleId);
+        $this->logger->info('[TeamHub][GroupFolderService] principal removed from group folder', [
+            'folderId' => $folderId, 'principal' => $groupOrCircleId, 'app' => Application::APP_ID,
+        ]);
+    }
+
+    /**
      * Permanently delete a Group Folder and all its contents.
      *
-     * @param int $folderId GroupFolders folder ID
+     * v4.10.1 — a team space can only be deleted by its team, through the
+     * provider (`FolderManager::removeFolder()` refuses a space outright).
+     * `$teamId` is the team doing the deleting: its own space goes through
+     * `removeTeamSpace()`; another team's space is refused rather than
+     * deleted from under that team.
+     *
+     * @param int         $folderId GroupFolders folder ID
+     * @param string|null $teamId   the team the folder is being deleted for
+     * @throws \RuntimeException when the folder is another team's space
      */
-    public function deleteGroupFolder(int $folderId): void {
+    public function deleteGroupFolder(int $folderId, ?string $teamId = null): void {
         $fm = $this->requireFolderManager();
 
         $this->logger->debug('[TeamHub][GroupFolderService] deleteGroupFolder', [
-            'folderId' => $folderId, 'app' => Application::APP_ID,
+            'folderId' => $folderId, 'teamId' => $teamId, 'app' => Application::APP_ID,
         ]);
+
+        if ($this->teamSpaceService->isAvailable()) {
+            $owner = $this->teamSpaceService->spaceOwnerCircleId($folderId);
+            if ($owner !== null) {
+                if ($teamId === null || $owner !== $teamId) {
+                    throw new \RuntimeException('This folder is the team space of another team and cannot be deleted here.');
+                }
+                $this->teamSpaceService->removeTeamSpace($teamId);
+                $this->logger->info('[TeamHub][GroupFolderService] team space deleted', [
+                    'folderId' => $folderId, 'teamId' => $teamId, 'app' => Application::APP_ID,
+                ]);
+                return;
+            }
+        }
 
         $fm->removeFolder($folderId);
 
@@ -406,6 +563,14 @@ class GroupFolderService {
             $out = [];
             foreach ($folders as $fid => $mp) {
                 if (isset($attached[$fid])) {
+                    continue;
+                }
+                // v4.10.1 — a folder that became another team's space since
+                // this team let go of it is that team's now; offering it
+                // would fail at connect time (Team folders refuses to share
+                // a space). Hidden, not shown disabled.
+                $owner = $this->teamSpaceService->spaceOwnerCircleId($fid);
+                if ($owner !== null && $owner !== $circleUniqueId) {
                     continue;
                 }
                 $out[] = ['folder_id' => $fid, 'mount_point' => $mp];

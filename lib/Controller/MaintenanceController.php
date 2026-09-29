@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MyWorkService;
 use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
+use OCA\TeamHub\Service\PersonSearchService;
 use OCA\TeamHub\Service\TeamExpiryService;
 use OCA\TeamHub\Service\TelemetryService;
 use OCP\AppFramework\Controller;
@@ -41,6 +42,8 @@ class MaintenanceController extends Controller {
         private MyWorkService      $myWorkService,
         // v4.9.4 — the one route to removing a team's OpenProject link.
         private TeamOpenProjectLinkService $openProjectLinks,
+        // v4.10.7 — the one way to look a person up; see searchUsers().
+        private PersonSearchService $personSearch,
         private IUserManager       $userManager,
         private IUserSession       $userSession,
         private LoggerInterface    $logger,
@@ -194,22 +197,21 @@ class MaintenanceController extends Controller {
 
     /**
      * GET /api/v1/admin/users/search?q=term
-     * User search for the owner picker — returns matching NC users.
+     * User search for the owner picker and the audit filter — matching NC
+     * accounts, by display name or uid.
+     *
+     * v4.10.7 — through PersonSearchService, in the same row shape as the
+     * member-facing `GET /api/v1/users/search` (`id`, not `uid`), with the
+     * subline that tells two people with the same name apart. An
+     * administrator's picker sees private profile fields too.
      */
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     #[NoCSRFRequired]
     public function searchUsers(string $q = ''): JSONResponse {
-        if (strlen($q) < 1) {
+        if (strlen($q) < 1 || strlen($q) > 200) {
             return new JSONResponse([]);
         }
-        $users = [];
-        foreach ($this->userManager->searchDisplayName($q, 10) as $user) {
-            $users[] = [
-                'uid'         => $user->getUID(),
-                'displayName' => $user->getDisplayName() ?: $user->getUID(),
-            ];
-        }
-        return new JSONResponse($users);
+        return new JSONResponse($this->personSearch->searchDirectory($q, 10));
     }
 
     // -------------------------------------------------------------------------

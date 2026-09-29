@@ -1,33 +1,45 @@
 <template>
     <NcContent app-name="teamhub">
         <NcAppNavigation :aria-label="t('teamhub', 'Teams navigation')">
+            <!-- v4.10.10 — the primary create action is NC's own "new" button
+                 (NcAppNavigationNew, design guide § Navigation), not a styled
+                 list item. It sits in the navigation's default slot, which NC
+                 renders above the list and already clears the sidebar toggle. -->
+            <NcAppNavigationNew
+                v-if="canCreateTeam"
+                :text="t('teamhub', 'New team')"
+                @click="startCreateTeam">
+                <template #icon>
+                    <Plus :size="ICON_BODY" />
+                </template>
+            </NcAppNavigationNew>
+            <!-- v4.10.22 — the same place, for the member who may not create a
+                 team here: asking for one is their version of the same action,
+                 so it belongs where the action is, not on a page they may
+                 never open. It moved off the My Work header for that reason.
+                 Shown only when there is a team to ask *from*: the request
+                 goes to the owner or a moderator of an existing team, so a
+                 member of none has nobody to ask and would get a dialog with
+                 an empty picker. -->
+            <NcAppNavigationNew
+                v-else-if="canRequestTeam"
+                :text="t('teamhub', 'Request a new team')"
+                @click="workflowStartOpen = true">
+                <template #icon>
+                    <AccountMultiplePlusOutline :size="ICON_BODY" />
+                </template>
+            </NcAppNavigationNew>
             <template #list>
-                <!-- Spacer to clear the show/hide sidebar toggle button -->
-                <div class="teamhub-nav-spacer" />
-
-                <!-- v4.3.17 — highlighted "primary action" style for the
-                     New Team item, matching NC's own sidebar convention
-                     (Files "+ New", Mail "Compose", etc. render the top
-                     item in the primary-element colour). Applied via a
-                     custom class rather than the `:active` prop because
-                     `active` semantically means "currently viewing" —
-                     we want prominence regardless of the active view. -->
-                <NcAppNavigationItem
-                    v-if="canCreateTeam"
-                    class="teamhub-nav-primary"
-                    :name="t('teamhub', 'New Team')"
-                    @click="startCreateTeam">
-                    <template #icon>
-                        <Plus :size="20" />
-                    </template>
-                </NcAppNavigationItem>
+                <!-- Spacer to clear the show/hide sidebar toggle button when
+                     there is no "new" button above the list. -->
+                <div v-if="!canCreateTeam && !canRequestTeam" class="teamhub-nav-spacer" />
 
                 <NcAppNavigationItem
-                    :name="t('teamhub', 'Browse Teams')"
+                    :name="t('teamhub', 'Browse teams')"
                     :active="activeView === 'browse'"
                     @click="showView('browse')">
                     <template #icon>
-                        <Magnify :size="20" />
+                        <Magnify :size="ICON_BODY" />
                     </template>
                 </NcAppNavigationItem>
 
@@ -44,29 +56,47 @@
                     :active="activeView === 'feed'"
                     @click="showView('feed')">
                     <template #icon>
-                        <Rss :size="20" />
+                        <Rss :size="ICON_BODY" />
                     </template>
                 </NcAppNavigationItem>
 
                 <!-- v4.5.21 — My Work. Sits directly under What's new, per the
                      information architecture: What's new is what happened in
                      the teams, My Work is what the teams are waiting on from
-                     you. Same licence gate as the feed above it — the backend
-                     enforces it too, this only hides the entry.
+                     you.
+                     v4.10.15 — no licence gate any more: the built-in
+                     workflows (WorkflowHub) live here and work on every
+                     instance; the aggregated queue inside the view is what
+                     the licence decides, and the view says so itself.
                      The counter shows Action Required only. Showing the total
                      would put a permanent double-digit badge on the sidebar
                      that nobody can ever clear; Action Required is the number
                      that is genuinely meant to reach zero. -->
                 <NcAppNavigationItem
-                    v-if="isLicensed"
                     :name="t('teamhub', 'My Work')"
                     :active="activeView === 'mywork'"
                     @click="showMyWork">
                     <template #icon>
-                        <ClipboardCheckOutline :size="20" />
+                        <ClipboardCheckOutline :size="ICON_BODY" />
                     </template>
                     <template v-if="actionRequiredCount > 0" #counter>
                         <NcCounterBubble type="highlighted" :count="actionRequiredCount" />
+                    </template>
+                </NcAppNavigationItem>
+
+                <!-- v4.10.25 — the service catalogue, for everybody who can
+                     start something. Where a request begins; My Work above it
+                     is where it is followed. Absent when nothing can be
+                     started — an unlicensed instance, or one where no team
+                     holds the services — rather than a page that says so
+                     (CLAUDE.md § Permissions). -->
+                <NcAppNavigationItem
+                    v-if="hasServiceCatalogue"
+                    :name="t('teamhub', 'Service catalog')"
+                    :active="activeView === 'services'"
+                    @click="showServices">
+                    <template #icon>
+                        <ViewGridOutline :size="ICON_BODY" />
                     </template>
                 </NcAppNavigationItem>
 
@@ -136,7 +166,7 @@
                     v-if="!loading.teams && teams.length === 0"
                     :name="t('teamhub', 'No teams yet')"
                     :description="canCreateTeam
-                        ? t('teamhub', 'Create your first team above')
+                        ? t('teamhub', 'Create the first team above')
                         : t('teamhub', 'Browse teams to find one to join')">
                     <template #icon>
                         <AccountGroup :size="iconHero" />
@@ -173,7 +203,7 @@
                         </p>
                         <p class="teamhub-announcement-hint__click">
                             <span>{{ t('teamhub', 'Click the') }}</span>
-                            <EmailOutline :size="16" aria-hidden="true" />
+                            <EmailOutline :size="ICON_BODY" aria-hidden="true" />
                             <span>{{ t('teamhub', 'below') }}</span>
                         </p>
                     </li>
@@ -197,14 +227,17 @@
                              per SKILLS.md § "UI shapes" — NC's global button
                              reset sets min-width AND min-height to 44 px and
                              would otherwise stretch this into an oval. -->
-                        <button
-                            type="button"
+                        <NcButton
                             class="teamhub-hint__close"
                             :title="t('teamhub', 'Close')"
                             :aria-label="t('teamhub', 'Close')"
-                            @click="dismissGettingStartedHint">
-                            <Close :size="14" aria-hidden="true" />
-                        </button>
+                            @click="dismissGettingStartedHint"
+                            variant="tertiary"
+                            size="small">
+                            <template #icon>
+                                <Close :size="ICON_INLINE" aria-hidden="true" />
+                            </template>
+                        </NcButton>
                         <!-- v4.4.15 — second line reads "Click the [icon]
                              below", with the icon rendered inline between
                              two translated fragments so the sentence names
@@ -217,7 +250,7 @@
                         </p>
                         <p class="teamhub-hint__click">
                             <span>{{ t('teamhub', 'Click the') }}</span>
-                            <HelpCircleOutlineIcon :size="16" aria-hidden="true" />
+                            <HelpCircleOutlineIcon :size="ICON_BODY" aria-hidden="true" />
                             <span>{{ t('teamhub', 'below') }}</span>
                         </p>
                         <p class="teamhub-hint__sub">
@@ -230,6 +263,17 @@
                          right, pushed there by margin-left:auto on the button
                          wrapper, so the wordmark + tagline stay left-aligned
                          and the ? affordance mirrors the sidebar header rhythm. -->
+                    <!-- v4.10.10 — per-user settings live where NC puts app
+                         settings: an entry at the bottom of the navigation that
+                         opens NcAppSettingsDialog. The same panel still renders
+                         under Settings → Personal → TeamHub (personal.js). -->
+                    <NcAppNavigationItem
+                        :name="t('teamhub', 'Settings')"
+                        @click="settingsOpen = true">
+                        <template #icon>
+                            <CogOutline :size="ICON_BODY" />
+                        </template>
+                    </NcAppNavigationItem>
                     <li class="teamhub-brand-item">
                         <div class="teamhub-brand__mark" aria-hidden="true">
                             <!-- v4.9.21 — the TeamHub beeldmerk (2026-09 brand sheet),
@@ -297,7 +341,7 @@
                                 :aria-label="announcementTitle"
                                 @click="openFirstAnnouncement">
                                 <template #icon>
-                                    <EmailOutline :size="20" />
+                                    <EmailOutline :size="ICON_BODY" />
                                 </template>
                             </NcButton>
                             <NcButton
@@ -306,7 +350,7 @@
                                 :aria-label="t('teamhub', 'Help & Documentation')"
                                 @click="openDocs">
                                 <template #icon>
-                                    <HelpCircleOutlineIcon :size="20" />
+                                    <HelpCircleOutlineIcon :size="ICON_BODY" />
                                 </template>
                             </NcButton>
                         </div>
@@ -314,6 +358,17 @@
                 </template>
             </template>
         </NcAppNavigation>
+
+        <NcAppSettingsDialog
+            v-model:open="settingsOpen"
+            :name="t('teamhub', 'TeamHub settings')"
+            :show-navigation="true">
+            <NcAppSettingsSection id="teamhub-personal" :name="t('teamhub', 'Personal')">
+                <PersonalSettingsPanel
+                    :presence-module-enabled="presenceModuleEnabled"
+                    :initial-getting-started-hint="gettingStartedHint" />
+            </NcAppSettingsSection>
+        </NcAppSettingsDialog>
 
         <NcAppContent>
             <AnnouncementView
@@ -356,20 +411,20 @@
                 @open-team-talk="onOpenTeamTalk"
                 @open-item="onOpenFeedItem" />
 
+            <!-- v4.10.15 — rendered on every instance; the view handles the
+                 licence gate of its aggregated queue itself and always shows
+                 the workflow sections. -->
             <MyWorkView
-                v-else-if="activeView === 'mywork' && isLicensed"
+                v-else-if="activeView === 'mywork'"
                 @open-team="selectTeamFromSidebar"
                 @open-item="onOpenMyWorkItem"
                 @counts-changed="actionRequiredCount = $event" />
 
-            <!-- v4.5.21 — same licence fallback the feed has, for a stale
-                 ?mywork deep-link on an instance whose licence was removed. -->
-            <NcEmptyContent
-                v-else-if="activeView === 'mywork' && !isLicensed"
-                :name="t('teamhub', 'License required')"
-                :description="t('teamhub', 'My Work requires an active TeamHub license. Add or renew a license in Admin settings → License to unlock your personal work queue.')">
-                <template #icon><ClipboardCheckOutline :size="48" /></template>
-            </NcEmptyContent>
+            <!-- v4.10.25 — the catalogue: where a request starts. Rendered
+                 whenever the view is asked for, including from a stale deep
+                 link on an instance that has since lost its desk; the page
+                 has its own empty state for that. -->
+            <ServiceCatalogueView v-else-if="activeView === 'services'" />
 
             <!-- v4.3.0 — license-required fallback for the feed view.
                  Reachable via a stale ?feed deep-link on an instance
@@ -378,7 +433,7 @@
                 v-else-if="activeView === 'feed' && !isLicensed"
                 :name="t('teamhub', 'License required')"
                 :description="t('teamhub', 'What’s new requires an active TeamHub license. Add or renew a license in Admin settings → License to unlock the feed.')">
-                <template #icon><Rss :size="48" /></template>
+                <template #icon><Rss :size="ICON_XL" /></template>
             </NcEmptyContent>
 
             <!-- v4.4.3 — the "no team selected" state covers two situations
@@ -417,13 +472,13 @@
                                 variant="primary"
                                 @click="startCreateTeam">
                                 <template #icon><Plus :size="iconNav" /></template>
-                                {{ t('teamhub', 'New Team') }}
+                                {{ t('teamhub', 'New team') }}
                             </NcButton>
                             <NcButton
                                 :variant="canCreateTeam ? 'secondary' : 'primary'"
                                 @click="showView('browse')">
                                 <template #icon><Magnify :size="iconNav" /></template>
-                                {{ t('teamhub', 'Browse Teams') }}
+                                {{ t('teamhub', 'Browse teams') }}
                             </NcButton>
                         </div>
 
@@ -493,6 +548,17 @@
             @assign="onTeamAssignGroup"
             @close="groupPicker = null" />
 
+        <!-- v4.10.22 — moved here with its button. Unchanged otherwise: the
+             `team_request` workflow still asks which team is asking, what the
+             new team should be called and why. -->
+        <WorkflowStartDialog
+            v-if="workflowStartOpen"
+            :teams="requestableTeams"
+            :busy="$store.state.workflows.busyId === 0"
+            :error="workflowStartError"
+            @close="workflowStartOpen = false; workflowStartError = ''"
+            @submit="submitWorkflowStart" />
+
     </NcContent>
 </template>
 
@@ -502,10 +568,11 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { emit } from '@nextcloud/event-bus'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcNoteCard } from '@nextcloud/vue'
+import { NcContent, NcAppNavigation, NcAppNavigationNew, NcAppNavigationItem, NcAppNavigationCaption, NcAppSettingsDialog, NcAppSettingsSection, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcNoteCard } from '@nextcloud/vue'
 import { showSuccess, showError, showWarning } from '@nextcloud/dialogs'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
+import AccountMultiplePlusOutline from 'vue-material-design-icons/AccountMultiplePlusOutline.vue'
 import Magnify from 'vue-material-design-icons/Magnify.vue'
 import Rss from 'vue-material-design-icons/Rss.vue'
 import HelpCircleOutlineIcon from 'vue-material-design-icons/HelpCircleOutline.vue'
@@ -543,25 +610,36 @@ import CreateTeamView from './components/CreateTeamView.vue'
 import WhatsHappeningView from './components/WhatsHappeningView.vue'
 import AnnouncementView from './components/AnnouncementView.vue'
 import MyWorkView from './components/MyWorkView.vue'
+import ServiceCatalogueView from './components/ServiceCatalogueView.vue'
+import ViewGridOutline from 'vue-material-design-icons/ViewGridOutline.vue'
 import TeamJoinView from './components/TeamJoinView.vue'
 import TeamGroupPickerModal from './components/TeamGroupPickerModal.vue'
+import WorkflowStartDialog from './components/mywork/WorkflowStartDialog.vue'
 import TeamNavGroup from './components/TeamNavGroup.vue'
 import TeamNavItem from './components/TeamNavItem.vue'
-import { ICON_NAV, ICON_HERO } from './constants/uiTokens.js'
+import PersonalSettingsPanel from './components/PersonalSettingsPanel.vue'
+import { loadClaimStatus } from './api/serviceTeams.js'
+import { ICON_NAV, ICON_HERO, ICON_BODY, ICON_INLINE, ICON_XL } from './constants/uiTokens.js'
 import { OPEN_KIND, TEAMHUB_VIEW_TARGETS } from './constants/myWork.js'
 
 export default {
     name: 'App',
     components: {
-        NcContent, NcAppNavigation, NcAppNavigationItem, NcAppNavigationCaption, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcNoteCard,
+        NcContent, NcAppNavigation, NcAppNavigationNew, NcAppNavigationItem, NcAppNavigationCaption, NcAppSettingsDialog, NcAppSettingsSection, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcNoteCard,
+        PersonalSettingsPanel,
         AccountGroup, Plus, Magnify, Rss, HelpCircleOutlineIcon,
         CogOutline, Close, EmailOutline,
         ClipboardCheckOutline,
         TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView, WhatsHappeningView, AnnouncementView,
-        MyWorkView, TeamGroupPickerModal, TeamJoinView, TeamNavGroup, TeamNavItem,
+        MyWorkView, ServiceCatalogueView, ViewGridOutline,
+        TeamGroupPickerModal, TeamJoinView, TeamNavGroup, TeamNavItem,
+        AccountMultiplePlusOutline, WorkflowStartDialog,
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_XL,
             activeView: null,
             // v4.7.15 — the team whose sidebar group is being picked, as
             // { teamId, teamName, groupId }. Null whenever the dialog is shut.
@@ -570,6 +648,14 @@ export default {
             // is not in. Drives TeamJoinView; null at every other moment.
             joinTeamId: null,
             canCreateTeam: true,
+            // v4.10.22 — the "Request a new team" dialog, moved here from the
+            // My Work header with its button.
+            workflowStartOpen: false,
+            workflowStartError: '',
+            // v4.10.23 — does a licensed instance have a team answering the
+            // Nextcloud services? Starts FALSE and stays false if the read
+            // fails: this one fails CLOSED, unlike canCreateTeam above.
+            teamRequestAnswerable: false,
             // v4.6.2 — is the current user an NC admin? Rides the existing
             // can-create-team fetch. Starts FALSE and stays false if that call
             // fails: canCreateTeam fails OPEN because hiding a button a user is
@@ -598,6 +684,7 @@ export default {
             // stays hidden is a better failure than one that reappears
             // after the user opted out.
             gettingStartedHint: false,
+            settingsOpen: false,
             // v4.4.12 — the X closes the callout for the rest of the browser
             // session. Deliberately NOT the same thing as the personal-settings
             // switch: the callout's own copy points the user at that switch for
@@ -624,8 +711,43 @@ export default {
         }
     },
     computed: {
-        ...mapState(['teams', 'currentTeamId', 'loading']),
+        ...mapState(['teams', 'currentTeamId', 'loading', 'presenceModuleEnabled']),
         ...mapGetters(['currentTeam', 'sidebarTeamGroups']),
+        // v4.10.25 — `hasCatalogue` is the Services entry: something can be
+        // started.
+        // v4.10.26 — the global *Service desk* entry beside it is gone: the
+        // desk is worked on the service team itself (`/service-teams`), where
+        // the page cannot be ambiguous about which team it means.
+        ...mapGetters('serviceTeams', {
+            hasServiceCatalogue: 'hasCatalogue',
+        }),
+
+        /**
+         * v4.10.22 — the teams this member could ask a new team from. The
+         * `team_request` workflow's second step is the owner or a moderator
+         * of the *asking* team, so a member of no team has nobody to ask and
+         * the button is absent rather than opening a dialog with an empty
+         * picker (CLAUDE.md § Permissions: hidden, not left to fail).
+         */
+        requestableTeams() {
+            return (this.teams || []).map(team => ({ id: team.id, name: team.name }))
+        },
+
+        /**
+         * Show "Request a new team" only to somebody who cannot create one
+         * here. The two are the same intent at different permission levels,
+         * which is why they share the one place in the navigation and are
+         * never both present.
+         */
+        canRequestTeam() {
+            return !this.canCreateTeam
+                && this.requestableTeams.length > 0
+                // v4.10.23 — and somebody answers. Without a licence, or
+                // with no team holding the Nextcloud services, the server
+                // refuses the workflow at `canStart()` and the button would
+                // open a dialog whose only outcome is an error.
+                && this.teamRequestAnswerable
+        },
         // Icon-size tokens for the template. MDI's :size prop needs a number
         // at compile time and cannot read a CSS variable, so the scale is
         // mirrored in JS (src/constants/uiTokens.js). Exposed as computeds to
@@ -736,7 +858,7 @@ export default {
          * most likely just changed.
          */
         activeView(next, previous) {
-            if (previous === 'mywork' && next !== 'mywork' && this.isLicensed) {
+            if (previous === 'mywork' && next !== 'mywork') {
                 this.refreshMyWorkCount()
             }
         },
@@ -762,11 +884,21 @@ export default {
         await Promise.all([
             this.fetchTeams(),
             this.fetchCanCreateTeam(),
+            // v4.10.23 — whether "Request a new team" has anybody to go to.
+            this.fetchServiceClaim(),
             // v4.7.3 — in parallel, not after: the sidebar needs the teams
             // and their grouping together, and the getter falls back to a
             // flat list until this lands, so a slow read degrades rather
             // than blocks.
             this.fetchTeamGroups(),
+            // v4.10.25 — what any desk offers, for the Services nav entry.
+            // Silent on every failure: an unlicensed instance answers 403
+            // and the entry is simply absent.
+            this.$store.dispatch('serviceTeams/loadCatalogue'),
+            // v4.10.27 — the desks this person works, for the unclaimed badge
+            // behind each service team's name. Teams only, no queue: the
+            // queue is read by the widget on the team's own home.
+            this.$store.dispatch('serviceTeams/loadDesks'),
         ])
 
         // v3.75.1 — consume ?team=…&decision=… deep link.
@@ -813,8 +945,10 @@ export default {
         await this.refreshAnnouncements()
 
         // v4.5.21 — My Work badge. After the entitlements call, because the
-        // endpoint is licence-gated and an unlicensed instance would just 403.
-        if (this.isLicensed) {
+        // queue endpoint is licence-gated; v4.10.15 — the workflow half of
+        // the badge exists on every instance, so the refresh always runs and
+        // decides inside what to ask.
+        {
             this.refreshMyWorkCount()
 
             // v4.5.26 — and again whenever the tab comes back to the
@@ -1025,16 +1159,12 @@ export default {
                 // 'msgstream' is the team's Home view — the one that renders
                 // the widget grid, and the message stream inside it.
                 this.SET_VIEW('msgstream')
-                // v4.8.7 — was `SET_MESSAGE_TARGET(Number(item.id))`, a bare
-                // number. Both consumers read `target?.messageId`
-                // (MessageStream's focusMessage watcher and TeamWidgetGrid's
-                // expand-the-widget watcher), so a number resolved to
-                // undefined and neither fired: since v4.5.26 this landed the
-                // reader on the team's stream without ever loading the page
-                // holding the message, scrolling to it, or highlighting it.
-                // The `{ messageId, nonce }` shape is the one MessageStream's
-                // watcher documents; the nonce is what lets the same message
-                // be opened twice in a row and still re-fire.
+                // v4.10.4 — the mutation wraps whatever it gets (a bare id or
+                // this object) into `{ messageId, nonce }`; the nonce is what
+                // lets the same message be opened twice in a row and still
+                // re-fire. 4.8.7 switched this call from a bare number to the
+                // object while the mutation still did `Number(payload)` — NaN —
+                // so the watchers never fired; see SET_MESSAGE_TARGET.
                 this.$nextTick(() => this.SET_MESSAGE_TARGET({
                     messageId: Number(item.id),
                     nonce: Date.now(),
@@ -1158,7 +1288,7 @@ export default {
 
                 window.location.href = data.url
             } catch (e) {
-                showError(t('teamhub', 'Could not work out who to write to. Please try again.'))
+                showError(t('teamhub', 'Could not work out who to write to. Try again.'))
             }
         },
 
@@ -1321,6 +1451,49 @@ export default {
             }
         },
 
+        /**
+         * v4.10.22 — open the `team_request` workflow. Moved here from
+         * MyWorkView with the button; the payload and the store action are
+         * unchanged.
+         */
+        async submitWorkflowStart({ teamId, teamName, reason }) {
+            this.workflowStartError = ''
+            try {
+                const created = await this.$store.dispatch('workflows/start', {
+                    teamId,
+                    definitionKey: 'team_request',
+                    data: { teamName, reason },
+                })
+                this.workflowStartOpen = false
+                showSuccess(t('teamhub', 'Request sent: {title}', { title: created?.title || teamName }))
+            } catch (e) {
+                // status 0 is the store's "already busy" signal, not a failure
+                // the member did anything about.
+                if (e?.status === 0) {
+                    return
+                }
+                this.workflowStartError = e?.message || t('teamhub', 'The request could not be sent.')
+            }
+        },
+
+        /**
+         * v4.10.23 — is *Request a new team* answerable on this instance?
+         *
+         * It is one of the six Nextcloud services, so it needs a licence
+         * and a team holding the bundle. Both come back in one read, and
+         * both fail CLOSED: a start point that opens a request nobody would
+         * ever answer is worse than a missing button, which is the opposite
+         * of `canCreateTeam`'s posture above and deliberately so.
+         */
+        async fetchServiceClaim() {
+            try {
+                const status = await loadClaimStatus()
+                this.teamRequestAnswerable = !!status.available && !!status.claimed
+            } catch (e) {
+                this.teamRequestAnswerable = false
+            }
+        },
+
         async fetchCanCreateTeam() {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/user/can-create-team'))
@@ -1345,17 +1518,32 @@ export default {
             this.closeSidebarIfOverlay()
         },
 
+        /** v4.10.25 — the catalogue. The view refreshes its own list on mount. */
+        showServices() {
+            this.activeView = 'services'
+            this.closeSidebarIfOverlay()
+        },
+
         /**
          * v4.5.21 — Action Required badge. Fails silently: a badge that
          * cannot load should be absent, never an error toast on page load.
          */
         async refreshMyWorkCount() {
-            try {
-                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/mywork/counts'))
-                this.actionRequiredCount = Number(data?.counts?.action_required) || 0
-            } catch (e) {
-                this.actionRequiredCount = 0
+            let queue = 0
+            // The aggregated queue is licence-gated; an unlicensed instance
+            // would only 403, so it is not asked.
+            if (this.isLicensed) {
+                try {
+                    const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/mywork/counts'))
+                    queue = Number(data?.counts?.action_required) || 0
+                } catch (e) {
+                    queue = 0
+                }
             }
+            // v4.10.15 — plus the workflow steps waiting on the viewer, which
+            // exist on every instance. The store keeps the list for the view.
+            await this.$store.dispatch('workflows/load')
+            this.actionRequiredCount = queue + (this.$store.getters['workflows/actionRequiredCount'] || 0)
         },
 
         /**
@@ -1490,7 +1678,7 @@ export default {
         },
 
         openDocs() {
-            window.open('https://tldr.host/teamhub/docs/', '_blank', 'noopener,noreferrer')
+            window.open('https://teamhub.doekworks.eu/docs/', '_blank', 'noopener,noreferrer')
             this.closeSidebarIfOverlay()
         },
 
@@ -1683,6 +1871,23 @@ export default {
     flex-shrink: 0;
 }
 
+/* v4.10.11 — no scrollbar beside "New team".
+   @nextcloud/vue 9.8 renders the default slot (where NcAppNavigationNew
+   belongs, per its own slot docs) in `.app-navigation__body` with
+   `overflow-y: scroll`, and the #list slot with `height: 100%`. In the nav's
+   flex column the list then claims the whole height and the body — whose
+   minimum size is 0 because it is not overflow: visible — is squeezed to
+   less than its one button (47 px around 50 px, measured on NC 35), which
+   puts a scrollbar next to the button; on Windows the `scroll` value shows
+   the track even without overflow. NC's own Files app never hits this
+   because it puts nothing in the default slot. The body holds one button
+   here, so it may keep its natural height and needs no scrolling of its
+   own; the list keeps `overflow-y: auto` and scrolls exactly as before. */
+:deep(#app-navigation-vue > .app-navigation__body) {
+    overflow-y: visible;
+    flex-shrink: 0;
+}
+
 /* v4.7.3 — divides the grouped teams from the loose ones.
    Deliberately quiet: a hairline in NC's standard border colour rather
    than a heading or a gap. A caption ("Other teams") would have named a
@@ -1697,31 +1902,6 @@ export default {
     margin: 8px 12px;
     border-top: 1px solid var(--color-border);
     list-style: none;
-}
-
-/* v4.3.18 — softened highlight for the "+ New Team" primary action.
-   Uses --color-primary-element-light (the state-tint variant NC uses
-   for hover/selected states across the theme) instead of the full
-   --color-primary-element brand green, plus rounded corners so it
-   matches the softer selected-item style Justin wanted. Text and
-   icon inherit the main-text colour so both dark and light themes
-   read cleanly on the tinted background.
-   :deep() is required because the inner button element lives inside
-   NcAppNavigationItem's own scoped template. */
-.teamhub-nav-primary :deep(a),
-.teamhub-nav-primary :deep(.app-navigation-entry-link) {
-    background-color: var(--color-primary-element-light);
-    color: var(--color-main-text);
-    border-radius: var(--border-radius-large);
-}
-.teamhub-nav-primary :deep(a:hover),
-.teamhub-nav-primary :deep(.app-navigation-entry-link:hover) {
-    background-color: var(--color-primary-element-light-hover);
-}
-.teamhub-nav-primary :deep(.app-navigation-entry__title),
-.teamhub-nav-primary :deep(.material-design-icon > svg) {
-    color: var(--color-main-text);
-    fill: var(--color-main-text);
 }
 
 // Visual separator above the feedback item at the bottom of the list.
@@ -1763,10 +1943,10 @@ export default {
 .teamhub-hint {
     list-style: none;
     position: relative;
-    margin: 4px 12px 10px;
-    padding: 10px 12px;
+    margin: 4px 12px 8px;
+    padding: 8px 12px;
     border: 1px solid var(--color-primary-element);
-    border-radius: var(--th-radius-card, var(--border-radius-large));
+    border-radius: var(--th-radius-card, var(--border-radius-element));
     background: var(--color-primary-element-light);
     color: var(--color-main-text);
 }
@@ -1777,12 +1957,12 @@ export default {
     content: '';
     position: absolute;
     bottom: -5px;
-    right: 18px;
+    inset-inline-end: 18px;
     width: 8px;
     height: 8px;
     transform: rotate(45deg);
     background: var(--color-primary-element-light);
-    border-right: 1px solid var(--color-primary-element);
+    border-inline-end: 1px solid var(--color-primary-element);
     border-bottom: 1px solid var(--color-primary-element);
 }
 /* Six-lock circular icon button — SKILLS.md § "UI shapes: circles, not
@@ -1794,44 +1974,23 @@ export default {
 .teamhub-hint__close {
     position: absolute;
     top: 4px;
-    right: 4px;
+    inset-inline-end: 4px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;          /* 1. no flex-grow inside a flex container */
     box-sizing: border-box;  /* 2. border is inside the pinned box */
     width: 20px;
-    height: 20px;
-    min-width: 20px;         /* 3. beats NC's 44px min-width */
-    min-height: 20px;        /* 4. beats NC's 44px min-height */
     max-width: 20px;         /* 5. content can't push it wider */
-    max-height: 20px;        /* 6. content can't push it taller */
-    padding: 0;
     margin: 0;
-    border: none;
-    border-radius: 50%;
-    line-height: 1;
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-}
-.teamhub-hint__close:hover {
-    background: var(--color-background-hover);
-    color: var(--color-main-text);
 }
 /* Split from :hover so the keyboard ring is never silenced — SKILLS.md
    § "Focus visibility standard". */
-.teamhub-hint__close:focus-visible {
-    background: var(--color-background-hover);
-    color: var(--color-main-text);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
-}
 
 .teamhub-hint__lead {
     margin: 0;
     /* Clear the close button so a long first line never runs under it. */
-    padding-right: 20px;
+    padding-inline-end: 20px;
     font-size: var(--th-font-meta);
     font-weight: var(--th-font-weight-semibold);
     line-height: var(--th-line-height-body);
@@ -1842,7 +2001,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin: 2px 0 0;
+    margin: 4px 0 0;
     font-size: var(--th-font-meta);
     line-height: var(--th-line-height-body);
 }
@@ -1861,7 +2020,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px 2px;
+    padding: 8px 12px 4px;
     --th-brand-hub: #245C80;
     --th-brand-signal: #FB5000;
     --th-brand-tagline: var(--color-text-maxcontrast);
@@ -1897,7 +2056,7 @@ body.theme--dark .teamhub-brand-item {
 .teamhub-brand__wordmark {
     font-family: 'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', sans-serif;
     font-weight: 700;
-    font-size: 15px;
+    font-size: var(--th-font-body);
     letter-spacing: -0.02em;
     line-height: 1.1;
     color: var(--th-brand-hub);
@@ -1913,14 +2072,14 @@ body.theme--dark .teamhub-brand-item {
     margin-top: 1px;
 }
 // v4.2.8 — help button sits on the same row, aligned to the right end.
-// margin-left:auto lets the text column keep its natural width and pushes
+// margin-inline-start:auto lets the text column keep its natural width and pushes
 // the help affordance against the sidebar's right edge.
 .teamhub-brand__help {
-    margin-left: auto;
+    margin-inline-start: auto;
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
 }
 
 /* v4.5.0 — Announcement callout. Mirrors .teamhub-hint's speech-bubble
@@ -1933,10 +2092,10 @@ body.theme--dark .teamhub-brand-item {
 .teamhub-announcement-hint {
     list-style: none;
     position: relative;
-    margin: 4px 12px 6px;
-    padding: 10px 12px;
+    margin: 4px 12px 8px;
+    padding: 8px 12px;
     border: 1px solid var(--color-primary-element);
-    border-radius: var(--th-radius-card, var(--border-radius-large));
+    border-radius: var(--th-radius-card, var(--border-radius-element));
     background: var(--color-primary-element-light);
     color: var(--color-main-text);
 }
@@ -1955,7 +2114,7 @@ body.theme--dark .teamhub-brand-item {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin: 2px 0 0;
+    margin: 4px 0 0;
     font-size: var(--th-font-meta);
     line-height: var(--th-line-height-body);
 }
@@ -2005,8 +2164,8 @@ ul.tribute-container,
 [class*="tribute-container"] {
     background-color: var(--color-main-background) !important;
     border: 1px solid var(--color-border) !important;
-    border-radius: var(--border-radius-large) !important;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2) !important;
+    border-radius: var(--border-radius-element) !important;
+    box-shadow: 0 2px 12px var(--color-box-shadow) !important;
     z-index: 10000 !important;
     max-height: 240px !important;
     overflow-y: auto !important;
@@ -2034,8 +2193,8 @@ ul.tribute-container li:hover,
     display: flex !important;
     align-items: center !important;
     gap: 8px !important;
-    padding: 6px 12px !important;
-    font-size: 13px !important;
+    padding: 8px 12px !important;
+    font-size: var(--th-font-meta) !important;
 }
 
 [id^="nc-rich-contenteditable-tribute-item-"] * {

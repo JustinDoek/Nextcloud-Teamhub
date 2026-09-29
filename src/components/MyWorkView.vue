@@ -5,44 +5,24 @@
 			<div class="mywork__header-text">
 				<h2 class="mywork__title">{{ t('teamhub', 'My Work') }}</h2>
 				<span class="mywork__subtitle">
-					{{ t('teamhub', 'Everything that needs your attention, across all your teams') }}
+					{{ t('teamhub', 'Everything that needs attention, across all teams') }}
 				</span>
 			</div>
 
 			<div class="mywork__header-actions">
-				<NcButton
-					:variant="filtersOpen || hasActiveFilters ? 'secondary' : 'tertiary'"
-					:aria-expanded="filtersOpen"
-					aria-controls="mywork-filters"
-					@click="filtersOpen = !filtersOpen">
-					<template #icon><FilterVariant :size="iconBody" /></template>
-					{{ filterButtonLabel }}
-				</NcButton>
+				<!-- v4.10.15 — "Request a new team" was here.
+				     v4.10.22 — moved to the navigation, where "New team" is:
+				     asking for a team is the same intent as creating one, so
+				     it belongs beside the action rather than on a page a
+				     member may never open. It is shown there only to somebody
+				     who may not create a team directly. -->
 
-				<!-- Density toggle. Segmented pair with aria-pressed — the
-				     SKILLS.md carve-out for two touching pills. -->
-				<div class="mywork__density" role="group" :aria-label="t('teamhub', 'Row density')">
-					<button
-						type="button"
-						class="mywork__density-btn"
-						:class="{ 'mywork__density-btn--on': !compact }"
-						:aria-pressed="!compact"
-						:title="t('teamhub', 'Comfortable rows')"
-						@click="setCompact(false)">
-						<FormatListBulletedSquare :size="iconBody" aria-hidden="true" />
-						<span class="mywork__sr">{{ t('teamhub', 'Comfortable rows') }}</span>
-					</button>
-					<button
-						type="button"
-						class="mywork__density-btn"
-						:class="{ 'mywork__density-btn--on': compact }"
-						:aria-pressed="compact"
-						:title="t('teamhub', 'Compact rows')"
-						@click="setCompact(true)">
-						<ViewSequentialOutline :size="iconBody" aria-hidden="true" />
-						<span class="mywork__sr">{{ t('teamhub', 'Compact rows') }}</span>
-					</button>
-				</div>
+				<!-- v4.10.20 — "Ask the service desk" was here.
+				     v4.10.25 — moved to the Services page, which is where a
+				     request starts now. My Work is where a person sees where
+				     their request is and takes the step that is theirs; it
+				     no longer starts anything (docs/service-catalogue.md
+				     § 1). -->
 
 				<NcButton
 					variant="tertiary"
@@ -90,155 +70,119 @@
 			<span>{{ t('teamhub', 'Some sources returned more work than can be shown at once. The most urgent items are listed first.') }}</span>
 		</div>
 
-		<!-- ── Summary cards ────────────────────────────────────────────── -->
-		<div class="mywork__summary" role="group" :aria-label="t('teamhub', 'Work summary')">
-			<button
-				v-for="card in summaryCards"
-				:key="card.key"
-				type="button"
-				class="mywork__card"
-				:class="[
-					'mywork__card--' + card.tone,
-					{ 'mywork__card--active': card.active },
-				]"
-				:aria-pressed="card.active"
-				@click="toggleSummary(card)">
-				<!-- v4.5.39 — the card is a two-column grid: name over sources
-				     on the left, the number on its own on the right, centred
-				     against both lines. 4.5.27 put the count at the end of the
-				     label's row, which capped how large it could be — the label
-				     is a heading now and the number is the size it deserves. -->
-				<span class="mywork__card-head">
-					<span class="mywork__card-chip" aria-hidden="true">
-						<component :is="card.icon" :size="iconBody" />
-					</span>
-					<span class="mywork__card-label">{{ card.label }}</span>
-				</span>
-				<!-- v4.5.25 — one chip per source: its glyph and its number.
-				     The name lives in the title/aria-label rather than on the
-				     card, so three sources cost one line instead of three.
-				     v4.5.39 — a step larger and a step lighter: it is detail
-				     you read after the number, not with it. -->
-				<span class="mywork__card-lines">
-					<span
-						v-for="row in card.breakdown"
-						:key="row.providerId"
-						class="mywork__card-source"
-						:title="breakdownLabel(row, providerNames)"
-						:aria-label="breakdownLabel(row, providerNames)">
-						<component
-							:is="providerIcon(row.providerId)"
-							:size="iconBody"
-							aria-hidden="true" />
-						{{ row.count }}
-					</span>
-					<span v-if="!card.breakdown.length" class="mywork__card-line mywork__card-line--empty">
-						{{ card.emptyHint }}
-					</span>
-				</span>
-				<span class="mywork__card-count">{{ card.count }}</span>
-			</button>
+		<!-- ── Workflows, standalone (v4.10.15, narrowed in v4.10.17) ──────
+		     A workflow is a request travelling between people; an aggregated
+		     item is a task from a source. They keep separate row components
+		     for that reason — an aggregated item has no step, no position in
+		     a whole and nobody to ask — but since v4.10.17 they share **one
+		     list**, grouped by the same categories, because two lists with
+		     their own "Action required" heading and their own count is the
+		     single thing that made this page hard to read (DESIGN §2.142,
+		     which reverses §2.141's "beside, never through").
+
+		     These standalone cards are what is left of that: the two cases
+		     where there is no list to merge into —
+		       * an unlicensed instance, which has no aggregated queue at all;
+		       * a page grouped by something other than category, where a
+		         category-keyed merge would put every workflow in the wrong
+		         group.
+		     `mergeWorkflows` is the one condition, so the rows are never
+		     rendered twice. -->
+		<div v-if="!mergeWorkflows" class="mywork__workflows">
+			<WorkflowSection
+				:kind="WORKFLOW_SECTION.ACTION_REQUIRED"
+				:workflows="workflowSections.actionRequired"
+				:loading="workflows.loading"
+				:loaded="workflows.loaded"
+				:error="workflows.error"
+				:busy-id="workflows.busyId"
+				@open="openWorkflow"
+				@action="onWorkflowAction"
+				@retry="loadWorkflows" />
+			<WorkflowSection
+				:kind="WORKFLOW_SECTION.WAITING"
+				:workflows="workflowSections.waiting"
+				:loading="workflows.loading"
+				:loaded="workflows.loaded"
+				:error="workflows.error"
+				:busy-id="workflows.busyId"
+				@open="openWorkflow"
+				@action="onWorkflowAction"
+				@retry="loadWorkflows" />
+			<WorkflowSection
+				v-if="workflowSections.completed.length"
+				:kind="WORKFLOW_SECTION.COMPLETED"
+				:workflows="workflowSections.completed"
+				:loading="workflows.loading"
+				:loaded="workflows.loaded"
+				:error="workflows.error"
+				:busy-id="workflows.busyId"
+				@open="openWorkflow"
+				@action="onWorkflowAction"
+				@retry="loadWorkflows" />
+			<WorkflowLicenceNote :licensed="!licenseGated" :workflows-licensed="workflowsLicensed" />
 		</div>
 
-		<!-- ── Source tabs + sort ───────────────────────────────────────────
-		     The tab bar answers "where is my work coming from" in one glance,
-		     which the summary cards cannot: they split by urgency, and a user
-		     who wants only their Deck cards was previously three clicks into
-		     the filter panel. Counts come from the server with every filter
-		     applied EXCEPT this one, on the same principle as the cards. -->
-		<!-- ── Predefined views (v4.9.7) ───────────────────────────────────
-		     Shortcuts over the same filter state the bar below sets — a chip
-		     lights up when the state matches it, whichever control got it
-		     there, and Clear filters undoes it like anything else. -->
-		<div class="mywork__views" role="group" :aria-label="t('teamhub', 'Views')">
-			<span class="mywork__views-label">{{ t('teamhub', 'Views') }}</span>
-			<button
-				v-for="view in views"
-				:key="view.key"
-				type="button"
-				class="mywork__view"
-				:class="{ 'mywork__view--on': view.active }"
-				:aria-pressed="view.active"
-				@click="applyView(view)">
-				{{ view.label }}
-			</button>
-			<span v-if="lastUpdatedLabel" class="mywork__updated" :title="lastUpdatedTitle">
-				{{ lastUpdatedLabel }}
-			</span>
+		<!-- The aggregated queue is the licensed part of the page. On an
+		     unlicensed instance the server answers 403 with licenseGate, the
+		     sections above still render, and the licence note says why the
+		     rest is missing — once, in one place. -->
+		<template v-if="!licenseGated">
+		<!-- ── The one list's heading (v4.10.17) ────────────────────────────
+		     One question above one list, so the page says what it is for
+		     before it says how it can be sliced. -->
+		<h3 v-if="unifiedGroups.length || loading" class="mywork__lead">
+			{{ t('teamhub', 'What needs your attention') }}
+		</h3>
+
+		<!-- ── One filter: the type of work (v4.10.18) ─────────────────────
+		     The only control on this page. Everything else that used to sit
+		     here — the five urgency tiles, the saved views, the sort order,
+		     the row density and the eleven-field filter panel — is gone,
+		     because all of it was *stored* state that could leave the page
+		     in a shape its reader never chose and could not see how to
+		     leave. Inge's saved `groupBy: project` plus a sticky
+		     `category: action_required` is what made 4.10.17 look
+		     unchanged to her: the work was under Action required all along
+		     and the headings said "Marketing".
+
+		     What is left answers the one question people actually asked of
+		     the filter panel: show me only my Deck cards / only the
+		     decisions. Counts come from the server with this filter *not*
+		     applied, so picking one never changes the others. -->
+		<div v-if="typeFilters.length > 1" class="mywork__types" role="group" :aria-label="t('teamhub', 'Show only one type of work')">
+			<NcButton
+				v-for="type in typeFilters"
+				:key="type.key"
+				class="mywork__type"
+				:pressed="type.active"
+				variant="tertiary"
+				@click="selectType(type.key)">
+				<template v-if="type.icon" #icon>
+					<component :is="type.icon" :size="iconBody" aria-hidden="true" />
+				</template>
+				{{ type.label }}
+				<span v-if="type.count !== null" class="mywork__type-count">{{ type.count }}</span>
+			</NcButton>
 		</div>
-
-		<div class="mywork__toolbar">
-			<div class="mywork__sources" role="group" :aria-label="t('teamhub', 'Filter by source')">
-				<button
-					v-for="tab in sourceTabs"
-					:key="tab.key"
-					type="button"
-					class="mywork__source"
-					:class="{ 'mywork__source--on': tab.active }"
-					:aria-pressed="tab.active"
-					@click="selectSource(tab.key)">
-					<component :is="tab.icon" :size="iconInline" class="mywork__source-icon" aria-hidden="true" />
-					<span>{{ tab.label }}</span>
-					<span v-if="tab.count !== null" class="mywork__source-count">{{ tab.count }}</span>
-				</button>
-			</div>
-
-			<label class="mywork__sort">
-				<span class="mywork__sort-label">{{ t('teamhub', 'Sort by') }}</span>
-				<select class="mywork__sort-select" :value="sortBy" @change="onSortBy($event.target.value)">
-					<option v-for="option in sortChoices" :key="option.key" :value="option.key">
-						{{ option.label }}
-					</option>
-				</select>
-			</label>
-		</div>
-
-		<!-- ── Filters, collapsed by default ────────────────────────────── -->
-		<MyWorkFilters
-			v-show="filtersOpen"
-			id="mywork-filters"
-			:search="filters.search"
-			:group-by="groupBy"
-			:team-id="filters.teamId"
-			:provider-id="filters.providerId"
-			:priority="filters.priority"
-			:status="filters.status"
-			:resource-type="filters.resourceType"
-			:due-window="filters.dueWindow"
-			:show-snoozed="filters.showSnoozed"
-			:project-id="filters.projectId || ''"
-			:work-type="filters.workType || ''"
-			:projects="facetProjects"
-			:work-types="facetWorkTypes"
-			:teams="payloadTeams"
-			:providers="providers"
-			@update:projectId="onFilter('projectId', $event)"
-			@update:workType="onFilter('workType', $event)"
-			@update:search="onFilter('search', $event)"
-			@update:groupBy="onGroupBy"
-			@update:teamId="onFilter('teamId', $event)"
-			@update:providerId="onFilter('providerId', $event)"
-			@update:priority="onFilter('priority', $event)"
-			@update:status="onFilter('status', $event)"
-			@update:resourceType="onFilter('resourceType', $event)"
-			@update:dueWindow="onFilter('dueWindow', $event)"
-			@update:showSnoozed="onFilter('showSnoozed', $event)"
-			@reset="resetFilters" />
 
 		<!-- ── First load ───────────────────────────────────────────────── -->
 		<div v-if="loading && !payload" class="mywork__loading">
-			<NcLoadingIcon :size="32" />
+			<NcLoadingIcon :size="ICON_LARGE" />
 		</div>
 
-		<!-- ── Nothing at all ───────────────────────────────────────────── -->
+		<!-- ── Nothing at all ───────────────────────────────────────────────
+		     v4.10.17 — `listGroups`, not `items`: when the aggregated queue
+		     is empty but a workflow is waiting, the page is not empty, and
+		     the merged list has a group to render. -->
 		<NcEmptyContent
-			v-else-if="!items.length"
+			v-else-if="!listGroups.length"
 			:name="emptyTitle"
 			:description="emptyBody">
 			<template #icon><ClipboardCheckOutline :size="iconHero" /></template>
 			<template v-if="hasActiveFilters" #action>
 				<NcButton variant="secondary" @click="resetFilters">
-					{{ t('teamhub', 'Clear filters') }}
+					{{ t('teamhub', 'Show all work') }}
 				</NcButton>
 			</template>
 		</NcEmptyContent>
@@ -250,14 +194,19 @@
 		     to-do list, and giving them the same weight as Action required is
 		     what made a queue of twenty rows feel like forty.
 
-		     The rail is category-derived, so it only appears when the page is
-		     actually grouped by category. Under any other grouping the same
-		     items would appear twice, and a duplicate row is worse than a
-		     missing panel. -->
-		<div v-else class="mywork__layout" :class="{ 'mywork__layout--railless': !showRail }">
-		<div class="mywork__groups" :class="{ 'mywork__groups--compact': compact }">
+		     v4.10.17 — one column. The two-column split (a to-do list on the
+		     left, "at a glance" panels on the right for Waiting for others
+		     and Completed) is gone: the same six categories are six groups
+		     of one list now, in one order, and each group holds both the
+		     workflows and the aggregated items that belong to it. The rail
+		     was a second place to look, with its own half-width rows and its
+		     own View-all buttons, for two of the categories only — and the
+		     request that started this was to make one page somebody can read
+		     top to bottom. -->
+		<div v-else class="mywork__layout">
+		<div class="mywork__groups">
 			<section
-				v-for="group in mainGroups"
+				v-for="group in listGroups"
 				:key="group.key"
 				class="mywork__group"
 				:class="[
@@ -282,14 +231,18 @@
 
 					<h3 :id="'mywork-group-title-' + group.key" class="mywork__group-title">
 						<span>{{ group.label }}</span>
-						<span class="mywork__group-count">{{ group.itemIds.length }}</span>
+						<!-- v4.10.17 — one count per group, workflows included.
+						     Two headings each counting half the group is what
+						     this page is being reworked to stop doing. -->
+						<span class="mywork__group-count">{{ groupTotal(group) }}</span>
 					</h3>
 
-					<div v-if="isExpanded(group.key)" class="mywork__columns" aria-hidden="true">
-						<span>{{ t('teamhub', 'Team') }}</span>
-						<span>{{ t('teamhub', 'Reason') }}</span>
-						<span>{{ t('teamhub', 'Deadline') }}</span>
-					</div>
+					<!-- v4.10.17 — the Team / Reason / Deadline column captions
+					     that used to sit here are gone: they labelled three of
+					     an *aggregated* row's fields and nothing at all on a
+					     workflow row, so in one merged list they captioned a
+					     layout half the rows do not have. -->
+					<span class="mywork__group-spacer" />
 
 					<!-- `aria-labelledby` at the heading rather than an
 					     aria-label of its own: the button's name is the section
@@ -297,18 +250,20 @@
 					     copy is a string that can drift out of step with the
 					     first. Announces as "Action required 7, collapsed,
 					     button". -->
-					<button
-						type="button"
+					<NcButton
 						class="mywork__group-toggle"
 						:aria-expanded="isExpanded(group.key)"
 						:aria-labelledby="'mywork-group-title-' + group.key"
-						@click="toggleGroup(group.key)">
-						<ChevronDown
+						@click="toggleGroup(group.key)"
+						variant="tertiary">
+						<template #icon>
+							<ChevronDown
 							:size="iconBody"
 							class="mywork__chevron"
 							:class="{ 'mywork__chevron--open': isExpanded(group.key) }"
 							aria-hidden="true" />
-					</button>
+						</template>
+					</NcButton>
 				</div>
 
 				<!-- `v-if`, not `v-show`, and therefore no `aria-controls` on
@@ -319,13 +274,27 @@
 				     requires; `aria-controls` is optional and would dangle at
 				     an id that does not exist while collapsed. -->
 				<ul v-if="isExpanded(group.key)" class="mywork__list">
+					<!-- v4.10.17 — the workflows of this category, first. A
+					     request travelling between people outranks a task
+					     from a source: somebody is waiting on the other end
+					     of it. Still WorkflowItemRow, never MyWorkItemRow —
+					     the row components stay separate because the two
+					     kinds of work say different things. Never rendered
+					     here unless `mergeWorkflows`, which is also what
+					     hides the standalone cards at the top. -->
+					<WorkflowItemRow
+						v-for="w in (group.workflows || [])"
+						:key="'wf-' + rowKey(w)"
+						:workflow="w"
+						:busy="workflows.busyId === w.id"
+						@open="openWorkflow"
+						@action="onWorkflowAction" />
 					<MyWorkItemRow
 						v-for="item in visibleItemsForGroup(group)"
 						:key="item.id"
 						:item="item"
 						:provider-names="providerNames"
 						:busy="busyItemId === item.id"
-						:compact="compact"
 						@open="openItem"
 						@open-team="openTeam"
 						@action="onAction"
@@ -334,13 +303,13 @@
 
 				<!-- Per-section "show the rest" — a long Action-required
 				     section should not push every other section off screen. -->
-				<button
+				<NcButton
 					v-if="isExpanded(group.key) && hiddenCount(group) > 0"
-					type="button"
 					class="mywork__group-more"
+					variant="tertiary"
 					@click="expandGroup(group.key)">
-					{{ t('teamhub', 'Show all {n}', { n: group.itemIds.length }) }}
-				</button>
+					{{ t('teamhub', 'Show all {n}', { n: groupTotal(group) }) }}
+				</NcButton>
 			</section>
 
 			<!-- ── Pagination ───────────────────────────────────────────── -->
@@ -359,51 +328,36 @@
 			</div>
 		</div>
 
-		<!-- ── The rail ─────────────────────────────────────────────────── -->
-		<aside v-if="showRail" class="mywork__rail" :aria-label="t('teamhub', 'At a glance')">
-			<section
-				v-for="panel in railPanels"
-				:key="panel.key"
-				class="mywork__panel">
-				<h3 class="mywork__panel-head">
-					<span class="mywork__panel-icon" aria-hidden="true">
-						<component :is="panel.icon" :size="iconBody" />
-					</span>
-					<span class="mywork__panel-title">{{ panel.label }}</span>
-					<span class="mywork__panel-count">{{ panel.count }}</span>
-				</h3>
-
-				<ul v-if="panel.items.length" class="mywork__panel-list">
-					<li v-for="item in panel.items" :key="item.id" class="mywork__panel-row">
-						<span class="mywork__panel-glyph" aria-hidden="true">
-							<component :is="resourceIcon(item)" :size="iconInline" />
-						</span>
-						<button
-							type="button"
-							class="mywork__panel-text"
-							:title="t('teamhub', 'Open {title}', { title: item.title })"
-							@click="openItem(item)">
-							<span class="mywork__panel-item-title">{{ item.title }}</span>
-							<span class="mywork__panel-item-sub">{{ panelSubtitle(item) }}</span>
-						</button>
-						<span v-if="panelMeta(panel, item)" class="mywork__panel-meta">
-							{{ panelMeta(panel, item) }}
-						</span>
-					</li>
-				</ul>
-
-				<p v-else class="mywork__panel-empty">{{ panel.empty }}</p>
-
-				<button
-					v-if="panel.count > panel.items.length"
-					type="button"
-					class="mywork__panel-more"
-					@click="panel.viewAll()">
-					{{ t('teamhub', 'View all') }} →
-				</button>
-			</section>
-		</aside>
 		</div>
+
+		<!-- ── Under the list (v4.10.17) ─────────────────────────────────
+		     The licence note used to sit between the workflow cards and the
+		     queue, which is where the seam between the two lists was. There
+		     is one list now, so it belongs under it — and outside the
+		     list's own `v-else`, so an empty page still says it. -->
+		<WorkflowLicenceNote v-if="mergeWorkflows" :licensed="!licenseGated" :workflows-licensed="workflowsLicensed" />
+		</template>
+
+		<!-- ── Workflow detail and actions (v4.10.15) ───────────────────── -->
+		<WorkflowDetailModal
+			v-if="workflowDetailOpen"
+			:workflow="workflows.detail"
+			:loading="workflows.detailLoading"
+			:error="workflows.detailError"
+			:busy="workflows.busyId !== null && workflows.detail && workflows.busyId === workflows.detail.id"
+			:display-names="workflows.detail ? (workflows.detail.people || {}) : {}"
+			@close="closeWorkflow"
+			@retry="reopenWorkflow"
+			@action="onWorkflowAction"
+			@changed="emitCounts()" />
+		<WorkflowActionDialog
+			v-if="workflowAction"
+			:action="workflowAction.action"
+			:subject="workflowAction.workflow.title"
+			:workflow="workflowAction.workflow"
+			:busy="workflows.busyId === workflowAction.workflow.id"
+			@close="workflowAction = null"
+			@submit="submitWorkflowAction" />
 
 		<!-- ── Custom snooze ────────────────────────────────────────────── -->
 		<NcModal v-if="snoozeTarget" :name="t('teamhub', 'Snooze until')" @close="snoozeTarget = null">
@@ -453,12 +407,14 @@
 				</label>
 				<label class="mywork__modal-field">
 					<span>{{ t('teamhub', 'Why does this team need more time?') }}</span>
-					<textarea
+					<NcTextArea
 						v-model="extensionReason"
 						class="mywork__modal-input mywork__modal-textarea"
 						rows="3"
 						maxlength="1000"
-						:placeholder="t('teamhub', 'e.g. The project runs until the end of Q3 and the handover is in September.')" />
+						:placeholder="t('teamhub', 'e.g. The project runs until the end of Q3 and the handover is in September.')"
+						label-outside
+						:aria-label="t('teamhub', 'Why does this team need more time?')" />
 				</label>
 				<div class="mywork__modal-actions">
 					<NcButton variant="tertiary" @click="extensionTarget = null">
@@ -478,11 +434,13 @@
 				<p class="mywork__modal-body">{{ commentTarget.subtitle || commentTarget.title }}</p>
 				<label class="mywork__modal-field">
 					<span>{{ t('teamhub', 'Comment') }}</span>
-					<textarea
+					<NcTextArea
 						v-model="commentText"
 						class="mywork__modal-input mywork__modal-textarea"
 						rows="4"
-						maxlength="1000" />
+						maxlength="1000"
+						label-outside
+						:aria-label="t('teamhub', 'Comment')" />
 				</label>
 				<div class="mywork__modal-actions">
 					<NcButton variant="tertiary" @click="commentTarget = null">{{ t('teamhub', 'Cancel') }}</NcButton>
@@ -505,11 +463,13 @@
 				</p>
 				<label v-if="confirmNeedsReason || confirmAllowsReason" class="mywork__modal-field">
 					<span>{{ confirmReasonLabel }}</span>
-					<textarea
+					<NcTextArea
 						v-model="confirmReason"
 						class="mywork__modal-input mywork__modal-textarea"
 						rows="3"
-						maxlength="1000" />
+						maxlength="1000"
+						label-outside
+						:aria-label="confirmReasonLabel" />
 				</label>
 				<div class="mywork__modal-actions">
 					<NcButton variant="tertiary" @click="confirmTarget = null">{{ t('teamhub', 'Cancel') }}</NcButton>
@@ -526,14 +486,15 @@
 </template>
 
 <script>
-import { mapState } from 'vuex'
+import { mapState, mapGetters } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { shiftIsoDate, formatTime } from '../lib/localDate.js'
 import { personalSettingsUrl } from '../lib/openProject.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
+import { getCurrentUser } from '@nextcloud/auth'
 import axios from '@nextcloud/axios'
-import { NcButton, NcLoadingIcon, NcEmptyContent, NcModal } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcEmptyContent, NcModal, NcTextArea } from '@nextcloud/vue'
 
 import Refresh from 'vue-material-design-icons/Refresh.vue'
 import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
@@ -542,11 +503,9 @@ import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
-import FilterVariant from 'vue-material-design-icons/FilterVariant.vue'
-import FormatListBulletedSquare from 'vue-material-design-icons/FormatListBulletedSquare.vue'
-import ViewSequentialOutline from 'vue-material-design-icons/ViewSequentialOutline.vue'
 import CalendarToday from 'vue-material-design-icons/CalendarToday.vue'
-// v4.5.45 — the Team admin category's glyph.
+// v4.5.45 — the team-resource glyph (the Team admin *category* it was added
+// for was folded into Action required in v4.10.20).
 import ShieldAccountOutline from 'vue-material-design-icons/ShieldAccountOutline.vue'
 import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 import AccountClock from 'vue-material-design-icons/AccountClock.vue'
@@ -571,44 +530,53 @@ import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 import FlagOutline from 'vue-material-design-icons/FlagOutline.vue'
 // v4.9.17 — the source groups' glyphs: Teams (a group of people) and
 // Administration (the instance's authority — a shield with a crown, so it
-// cannot be mistaken for Team admin's shield-with-person inside Teams).
+// cannot be mistaken for the Team admin source's shield-with-person inside
+// Teams).
 // Files reuses Folder above.
 import AccountGroupOutline from 'vue-material-design-icons/AccountGroupOutline.vue'
 import ShieldCrownOutline from 'vue-material-design-icons/ShieldCrownOutline.vue'
+// v4.10.1 — the team-space administrator source and its report rows.
+import FolderAccountOutline from 'vue-material-design-icons/FolderAccountOutline.vue'
+import ArchiveCheckOutline from 'vue-material-design-icons/ArchiveCheckOutline.vue'
 
 import MyWorkItemRow from './mywork/MyWorkItemRow.vue'
-import MyWorkFilters from './mywork/MyWorkFilters.vue'
+// v4.10.15 — WorkflowHub in My Work.
+import WorkflowSection from './mywork/WorkflowSection.vue'
+// v4.10.17 — the merged list renders workflow rows itself, beside the
+// aggregated ones, so it needs the row component and not only the section.
+import WorkflowItemRow from './mywork/WorkflowItemRow.vue'
+import WorkflowDetailModal from './mywork/WorkflowDetailModal.vue'
+import WorkflowActionDialog from './mywork/WorkflowActionDialog.vue'
+import WorkflowLicenceNote from './mywork/WorkflowLicenceNote.vue'
+import {
+	WORKFLOW_SECTION,
+	WORKFLOW_ACTION,
+	actionText as workflowActionText,
+	isOpen as workflowIsOpen,
+	rowKey,
+} from '../constants/workflows.js'
 import {
 	ACTION,
 	CATEGORY,
 	CATEGORY_ICONS,
 	CATEGORY_ORDER,
 	CATEGORY_TONES,
+	RETIRED_CATEGORIES,
 	DESTRUCTIVE_ACTIONS,
 	NAVIGATION_ACTIONS,
 	FORM_ACTIONS,
 	actionLabel,
-	breakdownLabel,
-	categoryEmptyState,
 	categoryLabel,
 	resolveSnoozePreset,
-	FALLBACK_ICON,
-	PROVIDER_ICONS,
-	RESOURCE_TYPE_ICONS,
 	SORT,
-	sortOptions,
-	predefinedViews,
-	isViewActive,
-	viewFilterPatch,
 	providerWarning,
 	formatAbsolute,
 	buildSourceTabs,
 	sourceGroupOf,
 } from '../constants/myWork.js'
-import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_HERO } from '../constants/uiTokens.js'
+import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_HERO, ICON_LARGE } from '../constants/uiTokens.js'
 
 /** Debounce for the search field — one request per pause, not per keystroke. */
-const SEARCH_DEBOUNCE_MS = 300
 
 /** How stale a cached payload may be before mount forces a blocking refetch. */
 const STALE_AFTER_MS = 30000
@@ -623,7 +591,6 @@ const SECTION_PREVIEW = 5
  * handed on, the other is work already done. Giving them the same weight as
  * Action required is what made a queue of twenty rows feel like forty.
  */
-const RAIL_CATEGORIES = [CATEGORY.WAITING_FOR_OTHERS, CATEGORY.COMPLETED]
 
 /**
  * Categories that get a summary card (v4.5.39).
@@ -634,28 +601,49 @@ const RAIL_CATEGORIES = [CATEGORY.WAITING_FOR_OTHERS, CATEGORY.COMPLETED]
  * Completed keeps its card because the number there is a week's worth of
  * closure, which is a summary; the panel beside it only shows the last few.
  */
-const SUMMARY_CATEGORIES = CATEGORY_ORDER.filter(c => c !== CATEGORY.WAITING_FOR_OTHERS)
 
 export default {
 	name: 'MyWorkView',
 	components: {
-		NcButton, NcLoadingIcon, NcEmptyContent, NcModal,
+		  NcTextArea, NcButton, NcLoadingIcon, NcEmptyContent, NcModal,
 		Refresh, ChevronLeft, ChevronRight, ChevronDown, ClipboardCheckOutline,
-		AlertCircleOutline, InformationOutline, FilterVariant,
-		FormatListBulletedSquare, ViewSequentialOutline,
+		AlertCircleOutline, InformationOutline,
 		CalendarToday, CalendarClock, AccountClock, CheckCircleOutline,
 		ShieldAccountOutline, AccountPlusOutline,
 		ViewGrid, CardText, Folder, Gavel, Calendar, Puzzle, FileEyeOutline, BriefcaseOutline, FlagOutline,
-		AccountGroupOutline, ShieldCrownOutline,
-		MyWorkItemRow, MyWorkFilters,
+		AccountGroupOutline, ShieldCrownOutline, FolderAccountOutline, ArchiveCheckOutline,
+		MyWorkItemRow,
+		WorkflowSection, WorkflowItemRow, WorkflowDetailModal, WorkflowActionDialog, WorkflowLicenceNote,
 	},
 	emits: ['open-team', 'open-item', 'counts-changed'],
 
 	data() {
 		return {
+			ICON_LARGE,
+			WORKFLOW_SECTION,
 			loading: false,
 			busyItemId: null,
-			filtersOpen: false,
+			// v4.10.15 — the aggregated queue answered 403 with licenseGate:
+			// the workflow sections stay, the rest of the page is not rendered.
+			licenseGated: false,
+			// The workflow whose detail view is open, and the action a dialog
+			// is collecting a text for: { workflow, action } | null.
+			workflowDetailOpen: false,
+			workflowAction: null,
+			/**
+			 * v4.10.18 — the per-type counts from the last answer that had
+			 * **no** type filter on, which is the only honest source for the
+			 * chips' numbers. `null` until such an answer arrives.
+			 *
+			 * The server cannot supply these while narrowed: `providerIds`
+			 * decides which providers are *queried at all*
+			 * (`ProviderRegistry`), so a narrowed answer holds no rows for
+			 * the other sources and `MyWorkService`'s `ignoreProvider: true`
+			 * has nothing left to un-filter. Picking Decisions made every
+			 * other chip read 0 — "you have no Deck work", said to somebody
+			 * with three overdue Deck cards.
+			 */
+			allSourceCounts: null,
 			snoozeTarget: null,
 			snoozeCustomValue: '',
 			commentTarget: null,
@@ -673,7 +661,18 @@ export default {
 	},
 
 	computed: {
-		...mapState({ myWork: state => state.myWork }),
+		...mapState({ myWork: state => state.myWork, workflows: state => state.workflows }),
+		...mapGetters('workflows', { workflowSections: 'sections', workflowActionRequiredCount: 'actionRequiredCount' }),
+
+		/**
+		 * v4.10.16 — whether this instance is licensed, as the workflow
+		 * list reported it. Independent of `licenseGated`, which only says
+		 * whether the aggregated queue answered: the two always agree, but
+		 * the licence note reads the tier the workflow API stated.
+		 */
+		workflowsLicensed() {
+			return this.workflows.tier !== 'basic'
+		},
 
 		iconInline() { return ICON_INLINE },
 		iconBody() { return ICON_BODY },
@@ -700,10 +699,17 @@ export default {
 		},
 
 		filters() { return this.myWork.filters },
-		groupBy() { return this.myWork.groupBy },
-		sortBy() { return this.myWork.sortBy },
+		/**
+		 * v4.10.18 — fixed, not stored. My Work is one list grouped by what
+		 * the work needs from you, sorted by when it is due, at one density.
+		 * These were three saved preferences, and a saved `groupBy: project`
+		 * is what made the category headings invisible for a reader who had
+		 * once tried that grouping and never found the way back.
+		 */
+		groupBy() { return 'category' },
+		sortBy() { return SORT.DEADLINE },
+		compact() { return false },
 		page() { return this.myWork.page },
-		compact() { return this.myWork.compact },
 		collapsedGroups() { return this.myWork.collapsedGroups || [] },
 		payload() { return this.myWork.payload },
 		providers() { return this.myWork.providers },
@@ -724,174 +730,91 @@ export default {
 		},
 
 		/**
-		 * The cards — see SUMMARY_CATEGORIES for which. Today is a **lens, not
-		 * a bucket**: with the action-required lead time on, an item due today
-		 * is correctly in Action required, so filtering the Today card by
-		 * category would show an empty list next to a non-zero count. It
-		 * filters by due date instead, which is what a user clicking "Today"
-		 * actually means.
-		 */
-		summaryCards() {
-			const breakdown = this.payload?.breakdown || {}
-			// v4.5.31 — under the Today lens the Completed card counts today's
-			// completions, matching the side panel beside it. Both read the
-			// same server-narrowed number, so the card and the panel cannot
-			// disagree about what "completed" currently means.
-			const completedToday = this.payload?.highlights?.completedScope === 'today'
-
-			return SUMMARY_CATEGORIES.map(category => ({
-				key: category,
-				tone: CATEGORY_TONES[category],
-				icon: CATEGORY_ICONS[category],
-				label: (completedToday && category === CATEGORY.COMPLETED)
-					? t('teamhub', 'Completed today')
-					: categoryLabel(category),
-				count: (completedToday && category === CATEGORY.COMPLETED)
-					? (this.payload?.highlights?.completedCount ?? 0)
-					: (this.counts[category] || 0),
-				breakdown: breakdown[category] || [],
-				// A card at zero still needs a second line or the row of
-				// cards loses its shared height and the grid jitters as
-				// counts change.
-				emptyHint: category === CATEGORY.COMPLETED
-					? t('teamhub', 'Recently')
-					: t('teamhub', 'Nothing'),
-				active: category === CATEGORY.TODAY
-					? this.filters.dueWindow === 'today'
-					: this.filters.category === category,
-			}))
-		},
-
-		sortChoices() { return sortOptions() },
-
-		/**
-		 * All + one tab per available source — a provider on its own, or a
-		 * group (Files, Teams, Administration) standing in for its members.
+		 * v4.10.18 — the page's only control: one chip per kind of work this
+		 * person actually has, plus "All work".
 		 *
-		 * v4.9.17 — the clustering, and the rule that an *unavailable* source
-		 * (app not installed, module off) gets no tab, live in
-		 * `buildSourceTabs()` so they can be tested. A source that is merely
-		 * empty still gets a tab, showing zero: "no file work waiting on me" is
-		 * information, and a tab that vanishes when it empties makes the bar
-		 * reflow every refresh. The Administration group is absent for a
-		 * non-admin because the server does not list its providers to them.
+		 * Built from the same `buildSourceTabs` the old source bar used, so
+		 * the grouping of related sources (File approval + File reviews →
+		 * Files) and the server's counts are unchanged; what changed is that
+		 * this is now the whole filter surface rather than one row of six.
 		 */
-		sourceTabs() {
-			return buildSourceTabs(this.providers, this.payload?.sourceCounts || {}, this.filters.providerId)
-		},
-
-		/**
-		 * The rail is derived from item categories, so it only makes sense
-		 * while the page is grouped by category — see the template comment.
-		 */
-		showRail() {
-			return this.groupBy === 'category'
-		},
-
-		/** Groups the main column renders: the ones that are a to-do list. */
-		mainGroups() {
-			if (!this.showRail) {
-				return this.visibleGroups
+		typeFilters() {
+			const known = this.allSourceCounts
+			const tabs = buildSourceTabs(
+				this.providers,
+				known || this.payload?.sourceCounts || {},
+				this.filters.providerId,
+			)
+			if (known) {
+				return tabs
 			}
-			return this.visibleGroups.filter(g => !RAIL_CATEGORIES.includes(g.key))
+			// No unnarrowed answer yet — a filter restored from preferences on
+			// a cold start. An inactive chip shows no number rather than a
+			// zero it cannot stand behind; the real ones arrive with All.
+			return tabs.map(tab => (tab.active ? tab : { ...tab, count: null }))
 		},
 
 		/**
-		 * The rail's rows come from the server's `highlights`, not from the
-		 * current page.
+		 * Whether the workflows are rendered inside the one list (v4.10.17)
+		 * rather than as their own cards above it.
 		 *
-		 * They used to be filtered out of `items`, which meant selecting a
-		 * summary card emptied every panel while the counts beside them kept
-		 * reading the real number — "Nothing finished yet this week" printed
-		 * directly under a 5. `highlights` is computed before the category
-		 * filter is applied, exactly like the counts, so the two always agree.
+		 * One case cannot merge and falls back to the standalone cards: an
+		 * **unlicensed** instance, which has no aggregated queue to merge
+		 * into. (Until v4.10.18 a second case could: a page grouped by
+		 * something other than category. Grouping is no longer a choice, so
+		 * that case is gone.) One condition drives both the cards and the
+		 * in-list rows, so a workflow is never rendered twice.
 		 */
-		railPanels() {
-			const h = this.payload?.highlights || {}
-			const today = h.today || []
-			const waiting = h[CATEGORY.WAITING_FOR_OTHERS] || []
-			const done = h[CATEGORY.COMPLETED] || []
-			// The server says which scope it narrowed Completed to, rather than
-			// the view re-deriving it from the filter — they would then be two
-			// answers to one question, and could disagree mid-refresh.
-			const completedToday = h.completedScope === 'today'
-
-			return [
-				{
-					key: 'today',
-					label: t('teamhub', 'Upcoming today'),
-					icon: CATEGORY_ICONS[CATEGORY.TODAY],
-					count: this.counts[CATEGORY.TODAY] || today.length,
-					items: today,
-					empty: t('teamhub', 'Nothing due today.'),
-					viewAll: () => this.applyFilterPatch({ dueWindow: 'today', category: '' }),
-				},
-				{
-					key: CATEGORY.WAITING_FOR_OTHERS,
-					label: categoryLabel(CATEGORY.WAITING_FOR_OTHERS),
-					icon: CATEGORY_ICONS[CATEGORY.WAITING_FOR_OTHERS],
-					count: this.counts[CATEGORY.WAITING_FOR_OTHERS] || waiting.length,
-					items: waiting,
-					empty: t('teamhub', 'You are not waiting on anyone.'),
-					viewAll: () => this.applyFilterPatch({
-						category: CATEGORY.WAITING_FOR_OTHERS, dueWindow: '',
-					}),
-				},
-				// v4.5.28 — the Completed panel follows the Today lens. Its
-				// label, its rows and its count all come from the same
-				// narrowed set, so the heading can never disagree with the
-				// number underneath it (the §2.74 rule, applied the other way
-				// round this time).
-				{
-					key: CATEGORY.COMPLETED,
-					label: completedToday
-						? t('teamhub', 'Completed today')
-						: t('teamhub', 'Completed this week'),
-					icon: CATEGORY_ICONS[CATEGORY.COMPLETED],
-					count: completedToday
-						? (h.completedCount ?? done.length)
-						: (this.counts[CATEGORY.COMPLETED] || done.length),
-					items: done,
-					empty: completedToday
-						? t('teamhub', 'Nothing finished today.')
-						: t('teamhub', 'Nothing finished yet this week.'),
-					viewAll: () => this.applyFilterPatch({
-						category: CATEGORY.COMPLETED,
-						// Keep the lens when the panel is showing today's work
-						// — otherwise "View all" widens to the week, which is
-						// not what the panel just offered.
-						dueWindow: completedToday ? 'today' : '',
-					}),
-				},
-			]
+		mergeWorkflows() {
+			return !this.licenseGated
 		},
-
-		filterButtonLabel() {
-			const active = this.activeFilterCount
-			return active
-				? t('teamhub', 'Filters ({n})', { n: active })
-				: t('teamhub', 'Filters')
-		},
-
-		activeFilterCount() {
-			const f = this.filters
-			return ['search', 'teamId', 'providerId', 'priority', 'status', 'resourceType', 'dueWindow', 'projectId', 'workType']
-				.filter(k => !!f[k]).length + (f.showSnoozed ? 1 : 0)
-		},
-
-		/** v4.9.7 — the projects and work types the queue currently holds. */
-		facetProjects() { return this.payload?.facets?.projects || [] },
-		facetWorkTypes() { return this.payload?.facets?.workTypes || [] },
 
 		/**
-		 * v4.9.7 — the predefined views, with their on/off state and with the
-		 * ones that need a provider this instance does not have dropped.
+		 * The one list: every category that has something in it, in
+		 * `CATEGORY_ORDER`, each carrying both its workflows and its
+		 * aggregated items.
+		 *
+		 * This replaces the two-column layout. Waiting for others and
+		 * Completed used to be excluded from the main column and rendered as
+		 * "at a glance" panels in a rail instead; they are ordinary groups
+		 * now. A category the *server* sent no group for can still hold
+		 * workflows — a team request waiting on somebody else, on an instance
+		 * with no other waiting work at all — so those are appended rather
+		 * than lost.
 		 */
-		views() {
-			const registered = new Set(this.providers.filter(p => p.enabled !== false).map(p => p.id))
-			return predefinedViews()
-				.filter(v => !v.requiresProvider || registered.has(v.requiresProvider))
-				.map(v => ({ ...v, active: isViewActive(v, this.filters, this.groupBy) }))
+		unifiedGroups() {
+			// v4.10.18 — a workflow belongs to no source: it is a request
+			// travelling between people, not a Deck card or a Decision. So a
+			// type filter hides it, and the group heading agrees with the chip
+			// instead of counting one more than it. With All on, it is back.
+			const byCategory = this.filters.providerId ? {} : {
+				[CATEGORY.ACTION_REQUIRED]: this.workflowSections.actionRequired,
+				[CATEGORY.WAITING_FOR_OTHERS]: this.workflowSections.waiting,
+				[CATEGORY.COMPLETED]: this.workflowSections.completed,
+			}
+			const out  = []
+			const seen = new Set()
+			for (const group of (this.payload?.groups || [])) {
+				seen.add(group.key)
+				const workflows = byCategory[group.key] || []
+				if (!this.itemsForGroup(group).length && !workflows.length) {
+					continue
+				}
+				out.push({ ...group, workflows })
+			}
+			for (const key of CATEGORY_ORDER) {
+				const workflows = byCategory[key] || []
+				if (seen.has(key) || !workflows.length) {
+					continue
+				}
+				out.push({ key, label: categoryLabel(key), itemIds: [], workflows })
+			}
+			return out.sort((a, b) => CATEGORY_ORDER.indexOf(a.key) - CATEGORY_ORDER.indexOf(b.key))
+		},
+
+		/** What the list renders — merged, or the aggregated groups alone. */
+		listGroups() {
+			return this.mergeWorkflows ? this.unifiedGroups : this.visibleGroups
 		},
 
 		/**
@@ -954,8 +877,22 @@ export default {
 			return t('teamhub', '{sources} items could not be refreshed. All other results are up to date.', { sources })
 		},
 
+		/** v4.10.18 — there is one filter, so this is one question. */
 		hasActiveFilters() {
-			return this.activeFilterCount > 0 || !!this.filters.category
+			return !!this.filters.providerId
+		},
+
+		/**
+		 * v4.10.1 — a source may script the confirmation of one of its actions
+		 * itself: `metadata.confirm[action] = { title, body, reasonLabel? }`,
+		 * translated server-side. The team-space hand-over is the first to —
+		 * "Hand the move to Inge?" is a question only the source can word, and
+		 * the generic copy below is written for approvals. `reasonLabel` adds
+		 * an optional note field. Absent → everything works as before.
+		 */
+		confirmSpec() {
+			const spec = this.confirmTarget?.item?.metadata?.confirm?.[this.confirmTarget?.action]
+			return spec && typeof spec === 'object' ? spec : null
 		},
 
 		/** The source told us its action needs free text before it will run. */
@@ -973,9 +910,13 @@ export default {
 		 */
 		confirmAllowsReason() {
 			return !!this.confirmTarget?.item?.metadata?.allowsReason
+				|| typeof this.confirmSpec?.reasonLabel === 'string'
 		},
 
 		confirmReasonLabel() {
+			if (typeof this.confirmSpec?.reasonLabel === 'string' && this.confirmSpec.reasonLabel !== '') {
+				return this.confirmSpec.reasonLabel
+			}
 			return this.confirmNeedsReason
 				? t('teamhub', 'Reason')
 				// TRANSLATORS: label of an optional free-text field shown when finishing a file review
@@ -992,6 +933,9 @@ export default {
 			if (!this.confirmTarget) {
 				return ''
 			}
+			if (typeof this.confirmSpec?.title === 'string' && this.confirmSpec.title !== '') {
+				return this.confirmSpec.title
+			}
 			const label = this.confirmTarget.item.subtitle || this.confirmTarget.item.title
 			switch (this.confirmTarget.action) {
 			case ACTION.REJECT:
@@ -999,7 +943,7 @@ export default {
 			case ACTION.CLOSE:
 				return t('teamhub', 'Close the review of “{title}”?', { title: label })
 			case ACTION.COMPLETE:
-				return t('teamhub', 'Complete your review of “{title}”?', { title: label })
+				return t('teamhub', 'Complete the review of “{title}”?', { title: label })
 			default:
 				return t('teamhub', 'Approve “{title}”?', { title: label })
 			}
@@ -1015,6 +959,9 @@ export default {
 		confirmBody() {
 			if (!this.confirmTarget) {
 				return ''
+			}
+			if (typeof this.confirmSpec?.body === 'string') {
+				return this.confirmSpec.body
 			}
 			if (this.confirmTarget.action === ACTION.CLOSE) {
 				const pending = (this.confirmTarget.item.metadata?.reviewers || [])
@@ -1035,19 +982,22 @@ export default {
 		},
 
 		emptyTitle() {
-			return this.hasActiveFilters
-				? t('teamhub', 'Nothing matches these filters')
-				: t('teamhub', 'You’re all caught up')
+			if (this.hasActiveFilters) {
+				return t('teamhub', 'Nothing matches these filters')
+			}
+			// v4.10.15 — with workflow rows on screen above, "caught up"
+			// would contradict them; the queue is empty, the page is not.
+			if (this.workflowSections.actionRequired.length || this.workflowSections.waiting.length) {
+				return t('teamhub', 'No other work')
+			}
+			return t('teamhub', 'You’re all caught up')
 		},
 
 		emptyBody() {
 			if (this.hasActiveFilters) {
 				return t('teamhub', 'Try widening the filters, or clear them to see everything again.')
 			}
-			if (this.filters.category) {
-				return categoryEmptyState(this.filters.category)
-			}
-			return t('teamhub', 'New tasks and approvals from your teams will appear here automatically.')
+			return t('teamhub', 'New tasks and approvals from the teams appear here automatically.')
 		},
 	},
 
@@ -1058,6 +1008,10 @@ export default {
 		// Skipping it while the payload was "fresh" stacked a second cache on
 		// top of the server's own, and a due-date change could take minutes to
 		// surface.
+		// v4.10.15 — the workflow sections load beside the queue, never
+		// behind it: on an unlicensed instance the queue's request is the
+		// one that fails, and the sections must not wait for it.
+		this.loadWorkflows()
 		await Promise.all([this.loadProviders(), this.loadPreferences()])
 		const stale = !this.payload || (Date.now() - this.myWork.loadedAt) > STALE_AFTER_MS
 		if (stale) {
@@ -1076,50 +1030,33 @@ export default {
 	},
 
 	methods: {
+		rowKey,
 		t,
 		n,
 		categoryLabel,
-		breakdownLabel,
-		actionLabel,
+
+		/**
+		 * v4.10.1 — the confirm button wears the row's own word for the verb
+		 * when the source gave one (`metadata.actionLabels`), so "Hand to team
+		 * owner" on the row is "Hand to team owner" in the dialog too.
+		 */
+		actionLabel(action) {
+			const own = this.confirmTarget?.item?.metadata?.actionLabels?.[action]
+			return typeof own === 'string' && own !== '' ? own : actionLabel(action)
+		},
 
 		groupIcon(key) {
 			return CATEGORY_ICONS[key] || 'CalendarClock'
 		},
 
-		/** The glyph for a source, for the summary cards' breakdown chips. */
-		providerIcon(providerId) {
-			return PROVIDER_ICONS[providerId] || FALLBACK_ICON
-		},
-
-		/** The glyph of the tab this item opens in — same map the rows use. */
-		resourceIcon(item) {
-			return RESOURCE_TYPE_ICONS[item.resourceType]
-				|| PROVIDER_ICONS[item.providerId]
-				|| FALLBACK_ICON
-		},
-
 		/**
-		 * A rail row is half the width of a main row, so its second line gets
-		 * one fact rather than three: which team, because that is what
-		 * distinguishes two similarly-named items across teams.
+		 * One count per group, workflows included (v4.10.17). The heading
+		 * counts what the group renders — the whole point of merging the two
+		 * lists was that "Action required 0" above "Action required 7" is
+		 * not a thing a reader can resolve.
 		 */
-		panelSubtitle(item) {
-			return item.teamName || item.subtitle || ''
-		},
-
-		/**
-		 * The right-hand meta on a rail row. Only the Today panel has one — a
-		 * time is what you want to know about something happening today, and
-		 * the other two panels have nothing equally useful to put there.
-		 */
-		panelMeta(panel, item) {
-			if (panel.key !== 'today' || !item.dueAt) {
-				return ''
-			}
-			return formatTime(item.dueAt * 1000, {
-				hour: '2-digit',
-				minute: '2-digit',
-			})
+		groupTotal(group) {
+			return (group.itemIds || []).length + (group.workflows || []).length
 		},
 
 		/**
@@ -1158,22 +1095,12 @@ export default {
 			window.open(parsed.href, '_blank', 'noopener,noreferrer')
 		},
 
-		selectSource(providerId) {
+		/** v4.10.18 — the one filter. An empty key is "All work". */
+		selectType(providerId) {
 			if (this.filters.providerId === providerId) {
 				return
 			}
 			this.applyFilterPatch({ providerId })
-		},
-
-		onSortBy(value) {
-			if (value === this.sortBy) {
-				return
-			}
-			this.$store.commit('SET_MYWORK_SORT_BY', value)
-			this.$store.commit('SET_MYWORK_PAGE', 1)
-			this.expandedGroups = []
-			this.persistPreferences()
-			this.refresh(false)
 		},
 
 		groupTone(key) {
@@ -1228,11 +1155,6 @@ export default {
 			this.persistPreferences()
 		},
 
-		setCompact(value) {
-			this.$store.commit('SET_MYWORK_COMPACT', value)
-			this.persistPreferences()
-		},
-
 		// ── Loading ──────────────────────────────────────────────────────
 
 		async loadProviders() {
@@ -1268,30 +1190,48 @@ export default {
 				if (!data) {
 					return
 				}
-				if (data.groupBy) this.$store.commit('SET_MYWORK_GROUP_BY', data.groupBy)
-				if (data.sortBy) this.$store.commit('SET_MYWORK_SORT_BY', data.sortBy)
-				this.$store.commit('SET_MYWORK_COMPACT', !!data.compact)
+				// v4.10.18 — `groupBy`, `sortBy` and `compact` are deliberately
+				// **not** read back any more. They are no longer choices, and a
+				// stored value is worse than no value: Inge's saved
+				// `groupBy: "project"` survived the 4.10.17 rework and replaced
+				// every category heading with a project name, so the page looked
+				// untouched to the one person it was reworked for. The server may
+				// still hold the old keys; nothing reads them, and the next
+				// `persistPreferences()` overwrites them.
+				//
 				// A pre-4.5.39 server sends `completedExpanded` and no
 				// `collapsedGroups`. Nothing is migrated: the old key was one
 				// boolean about one section, the new one a set of section keys,
 				// so carrying a stored `false` across would arrive meaning
 				// "everything collapsed" — the 4.5.29 `mentionsOnly` lesson.
 				// Absent means the default, which is everything open.
+				// v4.10.20 — a key naming a retired category is dropped, not
+				// carried forward. See RETIRED_CATEGORIES in constants/myWork.js.
 				if (Array.isArray(data.collapsedGroups)) {
-					this.$store.commit('SET_MYWORK_COLLAPSED_GROUPS', data.collapsedGroups)
+					this.$store.commit(
+						'SET_MYWORK_COLLAPSED_GROUPS',
+						data.collapsedGroups.filter(k => !(k in RETIRED_CATEGORIES)),
+					)
 				}
 				if (data.filters && typeof data.filters === 'object') {
-					const filters = { ...data.filters }
+					// v4.10.18 — the type of work is the only filter that
+					// survives a reload. Everything else a stored filter set
+					// could carry — a category, a team, a priority, a due
+					// window, a search — is dropped on the way in: a sticky
+					// filter nobody can see the control for is how a page ends
+					// up showing a third of somebody's work with no clue why.
+					// Inge's stored `category: "action_required"` was exactly
+					// that.
+					//
 					// v4.9.17 — a preference saved before the source groups
-					// existed may hold a member (`approval`) where the bar and
-					// the dropdown now speak in groups (`files`). The server
-					// would honour either; the controls only agree with the
-					// rows if they are told the group.
-					const group = sourceGroupOf(filters.providerId || '')
-					if (group) {
-						filters.providerId = group
-					}
-					this.$store.commit('SET_MYWORK_FILTERS', filters)
+					// existed may hold a member (`approval`) where the control
+					// now speaks in groups (`files`). The server would honour
+					// either; the control only agrees with the rows if it is
+					// told the group.
+					const stored = String(data.filters.providerId || '')
+					this.$store.commit('SET_MYWORK_FILTERS', {
+						providerId: sourceGroupOf(stored) || stored,
+					})
 				}
 			} catch (e) {
 				// Defaults are a perfectly good starting point; a failed
@@ -1319,6 +1259,9 @@ export default {
 				return
 			}
 			this.loading = true
+			if (userInitiated) {
+				this.loadWorkflows()
+			}
 			try {
 				const params = this.queryParams()
 				if (userInitiated) {
@@ -1326,6 +1269,11 @@ export default {
 				}
 				const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/mywork'), { params })
 				this.$store.commit('SET_MYWORK_PAYLOAD', data)
+				this.licenseGated = false
+				// Only an unnarrowed answer can be trusted for the chips.
+				if (!params.providerIds) {
+					this.allSourceCounts = data?.sourceCounts || {}
+				}
 
 				// v4.5.26 — keep the sidebar badge honest.
 				//
@@ -1333,7 +1281,8 @@ export default {
 				// completing something while staying on the page left a stale
 				// number until a reload. Every payload already carries the
 				// counts, so this costs nothing — no second request.
-				this.$emit('counts-changed', Number(data?.counts?.action_required) || 0)
+				// v4.10.15 — plus the workflow steps waiting on the viewer.
+				this.emitCounts()
 
 				// The requested page can fall off the end when work is
 				// completed between fetches — clamp and refetch once.
@@ -1345,7 +1294,10 @@ export default {
 				}
 			} catch (e) {
 				if (e?.response?.status === 403 && e?.response?.data?.licenseGate) {
-					showError(t('teamhub', 'My Work requires an active TeamHub license.'))
+					// v4.10.15 — not an error any more: the page renders the
+					// workflow sections and the licence note; no toast.
+					this.licenseGated = true
+					this.emitCounts()
 				} else if (userInitiated) {
 					showError(t('teamhub', 'Failed to load My Work'))
 				}
@@ -1425,73 +1377,6 @@ export default {
 
 		// ── Filters ──────────────────────────────────────────────────────
 
-		onFilter(key, value) {
-			this.$store.commit('SET_MYWORK_FILTERS', { [key]: value })
-			this.$store.commit('SET_MYWORK_PAGE', 1)
-			this.expandedGroups = []
-			this.persistPreferences()
-
-			if (key === 'search') {
-				if (this._searchTimer) clearTimeout(this._searchTimer)
-				this._searchTimer = setTimeout(() => this.refresh(false), SEARCH_DEBOUNCE_MS)
-				return
-			}
-			this.refresh(false)
-		},
-
-		onGroupBy(value) {
-			this.$store.commit('SET_MYWORK_GROUP_BY', value)
-			this.$store.commit('SET_MYWORK_PAGE', 1)
-			this.expandedGroups = []
-			this.persistPreferences()
-			this.refresh(false)
-		},
-
-		/**
-		 * Today filters by due date; every other card filters by category.
-		 *
-		 * The two live on different filter keys, so selecting one card has to
-		 * explicitly clear the other dimension — otherwise picking Upcoming
-		 * after Today left both highlighted and intersected, which is what
-		 * Justin hit ("Today stays active, I need to click it again").
-		 * Both keys move in a single commit so only one refetch fires.
-		 */
-		toggleSummary(card) {
-			const turningOff = card.active
-
-			if (card.key === CATEGORY.TODAY) {
-				this.applyFilterPatch({
-					dueWindow: turningOff ? '' : 'today',
-					category: '',
-				})
-				return
-			}
-
-			this.applyFilterPatch({
-				category: turningOff ? '' : card.key,
-				dueWindow: '',
-			})
-		},
-
-		/**
-		 * v4.9.7 — a predefined view. A filter view replaces the filters any
-		 * other filter view set (`viewFilterPatch` — Justin's review,
-		 * 2026-09-14: *Needs attention* left on under *OpenProject* hid the
-		 * work packages); a grouping view only changes the grouping. Clicking
-		 * an active view turns its own filters off and leaves the grouping,
-		 * which is a preference, alone.
-		 */
-		applyView(view) {
-			if (view.groupBy && !view.active && view.groupBy !== this.groupBy) {
-				this.$store.commit('SET_MYWORK_GROUP_BY', view.groupBy)
-			}
-			const patch = viewFilterPatch(view, view.active)
-			if (Object.keys(patch).length || (view.groupBy && !view.active)) {
-				this.applyFilterPatch(patch)
-			}
-		},
-
-
 		/**
 		 * v4.9.7 — where the source's account is (re)connected. OpenProject
 		 * has its own personal settings section; any other source lands on
@@ -1512,12 +1397,9 @@ export default {
 			this.refresh(false)
 		},
 
+		/** v4.10.18 — "Show all work": the one filter off. */
 		resetFilters() {
-			this.$store.commit('RESET_MYWORK_FILTERS')
-			this.$store.commit('SET_MYWORK_PAGE', 1)
-			this.expandedGroups = []
-			this.persistPreferences()
-			this.refresh(false)
+			this.applyFilterPatch({ providerId: '' })
 		},
 
 		goToPage(target) {
@@ -1535,14 +1417,21 @@ export default {
 		 * another browser. Fire-and-forget: a failed preference write must
 		 * never interrupt filtering.
 		 */
+		/**
+		 * v4.10.18 — two things are still the viewer's own: which sections
+		 * they collapsed, and which type of work they are looking at. The
+		 * grouping, the sort, the density and the other ten filter keys are
+		 * written as their fixed values / empty, which also *clears* whatever
+		 * an older version stored for this person on their first visit.
+		 */
 		persistPreferences() {
 			axios.put(generateUrl('/apps/teamhub/api/v1/mywork/preferences'), {
-				groupBy: this.groupBy,
-				sortBy: this.sortBy,
-				showSnoozed: this.filters.showSnoozed,
+				groupBy: 'category',
+				sortBy: SORT.DEADLINE,
+				showSnoozed: false,
 				collapsedGroups: this.collapsedGroups,
-				compact: this.compact,
-				filters: this.filters,
+				compact: false,
+				filters: { providerId: this.filters.providerId || '' },
 			}).catch(() => {})
 		},
 
@@ -1573,6 +1462,169 @@ export default {
 		openTeam(item) { this.$emit('open-team', item.teamId) },
 
 		// ── Actions ──────────────────────────────────────────────────────
+
+		// ── Workflows (v4.10.15) ──────────────────────────────────────────
+
+		/** The sidebar badge: the queue's Action required plus the workflow steps waiting on the viewer. */
+		emitCounts() {
+			const queue = this.licenseGated ? 0 : (Number(this.payload?.counts?.action_required) || 0)
+			this.$emit('counts-changed', queue + this.workflowActionRequiredCount)
+		},
+
+		async loadWorkflows() {
+			await this.$store.dispatch('workflows/load')
+			this.emitCounts()
+		},
+
+		/** v4.10.37 — opened on the row's own task. */
+		openWorkflow(workflow) {
+			this.workflowDetailOpen = true
+			this.$store.dispatch('workflows/open', { id: workflow.id, step: workflow.viewer?.stepKey || '' })
+		},
+
+		reopenWorkflow() {
+			const detail = this.workflows.detail
+			if (detail?.id) {
+				this.$store.dispatch('workflows/open', { id: detail.id, step: detail.viewer?.stepKey || '' })
+			}
+		},
+
+		closeWorkflow() {
+			this.workflowDetailOpen = false
+			this.$store.dispatch('workflows/close')
+		},
+
+		/**
+		 * A row or the detail asked for an action. Verbs that take a text
+		 * open the dialog first; the rest fire at once. Nothing fires while
+		 * another action is in flight — the store refuses, and the buttons
+		 * are disabled anyway.
+		 */
+		onWorkflowAction({ workflow, action, direct = false }) {
+			if (this.workflows.busyId !== null) {
+				return
+			}
+			// v4.10.39 — a team task is claimed before anybody acts on it; the
+			// detail view offers the claim, the service team's store makes it.
+			if (action === 'claim') {
+				this.claimWorkflowTask(workflow)
+				return
+			}
+			// v4.10.37 — `direct`: the requester pressed a task's link, and
+			// pressing it is doing the task; there is nothing to ask first.
+			if (direct || workflowActionText(action) === 'none') {
+				this.runWorkflowAction(workflow, action, '')
+				return
+			}
+			this.workflowAction = { workflow, action }
+		},
+
+		/** v4.10.38 — `files` from the dialog's paperclip, `[{ fileId, name }]`. */
+		async claimWorkflowTask(workflow) {
+			const step = workflow.viewer?.stepKey || ''
+			const result = await this.$store.dispatch('serviceTeams/act', {
+				id: workflow.id, action: 'claim', uid: getCurrentUser()?.uid || '', step,
+			})
+			if (result?.ok) {
+				showSuccess(t('teamhub', 'Claimed: {title}', { title: workflow.title }))
+				this.$store.dispatch('workflows/refresh')
+				this.$store.dispatch('workflows/open', { id: workflow.id, step })
+			} else if (!result?.error?.busy) {
+				showError(result?.error?.message || t('teamhub', 'The request could not be claimed.'))
+			}
+		},
+
+		submitWorkflowAction(text, files = []) {
+			if (!this.workflowAction) {
+				return
+			}
+			const { workflow, action } = this.workflowAction
+			this.runWorkflowAction(workflow, action, text, files)
+		},
+
+		async runWorkflowAction(workflow, action, text, files = []) {
+			try {
+				const updated = await this.$store.dispatch('workflows/act', {
+					id: workflow.id, action, text, step: workflow.viewer?.stepKey || '',
+					fileIds: (files || []).map(f => f.fileId),
+				})
+				this.workflowAction = null
+				showSuccess(this.workflowActionToast(action, updated))
+				// v4.10.37 — finishing one task can open the next step's tasks
+				// or close this request's other rows: re-read the list.
+				this.$store.dispatch('workflows/refresh')
+				if (this.workflowDetailOpen && updated && this.workflows.detail?.id === updated.id) {
+					if (workflowIsOpen(updated)) {
+						// The events changed; re-read the detail with its history.
+						this.$store.dispatch('workflows/open', { id: updated.id, step: updated.viewer?.stepKey || '' })
+					} else {
+						// It ended. On an unlicensed instance it no longer
+						// exists at all (v4.10.16), so re-reading it would
+						// answer 404: close the view, the toast said what
+						// happened.
+						this.closeWorkflow()
+					}
+				}
+				this.emitCounts()
+			} catch (e) {
+				if (e?.status === 0) {
+					return // busy — the first click is still running
+				}
+				const msg = e?.message
+				if (e?.status === 429) {
+					showError(msg || t('teamhub', 'You asked for an update recently. Try again later.'))
+				} else if (e?.status === 409) {
+					showError(msg || t('teamhub', 'This workflow changed in the meantime. The list was refreshed.'))
+					this.workflowAction = null
+				} else {
+					showError(msg || t('teamhub', 'That action could not be completed.'))
+				}
+				this.emitCounts()
+			}
+		},
+
+		/** The toast after an action; a finished workflow says so — there is no Completed section to find it in. */
+		workflowActionToast(action, updated) {
+			const title = updated?.title || ''
+			if (updated && !workflowIsOpen(updated)) {
+				switch (updated.status) {
+				case 'completed':
+					return t('teamhub', 'Workflow completed: {title}', { title })
+				case 'rejected':
+					return t('teamhub', 'Workflow rejected: {title}', { title })
+				default:
+					return t('teamhub', 'Workflow withdrawn: {title}', { title })
+				}
+			}
+			switch (action) {
+			case WORKFLOW_ACTION.COMPLETE:
+				return t('teamhub', 'Step completed. The next step is with {actor}.', { actor: this.nextActorLabel(updated) })
+			case WORKFLOW_ACTION.REQUEST_INFORMATION:
+				return t('teamhub', 'Asked. The requester has been notified.')
+			case WORKFLOW_ACTION.PROVIDE_INFORMATION:
+				return t('teamhub', 'Answer sent.')
+			case WORKFLOW_ACTION.REQUEST_STATUS:
+				return t('teamhub', 'Update requested. The responsible person has been notified.')
+			default:
+				return t('teamhub', 'Done')
+			}
+		},
+
+		nextActorLabel(updated) {
+			const step = (updated?.steps || []).find(s => ['available', 'in_progress', 'waiting_for_information'].includes(s.status))
+			if (!step) {
+				return ''
+			}
+			const people = updated?.people || {}
+			switch (step.actor?.type) {
+			case 'user': return people[step.actor.id] || step.actor.id
+			case 'group': return t('teamhub', 'Group {group}', { group: step.actor.id })
+			case 'team_owner': return t('teamhub', 'Team owner')
+			case 'team_moderator': return t('teamhub', 'Team owner or moderator')
+			case 'team': return t('teamhub', 'Team members')
+			default: return ''
+			}
+		},
 
 		onAction({ item, action }) {
 			if (action === ACTION.OPEN) {
@@ -1614,9 +1666,13 @@ export default {
 			// much as somewhere to type: a file reviewer's optional remark is
 			// the only part of their reasoning that outlives the review's Talk
 			// room, and the row has nowhere to put a text field.
+			//
+			// v4.10.1 — and whenever the source scripted this action's
+			// confirmation itself (`metadata.confirm[action]`).
 			if (DESTRUCTIVE_ACTIONS.includes(action)
 				|| item.metadata?.requiresReason
-				|| item.metadata?.allowsReason) {
+				|| item.metadata?.allowsReason
+				|| item.metadata?.confirm?.[action]) {
 				this.confirmTarget = { item, action }
 				this.confirmReason = ''
 				return
@@ -1726,13 +1782,16 @@ export default {
 .mywork {
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	gap: 16px;
 	/* Left padding clears NC's sidebar-toggle button AND gives the canvas
 	   room to breathe against the sidebar — everything below the header
 	   shares this edge, so the whole view lines up on one axis. */
-	padding: 18px 28px 28px 48px;
-	height: 100%;
-	overflow-y: auto;
+	padding: 16px 28px 28px 48px;
+	/* v4.10.10: no own scroll box — NcAppContent is the scroller (NC's
+	   content rule: no overflow on content parents unless it is a split
+	   pane). The view just lays out its height. */
+	min-height: 100%;
+	box-sizing: border-box;
 	/* v4.5.27 — the same canvas a team page uses (.teamhub-home-view in
 	   TeamWidgetGrid). The cards and section panels were already
 	   --color-main-background with a border, so they had been sitting on a
@@ -1740,6 +1799,14 @@ export default {
 	   the work. On grey they read as cards, and the three pages in the
 	   sidebar look like one product. */
 	background: var(--color-background-dark);
+}
+
+/* ── Workflows (v4.10.15) ────────────────────────────────────────────── */
+
+.mywork__workflows {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
 }
 
 /* ── Header ─────────────────────────────────────────────────────────── */
@@ -1754,7 +1821,7 @@ export default {
 .mywork__header-text {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 4px;
 	flex: 1 1 auto;
 	min-width: 0;
 }
@@ -1779,591 +1846,48 @@ export default {
 	flex: 0 0 auto;
 }
 
-/* Segmented density pair — raw buttons with aria-pressed, the SKILLS.md
-   carve-out for a toggle group. */
-.mywork__density {
-	display: inline-flex;
-	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-control, var(--border-radius));
-	overflow: hidden;
-}
+/* ── The one filter (v4.10.18) ──────────────────────────────────────── */
 
-.mywork__density-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 34px;
-	height: 34px;
-	min-width: 34px;
-	min-height: 34px;
-	padding: 0;
-	border: none;
-	background: var(--color-main-background);
-	color: var(--color-text-maxcontrast);
-	cursor: pointer;
-
-	&:hover { background: var(--color-background-hover); }
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: -2px;
-	}
-}
-
-.mywork__density-btn--on {
-	background: var(--color-primary-element-light);
-	color: var(--color-main-text);
-}
-
-/* Visually hidden but read by screen readers — the icons alone are not
-   a name, and the title attribute is not reliably announced. */
-.mywork__sr {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	padding: 0;
-	margin: -1px;
-	overflow: hidden;
-	clip: rect(0, 0, 0, 0);
-	white-space: nowrap;
-	border: 0;
-}
-
-/* ── Notices ────────────────────────────────────────────────────────── */
-
-.mywork__notice {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 8px 12px;
-	border-radius: var(--th-radius-control, var(--border-radius));
-	background: var(--color-background-dark);
-	border: 1px solid var(--color-border);
-	font-size: var(--th-font-meta, 12px);
-	color: var(--color-main-text);
-}
-
-.mywork__notice--info { color: var(--color-text-maxcontrast); }
-
-/* ── Summary cards ──────────────────────────────────────────────────── */
-
-/* Four cards since v4.5.39 — Waiting for others moved to the rail alone. */
-.mywork__summary {
-	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
-	gap: 10px;
-
-	@media (max-width: 1100px) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-	@media (max-width: 700px)  { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-/* Raw <button>: a custom card with bespoke chrome — the documented
-   carve-out in SKILLS.md § "NcButton is the default".
-
-   v4.5.39 — a two-column grid rather than a column stack. Left column holds
-   the name over its source chips; right column holds the count alone, centred
-   against both rows. The hairline spans the full width underneath. */
-.mywork__card {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	grid-template-rows: auto auto auto;
-	align-items: center;
-	column-gap: 10px;
-	/* v4.5.39 — ~30% taller again on top of the first pass, per Justin: 14 →
-	   28px vertical padding takes the card from ~91px to ~119px. The height is
-	   all padding and row gap, never type size, so the count and the heading
-	   keep the sizes already agreed and simply get room to breathe. */
-	row-gap: 6px;
-	padding: 28px 16px;
-	cursor: pointer;
-	text-align: left;
-	background: var(--color-main-background);
-	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-card, var(--border-radius-large));
-	color: var(--color-main-text);
-
-	&:hover { background: var(--color-background-hover); }
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-	}
-}
-
-/* Selected state is a light tint plus a stronger border, not a saturated
-   fill: these are multi-select filter tiles, which is the case where the
-   light tint is the house rule. */
-.mywork__card--active {
-	background: var(--color-primary-element-light);
-	border-color: var(--color-primary-element);
-}
-
-.mywork__card-head {
-	grid-column: 1;
-	grid-row: 1;
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	min-width: 0;
-	width: 100%;
-}
-
-/* v4.5.39 — 24 → 28px, so the chip still balances a heading-sized label on a
-   card that grew by a fifth. */
-.mywork__card-chip {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 auto;
-	width: 28px;
-	height: 28px;
-	border-radius: 50%;
-	/* Six locks so NC's global 44px button min-* can't stretch this into
-	   an oval (SKILLS.md § UI shapes). */
-	min-width: 28px;
-	min-height: 28px;
-	max-width: 28px;
-	max-height: 28px;
-	padding: 0;
-	box-sizing: border-box;
-}
-
-/* v4.5.39 — a heading, at heading size and in the app's heading colour, like
-   .teamhub-widget-title and .mywork__group-title. It was 12px semibold black,
-   which read as a caption on a card whose whole job is to be a heading with a
-   number beside it. */
-.mywork__card-label {
-	flex: 1 1 auto;
-	min-width: 0;
-	font-size: var(--th-font-heading, 16px);
-	font-weight: var(--th-font-weight-semibold, 600);
-	line-height: var(--th-line-height-tight, 1.2);
-	color: var(--color-primary-element);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-/* The number, alone in the right-hand column and spanning both text rows so it
-   is centred against them rather than pinned to the first line. */
-.mywork__card-count {
-	grid-column: 2;
-	grid-row: 1 / span 2;
-	align-self: center;
-	justify-self: end;
-	padding-left: 6px;
-	font-size: var(--th-font-display, 30px);
-	font-weight: var(--th-font-weight-bold, 700);
-	line-height: var(--th-line-height-tight, 1.2);
-	font-variant-numeric: tabular-nums;
-}
-
-/* One line per source. The cards live in a grid row, so they already share
-   a height — but give the block a floor so a card with one source and a card
-   with three still look like siblings. */
-/* v4.5.25 — a row of source chips, not a stack of source sentences. The
-   min-height keeps every card the same height whether it has three sources or
-   none, so the grid does not jitter as counts change. */
-/* v4.5.39 — a step larger (11 → 12px, ICON_INLINE → ICON_BODY glyphs) and a
-   step lighter. Justin's brief: it should be readable without asking for
-   attention, so size buys legibility and the opacity gives the attention back
-   to the count. --color-text-maxcontrast is already NC's muted text token and
-   there is no lighter one, so the last step is opacity rather than a colour
-   that would stop tracking the theme. */
-.mywork__card-lines {
-	grid-column: 1;
-	grid-row: 2;
+/* One chip per kind of work, plus All work. This is the whole of what used
+   to be here: the segmented density pair, six summary tiles with their
+   accent rails, the saved-view chips, the source tab bar and the sort
+   select. */
+.mywork__types {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 4px 10px;
-	width: 100%;
-	min-height: 1.6em;
-	font-size: var(--th-font-meta, 12px);
+	gap: var(--th-space-sm, 8px);
+	margin-block: var(--th-space-md, 12px);
+}
+
+.mywork__type-count {
+	margin-inline-start: var(--th-space-xs, 4px);
 	color: var(--color-text-maxcontrast);
-	opacity: 0.8;
-}
-
-.mywork__card-source {
-	display: inline-flex;
-	align-items: center;
-	gap: 3px;
-	font-variant-numeric: tabular-nums;
-	white-space: nowrap;
-}
-
-.mywork__card-line {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.mywork__card-line--empty { opacity: 0.6; }
-
-/* v4.5.25 — the glyphs are neutral, at Justin's request. They used to carry a
-   per-category tint; a row of five differently-coloured chips reads as five
-   competing signals before the eye reaches a single number, and the numbers
-   are the point of the cards.
-
-   The categories are still distinguishable: each card keeps its icon and its
-   name in words, and the section it opens keeps a coloured accent bar. Colour
-   is never the only signal here, and now it is not the loudest one either. */
-.mywork__card-chip {
-	background: var(--color-background-dark);
-	color: var(--color-main-text);
-}
-
-/* A hairline in the category's colour along the bottom of the card. Enough to
-   tie a card to its section, too little to compete with the count. */
-.mywork__card::after {
-	content: '';
-	/* Row 3, spanning both columns, so it stays a full-width rule under the
-	   text *and* the count now that the card is a grid (v4.5.39). */
-	grid-column: 1 / -1;
-	grid-row: 3;
-	display: block;
-	width: 100%;
-	height: 2px;
-	margin-top: 8px;
-	border-radius: 2px;
-	background: var(--th-mywork-accent, var(--color-border));
-}
-
-/* `--waiting` has had no card to colour since v4.5.39. Kept so the set stays
-   one-to-one with CATEGORY_TONES — a gap here would read as an omission, and
-   it is what the rule needs back if the card ever returns. */
-.mywork__card--action   { --th-mywork-accent: var(--th-mywork-action-accent); }
-.mywork__card--today    { --th-mywork-accent: var(--th-mywork-today-accent); }
-.mywork__card--upcoming { --th-mywork-accent: var(--th-mywork-upcoming-accent); }
-.mywork__card--waiting  { --th-mywork-accent: var(--th-mywork-waiting-accent); }
-.mywork__card--admin    { --th-mywork-accent: var(--th-mywork-admin-accent); }
-.mywork__card--done     { --th-mywork-accent: var(--th-mywork-done-accent); }
-
-/* ── Source tabs + sort ─────────────────────────────────────────────── */
-
-/* v4.9.7 — the predefined views: the same pill as a source tab, one step
-   quieter (no icon), with the last-updated stamp pushed to the far end. */
-.mywork__views {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	flex-wrap: wrap;
-	min-width: 0;
-}
-
-.mywork__views-label {
-	font-size: var(--th-font-micro, 11px);
-	font-weight: var(--th-font-weight-semibold, 600);
-	color: var(--color-text-maxcontrast);
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-	margin-inline-end: 4px;
-}
-
-/* Raw <button>: aria-pressed toggle group, the SKILLS.md carve-out the
-   source tabs below already use. */
-.mywork__view {
-	display: inline-flex;
-	align-items: center;
-	padding: 5px 12px;
-	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-pill, 999px);
-	background: var(--color-main-background);
-	color: var(--color-main-text);
-	font-size: var(--th-font-meta, 12px);
-	cursor: pointer;
-	white-space: nowrap;
-
-	&:hover { background: var(--color-background-hover); }
-
-	&:focus-visible {
-		background: var(--color-background-hover);
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-	}
-}
-
-.mywork__view--on {
-	background: var(--color-primary-element-light);
-	border-color: var(--color-primary-element);
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-.mywork__updated {
-	margin-inline-start: auto;
-	font-size: var(--th-font-micro, 11px);
-	color: var(--color-text-maxcontrast);
-	white-space: nowrap;
-}
-
-.mywork__toolbar {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-	flex-wrap: wrap;
-}
-
-.mywork__sources {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	flex-wrap: wrap;
-	min-width: 0;
-}
-
-/* Raw <button>: a segmented toggle group using aria-pressed — the documented
-   carve-out in SKILLS.md § "NcButton is the default". NcButton's 44px minimum
-   would make a six-source bar taller than the summary cards above it. */
-.mywork__source {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	padding: 6px 12px;
-	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-pill, 999px);
-	background: var(--color-main-background);
-	color: var(--color-main-text);
-	font-size: var(--th-font-meta, 12px);
-	cursor: pointer;
-	white-space: nowrap;
-
-	&:hover { background: var(--color-background-hover); }
-
-	/* Split from :hover on purpose — grouping them silences the keyboard
-	   focus ring, which is the trap SKILLS.md § Focus visibility names. */
-	&:focus-visible {
-		background: var(--color-background-hover);
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-	}
-}
-
-.mywork__source--on {
-	background: var(--color-primary-element-light);
-	border-color: var(--color-primary-element);
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-/* Neutral, like every other glyph on this page. */
-.mywork__source-icon { color: var(--color-text-maxcontrast); }
-.mywork__source--on .mywork__source-icon { color: inherit; }
-
-.mywork__source-count {
-	font-variant-numeric: tabular-nums;
-	color: var(--color-text-maxcontrast);
-}
-
-.mywork__source--on .mywork__source-count { color: inherit; }
-
-.mywork__sort {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-	font-size: var(--th-font-meta, 12px);
-	white-space: nowrap;
-}
-
-.mywork__sort-label { color: var(--color-text-maxcontrast); }
-
-.mywork__sort-select {
-	min-height: 34px;
-	padding: 4px 8px;
-	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-control, var(--border-radius));
-	background: var(--color-main-background);
-	color: var(--color-main-text);
-	font-size: var(--th-font-meta, 12px);
-
-	/* The NC form-field pattern: no outline, a primary border on focus.
-	   Documented as acceptable in SKILLS.md § Focus visibility. */
-	&:focus {
-		outline: none;
-		border-color: var(--color-primary-element);
-	}
-	&:focus-visible {
-		box-shadow: 0 0 0 2px var(--color-primary-element);
-	}
+	font-size: var(--th-font-meta, 13px);
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────── */
 
+/* v4.10.17 — one column. The 300px rail beside it is gone; Waiting for
+   others and Completed are groups of the one list. */
 .mywork__layout {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 300px;
+	grid-template-columns: minmax(0, 1fr);
 	align-items: start;
-	gap: 16px;
-
-	/* Below this the rail would squeeze the five-column rows into
-	   unreadability, and the rail's own rows are the less important of the
-	   two — so it goes under the queue rather than beside it. */
-	@media (max-width: 1280px) {
-		grid-template-columns: minmax(0, 1fr);
-	}
+	gap: var(--th-space-lg, 16px);
 }
 
-.mywork__layout--railless { grid-template-columns: minmax(0, 1fr); }
-
-.mywork__rail {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	min-width: 0;
-}
-
-.mywork__panel {
-	background: var(--color-main-background);
-	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-card, var(--border-radius-large));
-	padding: 12px 14px;
-}
-
-/* v4.5.27 — a rail panel's header is a header, so it reads like every other
-   one on the page and on a team page: primary colour, same weight. */
-.mywork__panel-head {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin: 0 0 8px;
-	font-size: var(--th-font-heading, 16px);
+/* The question the page answers, above the list that answers it. */
+.mywork__lead {
+	margin: var(--th-space-lg, 16px) 0 var(--th-space-sm, 8px);
+	font-size: var(--th-font-heading-lg, 20px);
 	font-weight: var(--th-font-weight-semibold, 600);
-	color: var(--color-primary-element);
 }
 
-/* No chip behind it. The circle was doing the work of separating a
-   maxcontrast glyph from the text; a primary-coloured glyph next to a
-   primary-coloured title needs no help, and the chip only added weight. The
-   six size locks stay — without them NC's global 44px button min-* would
-   still stretch the box (SKILLS.md § UI shapes). */
-.mywork__panel-icon {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 auto;
-	box-sizing: border-box;
-	width: 24px;
-	height: 24px;
-	min-width: 24px;
-	min-height: 24px;
-	max-width: 24px;
-	max-height: 24px;
-	padding: 0;
-	background: none;
-	color: var(--color-primary-element);
-}
-
-.mywork__panel-title {
+/* Holds the space the Team / Reason / Deadline captions used to take, so
+   the collapse chevron stays at the far end of the header row. */
+.mywork__group-spacer {
 	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.mywork__panel-count {
-	flex: 0 0 auto;
-	font-size: var(--th-font-micro, 11px);
-	font-variant-numeric: tabular-nums;
-	color: var(--color-text-maxcontrast);
-}
-
-.mywork__panel-list {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-}
-
-.mywork__panel-row {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 5px 4px;
-	border-radius: var(--th-radius-control, var(--border-radius));
-	min-width: 0;
-
-	&:hover { background: var(--color-background-hover); }
-}
-
-.mywork__panel-glyph {
-	flex: 0 0 auto;
-	display: inline-flex;
-	color: var(--color-text-maxcontrast);
-}
-
-/* Raw <button>: a full-width card-row list item — the documented carve-out in
-   SKILLS.md § "NcButton is the default". */
-.mywork__panel-text {
-	flex: 1 1 auto;
-	min-width: 0;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 1px;
-	background: none;
-	border: none;
-	padding: 0;
-	cursor: pointer;
-	text-align: left;
-	color: inherit;
-	font: inherit;
-
-	&:hover .mywork__panel-item-title { text-decoration: underline; }
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-		border-radius: 2px;
-	}
-}
-
-.mywork__panel-item-title,
-.mywork__panel-item-sub {
-	max-width: 100%;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.mywork__panel-item-title {
-	font-size: var(--th-font-meta, 12px);
-	font-weight: var(--th-font-weight-medium, 500);
-}
-
-.mywork__panel-item-sub {
-	font-size: var(--th-font-micro, 11px);
-	color: var(--color-text-maxcontrast);
-}
-
-.mywork__panel-meta {
-	flex: 0 0 auto;
-	font-size: var(--th-font-micro, 11px);
-	font-variant-numeric: tabular-nums;
-	color: var(--color-text-maxcontrast);
-}
-
-.mywork__panel-empty {
-	margin: 0;
-	font-size: var(--th-font-micro, 11px);
-	color: var(--color-text-maxcontrast);
-}
-
-/* Raw <button>: an inline text link-button, not a control needing a 44px
-   target. Same pattern as .mywork__group-more below. */
-.mywork__panel-more {
-	margin-top: 8px;
-	background: none;
-	border: none;
-	padding: 0;
-	cursor: pointer;
-	font-size: var(--th-font-micro, 11px);
-	color: var(--color-primary-element);
-
-	&:hover { text-decoration: underline; }
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-		border-radius: 2px;
-	}
 }
 
 /* ── Sections ───────────────────────────────────────────────────────── */
@@ -2378,7 +1902,7 @@ export default {
 .mywork__groups {
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	gap: 16px;
 
 	--th-mywork-col-team: 128px;
 	--th-mywork-col-reason: minmax(0, 200px);
@@ -2391,16 +1915,10 @@ export default {
 	--th-mywork-col-actions: 100px;
 }
 
-/* Density now only changes row padding — the actions column is the same two
-   controls either way. */
-.mywork__groups--compact {
-	--th-mywork-col-actions: 100px;
-}
-
 .mywork__group {
 	background: var(--color-main-background);
 	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-card, var(--border-radius-large));
+	border-radius: var(--th-radius-card, var(--border-radius-element));
 	overflow: hidden;
 }
 
@@ -2415,7 +1933,7 @@ export default {
 		var(--th-mywork-col-actions);
 	align-items: center;
 	gap: 12px;
-	padding: 10px 16px;
+	padding: 8px 16px;
 	/* v4.5.39 — the same header treatment every team widget uses
 	   (.teamhub-widget-header): the card's own background, separated from its
 	   body by a hairline rather than by a grey fill. It was
@@ -2490,26 +2008,11 @@ export default {
 	flex: 0 0 auto;
 	box-sizing: border-box;
 	width: 28px;
-	height: 28px;
-	min-width: 28px;
-	min-height: 28px;
 	max-width: 28px;
-	max-height: 28px;
-	padding: 0;
-	background: none;
-	border: none;
-	border-radius: var(--th-radius-control, var(--border-radius));
-	cursor: pointer;
-	color: var(--color-primary-element);
 
 	&:hover { background: var(--color-background-hover); }
 	/* Split from :hover — grouping them is what silently kills the keyboard
 	   focus ring (SKILLS.md § Focus visibility standard). */
-	&:focus-visible {
-		background: var(--color-background-hover);
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-	}
 }
 
 /* Down = collapsed, up = expanded, the same direction the widget headers use.
@@ -2527,7 +2030,7 @@ export default {
 	font-variant-numeric: tabular-nums;
 	background: var(--color-background-dark);
 	border-radius: var(--th-radius-pill, 999px);
-	padding: 0 7px;
+	padding: 0 8px;
 }
 
 /* Column captions. Aria-hidden in the template — they label cells that
@@ -2540,8 +2043,6 @@ export default {
 		font-size: var(--th-font-micro, 11px);
 		font-weight: var(--th-font-weight-semibold, 600);
 		color: var(--color-text-maxcontrast);
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
 	}
 }
 
@@ -2559,20 +2060,8 @@ export default {
 .mywork__group-more {
 	display: block;
 	width: 100%;
-	padding: 9px 16px;
-	border: none;
-	border-top: 1px solid var(--color-border);
-	background: none;
-	cursor: pointer;
-	color: var(--color-primary-element);
-	font-size: var(--th-font-meta, 12px);
-	font-weight: var(--th-font-weight-semibold, 600);
 
 	&:hover { background: var(--color-background-hover); }
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: -2px;
-	}
 }
 
 .mywork__loading {
@@ -2629,12 +2118,12 @@ export default {
 
 .mywork__modal-input {
 	width: 100%;
-	padding: 6px 8px;
+	padding: 8px 8px;
 	font-size: var(--th-font-body, 14px);
 	color: var(--color-main-text);
 	background: var(--color-main-background);
 	border: 1px solid var(--color-border-dark, var(--color-border));
-	border-radius: var(--th-radius-control, var(--border-radius));
+	border-radius: var(--th-radius-control, var(--border-radius-small));
 	outline: none;
 
 	&:focus { border-color: var(--color-primary-element); }
@@ -2642,11 +2131,6 @@ export default {
 		outline: 2px solid var(--color-primary-element);
 		outline-offset: 1px;
 	}
-}
-
-.mywork__modal-textarea {
-	resize: vertical;
-	font-family: inherit;
 }
 
 .mywork__modal-actions {
@@ -2659,7 +2143,7 @@ export default {
 
 @media (max-width: 900px) {
 	.mywork { padding: 16px 14px 24px 14px; }
-	.mywork__header { padding-left: 44px; }
+	.mywork__header { padding-inline-start: 44px; }
 
 	/* v4.5.39 — the summary cards, rearranged rather than shrunk.
 	   Two cards to a phone row leaves ~55px for a heading that needs ~110px,
@@ -2695,10 +2179,10 @@ export default {
 	/* No grid to place it in, so the flex row pushes it right instead
 	   (v4.5.39). The title takes the slack. */
 	.mywork__group-title { flex: 1 1 auto; }
-	.mywork__group-toggle { margin-left: auto; }
+	.mywork__group-toggle { margin-inline-start: auto; }
 
 	/* The 28px indent existed to clear the icon inside a shared grid cell.
 	   In flex the icon is a real sibling, so the indent would double it. */
-	.mywork__group-title { margin-left: 0; }
+	.mywork__group-title { margin-inline-start: 0; }
 }
 </style>

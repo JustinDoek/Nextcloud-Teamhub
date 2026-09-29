@@ -34,7 +34,11 @@ require_once $ncRoot . '/lib/base.php';
 if (method_exists(\OC_App::class, 'registerAutoloading')) {
     \OC_App::registerAutoloading('teamhub', dirname(__DIR__));
 } else {
-    \OC::$server->get(\OCP\App\IAppManager::class)->registerAutoloading('teamhub', dirname(__DIR__));
+    // `force` is required: base.php has already registered the enabled app,
+    // and without it the call returns early and the tests silently run
+    // against the DEPLOYED copy, not this one (found 2026-09-19, when six
+    // new classes "could not load").
+    \OC::$server->get(\OCP\App\IAppManager::class)->registerAutoloading('teamhub', dirname(__DIR__), true);
 }
 // The tests' own base classes (PHPUnit only auto-includes *Test.php).
 \OC::$composerAutoloader->addPsr4('OCA\\TeamHub\\Tests\\', __DIR__ . '/', true);

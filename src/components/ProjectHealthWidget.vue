@@ -24,7 +24,7 @@
             <!-- Tile 1 — Budget & Time -->
             <li class="th-health-tile" :class="`th-health-tile--${budgetTimeStatus}`">
                 <div class="th-health-tile__row">
-                    <WalletOutline :size="16" aria-hidden="true" class="th-health-tile__icon" />
+                    <WalletOutline :size="ICON_BODY" aria-hidden="true" class="th-health-tile__icon" />
                     <span class="th-health-tile__label">{{ t('teamhub', 'Budget & Time') }}</span>
                 </div>
                 <div class="th-health-tile__signal">
@@ -44,19 +44,25 @@
                     </template>
                 </div>
                 <div class="th-health-tile__actions">
-                    <button type="button" class="th-health-tile__link" @click="openTab('budget')">
-                        {{ t('teamhub', 'Open Budget') }}
-                    </button>
-                    <button type="button" class="th-health-tile__link" @click="openTab('time')">
-                        {{ t('teamhub', 'Open Time') }}
-                    </button>
+                    <NcButton
+                        class="th-health-tile__link"
+                        @click="openTab('budget')"
+                        variant="tertiary">
+                        {{ t('teamhub', 'Open budget') }}
+                    </NcButton>
+                    <NcButton
+                        class="th-health-tile__link"
+                        @click="openTab('time')"
+                        variant="tertiary">
+                        {{ t('teamhub', 'Open time') }}
+                    </NcButton>
                 </div>
             </li>
 
             <!-- Tile 2 — Milestones -->
             <li class="th-health-tile" :class="`th-health-tile--${milestonesStatus}`">
                 <div class="th-health-tile__row">
-                    <FlagOutline :size="16" aria-hidden="true" class="th-health-tile__icon" />
+                    <FlagOutline :size="ICON_BODY" aria-hidden="true" class="th-health-tile__icon" />
                     <span class="th-health-tile__label">{{ t('teamhub', 'Milestones') }}</span>
                 </div>
                 <div class="th-health-tile__signal">
@@ -80,27 +86,31 @@
                     </template>
                 </div>
                 <div class="th-health-tile__actions">
-                    <button type="button" class="th-health-tile__link" @click="openTab('timeline')">
-                        {{ t('teamhub', 'Open Timeline') }}
-                    </button>
+                    <NcButton
+                        class="th-health-tile__link"
+                        @click="openTab('timeline')"
+                        variant="tertiary">
+                        {{ t('teamhub', 'Open timeline') }}
+                    </NcButton>
                     <!-- v3.99.8 — when a milestone is slipping because of a
                          pending decision (not a past-due Deck card), the
                          Timeline can't show the cause. Surface a second
                          link straight to Decisions so the user has a path
                          to the actual blocker. -->
-                    <button v-if="hasMilestoneWithPendingDecision"
-                        type="button"
+                    <NcButton
+                        v-if="hasMilestoneWithPendingDecision"
                         class="th-health-tile__link"
-                        @click="openDecisionsAwaitingApproval">
-                        {{ t('teamhub', 'Open Decisions') }}
-                    </button>
+                        @click="openDecisionsAwaitingApproval"
+                        variant="tertiary">
+                        {{ t('teamhub', 'Open decisions') }}
+                    </NcButton>
                 </div>
             </li>
 
             <!-- Tile 3 — Quality -->
             <li class="th-health-tile" :class="`th-health-tile--${qualityStatus}`">
                 <div class="th-health-tile__row">
-                    <AlertOctagonOutline :size="16" aria-hidden="true" class="th-health-tile__icon" />
+                    <AlertOctagonOutline :size="ICON_BODY" aria-hidden="true" class="th-health-tile__icon" />
                     <span class="th-health-tile__label">{{ t('teamhub', 'Quality') }}</span>
                 </div>
                 <div class="th-health-tile__signal">
@@ -125,9 +135,12 @@
                          Messages "home" (which never resolved to a real
                          view key anyway — it emitted 'home' but no view
                          is registered under that key). -->
-                    <button type="button" class="th-health-tile__link" @click="openDecisionsAwaitingApproval">
-                        {{ t('teamhub', 'Open Decisions') }}
-                    </button>
+                    <NcButton
+                        class="th-health-tile__link"
+                        @click="openDecisionsAwaitingApproval"
+                        variant="tertiary">
+                        {{ t('teamhub', 'Open decisions') }}
+                    </NcButton>
                 </div>
             </li>
         </ul>
@@ -135,6 +148,7 @@
 </template>
 
 <script>
+import { NcButton } from '@nextcloud/vue'
 import { mapState, mapMutations } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatIsoDate } from '../lib/localDate.js'
@@ -143,6 +157,7 @@ import axios from '@nextcloud/axios'
 import WalletOutline from 'vue-material-design-icons/WalletOutline.vue'
 import FlagOutline from 'vue-material-design-icons/FlagOutline.vue'
 import AlertOctagonOutline from 'vue-material-design-icons/AlertOctagonOutline.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 /**
  * ProjectHealthWidget (v3.97.0, Track E Session 6).
@@ -161,10 +176,11 @@ import AlertOctagonOutline from 'vue-material-design-icons/AlertOctagonOutline.v
 export default {
     name: 'ProjectHealthWidget',
 
-    components: { WalletOutline, FlagOutline, AlertOctagonOutline },
+    components: {  NcButton, WalletOutline, FlagOutline, AlertOctagonOutline },
 
     data() {
         return {
+            ICON_BODY,
             payload: null,
             loading: false,
             fetchError: null,
@@ -312,7 +328,7 @@ export default {
     flex-direction: column;
     gap: 8px;
     padding: 8px 12px 12px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .th-health-widget__loading,
@@ -325,7 +341,7 @@ export default {
 .th-health-widget__error {
     color: var(--color-error-text);
     background: var(--color-error);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     padding: 8px 12px;
 }
 
@@ -341,21 +357,26 @@ export default {
 .th-health-tile {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 8px 10px;
-    border-radius: var(--border-radius);
-    background: var(--color-background-hover);
-    border-left: 3px solid transparent;
+    gap: var(--th-space-sm, 8px);
+    padding: var(--th-space-sm, 8px);
+    /* v4.11.0 — a bordered card on the widget's own background, not a grey
+       fill (Justin, 2026-09-28); the state rail stays on the start edge. */
+    border: 1px solid var(--color-border);
+    border-inline-start: 3px solid var(--color-border);
+    border-radius: var(--border-radius-element);
+    background: var(--color-main-background);
 }
 
-.th-health-tile--ok    { border-left-color: var(--color-success);     }
-.th-health-tile--amber { border-left-color: var(--color-warning);     }
-.th-health-tile--red   { border-left-color: var(--color-error);       }
+/* The rail is a saturated colour (`--color-element-X`): `--color-X` is the
+   pale tint meant as a chip's fill, and all but vanishes as a 3px line. */
+.th-health-tile--ok    { border-inline-start-color: var(--color-element-success); }
+.th-health-tile--amber { border-inline-start-color: var(--color-element-warning); }
+.th-health-tile--red   { border-inline-start-color: var(--color-element-error);   }
 
 .th-health-tile__row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .th-health-tile__icon {
@@ -370,7 +391,7 @@ export default {
 .th-health-tile__signal {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     align-items: center;
     color: var(--color-main-text);
 }
@@ -378,8 +399,8 @@ export default {
 .th-health-tile__chip {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-meta);
     font-weight: 600;
     line-height: 1.4;
@@ -401,31 +422,10 @@ export default {
     flex-wrap: wrap;
 }
 
-.th-health-tile__link {
-    background: transparent;
-    border: none;
-    padding: 2px 4px;
-    font-size: var(--th-font-meta);
-    font-weight: 500;
-    color: var(--color-primary-element);
-    cursor: pointer;
-    text-decoration: underline;
-}
-
 /* v3.100.14: previously the hover+focus rule set outline: none and the
    :focus-visible rule below re-added the ring — same specificity, source
    order made it work but the intent read as "no focus ring". Split so
    :hover clears the outline explicitly and :focus-visible owns the ring. */
-.th-health-tile__link:hover {
-    color: var(--color-primary-element-hover);
-}
-
-.th-health-tile__link:focus-visible {
-    color: var(--color-primary-element-hover);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-    border-radius: 3px;
-}
 
 .th-health-milestone-list {
     display: flex;
@@ -442,7 +442,7 @@ export default {
     justify-content: space-between;
     align-items: baseline;
     gap: 8px;
-    padding: 2px 0;
+    padding: 4px 0;
 }
 
 .th-health-milestone__label {
@@ -456,7 +456,7 @@ export default {
 
 .th-health-milestone__meta {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     align-items: baseline;
     font-size: var(--th-font-meta);
     flex-shrink: 0;
@@ -467,8 +467,8 @@ export default {
 }
 
 .th-health-milestone__status {
-    padding: 1px 6px;
-    border-radius: 10px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-container);
     font-weight: 600;
     font-size: var(--th-font-micro);
 }

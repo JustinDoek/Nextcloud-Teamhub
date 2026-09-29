@@ -2599,7 +2599,7 @@ HTML;
      * Extract the Talk room's chat history for the team and write it to the archive.
      *
      * Lookup chain:
-     *   talk_attendees (actor_type='circles', actor_id=teamId) → room_id
+     *   TalkService::teamRoomIds() — the team's first linked room → room_id
      *   talk_rooms (id=room_id)                                → token, name
      *   oc_comments (object_type='chat', object_id=room_id)    → all messages
      *
@@ -2625,18 +2625,13 @@ HTML;
             return [];
         }
 
-        // ── Step 1: Find room_id via circle attendee ──────────────────────────
-        $qb  = $this->db->getQueryBuilder();
-        $res = $qb->select('room_id')
-            ->from('talk_attendees')
-            ->where($qb->expr()->eq('actor_type', $qb->createNamedParameter('circles')))
-            ->andWhere($qb->expr()->eq('actor_id',   $qb->createNamedParameter($teamId)))
-            ->setMaxResults(1)
-            ->executeQuery();
-        $attendeeRow = $res->fetch();
-        $res->closeCursor();
+        // ── Step 1: The team room ─────────────────────────────────────────────
+        // v4.10.48 — the first of the team's linked rooms, the one its Talk
+        // widget shows (TalkService::teamRoomIds()). Was the first room with
+        // the team's circle in it, which could export a different conversation.
+        $roomIds = $this->talkService->teamRoomIds($this->db, $teamId);
 
-        if ($attendeeRow === false) {
+        if ($roomIds === []) {
             // Circle attendee row was removed by suspension — try finding the
             // room directly by looking for any attendee whose actor_id matches
             // the teamId in any actor_type, or fall back to the suspended_resources
@@ -2647,7 +2642,7 @@ HTML;
             return [];
         }
 
-        $roomId = (int)$attendeeRow['room_id'];
+        $roomId = $roomIds[0];
 
         // ── Step 2: Get room token and name from talk_rooms ───────────────────
         $rqb  = $this->db->getQueryBuilder();
@@ -3065,11 +3060,14 @@ HTML;
 
         // Talk — remove circle attendee row.
         try {
-            $roomId = $this->talkService->suspendTalkAccess($teamId, $this->db);
-            if ($roomId !== null) {
-                $suspended['talk'] = ['room_id' => $roomId];
+            // v4.10.48 — every linked room. `room_id` (the team room) stays
+            // beside `room_ids` so a row stored by an earlier version and one
+            // stored now are both restored by resumeConnectedAppResources().
+            $roomIds = $this->talkService->suspendTalkAccess($teamId, $this->db);
+            if ($roomIds !== []) {
+                $suspended['talk'] = ['room_id' => $roomIds[0], 'room_ids' => $roomIds];
                 $this->logger->debug('[TeamHub][ArchiveService] Talk access suspended', [
-                    'teamId' => $teamId, 'roomId' => $roomId, 'app' => Application::APP_ID,
+                    'teamId' => $teamId, 'roomIds' => $roomIds, 'app' => Application::APP_ID,
                 ]);
             }
         } catch (\Throwable $e) {
@@ -3197,14 +3195,20 @@ HTML;
         array $suspended
     ): void {
         // Talk.
-        if (isset($suspended['talk']['room_id'])) {
+        if (isset($suspended['talk']['room_id']) || isset($suspended['talk']['room_ids'])) {
             try {
-                $this->talkService->resumeTalkAccess(
-                    (int)$suspended['talk']['room_id'],
-                    $teamId,
-                    $teamName,
-                    $this->db
-                );
+                // `room_ids` since v4.10.48; a row stored earlier has `room_id` only.
+                $roomIds = is_array($suspended['talk']['room_ids'] ?? null)
+                    ? $suspended['talk']['room_ids']
+                    : [$suspended['talk']['room_id']];
+                foreach ($roomIds as $roomId) {
+                    $this->talkService->resumeTalkAccess(
+                        (int)$roomId,
+                        $teamId,
+                        $teamName,
+                        $this->db
+                    );
+                }
                 $this->logger->debug('[TeamHub][ArchiveService] Talk access resumed', [
                     'teamId' => $teamId, 'app' => Application::APP_ID,
                 ]);

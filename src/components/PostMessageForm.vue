@@ -5,17 +5,17 @@
         <div v-if="!forceDecision" class="post-form__type">
             <label class="post-form__type-option" :class="{ active: messageType === 'normal' }">
                 <input v-model="messageType" type="radio" value="normal">
-                <MessageOutline :size="16" />
+                <MessageOutline :size="ICON_BODY" />
                 {{ t('teamhub', 'Message') }}
             </label>
             <label class="post-form__type-option" :class="{ active: messageType === 'poll' }">
                 <input v-model="messageType" type="radio" value="poll">
-                <PollIcon :size="16" />
+                <PollIcon :size="ICON_BODY" />
                 {{ t('teamhub', 'Poll') }}
             </label>
             <label class="post-form__type-option" :class="{ active: messageType === 'question' }">
                 <input v-model="messageType" type="radio" value="question">
-                <HelpCircleOutline :size="16" />
+                <HelpCircleOutline :size="ICON_BODY" />
                 {{ t('teamhub', 'Question') }}
             </label>
             <!-- v4.5.42 — Decision is no longer a message type you pick here.
@@ -62,7 +62,7 @@
                     :aria-label="t('teamhub', 'Bold')"
                     @mousedown.prevent
                     @click="applyMarkdown('**', '**')">
-                    <template #icon><FormatBold :size="16" /></template>
+                    <template #icon><FormatBold :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -70,7 +70,7 @@
                     :aria-label="t('teamhub', 'Italic')"
                     @mousedown.prevent
                     @click="applyMarkdown('*', '*')">
-                    <template #icon><FormatItalic :size="16" /></template>
+                    <template #icon><FormatItalic :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -78,7 +78,7 @@
                     :aria-label="t('teamhub', 'Inline code')"
                     @mousedown.prevent
                     @click="applyMarkdown('`', '`')">
-                    <template #icon><CodeTags :size="16" /></template>
+                    <template #icon><CodeTags :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -86,7 +86,7 @@
                     :aria-label="t('teamhub', 'Code block')"
                     @mousedown.prevent
                     @click="applyMarkdown('```\n', '\n```')">
-                    <template #icon><CodeBraces :size="16" /></template>
+                    <template #icon><CodeBraces :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -94,7 +94,7 @@
                     :aria-label="t('teamhub', 'Heading')"
                     @mousedown.prevent
                     @click="applyMarkdown('## ', '')">
-                    <template #icon><FormatHeader2 :size="16" /></template>
+                    <template #icon><FormatHeader2 :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -102,7 +102,7 @@
                     :aria-label="t('teamhub', 'Bullet list')"
                     @mousedown.prevent
                     @click="applyList(false)">
-                    <template #icon><FormatListBulleted :size="16" /></template>
+                    <template #icon><FormatListBulleted :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -110,7 +110,7 @@
                     :aria-label="t('teamhub', 'Numbered list')"
                     @mousedown.prevent
                     @click="applyList(true)">
-                    <template #icon><FormatListNumbered :size="16" /></template>
+                    <template #icon><FormatListNumbered :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -118,7 +118,7 @@
                     :aria-label="t('teamhub', 'Insert link')"
                     @mousedown.prevent
                     @click="applyLink">
-                    <template #icon><LinkVariant :size="16" /></template>
+                    <template #icon><LinkVariant :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -126,7 +126,7 @@
                     :aria-label="t('teamhub', 'Insert image')"
                     @mousedown.prevent
                     @click="openImageDialog">
-                    <template #icon><ImageIcon :size="16" /></template>
+                    <template #icon><ImageIcon :size="ICON_BODY" /></template>
                 </NcButton>
             </div>
 
@@ -138,7 +138,7 @@
                     :aria-label="t('teamhub', 'Insert link from Smart Picker')"
                     :title="t('teamhub', 'Smart Picker — type / in the editor, or click here')"
                     @click="openSmartPicker">
-                    <template #icon><LinkVariant :size="18" /></template>
+                    <template #icon><LinkVariant :size="ICON_BODY" /></template>
                 </NcButton>
 
                 <!-- Attach file -->
@@ -149,8 +149,8 @@
                     :title="t('teamhub', 'Attach file — uploads to your Files and inserts a link')"
                     @click="triggerFilePicker">
                     <template #icon>
-                        <NcLoadingIcon v-if="uploading" :size="18" />
-                        <Paperclip v-else :size="18" />
+                        <NcLoadingIcon v-if="uploading" :size="ICON_BODY" />
+                        <Paperclip v-else :size="ICON_BODY" />
                     </template>
                 </NcButton>
 
@@ -178,10 +178,10 @@
                     :key="att.id"
                     class="post-form__attachment"
                     :class="{ 'post-form__attachment--error': att.error }">
-                    <Paperclip :size="14" class="post-form__attachment-icon" />
+                    <Paperclip :size="ICON_INLINE" class="post-form__attachment-icon" />
                     <span class="post-form__attachment-name">{{ att.name }}</span>
                     <span v-if="att.uploading" class="post-form__attachment-status">
-                        <NcLoadingIcon :size="14" />
+                        <NcLoadingIcon :size="ICON_INLINE" />
                         {{ t('teamhub', 'Uploading…') }}
                     </span>
                     <span v-else-if="att.error" class="post-form__attachment-status post-form__attachment-status--error">
@@ -195,7 +195,7 @@
                         variant="tertiary"
                         :aria-label="t('teamhub', 'Remove attachment')"
                         @click="removeAttachment(i)">
-                        <template #icon><Close :size="14" /></template>
+                        <template #icon><Close :size="ICON_INLINE" /></template>
                     </NcButton>
                 </div>
             </div>
@@ -212,7 +212,7 @@
 
         <!-- Poll options -->
         <div v-if="messageType === 'poll'" class="post-form__poll-options">
-            <label class="post-form__label">{{ t('teamhub', 'Poll Options') }}</label>
+            <label class="post-form__label">{{ t('teamhub', 'Poll options') }}</label>
             <div v-for="(option, index) in pollOptions" :key="option.id" class="poll-option-row">
                 <NcTextField
                     v-model="option.text"
@@ -223,14 +223,14 @@
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Remove option')"
                     @click="removePollOption(index)">
-                    <template #icon><Close :size="20" /></template>
+                    <template #icon><Close :size="ICON_BODY" /></template>
                 </NcButton>
             </div>
             <NcButton
                 v-if="pollOptions.length < 10"
                 variant="tertiary"
                 @click="addPollOption">
-                <template #icon><Plus :size="20" /></template>
+                <template #icon><Plus :size="ICON_BODY" /></template>
                 {{ t('teamhub', 'Add option') }}
             </NcButton>
         </div>
@@ -239,19 +239,22 @@
         <div v-if="messageType === 'decision'" class="post-form__decision-options">
             <!-- Supersede banner — shown when this proposal will replace another -->
             <div v-if="decisionSupersedesId" class="decision-supersede-banner" role="note">
-                <SwapHorizontal :size="16" aria-hidden="true" />
+                <SwapHorizontal :size="ICON_BODY" aria-hidden="true" />
                 <span class="decision-supersede-banner__text">
                     <!-- TRANSLATORS: shown above the message composer when the user is creating a proposal that supersedes an earlier one -->
                     {{ t('teamhub', 'This proposal will supersede decision #{id}. The original will be withdrawn if it is still open.', { id: decisionSupersedesId }) }}
                 </span>
-                <button
-                    type="button"
+                <NcButton
                     class="decision-supersede-banner__clear"
                     :aria-label="t('teamhub', 'Cancel superseding')"
                     :title="t('teamhub', 'Cancel superseding')"
-                    @click="decisionSupersedesId = null">
-                    <Close :size="14" />
-                </button>
+                    @click="decisionSupersedesId = null"
+                    variant="tertiary"
+                    size="small">
+                    <template #icon>
+                        <Close :size="ICON_INLINE" />
+                    </template>
+                </NcButton>
             </div>
 
             <!-- v4.5.46 — Impact / Level / Category as one two-row grid.
@@ -275,26 +278,26 @@
                 </div>
 
                 <div class="decision-meta__row">
-                    <select
-                        id="decision-impact"
+                    <NcSelect
+                        input-id="decision-impact"
+                        label-outside
                         v-model="decisionImpact"
                         class="decision-meta__select"
-                        :aria-label="t('teamhub', 'Decision impact')">
-                        <option v-for="opt in impactOptions" :key="opt.value" :value="opt.value">
-                            {{ opt.label }}
-                        </option>
-                    </select>
+                        :aria-label-combobox="t('teamhub', 'Decision impact')"
+                        :options="impactOptions.map(opt => ({ id: opt.value, label: opt.label }))"
+                        :reduce="o => o.id"
+                        :clearable="false" />
 
-                    <select
+                    <NcSelect
                         v-if="decisionsLevelEnabled"
-                        id="decision-level"
+                        input-id="decision-level"
+                        label-outside
                         v-model="decisionLevel"
                         class="decision-meta__select"
-                        :aria-label="t('teamhub', 'Decision level')">
-                        <option v-for="opt in levelOptions" :key="opt.value" :value="opt.value">
-                            {{ opt.label }}
-                        </option>
-                    </select>
+                        :aria-label-combobox="t('teamhub', 'Decision level')"
+                        :options="levelOptions.map(opt => ({ id: opt.value, label: opt.label }))"
+                        :reduce="o => o.id"
+                        :clearable="false" />
 
                     <!-- No categories yet — the picker cannot be filled, so it
                          is replaced rather than shown empty and disabled. -->
@@ -305,17 +308,17 @@
                         <!-- TRANSLATORS: Shown in the message composer when no decision categories have been set up for this team -->
                         {{ t('teamhub', 'No decision categories have been set up for this team. Ask a team admin to add categories in Manage team → Decisions.') }}
                     </span>
-                    <select
+                    <NcSelect
                         v-else
-                        id="decision-category"
+                        input-id="decision-category"
+                        label-outside
                         v-model="decisionCategoryId"
                         class="decision-meta__select"
                         :disabled="loadingCategories"
-                        :aria-label="t('teamhub', 'Decision category')">
-                        <option v-for="opt in decisionCategoryOptions" :key="opt.id" :value="opt.id">
-                            {{ opt.name }}
-                        </option>
-                    </select>
+                        :aria-label-combobox="t('teamhub', 'Decision category')"
+                        :options="decisionCategoryOptions.map(opt => ({ id: opt.id, label: opt.name }))"
+                        :reduce="o => o.id"
+                        :clearable="false" />
                 </div>
             </div>
 
@@ -376,7 +379,7 @@
                 :aria-label="publicHintText"
                 :title="publicHintText">
                 <template #icon>
-                    <InformationOutline :size="16" />
+                    <InformationOutline :size="ICON_BODY" />
                 </template>
             </NcButton>
         </div>
@@ -394,8 +397,8 @@
                 :disabled="!canSubmit || submitting || uploading"
                 @click="submit">
                 <template #icon>
-                    <NcLoadingIcon v-if="submitting" :size="20" />
-                    <Send v-else :size="20" />
+                    <NcLoadingIcon v-if="submitting" :size="ICON_BODY" />
+                    <Send v-else :size="ICON_BODY" />
                 </template>
                 {{ submitButtonText }}
             </NcButton>
@@ -417,8 +420,8 @@
                     :disabled="imageDialogBrowsing"
                     @click="browseImageFromFiles">
                     <template #icon>
-                        <NcLoadingIcon v-if="imageDialogBrowsing" :size="16" />
-                        <FolderIcon v-else :size="16" />
+                        <NcLoadingIcon v-if="imageDialogBrowsing" :size="ICON_BODY" />
+                        <FolderIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Browse Files…') }}
                 </NcButton>
@@ -462,6 +465,7 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 import { mapState, mapActions } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateRemoteUrl, generateUrl } from '@nextcloud/router'
@@ -473,14 +477,7 @@ import {
 import { getCurrentUser } from '@nextcloud/auth'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import {
-    NcButton,
-    NcTextField,
-    NcRichContenteditable,
-    NcLoadingIcon,
-    NcDialog,
-    NcSelect,
-} from '@nextcloud/vue'
+import { NcButton, NcTextField, NcRichContenteditable, NcLoadingIcon, NcDialog, NcSelect } from '@nextcloud/vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
 import PollIcon from 'vue-material-design-icons/Poll.vue'
@@ -554,6 +551,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             subject: '',
             body: '',
             // When forceDecision is set we initialise messageType to 'decision'
@@ -661,7 +660,7 @@ export default {
         },
 
         subjectLabel() {
-            if (this.messageType === 'poll') return t('teamhub', 'Poll Question')
+            if (this.messageType === 'poll') return t('teamhub', 'Poll question')
             if (this.messageType === 'question') return t('teamhub', 'Question')
             // v4.5.44 — "Proposal subject", not "Decision question". What you
             // are writing here is a proposal; it only becomes a decision once
@@ -672,7 +671,7 @@ export default {
         },
         subjectPlaceholder() {
             if (this.messageType === 'poll') return t('teamhub', 'What would you like to ask?')
-            if (this.messageType === 'question') return t('teamhub', 'Your question…')
+            if (this.messageType === 'question') return t('teamhub', 'Question')
             if (this.messageType === 'decision') return t('teamhub', 'What needs to be decided?')
             return t('teamhub', 'Message subject')
         },
@@ -683,20 +682,20 @@ export default {
             return t('teamhub', 'Message')
         },
         bodyPlaceholder() {
-            if (this.messageType === 'poll') return t('teamhub', 'Add more context to your poll…')
+            if (this.messageType === 'poll') return t('teamhub', 'Add more context to the poll')
             if (this.messageType === 'question') return t('teamhub', 'Provide more details…')
             if (this.messageType === 'decision') return t('teamhub', 'Explain the trade-offs, constraints, or background…')
-            return t('teamhub', 'Write your message… (type / for Smart Picker, @ to mention)')
+            return t('teamhub', 'Write a message (type / for Smart Picker, @ to mention)')
         },
         submitButtonText() {
-            if (this.messageType === 'poll') return t('teamhub', 'Create Poll')
-            if (this.messageType === 'question') return t('teamhub', 'Ask Question')
+            if (this.messageType === 'poll') return t('teamhub', 'Create poll')
+            if (this.messageType === 'question') return t('teamhub', 'Ask question')
             // v4.5.42 — "Submit", not "Propose Decision". The button no longer
             // does one thing: what happens on click is whatever share mode the
             // chooser above it is set to, so naming one of the three outcomes
             // on the button would be wrong two times out of three.
             if (this.messageType === 'decision') return t('teamhub', 'Submit')
-            return t('teamhub', 'Post Message')
+            return t('teamhub', 'Post message')
         },
 
         canSubmit() {
@@ -928,10 +927,21 @@ export default {
                 const memberIds = new Set(mentionList.map(m => m.userId))
                 const lower = (search || '').toLowerCase()
 
+                // v4.10.7 — the same subline every picker shows (job title ·
+                // organisation by default; PersonSublineService), read from
+                // the members list the backend enriched. Core's autocomplete
+                // puts the status message in `subline`; ours is what tells two
+                // people with the same name apart, so it wins when present.
+                const sublineById = new Map(mentionList.map(m => [m.userId, m.subline || '']))
+                const withSubline = row => {
+                    const own = sublineById.get(row.id)
+                    return own ? { ...row, subline: own } : row
+                }
+
                 // OCS results scoped to team members
-                const filtered = ocsUsers.filter(u =>
-                    memberIds.has(u.id) || memberIds.has(u.value?.shareWith)
-                )
+                const filtered = ocsUsers
+                    .filter(u => memberIds.has(u.id) || memberIds.has(u.value?.shareWith))
+                    .map(withSubline)
 
                 // Supplement with team members absent from OCS (NC privacy settings
                 // may restrict user enumeration for users in other groups/orgs).
@@ -944,11 +954,12 @@ export default {
                         )
                     )
                     .map(m => ({
-                        id:     m.userId,
-                        label:  m.displayName || m.userId,
-                        source: 'users',
-                        icon:   'icon-user',
-                        value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                        id:      m.userId,
+                        label:   m.displayName || m.userId,
+                        source:  'users',
+                        icon:    'icon-user',
+                        subline: m.subline || '',
+                        value:   { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
                     }))
 
                 callback([...filtered, ...supplemental])
@@ -980,11 +991,12 @@ export default {
                         )
                         .slice(0, 10)
                         .map(m => ({
-                            id:     m.userId,
-                            label:  m.displayName || m.userId,
-                            source: 'users',
-                            icon:   'icon-user',
-                            value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                            id:      m.userId,
+                            label:   m.displayName || m.userId,
+                            source:  'users',
+                            icon:    'icon-user',
+                            subline: m.subline || '',
+                            value:   { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
                         }))
                 )
             }
@@ -1161,7 +1173,6 @@ export default {
                 }
                 if (!path) return
 
-
                 // POST to the PHP endpoint — copies the file into .teamhub-cache
                 // inside the team folder and returns the cached file's numeric fileId.
                 const teamId = this.$store.state.currentTeamId
@@ -1174,7 +1185,6 @@ export default {
                     showError(t('teamhub', 'Could not cache the image in the team folder'))
                     return
                 }
-
 
                 // Pre-fill the dialog with /core/preview for the CACHED copy.
                 // This URL is accessible to all team members because the cached
@@ -1592,10 +1602,10 @@ export default {
                 }
 
                 showSuccess(
-                    this.messageType === 'poll'     ? t('teamhub', 'Poll created!') :
-                    this.messageType === 'question' ? t('teamhub', 'Question posted!') :
-                    this.messageType === 'decision' ? t('teamhub', 'Decision proposed!') :
-                                                      t('teamhub', 'Message posted!')
+                    this.messageType === 'poll'     ? t('teamhub', 'Poll created') :
+                    this.messageType === 'question' ? t('teamhub', 'Question posted') :
+                    this.messageType === 'decision' ? t('teamhub', 'Decision proposed') :
+                                                      t('teamhub', 'Message posted')
                 )
                 this.$emit('submitted', createdMessage)
 
@@ -1627,7 +1637,7 @@ export default {
 .post-form {
     background: var(--color-background-dark);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     padding: 16px;
     margin-bottom: 20px;
     display: flex;
@@ -1638,7 +1648,7 @@ export default {
 /* Type selector */
 .post-form__type {
     display: flex;
-    gap: 10px;
+    gap: 8px;
 }
 
 .post-form__type-option {
@@ -1646,11 +1656,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 8px 16px;
     border: 2px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
 
 .post-form__type-option input { display: none; }
@@ -1690,7 +1700,7 @@ export default {
     max-width: 160px;
     /* Aligns the first rail dot with the subject field's label rather than
        its input, which is where the eye starts. */
-    padding-top: 2px;
+    padding-top: 4px;
 }
 
 /* Below the tablet breakpoint the rail stacks under the fields — a 160 px
@@ -1729,18 +1739,18 @@ export default {
 
 .post-form__label {
     font-weight: 500;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 /* Toolbar row beneath the editor */
 .post-form__toolbar {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 4px;
+    gap: 4px;
+    padding: 4px 4px;
     border: 1px solid var(--color-border);
     border-top: none;
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    border-radius: 0 0 var(--border-radius-small) var(--border-radius-small);
     background: var(--color-background-hover);
 }
 
@@ -1749,8 +1759,8 @@ export default {
 .post-form__md-toolbar {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 4px;
+    gap: 4px;
+    padding: 4px 4px;
     border: 1px solid var(--color-border);
     border-top: none;
     background: var(--color-background-hover);
@@ -1762,10 +1772,10 @@ export default {
 }
 
 .post-form__toolbar-hint {
-    margin-left: auto;
+    margin-inline-start: auto;
     font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
-    padding-right: 6px;
+    padding-inline-end: 8px;
     white-space: nowrap;
 }
 
@@ -1785,11 +1795,11 @@ export default {
 .post-form__attachment {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     padding: 4px 8px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-background-hover);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 /* v3.100.14: full-saturation error state per SKILLS.md § "State-coloured
@@ -1811,8 +1821,8 @@ export default {
     flex-shrink: 0;
 }
 
-.post-form__attachment-status--done { color: var(--color-success-text); }
-.post-form__attachment-status--error { color: var(--color-error-text); }
+.post-form__attachment-status--done { color: var(--color-text-success); }
+.post-form__attachment-status--error { color: var(--color-text-error); }
 
 /* Actions */
 .post-form__actions {
@@ -1830,7 +1840,7 @@ export default {
 .post-form__public-label {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-font-body, 14px);
     cursor: pointer;
     user-select: none;
@@ -1860,29 +1870,29 @@ export default {
 .post-form__decision-options {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     padding: 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-background-hover);
 }
 
 .decision-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .decision-required {
-    color: var(--color-error-text);
-    margin-left: 4px;
+    color: var(--color-text-error);
+    margin-inline-start: 4px;
 }
 
 .decision-optional {
     color: var(--color-text-maxcontrast);
     font-weight: normal;
     font-size: 0.85em;
-    margin-left: 6px;
+    margin-inline-start: 8px;
 }
 
 .decision-impact-row {
@@ -1894,11 +1904,11 @@ export default {
 .decision-impact-chip {
     display: inline-flex;
     align-items: center;
-    padding: 6px 14px;
+    padding: 8px 16px;
     border-radius: var(--border-radius-pill);
     border: 1px solid var(--color-border);
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background var(--animation-quick), border-color var(--animation-quick);
     user-select: none;
 }
 
@@ -1949,10 +1959,10 @@ export default {
 }
 
 .decision-category-empty {
-    padding: 10px 12px;
+    padding: 8px 12px;
     background: var(--color-background-dark);
     border: 1px solid var(--color-warning, var(--color-border-dark));
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     font-size: 0.9em;
     color: var(--color-text-maxcontrast);
     line-height: 1.4;
@@ -1993,25 +2003,8 @@ export default {
 .decision-meta__select {
     width: 100%;
     box-sizing: border-box;
-    min-height: 34px;
-    padding: 4px 8px;
-    font-size: var(--th-font-meta);
-    font-family: inherit;
-    color: var(--color-main-text);
-    background: var(--color-main-background);
-    border: 2px solid var(--color-border-dark);
-    border-radius: var(--th-radius-control);
     /* NC's form-field pattern: no outline, primary border on focus.
        SKILLS.md § Focus visibility standard names this as acceptable. */
-    outline: none;
-}
-
-.decision-meta__select:focus {
-    border-color: var(--color-primary-element);
-}
-
-.decision-meta__select:focus-visible {
-    box-shadow: 0 0 0 2px var(--color-primary-element);
 }
 
 /* Spans the whole selector row when there is nothing to pick from — a
@@ -2032,7 +2025,7 @@ export default {
 }
 
 .post-form__image-dialog-hint {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0;
 }
@@ -2062,11 +2055,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 8px 8px;
     margin-bottom: 8px;
     background: var(--color-warning);
     border: 1px solid var(--color-warning);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     color: var(--color-warning-text);
     font-size: 0.9em;
 }
@@ -2081,12 +2074,6 @@ export default {
     align-items: center;
     justify-content: center;
     width: 24px;
-    height: 24px;
-    border-radius: var(--border-radius);
-    border: none;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
     flex-shrink: 0;
 }
 
@@ -2094,14 +2081,6 @@ export default {
    warning banner. --color-warning-hover is the intended token for this
    (hover state OF an already-warning-coloured surface, not a state
    background), so SKILLS.md § "State-coloured backgrounds" allows it. */
-.decision-supersede-banner__clear:hover {
-    background: var(--color-warning-hover);
-}
-
-.decision-supersede-banner__clear:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
-}
 
 /* v3.99.5 — empty-state hint shown in the milestone picker slot when the
  * Advanced project has no milestones yet. */
@@ -2109,7 +2088,7 @@ export default {
     padding: 8px 12px;
     background: var(--color-background-hover);
     border: 1px dashed var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
     line-height: 1.4;

@@ -32,7 +32,7 @@
             v-else-if="error"
             :name="t('teamhub', 'Message unavailable')"
             :description="errorDescription">
-            <template #icon><EmailOutline :size="48" /></template>
+            <template #icon><EmailOutline :size="ICON_XL" /></template>
         </NcEmptyContent>
 
         <article
@@ -50,6 +50,7 @@ import { NcButton, NcEmptyContent } from '@nextcloud/vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { ICON_XL } from '../constants/uiTokens.js'
 
 // v4.4.17 — Canvas view for a single in-app announcement. Fetches the
 // markdown body from the server (which enforces license/version/role/
@@ -91,6 +92,7 @@ export default {
     emits: ['close', 'dismissed'],
     data() {
         return {
+            ICON_XL,
             body: null,
             loading: true,
             error: false,
@@ -214,7 +216,7 @@ export default {
 .announcement-view__body :deep(ul),
 .announcement-view__body :deep(ol) {
     margin: 0 0 12px;
-    padding-left: 24px;
+    padding-inline-start: 24px;
 }
 .announcement-view__body :deep(li) { margin-bottom: 4px; }
 .announcement-view__body :deep(a) {
@@ -224,7 +226,7 @@ export default {
 .announcement-view__body :deep(a:focus-visible) {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
-    border-radius: 2px;
+    border-radius: var(--border-radius-small);
 }
 .announcement-view__body :deep(code) {
     background: var(--color-background-hover);
@@ -239,8 +241,8 @@ export default {
     overflow-x: auto;
 }
 .announcement-view__body :deep(blockquote) {
-    border-left: 3px solid var(--color-border);
-    padding-left: 12px;
+    border-inline-start: 3px solid var(--color-border);
+    padding-inline-start: 12px;
     margin: 0 0 12px;
     color: var(--color-text-maxcontrast);
 }

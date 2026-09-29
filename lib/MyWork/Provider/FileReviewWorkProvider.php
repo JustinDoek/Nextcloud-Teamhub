@@ -372,7 +372,7 @@ class FileReviewWorkProvider implements IWorkProvider {
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
 
-            return ActionResult::failure($this->l->t('That did not work. Please try again.'));
+            return ActionResult::failure($this->l->t('That did not work. Try again.'));
         }
     }
 

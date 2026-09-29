@@ -1,20 +1,20 @@
 <template>
     <div class="th-sl">
         <div class="th-sl__toolbar">
-            <NcButton type="tertiary"
+            <NcButton variant="tertiary"
                 :aria-label="t('teamhub', 'Previous period')"
                 @click="goPrev">
-                <template #icon><ChevronLeft :size="20" /></template>
+                <template #icon><ChevronLeft :size="ICON_BODY" /></template>
             </NcButton>
-            <NcButton type="tertiary"
+            <NcButton variant="tertiary"
                 :aria-label="t('teamhub', 'Jump to today')"
                 @click="goToday">
-                <template #icon><CalendarToday :size="20" /></template>
+                <template #icon><CalendarToday :size="ICON_BODY" /></template>
             </NcButton>
-            <NcButton type="tertiary"
+            <NcButton variant="tertiary"
                 :aria-label="t('teamhub', 'Next period')"
                 @click="goNext">
-                <template #icon><ChevronRight :size="20" /></template>
+                <template #icon><ChevronRight :size="ICON_BODY" /></template>
             </NcButton>
 
             <span class="th-sl__period" aria-live="polite">{{ periodLabel }}</span>
@@ -36,46 +36,44 @@
             <label class="th-sl__vm-label" :for="'th-sl-vm-' + _uid">
                 {{ t('teamhub', 'View range') }}
             </label>
-            <select
-                :id="'th-sl-vm-' + _uid"
+            <NcSelect
+                :input-id="'th-sl-vm-' + _uid"
+                label-outside
                 class="th-sl__vm-select"
-                :value="viewMode"
-                :aria-label="t('teamhub', 'Timeline view range')"
-                @change="setViewMode($event.target.value)">
-                <option v-for="opt in viewModeOptions" :key="'vm-' + opt.value" :value="opt.value">
-                    {{ opt.label }}
-                </option>
-            </select>
+                :model-value="viewMode"
+                :aria-label-combobox="t('teamhub', 'Timeline view range')"
+                @update:model-value="setViewMode($event)"
+                :options="viewModeOptions.map(opt => ({ id: opt.value, label: opt.label }))"
+                :reduce="o => o.id"
+                :clearable="false" />
 
             <span class="th-sl__toolbar-divider" />
 
-            <NcButton type="tertiary"
+            <NcButton variant="tertiary"
                 :aria-label="printButtonLabel"
                 :title="printButtonLabel"
                 @click="printSwimlane">
-                <template #icon><PrinterOutline :size="20" /></template>
+                <template #icon><PrinterOutline :size="ICON_BODY" /></template>
             </NcButton>
         </div>
 
         <div v-if="loading" class="th-sl__status">
-            <NcLoadingIcon :size="32" />
+            <NcLoadingIcon :size="ICON_LARGE" />
         </div>
 
-        <NcEmptyContent v-else-if="error"
-            :name="t('teamhub', 'Could not load the swimlane view')"
-            :description="error">
-            <template #icon><AlertCircleOutline :size="48" /></template>
-            <template #action>
-                <NcButton @click="fetchTimeline">
-                    {{ t('teamhub', 'Retry') }}
-                </NcButton>
-            </template>
-        </NcEmptyContent>
+        <!-- v4.10.10: a recoverable error is a note card with a retry, not an
+             empty state (NC design guide § Empty content). -->
+        <NcNoteCard v-else-if="error" type="error" :heading="t('teamhub', 'Could not load the swimlane view')">
+            <p>{{ error }}</p>
+            <NcButton @click="fetchTimeline">
+                {{ t('teamhub', 'Retry') }}
+            </NcButton>
+        </NcNoteCard>
 
         <NcEmptyContent v-else-if="!canvasLayout.lanes.length"
             :name="t('teamhub', 'No workstreams yet')"
             :description="t('teamhub', 'Connect a Deck board to this project to see its stacks as swimlanes here.')">
-            <template #icon><ViewAgendaOutline :size="48" /></template>
+            <template #icon><ViewAgendaOutline :size="ICON_XL" /></template>
         </NcEmptyContent>
 
         <!-- View: Lanes — one row per card inside each lane, subject shown
@@ -153,7 +151,7 @@
                         :title="card.title"
                         @click.stop="openPopover(card, 'lanes', $event)">
                         <span class="th-sl__gantt-bar-title">{{ card.title }}</span>
-                        <AlertCircleOutline v-if="card.overdue" :size="12" aria-hidden="true" />
+                        <AlertCircleOutline v-if="card.overdue" :size="ICON_INLINE" aria-hidden="true" />
                     </button>
                 </template>
 
@@ -166,12 +164,15 @@
                     :style="{ top: popover.top + 'px', left: popover.left + 'px' }"
                     @click.stop
                     @keydown.esc="closePopover">
-                    <button type="button"
+                    <NcButton
                         class="th-sl__popover-close"
                         :aria-label="t('teamhub', 'Close')"
-                        @click="closePopover">
-                        <Close :size="16" />
-                    </button>
+                        @click="closePopover"
+                        variant="tertiary">
+                        <template #icon>
+                            <Close :size="ICON_BODY" />
+                        </template>
+                    </NcButton>
                     <div class="th-sl__popover-title">{{ popover.card.title }}</div>
                     <div v-if="popover.card.startEv" class="th-sl__popover-row">
                         {{ t('teamhub', 'Start') }}: {{ formatWhen(popover.card.startEv) }}
@@ -199,7 +200,7 @@
                     </p>
                     <a v-if="popover.card.url" :href="popover.card.url" class="th-sl__popover-open">
                         {{ t('teamhub', 'Open in Deck') }}
-                        <OpenInNew :size="16" />
+                        <OpenInNew :size="ICON_BODY" />
                     </a>
                 </div>
             </div>
@@ -309,7 +310,7 @@
                                 class="th-sl__popover-close"
                                 :aria-label="t('teamhub', 'Close')"
                                 @click="closePopover">
-                                <Close :size="16" />
+                                <Close :size="ICON_BODY" />
                             </button>
                             <div class="th-sl__popover-title">{{ popover.card.title }}</div>
                             <div v-if="popover.card.startEv" class="th-sl__popover-row">
@@ -338,7 +339,7 @@
                             </p>
                             <a v-if="popover.card.url" :href="popover.card.url" class="th-sl__popover-open">
                                 {{ t('teamhub', 'Open in Deck') }}
-                                <OpenInNew :size="16" />
+                                <OpenInNew :size="ICON_BODY" />
                             </a>
                         </div>
                     </div>
@@ -355,7 +356,7 @@ import { formatIsoDate, toIsoDate }             from '../lib/localDate.js'
 import { generateUrl }                          from '@nextcloud/router'
 import { mapState }                              from 'vuex'
 import axios                                     from '@nextcloud/axios'
-import { NcButton, NcLoadingIcon, NcEmptyContent } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcEmptyContent, NcNoteCard, NcSelect } from '@nextcloud/vue'
 import ChevronLeft         from 'vue-material-design-icons/ChevronLeft.vue'
 import ChevronRight        from 'vue-material-design-icons/ChevronRight.vue'
 import CalendarToday       from 'vue-material-design-icons/CalendarToday.vue'
@@ -364,6 +365,7 @@ import ViewAgendaOutline   from 'vue-material-design-icons/ViewAgendaOutline.vue
 import OpenInNew           from 'vue-material-design-icons/OpenInNew.vue'
 import Close                from 'vue-material-design-icons/Close.vue'
 import PrinterOutline      from 'vue-material-design-icons/PrinterOutline.vue'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 
 // Horizontal pixels per day per view mode. Module-level like TeamView's own
 // timeline date helpers — needed before `this` exists in data(). 1W is
@@ -578,12 +580,16 @@ export default {
     name: 'ProjectSwimlaneView',
 
     components: {
-        NcButton, NcLoadingIcon, NcEmptyContent,
+         NcSelect, NcButton, NcLoadingIcon, NcEmptyContent, NcNoteCard,
         ChevronLeft, ChevronRight, CalendarToday, AlertCircleOutline, ViewAgendaOutline, OpenInNew, Close, PrinterOutline,
     },
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
+            ICON_XL,
             loading: true,
             error: null,
             viewMode: '1M',
@@ -1055,7 +1061,7 @@ export default {
 }
 
 .th-sl__period {
-    margin-left: 8px;
+    margin-inline-start: 8px;
     font-weight: bold;
 }
 
@@ -1078,16 +1084,6 @@ export default {
 }
 .th-sl__vm-select {
     min-width: 110px;
-    padding: 4px 8px;
-    border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
-}
-.th-sl__vm-select:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
 }
 
 .th-sl__status {
@@ -1126,7 +1122,7 @@ export default {
 .th-sl__dmark-label, .th-sl__today-label, .th-sl__milestone-label {
     position: absolute;
     top: 2px;
-    left: 4px;
+    inset-inline-start: 4px;
     font-size: var(--th-font-micro);
     white-space: nowrap;
     color: var(--color-text-maxcontrast);
@@ -1136,7 +1132,7 @@ export default {
     position: absolute;
     top: 18px;
     bottom: 0;
-    left: 0;
+    inset-inline-start: 0;
     width: 1px;
     background: var(--color-border);
 }
@@ -1153,13 +1149,13 @@ export default {
     color: var(--color-primary-element-text);
     background: var(--color-primary-element);
     padding: 0 4px;
-    border-radius: 4px;
+    border-radius: var(--border-radius-small);
 }
 .th-sl__today-rule {
     position: absolute;
     top: 18px;
     bottom: 0;
-    left: 0;
+    inset-inline-start: 0;
     width: 2px;
     background: var(--color-primary-element);
 }
@@ -1168,7 +1164,7 @@ export default {
     color: var(--color-error-text);
     background: var(--color-error);
     padding: 0 4px;
-    border-radius: 4px;
+    border-radius: var(--border-radius-small);
     max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1177,7 +1173,7 @@ export default {
     position: absolute;
     top: 18px;
     bottom: 0;
-    left: 0;
+    inset-inline-start: 0;
     width: 2px;
     /* v3.99.8 — Justin: match the vertical rule to the milestone label's
        text color instead of the soft --color-error pink, so the line
@@ -1187,8 +1183,8 @@ export default {
 
 .th-sl__lane-bg {
     position: absolute;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     background: var(--color-background-hover);
 }
 .th-sl__lane-bg--alt {
@@ -1197,7 +1193,7 @@ export default {
 
 .th-sl__lane-label {
     position: absolute;
-    left: 4px;
+    inset-inline-start: 4px;
     font-size: var(--th-font-meta);
     font-weight: bold;
     color: var(--color-text-maxcontrast);
@@ -1207,7 +1203,7 @@ export default {
 .th-sl__dep-overlay {
     position: absolute;
     top: 0;
-    left: 0;
+    inset-inline-start: 0;
     pointer-events: none;
 }
 /* v3.100.16: dropped defensive #555 fallbacks on --color-text-maxcontrast
@@ -1229,9 +1225,9 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 0 6px;
+    padding: 0 8px;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--border-radius-small);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
     font-size: var(--th-font-meta);
@@ -1255,7 +1251,7 @@ export default {
     position: absolute;
     height: var(--th-sl-bar-h, 32px);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--border-radius-small);
     background: var(--color-primary-element);
     cursor: pointer;
     padding: 0;
@@ -1283,8 +1279,8 @@ export default {
     display: inline-block;
     width: 10px;
     height: 10px;
-    border-radius: 2px;
-    margin-right: 6px;
+    border-radius: var(--border-radius-small);
+    margin-inline-end: 8px;
     vertical-align: middle;
     flex-shrink: 0;
 }
@@ -1294,49 +1290,40 @@ export default {
     z-index: 10;
     width: 280px;
     padding: 12px;
-    border-radius: 8px;
+    border-radius: var(--border-radius-element);
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 12px var(--color-box-shadow);
 }
 .th-sl__popover-close {
     position: absolute;
     top: 6px;
-    right: 6px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    color: var(--color-text-maxcontrast);
-    padding: 4px;
-    border-radius: 50%;
-}
-.th-sl__popover-close:hover, .th-sl__popover-close:focus-visible {
-    background: var(--color-background-hover);
+    inset-inline-end: 6px;
 }
 .th-sl__popover-title {
     font-weight: bold;
-    margin: 0 24px 6px 0;
+    margin: 0 24px 8px 0;
 }
 .th-sl__popover-row {
-    font-size: 13px;
-    margin-bottom: 2px;
+    font-size: var(--th-font-meta);
+    margin-bottom: 4px;
 }
 .th-sl__popover-row--success {
     color: var(--color-success-text);
     background: var(--color-success);
     display: inline-block;
-    padding: 0 6px;
-    border-radius: 8px;
+    padding: 0 8px;
+    border-radius: var(--border-radius-element);
 }
 .th-sl__popover-row--error {
     color: var(--color-error-text);
     background: var(--color-error);
     display: inline-block;
-    padding: 0 6px;
-    border-radius: 8px;
+    padding: 0 8px;
+    border-radius: var(--border-radius-element);
 }
 .th-sl__popover-description {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 8px 0 0;
     white-space: pre-wrap;
@@ -1365,7 +1352,7 @@ export default {
     position: relative;
     flex: 0 0 200px;
     width: 200px;
-    border-right: 1px solid var(--color-border);
+    border-inline-end: 1px solid var(--color-border);
 }
 /* v3.99.8 — Justin: "the background doesn't really look great on the
    left bar with the lane names and subjects. Can you remove the
@@ -1375,8 +1362,8 @@ export default {
    fixed column) via an override further down. */
 .th-sl__list-lane-header {
     position: absolute;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     display: flex;
     align-items: center;
     padding: 0 8px;
@@ -1386,12 +1373,12 @@ export default {
 }
 .th-sl__list-row-name {
     position: absolute;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     display: flex;
     align-items: center;
     padding: 0 8px 0 16px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -8,27 +8,26 @@
                 <NcButton
                     variant="primary"
                     @click="openCreate">
-                    <template #icon><PlusIcon :size="18" /></template>
+                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Add holiday') }}
                 </NcButton>
 
                 <label class="presence-year-picker">
                     <span class="presence-year-picker__label">{{ t('teamhub', 'Year') }}</span>
-                    <select
+                    <NcSelect
                         v-model.number="year"
                         class="presence-year-picker__select"
-                        :aria-label="t('teamhub', 'Filter holidays by year')"
-                        @change="load">
-                        <option
-                            v-for="y in yearOptions"
-                            :key="y"
-                            :value="y">{{ y }}</option>
-                    </select>
+                        :aria-label-combobox="t('teamhub', 'Filter holidays by year')"
+                        @update:model-value="load"
+                        label-outside
+                        :options="yearOptions.map(y => ({ id: y, label: y }))"
+                        :reduce="o => o.id"
+                        :clearable="false" />
                 </label>
             </div>
 
             <div v-if="loading" class="presence-loading">
-                <NcLoadingIcon :size="24" />
+                <NcLoadingIcon :size="ICON_LARGE" />
             </div>
             <div v-else-if="error" class="presence-error" role="alert">
                 {{ error }}
@@ -43,7 +42,7 @@
                     v-for="h in holidays"
                     :key="h.id"
                     class="presence-holiday-row">
-                    <CalendarStarIcon :size="18" class="presence-holiday-row__icon" />
+                    <CalendarStarIcon :size="ICON_BODY" class="presence-holiday-row__icon" />
                     <div class="presence-holiday-row__main">
                         <div class="presence-holiday-row__date">{{ formatDate(h.holiday_date) }}</div>
                         <div class="presence-holiday-row__name">{{ h.name }}</div>
@@ -52,7 +51,7 @@
                         variant="tertiary"
                         :aria-label="t('teamhub', 'Delete holiday')"
                         @click="confirmDelete(h)">
-                        <template #icon><DeleteIcon :size="16" /></template>
+                        <template #icon><DeleteIcon :size="ICON_BODY" /></template>
                     </NcButton>
                 </li>
             </ul>
@@ -92,8 +91,8 @@
                     :disabled="!canSubmit || previewing"
                     @click="requestPreview">
                     <template #icon>
-                        <NcLoadingIcon v-if="previewing" :size="16" />
-                        <ChevronRightIcon v-else :size="16" />
+                        <NcLoadingIcon v-if="previewing" :size="ICON_BODY" />
+                        <ChevronRightIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Next') }}
                 </NcButton>
@@ -135,8 +134,8 @@
                     :disabled="committing"
                     @click="commit">
                     <template #icon>
-                        <NcLoadingIcon v-if="committing" :size="16" />
-                        <ContentSaveIcon v-else :size="16" />
+                        <NcLoadingIcon v-if="committing" :size="ICON_BODY" />
+                        <ContentSaveIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Add holiday') }}
                 </NcButton>
@@ -172,14 +171,13 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { todayIso, formatIsoDate } from '../lib/localDate.js'
-import {
-    NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog,
-} from '@nextcloud/vue'
+import { NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog, NcSelect } from '@nextcloud/vue'
 import PlusIcon          from 'vue-material-design-icons/Plus.vue'
 import DeleteIcon        from 'vue-material-design-icons/Delete.vue'
 import CalendarStarIcon  from 'vue-material-design-icons/CalendarStar.vue'
@@ -207,11 +205,13 @@ import ContentSaveIcon   from 'vue-material-design-icons/ContentSave.vue'
 export default {
     name: 'PresenceHolidaysManager',
     components: {
-        NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog,
+         NcSelect, NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog,
         PlusIcon, DeleteIcon, CalendarStarIcon, ChevronRightIcon, ContentSaveIcon,
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             loading: true,
             error: null,
             year: new Date().getFullYear(),
@@ -385,10 +385,10 @@ export default {
     padding: 20px;
 }
 .presence-error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     padding: 12px 16px;
     background: var(--color-error-background, var(--color-background-hover));
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     margin-bottom: 12px;
 }
 .presence-empty {
@@ -396,7 +396,7 @@ export default {
     text-align: center;
     color: var(--color-text-maxcontrast);
     border: 1px dashed var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 
 .presence-holidays-toolbar {
@@ -413,15 +413,8 @@ export default {
     gap: 8px;
 }
 .presence-year-picker__label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-}
-.presence-year-picker__select {
-    padding: 4px 8px;
-    border-radius: var(--border-radius);
-    border: 1px solid var(--color-border-dark);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
 }
 
 .presence-holidays-list {
@@ -430,7 +423,7 @@ export default {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 .presence-holiday-row {
     display: grid;
@@ -439,7 +432,7 @@ export default {
     gap: 12px;
     padding: 8px 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
 }
 .presence-holiday-row__icon {
@@ -452,7 +445,7 @@ export default {
     font-weight: 500;
 }
 .presence-holiday-row__name {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -468,8 +461,8 @@ export default {
     gap: 4px;
 }
 .presence-date-input {
-    padding: 6px 10px;
-    border-radius: var(--border-radius);
+    padding: 8px 8px;
+    border-radius: var(--border-radius-small);
     border: 1px solid var(--color-border-dark);
     background: var(--color-main-background);
     color: var(--color-main-text);
@@ -478,13 +471,13 @@ export default {
 .presence-confirm-warning {
     margin: 12px 0 0 0;
     padding: 8px 12px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-warning-background, var(--color-background-hover));
-    color: var(--color-warning-text, var(--color-main-text));
+    color: var(--color-warning-text);
 }
 .presence-confirm-info {
     margin: 12px 0 0 0;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 </style>

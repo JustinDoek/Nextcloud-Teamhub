@@ -1,0 +1,15 @@
+/*
+ * TeamHub v4.10.4 — the icon beside TeamHub's results in Nextcloud's unified
+ * search (Teams, Messages, Decisions). Hand-written, not built: the search
+ * result element is Nextcloud's, on every page, so this must be a global
+ * stylesheet — UnifiedSearchStyleListener adds it for every logged-in page,
+ * the way Talk (talk-search.css) and Deck (icon-deck) do. Without it the
+ * result renders an empty icon box (walked on NC 35, 2026-09-20).
+ *
+ * app-dark.svg is the dark mark; the invert variable turns it light on a dark
+ * theme, the same rule NC applies to its own result icons.
+ */
+.icon-teamhub {
+    background-image: url('../img/app-dark.svg');
+    filter: var(--background-invert-if-dark);
+}

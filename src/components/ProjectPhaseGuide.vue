@@ -93,9 +93,9 @@ export default {
             // time moved to the Initiation checklist above.
             return [
                 t('teamhub', 'Fill in the project contract on the page in the Pages widget'),
-                t('teamhub', 'Set up your Deck board for tasks and activities'),
+                t('teamhub', 'Set up the Deck board for tasks and activities'),
                 t('teamhub', 'Add milestones for key dates'),
-                t('teamhub', 'Schedule your planning meetings'),
+                t('teamhub', 'Schedule the planning meetings'),
             ]
         },
     },
@@ -118,7 +118,7 @@ export default {
 
 .phase-guide__checklist {
     margin: 0;
-    padding-left: 20px;
+    padding-inline-start: 20px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -135,7 +135,7 @@ export default {
 
 .phase-guide__advance {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 </style>

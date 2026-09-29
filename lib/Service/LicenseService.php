@@ -38,8 +38,10 @@ use Psr\Log\LoggerInterface;
  *  - paid_until  — unix ts of the moment paid entitlement ends (added
  *                  v4.3.20 for grace-period rendering; older JWTs without
  *                  this claim are treated as paid_until = exp)
- *  - grace_days  — grace-period length in days (added v4.3.20; older JWTs
- *                  without this claim default to 0)
+ *  - grace_days  — grace-period length in days (added v4.3.20). Informational
+ *                  only since v4.10.12: the grace window is fixed by the
+ *                  Commercial Licence and Support Agreement (art. 13.4 / 14.3),
+ *                  see PAID_GRACE_DAYS and graceDaysFor().
  *  - iat/nbf/exp — standard JWT time claims (seconds since epoch)
  *
  * The instance verifies the JWT offline against a hardcoded public key
@@ -57,10 +59,12 @@ use Psr\Log\LoggerInterface;
  * ENFORCEMENT LEVELS
  * ------------------
  *  - 'none'      — valid license (paid or trial). Feature fully enabled.
- *  - 'grace'     — license expired ≤ GRACE_DAYS ago. Advanced creation is
- *                  blocked; existing Advanced teams still fully work; banner
- *                  in admin UI shows a countdown.
- *  - 'soft-lock' — > GRACE_DAYS past expiry. Existing Advanced teams
+ *  - 'grace'     — paid license expired less than PAID_GRACE_DAYS ago.
+ *                  Advanced creation is blocked; existing Advanced teams
+ *                  still fully work; banner in admin UI shows a countdown.
+ *                  A trial never enters this state (no grace, art. 14.3).
+ *  - 'soft-lock' — PAID_GRACE_DAYS or more past expiry (a trial: at expiry).
+ *                  Existing Advanced teams
  *                  become read-only: Compass/health widget/timeline hidden,
  *                  Budget/Time/Milestone write endpoints reject. Non-Advanced
  *                  features untouched. Pasting a new JWT immediately restores.
@@ -105,8 +109,14 @@ class LicenseService {
 		. "VwIDAQAB\n"
         . "-----END PUBLIC KEY-----\n";
 
-    /** Days past exp before we escalate from grace to soft-lock. */
-    private const GRACE_DAYS = 30;
+    /**
+     * Grace window of a *paid* key, in days after `exp`, before grace
+     * escalates to soft-lock (v4.10.12, was 30). The number is the
+     * Commercial Licence and Support Agreement's, art. 13.4: "a Grace Period
+     * of fourteen days immediately following the expiry of the Licence
+     * Period". A trial has none (art. 14.3) — see graceDaysFor().
+     */
+    public const PAID_GRACE_DAYS = 14;
 
     /** IConfig app key names. All namespaced under app='teamhub'. */
     private const CFG_JWT                    = 'license_jwt';
@@ -223,10 +233,8 @@ class LicenseService {
                 : null;
             if (is_int($expiry) && $expiry < $now
                 && $this->peekUuidMatches($peeked, $instanceUuid)) {
-                $daysPast     = intdiv($now - $expiry, 86400);
-                $level        = $daysPast > self::GRACE_DAYS ? 'soft-lock' : 'grace';
-                $graceLeft    = max(0, self::GRACE_DAYS - $daysPast);
                 $p = $peeked['payload'];
+                [$level, $graceLeft, $graceDays] = self::expiredLevel($p, $expiry, $now);
                 return [
                     'hasKey'               => true,
                     'valid'                => false,
@@ -244,7 +252,7 @@ class LicenseService {
                     // "when did paid entitlement end".
                     'paidUntil'            => (int)($p['paid_until'] ?? $expiry),
                     'paidDaysRemaining'    => max(0, intdiv(((int)($p['paid_until'] ?? $expiry)) - $now, 86400)),
-                    'graceDays'            => (int)($p['grace_days'] ?? 0),
+                    'graceDays'            => $graceDays,
                     'enforcementLevel'     => $level,
                     'graceRemaining'       => $level === 'grace' ? $graceLeft : 0,
                     'invalidReason'        => $e->getMessage(),
@@ -281,7 +289,7 @@ class LicenseService {
             // callers can still reason about "when does paid entitlement end".
             'paidUntil'            => (int)($claims['paid_until'] ?? $expiry),
             'paidDaysRemaining'    => max(0, intdiv(((int)($claims['paid_until'] ?? $expiry)) - $now, 86400)),
-            'graceDays'            => (int)($claims['grace_days'] ?? 0),
+            'graceDays'            => self::graceDaysFor($claims),
             'enforcementLevel'     => 'none',
             'graceRemaining'       => null,
             'invalidReason'        => null,
@@ -292,6 +300,45 @@ class LicenseService {
             'lastTelemetryAt'      => $lastAt,
             'lastTelemetryPayload' => $lastPayload,
         ];
+    }
+
+    /**
+     * The grace window a key is entitled to, in days after `exp`: the
+     * contract's fourteen for a paid key, none for a trial (art. 14.3: "has no
+     * Grace Period"). The JWT's own `grace_days` claim is not consulted — the
+     * agreement sets the number, not the key.
+     *
+     * Static and pure on purpose: TelemetryService applies the same rule from
+     * a peeked payload and cannot inject this service (circular dependency,
+     * see its isEnabled()).
+     *
+     * @param array $claims The (verified or peeked) JWT payload.
+     */
+    public static function graceDaysFor(array $claims): int {
+        return !empty($claims['is_trial']) ? 0 : self::PAID_GRACE_DAYS;
+    }
+
+    /**
+     * Enforcement of a key whose `exp` has passed.
+     *
+     * Grace runs for exactly graceDaysFor() × 24 h from `exp`: on the
+     * fourteenth day a paid key is soft-locked, and a trial — zero days —
+     * is soft-locked the moment it expires. Before v4.10.12 the comparison was
+     * `>`, which quietly gave a thirty-first day.
+     *
+     * @param array $claims The (verified or peeked) JWT payload.
+     * @param int   $expiry `exp`, seconds since epoch — already < $now.
+     * @param int   $now    Seconds since epoch.
+     * @return array{0: 'grace'|'soft-lock', 1: int, 2: int} level, grace days
+     *         left (0 once soft-locked), grace days the key is entitled to.
+     */
+    public static function expiredLevel(array $claims, int $expiry, int $now): array {
+        $graceDays = self::graceDaysFor($claims);
+        $daysPast  = intdiv(max(0, $now - $expiry), 86400);
+        if ($daysPast >= $graceDays) {
+            return ['soft-lock', 0, $graceDays];
+        }
+        return ['grace', $graceDays - $daysPast, $graceDays];
     }
 
     /**
@@ -337,8 +384,9 @@ class LicenseService {
      * features at all so the check is trivially skipped.
      *
      * Grace still permits writes on existing Advanced teams — the whole
-     * point of the grace window is giving a lapsed customer 30 days to
-     * renew without disrupting existing operations.
+     * point of the grace window is giving a lapsed paid customer fourteen
+     * days to renew without disrupting existing operations. A trial has no
+     * grace: it is soft-locked at expiry.
      */
     public function gateAdvancedWrite(string $teamId): void {
         if ($this->allowsAdvancedWrites()) {

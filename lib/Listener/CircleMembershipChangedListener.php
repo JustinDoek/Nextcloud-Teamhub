@@ -44,6 +44,11 @@ use Psr\Log\LoggerInterface;
  * is the whole point: the crash is why the attendee row is missing, and this
  * listener is what puts it back.
  *
+ * A user joining a Nextcloud group attached to a team arrives here too — but
+ * only if Circles' async `SingleMemberAdd` for the group's mirror completes,
+ * which it silently may not. GroupMembershipChangedListener (v4.10.47) makes
+ * sure it does, and this listener then runs as usual.
+ *
  * Not covered: `MembershipsEditedEvent` exists in Circles but is never
  * dispatched, so a pure level change arrives through neither event. The hourly
  * TalkMembershipReconcileJob remains the backstop for that and for anything

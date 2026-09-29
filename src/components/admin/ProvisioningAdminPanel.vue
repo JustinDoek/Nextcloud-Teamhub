@@ -286,7 +286,7 @@ export default {
 
 .prov-admin__error {
     margin: 0;
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .prov-admin__sr {
@@ -354,7 +354,7 @@ export default {
 }
 
 .prov-admin__stalled {
-    margin-left: var(--th-space-xs);
+    margin-inline-start: var(--th-space-xs);
     font-size: var(--th-font-micro);
     color: var(--color-warning-text);
 }

@@ -3,19 +3,21 @@
         <!-- Toggle. Collapsed on mount by design — the feed's job is to let
              you scan what happened; a thread expanded by default turns every
              row into a wall. Nothing is fetched until it is opened. -->
-        <button
-            type="button"
+        <NcButton
             class="feed-thread__toggle"
             :aria-expanded="expanded ? 'true' : 'false'"
             :aria-controls="panelId"
-            @click="toggle">
-            <ChevronDown
+            @click="toggle"
+            variant="tertiary">
+            <template #icon>
+                <ChevronDown
                 class="feed-thread__chevron"
                 :class="{ 'feed-thread__chevron--open': expanded }"
                 :size="ICON_INLINE"
                 aria-hidden="true" />
+            </template>
             <span>{{ toggleLabel }}</span>
-        </button>
+        </NcButton>
 
         <div v-show="expanded" :id="panelId" class="feed-thread__panel">
             <div v-if="loading" class="feed-thread__loading">
@@ -36,8 +38,8 @@
                     <NcAvatar
                         :user="entry.authorId"
                         :display-name="entry.authorName"
-                        :size="AVATAR_SIZE"
-                        :show-user-status="false"
+                        :size="AVATAR_SM"
+                        :hide-status="true"
                         :disable-menu="true"
                         class="feed-thread__avatar" />
                     <div class="feed-thread__body">
@@ -79,7 +81,7 @@
                 <label :for="inputId" class="feed-thread__compose-label">
                     {{ replyLabel }}
                 </label>
-                <textarea
+                <NcTextArea
                     :id="inputId"
                     ref="input"
                     v-model="draft"
@@ -87,7 +89,8 @@
                     rows="2"
                     :maxlength="MAX_LENGTH"
                     :disabled="submitting || !canReply"
-                    :placeholder="replyPlaceholder" />
+                    :placeholder="replyPlaceholder"
+                    label-outside />
                 <!-- No Enter-to-submit. This is a textarea in a page of
                      textareas, and a stray Enter posting a half-written
                      comment into a team stream is not recoverable. The Reply
@@ -127,9 +130,9 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatDateTime } from '../../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcAvatar, NcButton, NcLoadingIcon } from '@nextcloud/vue'
+import { NcAvatar, NcButton, NcLoadingIcon, NcTextArea } from '@nextcloud/vue'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
-import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR } from '../../constants/uiTokens.js'
+import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, AVATAR_SM } from '../../constants/uiTokens.js'
 
 /**
  * Longest reply this box accepts. Mirrors FeedTalkController::MAX_REPLY_LENGTH
@@ -139,11 +142,10 @@ import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR } from '../../constants/uiTokens.j
 const MAX_LENGTH = 8000
 
 /** Avatar size in the thread. One step below the card's own author avatar. */
-const AVATAR_SIZE = 24
 
 export default {
     name: 'FeedItemThread',
-    components: { NcAvatar, NcButton, NcLoadingIcon, ChevronDown },
+    components: {  NcTextArea, NcAvatar, NcButton, NcLoadingIcon, ChevronDown },
 
     props: {
         /** The feed row this thread belongs to. */
@@ -170,7 +172,7 @@ export default {
             ICON_INLINE,
             ICON_BODY,
             ICON_TOOLBAR,
-            AVATAR_SIZE,
+            AVATAR_SM,
             MAX_LENGTH,
         }
     },
@@ -241,7 +243,7 @@ export default {
             if (this.item.comments_locked) {
                 return t('teamhub', 'Comments are locked on this decision.')
             }
-            return t('teamhub', 'Your role in this team does not allow commenting.')
+            return t('teamhub', 'This role does not allow commenting in this team.')
         },
 
         count() {
@@ -403,7 +405,7 @@ export default {
                 // that explains a refused write (locked decision, read-only
                 // room, role floor), and a generic string would hide it.
                 this.submitError = e?.response?.data?.error
-                    || t('teamhub', 'Could not post your reply.')
+                    || t('teamhub', 'Could not post the reply.')
             } finally {
                 this.submitting = false
             }
@@ -420,7 +422,7 @@ export default {
 <style scoped lang="scss">
 .feed-thread {
     border-top: 1px solid var(--color-border);
-    margin-top: 10px;
+    margin-top: 8px;
     padding-top: 8px;
 }
 
@@ -432,28 +434,11 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: none;
-    border: none;
-    padding: 2px 0;
-    cursor: pointer;
-    color: var(--color-primary-element);
-    font-size: var(--th-font-meta, 12px);
-    font-weight: var(--th-font-weight-semibold, 600);
 
-    &:hover {
-        text-decoration: underline;
-    }
-
-    &:focus-visible {
-        outline: 2px solid var(--color-primary-element);
-        outline-offset: 2px;
-        border-radius: 2px;
-        text-decoration: underline;
-    }
 }
 
 .feed-thread__chevron {
-    transition: transform 150ms ease-out;
+    transition: transform var(--animation-quick) ease-out;
     display: inline-flex;
 }
 
@@ -486,7 +471,7 @@ export default {
 // the plain token is a fill colour and fails contrast as body text.
 .feed-thread__error {
     margin: 0;
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-size: var(--th-font-meta, 12px);
 }
 
@@ -532,7 +517,7 @@ export default {
 }
 
 .feed-thread__text {
-    margin: 2px 0 0;
+    margin: 4px 0 0;
     font-size: var(--th-font-body, 14px);
     line-height: var(--th-line-height-body, 1.4);
     // A pasted wall of text must not stretch the card.
@@ -543,7 +528,7 @@ export default {
 .feed-thread__compose {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 /* v4.5.29 — a reserved affordance, not a broken one. The label and the reason
@@ -555,7 +540,6 @@ export default {
 
     .feed-thread__input {
         opacity: 0.6;
-        background: var(--color-background-dark);
     }
 }
 
@@ -563,8 +547,6 @@ export default {
     font-size: var(--th-font-micro, 11px);
     font-weight: var(--th-font-weight-semibold, 600);
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
 }
 
 .feed-thread__input {
@@ -574,10 +556,10 @@ export default {
     font-size: var(--th-font-body, 14px);
     line-height: var(--th-line-height-body, 1.4);
     border: 1px solid var(--color-border-dark);
-    border-radius: var(--th-radius-control, var(--border-radius));
+    border-radius: var(--th-radius-control, var(--border-radius-small));
     background: var(--color-main-background);
     color: var(--color-main-text);
-    padding: 6px 8px;
+    padding: 8px 8px;
 
     // The NC form-field pattern from SKILLS.md § Focus visibility: outline
     // removed on the base rule, replaced by a border-colour change on focus
@@ -596,7 +578,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 </style>

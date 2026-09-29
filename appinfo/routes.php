@@ -90,6 +90,9 @@ return [
 
         // Connect existing resources to a team (team admin required)
         ['name' => 'resource_connect#connect',     'url' => '/api/v1/teams/{teamId}/resources/{app}/connect', 'verb' => 'POST'],
+        // v4.10.2's team_space#requestQuota is gone (v4.10.29): the quota request
+        // is a Nextcloud service and starts on the engine's own route,
+        // POST /api/v1/teams/{teamId}/workflows/teamspace_quota.
 
         // Resource state — pending/ignored management (team admin required)
         ['name' => 'resource_state#getPanelData',    'url' => '/api/v1/teams/{teamId}/resources/panel',                          'verb' => 'GET'],
@@ -206,6 +209,117 @@ return [
         ['name' => 'myWorkAdmin#saveConfig',   'url' => '/api/v1/admin/mywork/config',                'verb' => 'PUT'],
         ['name' => 'myWorkAdmin#getStatus',    'url' => '/api/v1/admin/mywork/status',                'verb' => 'GET'],
         ['name' => 'myWorkAdmin#saveProvider', 'url' => '/api/v1/admin/mywork/providers/{providerId}', 'verb' => 'PUT'],
+
+        // ----------------------------------------------------------------
+        // WorkflowHub (v4.10.14) — the built-in workflows over the engine
+        // (docs/workflowhub-architecture.md §7). Every route resolves the
+        // caller from the session; no route carries an actor, a participant
+        // or a status. The fixed `definitions` path is registered before
+        // `{id}`, and `{id}` is digits only, so the two never collide. No
+        // licence gate: usable on every instance.
+        // ----------------------------------------------------------------
+        ['name' => 'workflow#index',              'url' => '/api/v1/workflows',                                  'verb' => 'GET'],
+        ['name' => 'workflow#definitions',        'url' => '/api/v1/workflows/definitions',                      'verb' => 'GET'],
+        ['name' => 'workflow#show',               'url' => '/api/v1/workflows/{id}',                             'verb' => 'GET',  'requirements' => ['id' => '\d+']],
+        ['name' => 'workflow#start',              'url' => '/api/v1/teams/{teamId}/workflows/{definitionKey}',   'verb' => 'POST'],
+        ['name' => 'workflow#complete',           'url' => '/api/v1/workflows/{id}/complete',                    'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'workflow#reject',             'url' => '/api/v1/workflows/{id}/reject',                      'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'workflow#requestInformation', 'url' => '/api/v1/workflows/{id}/request-information',         'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'workflow#provideInformation', 'url' => '/api/v1/workflows/{id}/provide-information',         'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'workflow#message',            'url' => '/api/v1/workflows/{id}/message',                     'verb' => 'POST', 'requirements' => ['id' => '\d+']],        // v4.11.0
+        ['name' => 'workflow#cancel',            'url' => '/api/v1/workflows/{id}/cancel',                      'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'workflow#requestStatus',      'url' => '/api/v1/workflows/{id}/status-request',              'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+
+        // ----------------------------------------------------------------
+        // Service Teams (v4.10.20) — the agent's side. Ordinary members with
+        // a job, so every method is #[NoAdminRequired]; eligibility and the
+        // licence are decided in ServiceTeamService, never here. The four
+        // queue verbs hang off /workflows/{id} because that is what they act
+        // on — a step of one workflow — while the listings hang off
+        // /service-teams. The fixed `catalogue` path is registered before
+        // `{teamId}` so the two never collide.
+        // ----------------------------------------------------------------
+        // v4.10.50 — the grid of teams made outside TeamHub (Admin → TeamHub
+        // and the holding service team's widget). Every route checks
+        // TeamAdoptionDecisionService::mayDecide().
+        ['name' => 'teamAdoption#index',       'url' => '/api/v1/team-adoptions',                      'verb' => 'GET'],
+        ['name' => 'teamAdoption#update',      'url' => '/api/v1/team-adoptions/{id}',                 'verb' => 'PUT'],
+        ['name' => 'teamAdoption#accept',      'url' => '/api/v1/team-adoptions/{id}/accept',          'verb' => 'POST'],
+        ['name' => 'teamAdoption#decline',     'url' => '/api/v1/team-adoptions/{id}/decline',         'verb' => 'POST'],
+        ['name' => 'serviceTeam#index',        'url' => '/api/v1/service-teams',                       'verb' => 'GET'],
+        ['name' => 'serviceTeam#catalogue',    'url' => '/api/v1/service-teams/catalogue',             'verb' => 'GET'],
+        ['name' => 'serviceTeam#claimStatus',  'url' => '/api/v1/service-teams/claim-status',          'verb' => 'GET'],
+        // v4.10.29 — the teams the caller may ask more storage for (the quota card's team picker).
+        ['name' => 'serviceTeam#quotaTeams',   'url' => '/api/v1/service-teams/quota-teams',           'verb' => 'GET'],
+        // v4.10.45 — the teams the caller may ask more time for.
+        ['name' => 'serviceTeam#expiryTeams',  'url' => '/api/v1/service-teams/expiry-teams',          'verb' => 'GET'],
+        // v4.10.45 — Settings → TeamHub → Services: categories and links.
+        ['name' => 'serviceAdmin#settings',       'url' => '/api/v1/admin/services/settings',            'verb' => 'GET'],
+        ['name' => 'serviceAdmin#saveCategories', 'url' => '/api/v1/admin/services/settings/categories', 'verb' => 'PUT'],
+        ['name' => 'serviceAdmin#saveLinks',      'url' => '/api/v1/admin/services/settings/links',      'verb' => 'PUT'],
+        ['name' => 'serviceTeam#queue',        'url' => '/api/v1/service-teams/{teamId}/queue',        'verb' => 'GET'],
+        ['name' => 'serviceTeam#statistics',   'url' => '/api/v1/service-teams/{teamId}/statistics',   'verb' => 'GET'],        // v4.10.27
+        ['name' => 'serviceTeam#claim',        'url' => '/api/v1/workflows/{id}/claim',                'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'serviceTeam#assign',       'url' => '/api/v1/workflows/{id}/assign',               'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'serviceTeam#release',      'url' => '/api/v1/workflows/{id}/release',              'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'serviceTeam#internalNote', 'url' => '/api/v1/workflows/{id}/internal-note',        'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        // v4.10.31 — an admin of the service team closes a request, at any step.
+        ['name' => 'serviceTeam#close',        'url' => '/api/v1/workflows/{id}/close-request',        'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+
+        // ----------------------------------------------------------------
+        // Manage team → Services (v4.10.23) — where a team claims the
+        // Nextcloud services. Team admins of a Service-template team, both
+        // re-checked in TeamServiceController::requireServiceTeamAdmin();
+        // #[NoAdminRequired] because a Nextcloud administrator has no part
+        // in this. The creation wizard posts to the same claim route.
+        // ----------------------------------------------------------------
+        ['name' => 'teamService#show',           'url' => '/api/v1/teams/{teamId}/services',               'verb' => 'GET'],
+        ['name' => 'teamService#claim',          'url' => '/api/v1/teams/{teamId}/services',               'verb' => 'POST'],
+        ['name' => 'teamService#release',        'url' => '/api/v1/teams/{teamId}/services',               'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
+        // The service builder (v4.10.33, docs/service-builder.md) — the
+        // services a service team builds and publishes itself. Members read,
+        // team admins write; both re-checked in
+        // ServiceBuilderController::requireServiceTeam().
+        // ----------------------------------------------------------------
+        ['name' => 'serviceBuilder#index',     'url' => '/api/v1/teams/{teamId}/built-services',                       'verb' => 'GET'],
+        ['name' => 'serviceBuilder#create',    'url' => '/api/v1/teams/{teamId}/built-services',                       'verb' => 'POST'],
+        ['name' => 'serviceBuilder#update',    'url' => '/api/v1/teams/{teamId}/built-services/{serviceId}',           'verb' => 'PUT',    'requirements' => ['serviceId' => '\d+']],
+        ['name' => 'serviceBuilder#destroy',   'url' => '/api/v1/teams/{teamId}/built-services/{serviceId}',           'verb' => 'DELETE', 'requirements' => ['serviceId' => '\d+']],
+        ['name' => 'serviceBuilder#publish',   'url' => '/api/v1/teams/{teamId}/built-services/{serviceId}/publish',   'verb' => 'POST',   'requirements' => ['serviceId' => '\d+']],
+        ['name' => 'serviceBuilder#unpublish', 'url' => '/api/v1/teams/{teamId}/built-services/{serviceId}/unpublish', 'verb' => 'POST',   'requirements' => ['serviceId' => '\d+']],
+
+        // ----------------------------------------------------------------
+        // Service Teams — what a Nextcloud administrator keeps (v4.10.23):
+        // which team holds the Nextcloud services, on the Setup checklist,
+        // and the release that takes an instance-wide claim back. Enforced
+        // by the absence of #[NoAdminRequired] on every method of
+        // ServiceTeamAdminController (a separate class so the gate is a
+        // property of the file). Licensed like the agent half.
+        // ----------------------------------------------------------------
+        ['name' => 'serviceTeamAdmin#index',     'url' => '/api/v1/admin/service-teams',                   'verb' => 'GET'],
+        ['name' => 'serviceTeamAdmin#destroy',   'url' => '/api/v1/admin/service-teams/{teamId}',          'verb' => 'DELETE'],
+
+        // ----------------------------------------------------------------
+        // The workflow archive (v4.10.21) — WorkflowHub phase 6.
+        // docs/workflow-archiving.md. Every method #[NoAdminRequired]: an
+        // archive belongs to the team that asked and the desk that
+        // answered, not to the server's administrators. `audience` is a
+        // query parameter and a *request*, never a grant — the service
+        // decides what the caller may read as that audience, and the
+        // requesting-team reading carries no internal note for anybody.
+        // The fixed `by-instance` path is registered before `{id}` so the
+        // two never collide. Documents hang off /workflows/{id} because
+        // that is what they are attached to, and only while it is open.
+        // ----------------------------------------------------------------
+        ['name' => 'workflowArchive#index',       'url' => '/api/v1/archive/workflows',                                'verb' => 'GET'],
+        ['name' => 'workflowArchive#byInstance',  'url' => '/api/v1/archive/workflows/by-instance/{instanceId}',       'verb' => 'GET',    'requirements' => ['instanceId' => '\d+']],
+        ['name' => 'workflowArchive#show',        'url' => '/api/v1/archive/workflows/{id}',                           'verb' => 'GET',    'requirements' => ['id' => '\d+']],
+        ['name' => 'workflowArchive#record',      'url' => '/api/v1/archive/workflows/{id}/record',                    'verb' => 'GET',    'requirements' => ['id' => '\d+']],
+        ['name' => 'workflowArchive#attachments', 'url' => '/api/v1/workflows/{id}/attachments',                       'verb' => 'GET',    'requirements' => ['id' => '\d+']],
+        ['name' => 'workflowArchive#attach',      'url' => '/api/v1/workflows/{id}/attachments',                       'verb' => 'POST',   'requirements' => ['id' => '\d+']],
+        ['name' => 'workflowArchive#detach',      'url' => '/api/v1/workflows/{id}/attachments/{attachmentId}',        'verb' => 'DELETE', 'requirements' => ['id' => '\d+', 'attachmentId' => '\d+']],
 
         // ----------------------------------------------------------------
         // Team image — upload, remove, serve

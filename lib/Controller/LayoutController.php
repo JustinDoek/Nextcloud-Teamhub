@@ -3,12 +3,14 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
+use OCA\TeamHub\Workflow\Definition\TeamAdoptionDefinition;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\LayoutMapper;
 use OCA\TeamHub\Db\ProvisioningMapper;
 use OCA\TeamHub\Service\BudgetService;
 use OCA\TeamHub\Service\CollectivesService;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
 use OCA\TeamHub\Service\DecisionTeamService;
 use OCA\TeamHub\Service\PresenceTeamService;
@@ -181,7 +183,60 @@ class LayoutController extends Controller {
             'hSaved'      => 5,
             'autoFit'     => true,
         ],
+        // v4.10.27 — the service team's queue (`/service-teams`). Rendered
+        // only on an active service team, for its members (gated in
+        // src/lib/activeWidgets.js). It is the desk's main work surface, so
+        // it goes where Project health goes — top of the right column, right
+        // under Team info — and mergeNewWidgets inserts it there for saved
+        // layouts too (TOP_INSERTED_WIDGETS). On every other team it is not
+        // rendered and vertical compaction closes the gap.
+        [
+            'i'           => 'widget-service-queue',
+            'x'           => 9, 'y' => 2,
+            'w'           => 3, 'h' => 6,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 6,
+            'autoFit'     => true,
+        ],
+        // v4.10.27 — the service team's request statistics. Appended at the
+        // bottom of the right column: useful, but not what a desk looks at
+        // first.
+        [
+            'i'           => 'widget-service-stats',
+            'x'           => 9, 'y' => 33,
+            'w'           => 3, 'h' => 5,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 5,
+            'autoFit'     => true,
+        ],
+        // v4.10.50 — the grid of teams made outside TeamHub, on the team that
+        // holds the adoption service. Full width at the bottom: it is a table.
+        [
+            'i'           => 'widget-team-adoption',
+            'x'           => 0, 'y' => 40,
+            'w'           => 12, 'h' => 7,
+            'minW'        => 6, 'minH' => 3,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => 7,
+            'autoFit'     => true,
+        ],
+        // v4.10.34–43 placed `widget-services` here; v4.10.44 retired it —
+        // the team's own services and the builder live on the *Services*
+        // tab. Pruned on GET with the other legacy ids.
     ];
+
+    /**
+     * Widgets mergeNewWidgets inserts at their DEFAULT_LAYOUT position,
+     * shifting the rest of their column down, instead of appending them at
+     * the bottom — the top-of-column cockpit widgets (v3.97.0 for Project
+     * health; generalised in v4.10.27 for the service queue).
+     */
+    private const TOP_INSERTED_WIDGETS = ['widget-project-health', 'widget-service-queue'];
 
     private const DEFAULT_TAB_ORDER = ['home', 'talk', 'files', 'calendar', 'deck', 'collectives', 'timeline'];
 
@@ -215,7 +270,14 @@ class LayoutController extends Controller {
         'widget-project-health',
         // v4.9.3 — OpenProject Phase 1. Gates on the team's link.
         'widget-openproject',
+        // v4.10.27 — the service team's queue and statistics.
+        'widget-service-queue',
+        'widget-service-stats',
+        // v4.10.50 — teams made outside TeamHub.
+        'widget-team-adoption',
         // Legacy — kept so saves from old clients are not rejected mid-migration.
+        // v4.10.44 — the retired Services widget (now the Services tab).
+        'widget-services',
         'widget-files-favorites',
         'widget-files-recent',
         'widget-files-shared',
@@ -235,6 +297,8 @@ class LayoutController extends Controller {
         private IConfig $config,
         private LoggerInterface $logger,
         private MemberService $memberService,
+        // v4.10.27 — the service-desk facts in the bundle.
+        private ServiceTeamService $serviceTeams,
         private PresenceTeamService $presenceTeamService,
         private DecisionTeamService $decisionTeamService,
         private TimelineService $timelineService,
@@ -363,6 +427,10 @@ class LayoutController extends Controller {
             // v4.9.6 — is this team's provisioning finished (null for a team
             // that was never provisioned). The team page's banner reads it.
             'provisioning'           => $this->provisioningMapper->latestSummaryForTeam($teamId),
+            // v4.10.27 — is this team a desk the viewer works? Gates the
+            // queue and statistics widgets (src/lib/activeWidgets.js); the
+            // routes behind them check the same rule again.
+            'serviceDeskConfig'      => $this->serviceDeskFacts($teamId, $userId),
         ]);
         }
 
@@ -445,6 +513,10 @@ class LayoutController extends Controller {
             // v4.9.6 — is this team's provisioning finished (null for a team
             // that was never provisioned). The team page's banner reads it.
             'provisioning'           => $this->provisioningMapper->latestSummaryForTeam($teamId),
+            // v4.10.27 — is this team a desk the viewer works? Gates the
+            // queue and statistics widgets (src/lib/activeWidgets.js); the
+            // routes behind them check the same rule again.
+            'serviceDeskConfig'      => $this->serviceDeskFacts($teamId, $userId),
         ]);
     }
 
@@ -455,6 +527,46 @@ class LayoutController extends Controller {
      *
      * @return array{isProject:bool, mode:?string, phase:?string, startDate:?int, targetEnd:?int}
      */
+    /**
+     * v4.10.27 — whether this team is a service desk the viewer works, and
+     * whether they administer it. `isDesk` is the eligibility rule itself
+     * (licensed, an active service team, a member of it), so a widget gated
+     * on it can never show to somebody the queue route would refuse.
+     *
+     * v4.10.34 — `isServiceTeam`: licensed and a team created from the
+     * Service template, desk or not yet — what the *Services* widget gates
+     * on, because publishing the first service is what makes a team a desk.
+     * The bundle is only built for a member of the team, which is the
+     * builder route's read gate. `canBuild`: a team admin of it, the
+     * builder's write gate.
+     *
+     * v4.10.50 — `handlesAdoption`: a desk member of the team that holds
+     * the adoption service. The teams-made-outside-TeamHub grid is a widget
+     * on that team's home; its routes ask the same rule
+     * (`TeamAdoptionDecisionService::mayDecide()` — which also lets a
+     * Nextcloud administrator in, from Admin → TeamHub).
+     *
+     * @return array{isDesk: bool, isAdmin: bool, isServiceTeam: bool, canBuild: bool, handlesAdoption: bool}
+     */
+    private function serviceDeskFacts(string $teamId, string $userId): array {
+        try {
+            $isDesk        = $this->serviceTeams->isEligibleAgent($userId, $teamId);
+            $isServiceTeam = $this->serviceTeams->isAvailable()
+                && $this->teamTypeService->getType($teamId) === 'service';
+            $isOwner       = ($isDesk || $isServiceTeam) && $this->serviceTeams->isServiceOwner($userId, $teamId);
+            return [
+                'isDesk'        => $isDesk,
+                'isAdmin'       => $isDesk && $isOwner,
+                'isServiceTeam' => $isServiceTeam,
+                'canBuild'      => $isServiceTeam && $isOwner,
+                'handlesAdoption' => $isDesk
+                    && $this->serviceTeams->serviceTeamForDefinition(TeamAdoptionDefinition::KEY) === $teamId,
+            ];
+        } catch (\Throwable $e) {
+            return ['isDesk' => false, 'isAdmin' => false, 'isServiceTeam' => false, 'canBuild' => false, 'handlesAdoption' => false];
+        }
+    }
+
     private function projectFacts(string $teamId): array {
         try {
             return $this->projectService->getForTeam($teamId);
@@ -733,7 +845,9 @@ class LayoutController extends Controller {
         // Filter them out before merging so the new consolidated widget is added.
         // widget-openproject-work → gone (v4.9.5 — its rows moved to My Work
         // and to the Upcoming tasks widget).
-        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared', 'widget-collectives', 'widget-openproject-work'];
+        // widget-services → gone (v4.10.44 — the team's services and the
+        // builder moved to the Services tab).
+        $legacyIds = ['widget-files-favorites', 'widget-files-recent', 'widget-files-shared', 'widget-collectives', 'widget-openproject-work', 'widget-services'];
         $pruned = false;
         $layout = array_values(array_filter($layout, static function (array $item) use ($legacyIds, &$pruned): bool {
             if (in_array($item['i'], $legacyIds, true)) {
@@ -765,7 +879,7 @@ class LayoutController extends Controller {
             // reflow the first time an existing user's layout receives the
             // widget; matches the visual position new users get from
             // DEFAULT_LAYOUT verbatim.
-            if ($defaultItem['i'] === 'widget-project-health') {
+            if (in_array($defaultItem['i'], self::TOP_INSERTED_WIDGETS, true)) {
                 $targetY = (int)$defaultItem['y'];
                 $shift   = (int)$defaultItem['h'];
                 foreach ($layout as &$item) {
@@ -779,8 +893,8 @@ class LayoutController extends Controller {
                 $layout[] = $defaultItem;
                 $added    = true;
 
-                $this->logger->debug('[TeamHub][LayoutController] mergeNewWidgets — inserted widget-project-health at top of right column', [
-                    'atY' => $targetY, 'shiftedBy' => $shift,
+                $this->logger->debug('[TeamHub][LayoutController] mergeNewWidgets — inserted a top-of-column widget', [
+                    'widgetId' => $defaultItem['i'], 'atY' => $targetY, 'shiftedBy' => $shift,
                 ]);
                 continue;
             }

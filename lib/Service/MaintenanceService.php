@@ -902,9 +902,24 @@ class MaintenanceService {
         }
 
         // ── Step 4: Reset the circle config to 0 so probeCircles() shows it ──
+        // v4.10.6 — all but CFG_APP. That bit is TeamHub's own lock against
+        // deletion from the Teams page (TeamRegistryService); a reset that
+        // dropped it left the team deletable until the hourly re-lock. The
+        // importer's privacy re-apply (DESIGN §2.82, Decision 7) is unaffected:
+        // updateTeamConfig() writes MANAGED_BITS only and never reaches it.
+        $keepQb  = $this->db->getQueryBuilder();
+        $keepRes = $keepQb->select('config')
+            ->from('circles_circle')
+            ->where($keepQb->expr()->eq('unique_id', $keepQb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $keepRow = $keepRes->fetch();
+        $keepRes->closeCursor();
+        $keptLock = ((int)($keepRow['config'] ?? 0)) & CirclesConfig::CFG_APP;
+
         $configQb = $this->db->getQueryBuilder();
         $configQb->update('circles_circle')
-            ->set('config', $configQb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            ->set('config', $configQb->createNamedParameter($keptLock, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
             ->where($configQb->expr()->eq('unique_id', $configQb->createNamedParameter($teamId)))
             ->executeStatement();
 
@@ -1197,6 +1212,8 @@ class MaintenanceService {
             'teamhub_layout'                => 'team_id',
             'teamhub_team_apps'             => 'team_id',
             'teamhub_team_integrations'     => 'team_id',
+            // v4.10.6 — the team registry row; this path destroys the circle.
+            'teamhub_team_registry'         => 'team_id',
         ];
 
         foreach ($tables as $table => $column) {
@@ -2154,13 +2171,21 @@ class MaintenanceService {
 
         // One pass over both masks — a team can be corrupt *and* app-claimed,
         // and those are independent facts about it.
+        //
+        // v4.10.6 — a registered team carries CFG_APP by design: it is
+        // TeamHub's own lock against deletion from the Teams page
+        // (TeamRegistryService). "Claimed by another app" therefore means
+        // CFG_APP on a circle that is *not* in the registry — a Collectives
+        // team, say — so the LEFT JOIN below tells the two apart.
         $qb  = $this->db->getQueryBuilder();
-        $res = $qb->select('unique_id', 'name', 'config')
-            ->from('circles_circle')
-            ->where($qb->expr()->eq('source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+        $res = $qb->select('c.unique_id', 'c.name', 'c.config')
+            ->selectAlias('treg.team_id', 'registered_id')
+            ->from('circles_circle', 'c')
+            ->leftJoin('c', 'teamhub_team_registry', 'treg', $qb->expr()->eq('treg.team_id', 'c.unique_id'))
+            ->where($qb->expr()->eq('c.source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->andWhere(
                 $qb->expr()->gt(
-                    $qb->createFunction('(config & ' . ($forbidden | $appOwned) . ')'),
+                    $qb->createFunction('(c.config & ' . ($forbidden | $appOwned) . ')'),
                     $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                 )
             )
@@ -2171,7 +2196,7 @@ class MaintenanceService {
         while ($row = $res->fetch()) {
             $config  = (int)$row['config'];
             $badBits = $config & $forbidden;
-            $appBits = $config & $appOwned;
+            $appBits = ($row['registered_id'] ?? null) === null ? ($config & $appOwned) : 0;
 
             if ($badBits > 0) {
                 $issues[] = [

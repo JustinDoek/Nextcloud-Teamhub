@@ -78,7 +78,7 @@ export default {
             } catch (error) {
                 // Revert so the switch never shows a state the server rejected.
                 this.gettingStartedHint = previous
-                this.saveError = t('teamhub', 'Could not save the setting. Please try again.')
+                this.saveError = t('teamhub', 'Could not save the setting. Try again.')
             } finally {
                 this.saving = false
             }
@@ -109,12 +109,12 @@ export default {
 .th-personal__note {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin: 6px 0 0;
+    margin: 8px 0 0;
 }
 
 .th-personal__error {
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
-    margin: 6px 0 0;
+    color: var(--color-text-error);
+    margin: 8px 0 0;
 }
 </style>

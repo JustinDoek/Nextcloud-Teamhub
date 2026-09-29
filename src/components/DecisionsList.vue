@@ -2,19 +2,19 @@
     <div class="th-decisions-list">
         <!-- Loading state — shared state row -->
         <div v-if="loading" class="th-widget__state">
-            <span class="th-widget__spinner" aria-hidden="true" />
+            <NcLoadingIcon :size="ICON_INLINE" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading decisions…') }}</span>
         </div>
 
         <!-- Error state — shared state row -->
         <div v-else-if="error" class="th-widget__state th-widget__state--error" role="alert">
-            <AlertCircleOutlineIcon :size="18" aria-hidden="true" />
+            <AlertCircleOutlineIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Could not load decisions') }}</span>
         </div>
 
         <!-- Empty state — shared state row -->
         <div v-else-if="!decisions.length" class="th-widget__state th-widget__state--empty">
-            <GavelIcon :size="22" aria-hidden="true" />
+            <GavelIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ emptyLabel }}</span>
         </div>
 
@@ -38,11 +38,9 @@
                     <!-- Header line: question text + status pill -->
                     <div class="th-decisions-list__header">
                         <span class="th-decisions-list__question">{{ d.question || t('teamhub', 'Untitled decision') }}</span>
-                        <span
-                            class="th-widget__pill"
-                            :class="`th-widget__pill--${statusToPillVariant(d.status)}`">
+                        <NcChip no-close :variant="statusToPillVariant(d.status)">
                             {{ statusLabel(d.status) }}
-                        </span>
+                        </NcChip>
                     </div>
 
                     <!-- Meta line: category · milestone · proposer · date.
@@ -63,7 +61,7 @@
                             v-if="d.milestoneLabel"
                             class="th-decisions-list__meta-item th-decisions-list__milestone"
                             :title="d.milestoneDate ? t('teamhub', 'Milestone: {label} — {date}', { label: d.milestoneLabel, date: d.milestoneDate }) : t('teamhub', 'Milestone: {label}', { label: d.milestoneLabel })">
-                            <FlagOutlineIcon :size="12" aria-hidden="true" />
+                            <FlagOutlineIcon :size="ICON_INLINE" aria-hidden="true" />
                             <span class="th-decisions-list__milestone-label">{{ d.milestoneLabel }}</span>
                         </span>
                         <span class="th-decisions-list__meta-item">
@@ -79,17 +77,19 @@
                 <div
                     v-if="showApproverActions"
                     class="th-decisions-list__actions">
-                    <button
-                        type="button"
+                    <NcButton
                         class="th-decisions-list__action th-decisions-list__action--review"
                         :disabled="actingDecisionId === d.id"
                         :aria-label="t('teamhub', 'Review this decision')"
                         :title="t('teamhub', 'Review')"
-                        @click.stop="$emit('review-decision', d)">
-                        <GavelIcon :size="14" aria-hidden="true" />
+                        @click.stop="$emit('review-decision', d)"
+                        variant="tertiary">
+                        <template #icon>
+                            <GavelIcon :size="ICON_INLINE" aria-hidden="true" />
+                        </template>
                         <!-- TRANSLATORS: button on a decision row to open the approval modal -->
                         <span class="th-decisions-list__action-label">{{ t('teamhub', 'Decision') }}</span>
-                    </button>
+                    </NcButton>
                 </div>
             </li>
         </ul>
@@ -100,16 +100,19 @@
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatDate, formatDateTime } from '../lib/localDate.js'
 import { mapState, mapMutations }                from 'vuex'
+import { NcLoadingIcon, NcChip, NcButton } from '@nextcloud/vue'
 import GavelIcon               from 'vue-material-design-icons/Gavel.vue'
 import AlertCircleOutlineIcon  from 'vue-material-design-icons/AlertCircleOutline.vue'
 import CheckBoldIcon           from 'vue-material-design-icons/CheckBold.vue'
 import CloseIcon               from 'vue-material-design-icons/Close.vue'
 import FlagOutlineIcon         from 'vue-material-design-icons/FlagOutline.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 export default {
     name: 'DecisionsList',
 
     components: {
+          NcButton, NcChip, NcLoadingIcon,
         GavelIcon,
         AlertCircleOutlineIcon,
         CheckBoldIcon,
@@ -141,6 +144,13 @@ export default {
          * buttons are disabled while in-flight. -1 = none.
          */
         actingDecisionId: { type: [Number, String, null], default: null },
+    },
+
+    data() {
+        return {
+            ICON_BODY,
+            ICON_INLINE,
+        }
     },
 
     computed: {
@@ -218,9 +228,9 @@ export default {
                 approved:   'success',
                 decided:    'success',
                 denied:     'error',
-                withdrawn:  'neutral',
+                withdrawn:  'tertiary',
             }
-            return map[status] || 'neutral'
+            return map[status] || 'tertiary'
         },
 
         relativeDate(ts) {
@@ -295,12 +305,12 @@ export default {
 .th-decisions-list__body {
     flex: 1;
     min-width: 0;
-    padding: 8px 10px;
+    padding: 8px 8px;
     background: none;
     border: none;
     cursor: pointer;
-    text-align: left;
-    transition: background 0.1s;
+    text-align: start;
+    transition: background var(--animation-quick);
 }
 
 .th-decisions-list__body:hover {
@@ -316,8 +326,8 @@ export default {
 .th-decisions-list__header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 3px;
+    gap: 8px;
+    margin-bottom: 4px;
 }
 
 .th-decisions-list__question {
@@ -357,22 +367,20 @@ export default {
 /* Small uppercase label preceding a value, e.g. "CATEGORY Beheer" */
 .th-decisions-list__meta-label {
     color: var(--th-widget-meta-color);
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.04em;
+    font-size: var(--th-font-meta);
 }
 
 /* v3.97.5 — milestone chip on the meta line. Sits next to the category
  * chip; small flag icon + label. Uses the same colour token as impact
  * pills to signal "project artifact linkage". */
 .th-decisions-list__milestone {
-    padding: 1px 6px;
-    border-radius: 10px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-container);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
     font-weight: 600;
     font-size: var(--th-font-micro);
-    gap: 3px;
+    gap: 4px;
 }
 .th-decisions-list__milestone-label {
     max-width: 140px;
@@ -383,7 +391,7 @@ export default {
 
 /* Date pushed to the right edge of the meta line */
 .th-decisions-list__date {
-    margin-left: auto;
+    margin-inline-start: auto;
     white-space: nowrap;
     color: var(--th-widget-meta-color);
 }
@@ -401,39 +409,14 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
     /* Tokens — pill-sized text */
-    font-size: var(--th-font-micro);
-    font-weight: var(--th-widget-pill-weight);
-    border-radius: 12px;
-    border: 1px solid transparent;
-    background: transparent;
-    cursor: pointer;
-    line-height: 1;
-    transition: background 0.12s, color 0.12s, border-color 0.12s;
-    white-space: nowrap;
-}
-
-.th-decisions-list__action:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
 }
 
 .th-decisions-list__action:disabled {
     opacity: 0.5;
-    cursor: not-allowed;
 }
 
 /* v3.100.16: review action uses NC theme tokens (was --th-color-* hex). */
-.th-decisions-list__action--review {
-    color: var(--color-success-text);
-    border-color: var(--color-success);
-}
-
-.th-decisions-list__action--review:not(:disabled):hover {
-    background: var(--color-success);
-    color: var(--color-success-text);
-}
 
 @media (max-width: 320px) {
     .th-decisions-list__action-label {

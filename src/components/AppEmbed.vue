@@ -14,33 +14,33 @@
                 it. Raw <button> per SKILLS.md § "NcButton is the default" —
                 NcButton's 44px touch target defeats the point of a thin strip.
             -->
-            <button
-                type="button"
+            <NcButton
                 class="app-embed__bar-collapse"
                 :aria-expanded="barCollapsed ? 'false' : 'true'"
                 :aria-label="barCollapsed ? t('teamhub', 'Show toolbar') : t('teamhub', 'Hide toolbar')"
                 :title="barCollapsed ? t('teamhub', 'Show toolbar') : t('teamhub', 'Hide toolbar')"
-                @click="toggleBar">
-                <ChevronDown v-if="barCollapsed" :size="16" />
-                <ChevronUp v-else :size="16" />
-            </button>
+                @click="toggleBar"
+                variant="tertiary"
+                size="small">
+                <template #icon>
+                    <ChevronDown v-if="barCollapsed" :size="ICON_BODY" />
+                    <ChevronUp v-else :size="ICON_BODY" />
+                </template>
+            </NcButton>
             <div v-show="!barCollapsed" class="app-embed__bar-actions">
                 <!-- Inline select dropdowns (e.g. calendar view switcher) -->
-                <select
+                <NcSelect
                     v-for="sel in embedSelects"
                     :key="sel.id"
                     class="app-embed__bar-select"
-                    :value="sel.value"
-                    :aria-label="sel.label"
+                    :model-value="sel.value"
+                    :aria-label-combobox="sel.label"
                     :title="sel.label"
-                    @change="$emit('select', { id: sel.id, value: $event.target.value })">
-                    <option
-                        v-for="opt in sel.options"
-                        :key="opt.value"
-                        :value="opt.value">
-                        {{ opt.label }}
-                    </option>
-                </select>
+                    @update:model-value="$emit('select', { id: sel.id, value: $event })"
+                    label-outside
+                    :options="sel.options.map(opt => ({ id: opt.value, label: opt.label }))"
+                    :reduce="o => o.id"
+                    :clearable="false" />
 
                 <!-- Custom action buttons injected by the parent (e.g. calendar
                      add/delete). Stacked icon-above-label layout — see DESIGN.md
@@ -52,36 +52,36 @@
                     <span v-if="action.isLabel" class="app-embed__bar-date-label">
                         {{ action.label }}
                     </span>
-                    <button
+                    <NcButton
                         v-else
-                        type="button"
                         class="app-embed__bar-btn"
                         :aria-label="action.label"
                         :title="action.label"
-                        @click="$emit('action', action.id)">
-                        <component :is="action.icon" :size="20" class="app-embed__bar-btn-icon" />
+                        @click="$emit('action', action.id)"
+                        variant="tertiary">
+                        <component :is="action.icon" :size="ICON_BODY" class="app-embed__bar-btn-icon" />
                         <!-- shortLabel is a one-or-two-word verb shown under the icon
-                             (e.g. "Add"); label is the full descriptive name kept for
-                             tooltip + screen reader (e.g. "Add event"). Falls back to
-                             label when shortLabel isn't set. -->
+                        (e.g. "Add"); label is the full descriptive name kept for
+                        tooltip + screen reader (e.g. "Add event"). Falls back to
+                        label when shortLabel isn't set. -->
                         <span class="app-embed__bar-btn-label">{{ action.shortLabel || action.label }}</span>
-                    </button>
+                    </NcButton>
                 </template>
 
                 <!-- Toggle buttons: pressed/active state, e.g. timeline source filters -->
-                <button
+                <NcButton
                     v-for="tog in embedToggles"
                     :key="tog.id"
-                    type="button"
                     class="app-embed__bar-btn"
                     :class="{ 'app-embed__bar-btn--active': tog.active }"
-                    :aria-pressed="tog.active ? 'true' : 'false'"
                     :aria-label="tog.label"
                     :title="tog.label"
-                    @click="$emit('toggle', tog.id)">
-                    <component :is="tog.icon" :size="20" class="app-embed__bar-btn-icon" />
+                    @click="$emit('toggle', tog.id)"
+                    :pressed="tog.active"
+                    variant="tertiary">
+                    <component :is="tog.icon" :size="ICON_BODY" class="app-embed__bar-btn-icon" />
                     <span class="app-embed__bar-btn-label">{{ tog.shortLabel || tog.label }}</span>
-                </button>
+                </NcButton>
 
                 <!--
                     Filter menu: a single dropdown button that opens a popover
@@ -97,7 +97,7 @@
                     type="tertiary"
                     :force-menu="true">
                     <template #icon>
-                        <component :is="embedMenu.icon" :size="16" />
+                        <component :is="embedMenu.icon" :size="ICON_BODY" />
                     </template>
                     <template v-for="item in embedMenu.items" :key="item.id">
                         <!-- Captions render as section headers in the dropdown.
@@ -115,16 +115,18 @@
                         </NcActionCheckbox>
                     </template>
                 </NcActions>
-                <button
-                    type="button"
+                <NcButton
                     class="app-embed__bar-btn"
                     :aria-label="t('teamhub', 'Reload')"
                     :title="t('teamhub', 'Reload')"
                     :disabled="!hosted && !iframeSrc"
-                    @click="reload">
-                    <Refresh :size="20" class="app-embed__bar-btn-icon" />
+                    @click="reload"
+                    variant="tertiary">
+                    <template #icon>
+                        <Refresh :size="ICON_BODY" class="app-embed__bar-btn-icon" />
+                    </template>
                     <span class="app-embed__bar-btn-label">{{ t('teamhub', 'Reload') }}</span>
-                </button>
+                </NcButton>
                 <a
                     v-if="url"
                     class="app-embed__bar-btn"
@@ -132,7 +134,7 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     :title="t('teamhub', 'Open in new tab')">
-                    <OpenInNew :size="20" class="app-embed__bar-btn-icon" />
+                    <OpenInNew :size="ICON_BODY" class="app-embed__bar-btn-icon" />
                     <!-- Kept as the full phrase rather than abbreviated to a single
                          verb: 'Open' alone collides with the existing decision-status
                          "Open" translation in nl/de/fr/da (which is the adjective
@@ -162,7 +164,7 @@
                 We surface this clearly rather than spinning forever.
             -->
             <div v-else-if="!iframeSrc" class="app-embed__error">
-                <AlertCircleOutline :size="32" />
+                <AlertCircleOutline :size="ICON_LARGE" />
                 <strong>{{ t('teamhub', 'Cannot load this view') }}</strong>
                 <span>{{ t('teamhub', 'The integration URL was rejected by TeamHub. Only https:// and Nextcloud-relative URLs are allowed.') }}</span>
             </div>
@@ -173,7 +175,7 @@
                 frame paints.
             -->
             <div v-else-if="loading" class="app-embed__loading">
-                <NcLoadingIcon :size="32" />
+                <NcLoadingIcon :size="ICON_LARGE" />
                 <span>{{ t('teamhub', 'Loading…') }}</span>
             </div>
 
@@ -210,7 +212,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import { NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption } from '@nextcloud/vue'
+import { NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption, NcSelect, NcButton } from '@nextcloud/vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import Refresh from 'vue-material-design-icons/Refresh.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
@@ -219,6 +221,7 @@ import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import { attachCollabSidebar, RENDERED_FILE_SELECTOR } from '../lib/filesCollab.js'
 import logger from '../logger.js'
 import { attachInternalLinkInterceptor } from '../lib/internalLinks.js'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
  * Sandbox token set applied to cross-origin iframes.
@@ -594,7 +597,7 @@ html, body {
 
 export default {
     name: 'AppEmbed',
-    components: { NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption, OpenInNew, Refresh, AlertCircleOutline, ChevronUp, ChevronDown },
+    components: {   NcButton, NcSelect, NcLoadingIcon, NcActions, NcActionCheckbox, NcActionCaption, OpenInNew, Refresh, AlertCircleOutline, ChevronUp, ChevronDown },
 
     props: {
         url:   { type: String, required: true },
@@ -696,10 +699,17 @@ export default {
         hosted: { type: Boolean, default: false },
     },
 
-    emits: ['action', 'select', 'toggle', 'menu-toggle', 'open-target', 'reload'],
+    // `loaded` (v4.10.11) fires on the frame's load event, every time the
+    // frame loads — a preloaded frame included. TeamView uses it to boot the
+    // embedded apps one after another instead of all at once: same-origin
+    // frames share the parent's main thread, so four NC apps booting together
+    // is four times slower for the one the user is looking at.
+    emits: ['action', 'select', 'toggle', 'menu-toggle', 'open-target', 'reload', 'loaded'],
 
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             // Use a stable src — only change when url prop actually changes.
             // Empty string is allowed and means "show loading skeleton, no
             // navigation" (used when TeamView's URL re-validation rejects
@@ -854,6 +864,7 @@ export default {
 
         onLoad() {
             this.loading = false
+            this.$emit('loaded')
             // A file open is not finished when the document loads — the Files
             // app still has to list the folder and open the document. Keep the
             // skeleton up until it does.
@@ -1273,18 +1284,18 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 12px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
     background: var(--color-background-dark);
-    border-radius: var(--border-radius-large) var(--border-radius-large) 0 0;
+    border-radius: var(--border-radius-element) var(--border-radius-element) 0 0;
 }
 
 /* Collapsed: a thin strip carrying just the app name and the way back.
    The bar keeps its own border and radius so the frame still reads as one
    panel rather than the iframe running into the tab bar. */
 .app-embed__bar--collapsed {
-    padding: 2px 12px;
+    padding: 4px 12px;
 }
 
 .app-embed__bar-collapse {
@@ -1294,30 +1305,11 @@ export default {
     flex: 0 0 auto;
     box-sizing: border-box;
     width: 24px;
-    height: 24px;
-    min-width: 24px;
-    min-height: 24px;
     max-width: 24px;
-    max-height: 24px;
     margin-inline-start: auto;   /* pushed to the right, before the actions */
-    padding: 0;
-    border: none;
-    border-radius: var(--border-radius);
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-}
-.app-embed__bar-collapse:hover {
-    background: var(--color-background-hover);
-    color: var(--color-main-text);
 }
 /* Split from :hover per SKILLS.md § focus visibility — grouping them would
    silence the keyboard focus ring. */
-.app-embed__bar-collapse:focus-visible {
-    background: var(--color-background-hover);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
 
 .app-embed__bar-actions {
     display: flex;
@@ -1326,32 +1318,20 @@ export default {
     /* Stacked icon+label buttons take more horizontal room — allow wrap to
        a second row on narrow viewports rather than horizontally overflow. */
     flex-wrap: wrap;
-    row-gap: 6px;
+    row-gap: 8px;
     justify-content: flex-end;
 }
 
 .app-embed__bar-select {
-    height: 34px;
-    padding: 0 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    color: var(--color-main-text);
-    font-size: 13px;
     cursor: pointer;
-    outline: none;
-    margin-right: 4px;
-}
-
-.app-embed__bar-select:focus-visible {
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px var(--color-primary-element-light);
+    margin-inline-end: 4px;
 }
 
 .app-embed__bar-date-label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-main-text);
-    padding: 0 6px;
+    padding: 0 8px;
     min-width: 110px;
     text-align: center;
     white-space: nowrap;
@@ -1373,28 +1353,10 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    min-width: 56px;
-    padding: 4px 8px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--border-radius);
-    color: var(--color-main-text);
-    cursor: pointer;
-    text-decoration: none;
-    font-family: inherit;
-    line-height: 1.1;
-}
-.app-embed__bar-btn:hover {
-    background: var(--color-background-hover);
-}
-.app-embed__bar-btn:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
+    gap: 4px;
 }
 .app-embed__bar-btn:disabled {
     opacity: 0.5;
-    cursor: not-allowed;
 }
 .app-embed__bar-btn-icon {
     color: var(--color-main-text);
@@ -1409,18 +1371,7 @@ export default {
 
 /* Active state for toggle buttons (e.g. Timeline source filters).
  * Uses the full-saturation primary token per SKILLS.md design rules. */
-.app-embed__bar-btn--active {
-    background: var(--color-primary-element);
-    border-color: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-}
 .app-embed__bar-btn--active .app-embed__bar-btn-icon,
-.app-embed__bar-btn--active .app-embed__bar-btn-label {
-    color: var(--color-primary-element-text);
-}
-.app-embed__bar-btn--active:hover {
-    background: var(--color-primary-element-hover, var(--color-primary-element));
-}
 
 .app-embed__label {
     font-weight: 600;
@@ -1435,7 +1386,7 @@ export default {
     overflow: hidden;
     border: 1px solid var(--color-border);
     border-top: none;
-    border-radius: 0 0 var(--border-radius-large) var(--border-radius-large);
+    border-radius: 0 0 var(--border-radius-element) var(--border-radius-element);
     /* v4.6.20 — no background. `--color-background-plain` is the themed
        page-behind colour, which was fine when this only ever held an iframe
        that painted over it, but in hosted mode it shows through wherever the
@@ -1447,7 +1398,7 @@ export default {
    the open top edge that assumed a bar was sitting on it. */
 .app-embed__viewport--full {
     border-top: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 .app-embed__frame {
@@ -1473,7 +1424,7 @@ export default {
     justify-content: center;
     gap: 12px;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     background: var(--color-background-plain);
     z-index: 2;
 }
@@ -1488,8 +1439,8 @@ export default {
     gap: 8px;
     padding: 24px;
     text-align: center;
-    color: var(--color-error-text);
-    font-size: 13px;
+    color: var(--color-text-error);
+    font-size: var(--th-font-meta);
     background: var(--color-background-plain);
     z-index: 2;
 }

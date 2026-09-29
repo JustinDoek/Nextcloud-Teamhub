@@ -92,6 +92,10 @@ class CollectivesService {
         private IConfig             $config,
         private ContainerInterface  $container,
         private LoggerInterface     $logger,
+        // v4.10.6 — Collectives shares the CFG_APP bit with TeamHub's own lock
+        // and clears it when a collective is purged; disableForTeam() puts it
+        // back. A DI leaf (mapper + IDBConnection).
+        private TeamRegistryService $teamRegistry,
         ICacheFactory               $cacheFactory,
     ) {
         $this->cache = $cacheFactory->createLocal();
@@ -274,7 +278,7 @@ class CollectivesService {
                             ]);
                             return [
                                 'ok'    => false,
-                                'error' => 'Collectives said this team already has a wiki but the corresponding Collective row could not be found in the database. Ask a Nextcloud admin to check for orphaned rows in oc_collectives_collectives with circle_unique_id="' . $teamId . '".',
+                                'error' => 'Collectives said this team already has a wiki but the corresponding Collective row could not be found in the database. Ask a Nextcloud admin to check for orphaned rows in oc_collectives with circle_unique_id="' . $teamId . '".',
                             ];
                         }
                     } elseif (str_contains($msg, 'Configuration value is not valid')) {
@@ -462,6 +466,11 @@ class CollectivesService {
                 $action = 'hard';
                 // Clear the cached collective id — the row is gone.
                 $this->config->deleteAppValue(Application::APP_ID, self::CFG_COLLECTIVE_ID . $teamId);
+                // v4.10.6 — the purge called unflagCircleAsAppManaged() on the
+                // team's own circle, which is the same CFG_APP bit TeamHub
+                // uses to keep the Teams page from deleting the team. The
+                // team survives its collective, so the lock goes back on.
+                $this->relockTeam($teamId);
             } else {
                 // soft30 / soft60 → Collectives' own trash. Restorable by
                 // an NC admin from Collectives' UI within its retention.
@@ -505,7 +514,7 @@ class CollectivesService {
     // ResourceDiscoveryService reconciles a team's registry rows against what
     // Nextcloud's ACL tables actually say, per app. Collectives is the fifth
     // app it asks about, and it asks through here rather than reading
-    // `collectives_collectives` itself — same arrangement GroupFolderService
+    // `collectives` itself — same arrangement GroupFolderService
     // has for `gf:` resources, and it keeps every Collectives-shaped
     // assumption in this one file.
     // ─────────────────────────────────────────────────────────────────────
@@ -1423,7 +1432,7 @@ class CollectivesService {
      * Circle identity to the owner's PERSONAL circle (each NC user has a
      * source=1 self-circle, its unique_id = the user's Circles `single_id`).
      *
-     * Implementation: direct UPDATE on `oc_collectives_collectives.circle_unique_id`
+     * Implementation: direct UPDATE on `oc_collectives.circle_unique_id`
      * (bypasses Collectives' own API — the app exposes no rebind method).
      * This is the same "reach into another app's table when the OCP surface
      * doesn't cover it" pattern TeamHub already uses for Deck reads/writes
@@ -1457,7 +1466,7 @@ class CollectivesService {
         if ($personalCircleId !== null && $personalCircleId !== $teamId) {
             try {
                 $qb = $db->getQueryBuilder();
-                $qb->update('collectives_collectives')
+                $qb->update('collectives')
                     ->set('circle_unique_id', $qb->createNamedParameter($personalCircleId))
                     ->where($qb->expr()->eq('id', $qb->createNamedParameter($collectiveId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                     ->executeStatement();
@@ -1529,7 +1538,7 @@ class CollectivesService {
             try {
                 $db = $this->container->get(\OCP\IDBConnection::class);
                 $qb = $db->getQueryBuilder();
-                $qb->update('collectives_collectives')
+                $qb->update('collectives')
                     ->set('circle_unique_id', $qb->createNamedParameter((string)$meta['originalCircleId']))
                     ->where($qb->expr()->eq('id', $qb->createNamedParameter($collectiveId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                     ->executeStatement();
@@ -1670,6 +1679,21 @@ class CollectivesService {
                 'teamId' => $teamId, 'collectiveId' => $collectiveId,
                 'error'  => $e->getMessage(),
                 'app'    => Application::APP_ID,
+            ]);
+        }
+    }
+
+    /**
+     * v4.10.6 — put TeamHub's deletion lock back on a team whose collective
+     * was just purged. Best-effort: the hourly `relockAll()` is the backstop,
+     * and the caller is on a path that already succeeded.
+     */
+    private function relockTeam(string $teamId): void {
+        try {
+            $this->teamRegistry->lock($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][CollectivesService] could not re-lock the team after its collective was purged — the hourly re-lock will retry', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
     }

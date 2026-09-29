@@ -203,7 +203,7 @@ export default {
 }
 
 .prov-progress__icon--ok {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .prov-progress__icon--warn {
@@ -242,11 +242,11 @@ export default {
 }
 
 .prov-progress__step--completed .prov-progress__step-mark {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .prov-progress__step--failed .prov-progress__step-mark {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .prov-progress__step--attention .prov-progress__step-mark {
@@ -278,7 +278,7 @@ export default {
 
 .prov-progress__step-error {
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .prov-progress__step--attention .prov-progress__step-error {
@@ -352,6 +352,6 @@ export default {
 
 .prov-progress__diag-steps {
     margin: 0;
-    padding-left: var(--th-space-lg);
+    padding-inline-start: var(--th-space-lg);
 }
 </style>

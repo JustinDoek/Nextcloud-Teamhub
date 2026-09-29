@@ -14,7 +14,7 @@ This will require us to start a company, develop a business case etc. Exciting t
 **Our Commitment to the Community**
 Our dedication to the open-source Community version remains! We chose an option to keep both versions side-by-side in our app, ensuring long-term stability and sharing new features that benefit all use cases.
 To make this seamless, we've introduced a unified licensing backend, meaning both versions are supported within a single app. To gather knowledge about what our users need we created a short feedback form. We would love to read your answers so we can keep building in the right direction. 
-Form: https://tldr.host/teamhub/feedback.php 
+Form: https://teamhub.doekworks.eu/feedback.php 
 
 **Why Upgrade to a License?**
 Request a free trial and experience for yourself. You can request one directly from your dashboard: simply navigate to Admin settings -> TeamHub -> License tab.

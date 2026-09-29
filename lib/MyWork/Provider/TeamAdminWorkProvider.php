@@ -17,7 +17,9 @@ use OCA\TeamHub\MyWork\WorkItemPage;
 use OCA\TeamHub\MyWork\WorkQuery;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
+use OCA\TeamHub\Service\TeamSpaceReconcileService;
 use OCP\IL10N;
+use OCP\IUserManager;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -29,14 +31,20 @@ use Psr\Log\LoggerInterface;
  * existed, on the Team info widget and in Manage team → Integrations; what it
  * did not have was a place in the one list a person actually works from.
  *
- * ## Why this is its own provider and its own category
+ * ## Why this is its own provider
  *
  * Every other My Work item is the viewer's own work: assigned to them, waiting
- * on them, proposed by them. This is not — it is work they have because of a
- * *role* they hold in a team. Filing it under Action required would have put
- * "someone connected a folder" beside "this approval is overdue", and the two
- * are not the same kind of urgent. `Category::TEAM_ADMIN` ranks below Waiting
- * for others precisely so it never outranks a deadline.
+ * on them, proposed by them. This is work they have because of a *role* they
+ * hold in a team — a different source of the same obligation, which is why it
+ * is a provider of its own.
+ *
+ * It is **not** a category of its own. Until v4.10.20 these rows sat in
+ * `Category::TEAM_ADMIN`, below Waiting for others, so that "someone connected
+ * a folder" would never outrank "this approval is overdue". The cost was worse
+ * than the problem: a team admin's own queue was filed below work they could
+ * not act on at all. The next move is theirs, so the row is
+ * `Category::ACTION_REQUIRED` like any other task, and `Priority` carries how
+ * pressing it is within that section — which is what priority is for.
  *
  * ## No due dates
  *
@@ -81,6 +89,19 @@ class TeamAdminWorkProvider implements IWorkProvider {
     private const JOIN_PREFIX = 'joinreq';
 
     /**
+     * v4.10.1 — the team owner's half of a team-space hand-over: a Nextcloud
+     * administrator handed the "move the shared folder into the team space"
+     * task to this team (`TeamSpaceAdminWorkProvider`), and the owner reports
+     * it done from here. Id shape `teamspace:{teamId}:task`, same three
+     * segments, marker in front like `joinreq`.
+     */
+    private const TEAMSPACE_PREFIX = 'teamspace';
+    /** The owner's team-space task. */
+    private const TYPE_TEAMSPACE_TASK = 'team_space_task';
+    /** Source status of an open team-space task. */
+    public const STATUS_TEAMSPACE_TASK = 'teamspace_task_assigned';
+
+    /**
      * Rows per request across all teams.
      *
      * A team with fifty unreviewed resources has a discovery problem, not a
@@ -91,11 +112,16 @@ class TeamAdminWorkProvider implements IWorkProvider {
     private ?string $unavailableReason = null;
 
     public function __construct(
-        private TeamAppResourceMapper    $resourceMapper,
-        private ResourceDiscoveryService $discoveryService,
-        private MemberService            $memberService,
-        private IL10N                    $l,
-        private LoggerInterface          $logger,
+        private TeamAppResourceMapper     $resourceMapper,
+        private ResourceDiscoveryService  $discoveryService,
+        private MemberService             $memberService,
+        // v4.10.1 — the owner's team-space task lives on the reconcile
+        // service's ledger; the owner's display name goes into the
+        // administrators' "reported done" notification.
+        private TeamSpaceReconcileService $teamSpaceReconcile,
+        private IUserManager              $userManager,
+        private IL10N                     $l,
+        private LoggerInterface           $logger,
     ) {
     }
 
@@ -127,10 +153,18 @@ class TeamAdminWorkProvider implements IWorkProvider {
                 ActionType::OPEN,
                 ActionType::APPROVE,
                 ActionType::REJECT,
+                // v4.10.1 — the owner reports a team-space task done.
+                ActionType::COMPLETE,
             ],
-            'resourceTypes' => [self::RESOURCE_TYPE, self::TYPE_JOIN_REQUEST],
-            'statuses'      => [self::STATUS_PENDING_REVIEW, self::STATUS_JOIN_REQUESTED],
-            'categories'    => [Category::TEAM_ADMIN],
+            'resourceTypes' => [self::RESOURCE_TYPE, self::TYPE_JOIN_REQUEST, self::TYPE_TEAMSPACE_TASK],
+            'statuses'      => [
+                self::STATUS_PENDING_REVIEW, self::STATUS_JOIN_REQUESTED, self::STATUS_TEAMSPACE_TASK,
+            ],
+            // v4.10.29 — the quota request (Waiting for others / Completed
+            // rows since v4.10.2) moved onto the engine as a Nextcloud
+            // service, whose rows are the workflow's own; everything left
+            // here is the team admin's to act on.
+            'categories'    => [Category::ACTION_REQUIRED],
             'pagination'    => false,
             'incremental'   => false,
         ];
@@ -178,6 +212,22 @@ class TeamAdminWorkProvider implements IWorkProvider {
 
         $items     = [];
         $truncated = false;
+
+        // v4.10.1 — team-space tasks first: a Nextcloud administrator is
+        // waiting on the owner, and the row says so. One per team at most.
+        try {
+            foreach ($this->teamSpaceReconcile->listAssignedTasks($teamIds) as $task) {
+                if (count($items) >= self::MAX_ITEMS) {
+                    $truncated = true;
+                    break;
+                }
+                $items[] = $this->buildTeamSpaceTaskItem($query, $task);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MyWork][TeamAdmin] team-space task lookup failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
 
         foreach ($teamIds as $teamId) {
             if (count($items) >= self::MAX_ITEMS) {
@@ -264,6 +314,28 @@ class TeamAdminWorkProvider implements IWorkProvider {
             return null;
         }
 
+        // v4.10.1 — the owner's team-space task, same marker-in-front shape.
+        if ($parts[0] === self::TEAMSPACE_PREFIX) {
+            $teamId = $parts[1];
+            if (!in_array($teamId, $allowedTeamIds, true) || !$this->isTeamAdmin($teamId)) {
+                return null;
+            }
+            try {
+                foreach ($this->teamSpaceReconcile->listAssignedTasks([$teamId]) as $task) {
+                    return $this->buildTeamSpaceTaskItem(
+                        new WorkQuery(userId: $userId, teamIds: $allowedTeamIds, now: time()),
+                        $task,
+                    );
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MyWork][TeamAdmin] team-space task re-read failed', [
+                    'itemId' => $itemId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+            // Reported done already, closed, or the shared folder is gone.
+            return null;
+        }
+
         // v4.6.17 — a join request wears the same three-segment shape with a
         // marker in front. Told apart before the resource branch reads $parts[0]
         // as a team id.
@@ -330,10 +402,16 @@ class TeamAdminWorkProvider implements IWorkProvider {
     // ---------------------------------------------------------------------
 
     public function getAvailableActions(string $userId, WorkItem $item): array {
+        if ($item->resourceType === self::TYPE_TEAMSPACE_TASK) {
+            return [ActionType::OPEN, ActionType::COMPLETE];
+        }
         return [ActionType::OPEN, ActionType::APPROVE, ActionType::REJECT];
     }
 
     public function executeAction(string $userId, WorkItem $item, string $action, array $params): ActionResult {
+        if ($item->resourceType === self::TYPE_TEAMSPACE_TASK) {
+            return $this->completeTeamSpaceTask($userId, $item, $action);
+        }
         if ($item->resourceType === self::TYPE_JOIN_REQUEST) {
             return $this->decideJoinRequest($item, $action);
         }
@@ -375,6 +453,38 @@ class TeamAdminWorkProvider implements IWorkProvider {
         }
 
         return ActionResult::unsupported($this->l->t('Unknown action.'));
+    }
+
+    /**
+     * The owner reports the team-space move done (v4.10.1). The ledger flips
+     * to *done*, the Nextcloud administrators are notified and their row comes
+     * back with a Close. `getItem()` has already established the caller is an
+     * admin of the team; `completeTask()` refuses a task that is not open.
+     */
+    private function completeTeamSpaceTask(string $userId, WorkItem $item, string $action): ActionResult {
+        if ($action !== ActionType::COMPLETE) {
+            return ActionResult::unsupported($this->l->t('Unknown action.'));
+        }
+        try {
+            $user = $this->userManager->get($userId);
+            $this->teamSpaceReconcile->completeTask(
+                $item->teamId,
+                $userId,
+                $user !== null ? ($user->getDisplayName() ?: $userId) : $userId,
+            );
+            return ActionResult::success(
+                $this->l->t('Reported done. The Nextcloud administrators have been notified.'),
+                null,
+                true,
+            );
+        } catch (\RuntimeException $e) {
+            return ActionResult::conflict($e->getMessage());
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MyWork][TeamAdmin] team-space task completion failed', [
+                'teamId' => $item->teamId, 'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return ActionResult::failure($this->l->t('That could not be saved.'), 'failed');
+        }
     }
 
     /**
@@ -445,7 +555,7 @@ class TeamAdminWorkProvider implements IWorkProvider {
             'providerItemId' => $teamId . ':' . $appId . ':' . $resourceId,
             'teamId'         => $teamId,
             'teamName'       => $query->teamName($teamId),
-            'category'       => Category::TEAM_ADMIN,
+            'category'       => Category::ACTION_REQUIRED,
             'title'          => $this->titleFor($appId, $row),
             'subtitle'       => $this->appLabel($appId),
             'resourceType'   => self::RESOURCE_TYPE,
@@ -501,7 +611,7 @@ class TeamAdminWorkProvider implements IWorkProvider {
             'providerItemId' => self::JOIN_PREFIX . ':' . $teamId . ':' . $uid,
             'teamId'         => $teamId,
             'teamName'       => $query->teamName($teamId),
-            'category'       => Category::TEAM_ADMIN,
+            'category'       => Category::ACTION_REQUIRED,
             'title'          => $this->l->t('%s asks to join', [$name]),
             'subtitle'       => $this->l->t('Membership request'),
             'resourceType'   => self::TYPE_JOIN_REQUEST,
@@ -531,6 +641,86 @@ class TeamAdminWorkProvider implements IWorkProvider {
                 'requesterName' => $name,
             ],
             'permissions'    => ['canApprove' => true],
+        ]);
+    }
+
+    /**
+     * The owner's team-space task (v4.10.1): move the shared folder's files
+     * into the team space the reconcile pass created, connect the space,
+     * disconnect the shared folder, then report done. The steps ride on the
+     * row (`metadata.steps`); Open lands on Manage team → Modules &
+     * integrations, where the space is waiting as the dual-folder row.
+     *
+     * HIGH, above a join request: a Nextcloud administrator handed this over
+     * and is waiting on it. Still Team admin, so it never outranks a deadline.
+     *
+     * @param array{teamId: string, teamName: string, sharedFolderId: int, sharedFolderName: string, spaceName: string|null, spaceConnected: bool, since: int, task: array<string,mixed>} $task
+     */
+    private function buildTeamSpaceTaskItem(WorkQuery $query, array $task): WorkItem {
+        $teamId  = $task['teamId'];
+        $shared  = $task['sharedFolderName'];
+        $space   = $task['spaceName'] ?? $task['teamName'];
+        $handed  = $task['task'];
+        $steps   = [
+            $this->l->t('In Files, open the shared folder "%1$s", select everything and move it into the team space "%2$s".', [$shared, $space]),
+        ];
+        if (!$task['spaceConnected']) {
+            $steps[] = $this->l->t('In Manage team → Modules & integrations → Files, connect the team space with "+ Connect team folder" — it is already listed.');
+        }
+        $steps[] = $this->l->t('Disconnect the shared folder "%s" in the same section. The folder stays in your Files; only the team\'s access to it ends.', [$shared]);
+        $steps[] = $this->l->t('Then press Complete here. The Nextcloud administrators are told, and this row disappears.');
+
+        $adminName = (string)($handed['assignedByName'] ?: $handed['assignedBy']);
+        $note      = (string)($handed['note'] ?? '');
+
+        return WorkItem::make([
+            'providerId'     => self::ID,
+            'providerItemId' => self::TEAMSPACE_PREFIX . ':' . $teamId . ':task',
+            'teamId'         => $teamId,
+            'teamName'       => $query->teamNames[$teamId] ?? $task['teamName'],
+            'category'       => Category::ACTION_REQUIRED,
+            'title'          => $this->l->t('Move the shared folder into the team space'),
+            // TRANSLATORS: %1$s is the old shared folder's name, %2$s the new team space's name
+            'subtitle'       => $this->l->t('"%1$s" → "%2$s"', [$shared, $space]),
+            'resourceType'   => self::TYPE_TEAMSPACE_TASK,
+            'resourceId'     => $teamId,
+            'resourceUrl'    => '/apps/teamhub?team=' . rawurlencode($teamId),
+            'openTarget'     => OpenTarget::manageTeam('integrations'),
+            'priority'       => Priority::HIGH,
+            'status'         => self::STATUS_TEAMSPACE_TASK,
+            'reason'         => $note !== ''
+                ? $this->l->t('%1$s handed this to you: %2$s', [$adminName, $note])
+                : $this->l->t('%s handed this to you and is waiting for it.', [$adminName]),
+            'createdAt'      => (int)$handed['assignedAt'] ?: null,
+            'updatedAt'      => (int)$handed['assignedAt'] ?: null,
+            'dueAt'          => null,
+            'completedAt'    => null,
+            'assignee'       => null,
+            'waitingFor'     => null,
+            'availableActions' => [],
+            'metadata'       => [
+                'steps'        => $steps,
+                'sharedFolder' => $shared,
+                'spaceName'    => $space,
+                'assignedBy'   => (string)$handed['assignedBy'],
+                'workflow'     => $this->teamSpaceReconcile->handOverWorkflow($handed, (string)($handed['ownerName'] ?? ''), [
+                    // TRANSLATORS: workflow step — a Nextcloud administrator hands the folder move to the team owner
+                    $this->l->t('Handed to the team owner'),
+                    // TRANSLATORS: workflow step — the team owner moves the files and disconnects the shared folder
+                    $this->l->t('Owner moves the folder'),
+                    // TRANSLATORS: workflow step — a Nextcloud administrator closes the finished folder move
+                    $this->l->t('Administrator closes'),
+                ]),
+                'assignedByName' => $adminName,
+                'note'         => $note,
+                'confirm'      => [
+                    ActionType::COMPLETE => [
+                        'title' => $this->l->t('Report the move done?'),
+                        'body'  => $this->l->t('%s is told that the files are in the team space and the shared folder is disconnected. Nothing is moved or deleted by this button.', [$adminName]),
+                    ],
+                ],
+            ],
+            'permissions'    => ['canComplete' => true],
         ]);
     }
 

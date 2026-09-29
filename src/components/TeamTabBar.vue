@@ -22,7 +22,7 @@
             :class="{ active: currentView === 'msgstream' }"
             :aria-selected="currentView === 'msgstream' ? 'true' : 'false'"
             @click="setView('msgstream')">
-            <MessageOutline :size="16" />
+            <MessageOutline :size="ICON_BODY" />
             {{ t('teamhub', 'Home') }}
         </button>
 
@@ -54,8 +54,8 @@
                     @click="setView('talk')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <Chat :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <Chat :size="ICON_BODY" />
                     {{ t('teamhub', 'Chat') }}
                 </button>
 
@@ -72,8 +72,8 @@
                     @click="setView('files')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <Folder :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <Folder :size="ICON_BODY" />
                     {{ t('teamhub', 'Files') }}
                 </button>
 
@@ -90,8 +90,8 @@
                     @click="onCalendarTabClick"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <Calendar :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <Calendar :size="ICON_BODY" />
                     {{ t('teamhub', 'Calendar') }}
                     <span v-if="resources.calendar.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} calendars', { n: resources.calendar.length })">{{ resources.calendar.length }}</span>
                 </button>
@@ -109,8 +109,8 @@
                     @click="onDeckTabClick"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <CardText :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <CardText :size="ICON_BODY" />
                     {{ t('teamhub', 'Deck') }}
                     <span v-if="resources.deck.length > 1" class="teamhub-tab-count" :aria-label="t('teamhub', '{n} boards', { n: resources.deck.length })">{{ resources.deck.length }}</span>
                 </button>
@@ -128,8 +128,8 @@
                     @click="setView('presence')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <OfficeBuildingIcon :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <OfficeBuildingIcon :size="ICON_BODY" />
                     {{ t('teamhub', 'Presence') }}
                 </button>
 
@@ -146,9 +146,28 @@
                     @click="setView('decisions')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <GavelIcon :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <GavelIcon :size="ICON_BODY" />
                     {{ t('teamhub', 'Decisions') }}
+                </button>
+
+                <!-- Built-in: Services (v4.10.41) — a service team's services
+                     and the service builder. Same pattern as Decisions. -->
+                <button
+                    v-else-if="tab.key === 'services'"
+                    id="tab-services"
+                    :key="'tab-services'"
+                    role="tab"
+                    class="teamhub-tab"
+                    :class="{ active: currentView === 'services' }"
+                    :aria-selected="currentView === 'services' ? 'true' : 'false'"
+                    :title="t('teamhub', 'Press left/right arrow to reorder')"
+                    @click="setView('services')"
+                    @keydown.left.prevent="moveTab(tab, -1)"
+                    @keydown.right.prevent="moveTab(tab, 1)">
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <ViewGridOutline :size="ICON_BODY" />
+                    {{ t('teamhub', 'Services') }}
                 </button>
 
                 <!-- Built-in: Wiki (Collectives) (v4.3.9). Mirrors the
@@ -167,8 +186,8 @@
                     @click="setView('collectives')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <BookOpenOutline :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <BookOpenOutline :size="ICON_BODY" />
                     {{ t('teamhub', 'Collectives') }}
                 </button>
 
@@ -185,8 +204,8 @@
                     @click="setView('timeline')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <TimelineIcon :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <TimelineIcon :size="ICON_BODY" />
                     {{ t('teamhub', 'Timeline') }}
                 </button>
 
@@ -203,8 +222,8 @@
                     @click="setView('budget')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <WalletOutlineIcon :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <WalletOutlineIcon :size="ICON_BODY" />
                     {{ t('teamhub', 'Budget') }}
                 </button>
 
@@ -221,8 +240,8 @@
                     @click="setView('time')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <ClockOutlineIcon :size="16" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <ClockOutlineIcon :size="ICON_BODY" />
                     {{ t('teamhub', 'Time') }}
                 </button>
 
@@ -239,14 +258,14 @@
                     @click="setView(tab.key)"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
                     <img
                         v-if="tab.appId"
                         :src="appIconUrl(tab.appId)"
                         :alt="tab.label"
                         class="teamhub-tab-app-icon"
                         @error="onTabIconError($event, tab)" />
-                    <Puzzle v-else :size="16" />
+                    <Puzzle v-else :size="ICON_BODY" />
                     {{ tab.label }}
                 </button>
 
@@ -263,8 +282,8 @@
                     @click="setView(tab.key)"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <Web :size="14" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <Web :size="ICON_INLINE" />
                     {{ tab.label }}
                 </button>
 
@@ -280,8 +299,8 @@
                     :title="t('teamhub', 'Press left/right arrow to reorder')"
                     @keydown.left.prevent="moveTab(tab, -1)"
                     @keydown.right.prevent="moveTab(tab, 1)">
-                    <DragVariant class="teamhub-tab-drag-handle" :size="14" aria-hidden="true" />
-                    <OpenInNew :size="14" />
+                    <DragVariant class="teamhub-tab-drag-handle" :size="ICON_INLINE" aria-hidden="true" />
+                    <OpenInNew :size="ICON_INLINE" />
                     {{ tab.label }}
                 </a>
             </template>
@@ -300,7 +319,7 @@
                 aria-haspopup="true"
                 @click="toggleMoreMenu"
                 @keydown.escape="moreMenuOpen = false">
-                <ChevronDown :size="16" />
+                <ChevronDown :size="ICON_BODY" />
                 {{ t('teamhub', 'More…') }}
             </button>
             <div v-show="moreMenuOpen"
@@ -320,7 +339,7 @@
                        class="teamhub-tab-more-item"
                        role="menuitem"
                        @click="moreMenuOpen = false">
-                        <OpenInNew :size="16" />
+                        <OpenInNew :size="ICON_BODY" />
                         {{ tab.label }}
                     </a>
                     <button v-else
@@ -333,7 +352,7 @@
                              :src="appIconUrl(tab.appId)"
                              :alt="tab.label"
                              class="teamhub-tab-app-icon" />
-                        <component v-else :is="getTabIconName(tab)" :size="16" />
+                        <component v-else :is="getTabIconName(tab)" :size="ICON_BODY" />
                         {{ tab.label }}
                     </button>
                 </template>
@@ -346,7 +365,7 @@
             variant="tertiary"
             :aria-label="t('teamhub', 'Manage links')"
             @click="$emit('manage-links')">
-            <template #icon><Plus :size="18" /></template>
+            <template #icon><Plus :size="ICON_BODY" /></template>
         </NcButton>
 
         <!-- Edit layout toggle — shown only on Home view, and only on
@@ -359,7 +378,7 @@
             :variant="editMode ? 'primary' : 'tertiary'"
             :aria-label="editMode ? t('teamhub', 'Done editing layout') : t('teamhub', 'Edit layout')"
             @click="$emit('toggle-edit-mode')">
-            <template #icon><ViewDashboardEdit :size="18" /></template>
+            <template #icon><ViewDashboardEdit :size="ICON_BODY" /></template>
             {{ editMode ? t('teamhub', 'Done') : t('teamhub', 'Edit layout') }}
         </NcButton>
     </div>
@@ -371,6 +390,7 @@ import { generateUrl } from '@nextcloud/router'
 import { mapState } from 'vuex'
 import { NcButton } from '@nextcloud/vue'
 import draggable from 'vuedraggable'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import Chat from 'vue-material-design-icons/Chat.vue'
@@ -388,6 +408,7 @@ import BookOpenOutline    from 'vue-material-design-icons/BookOpenOutline.vue'
 import TimelineIcon       from 'vue-material-design-icons/TimelineCheckOutline.vue'
 import WalletOutlineIcon  from 'vue-material-design-icons/WalletOutline.vue'
 import ClockOutlineIcon   from 'vue-material-design-icons/ClockOutline.vue'
+import ViewGridOutline    from 'vue-material-design-icons/ViewGridOutline.vue'
 import ChevronDown        from 'vue-material-design-icons/ChevronDown.vue'
 // v3.100.14: replaces the ⠿ Braille character previously used as a
 // drag handle. See gui.md § 13 — the Braille glyph renders
@@ -402,7 +423,7 @@ export default {
         draggable,
         MessageOutline, Chat, Folder, Calendar, CardText,
         OpenInNew, Plus, Puzzle, ViewDashboardEdit, Web, OfficeBuildingIcon, GavelIcon, BookOpenOutline,
-        TimelineIcon, WalletOutlineIcon, ClockOutlineIcon, ChevronDown, DragVariant,
+        TimelineIcon, WalletOutlineIcon, ClockOutlineIcon, ChevronDown, DragVariant, ViewGridOutline,
     },
 
     props: {
@@ -421,6 +442,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             overflowStartIndex: -1,
             moreMenuOpen: false,
             moreMenuTop: 0,
@@ -584,6 +607,8 @@ export default {
             case 'presence':
                 return true
             case 'decisions':
+                return true
+            case 'services':
                 return true
             case 'collectives':
                 // v4.3.9 — Wiki tab. buildAllTabDescriptors already gates
@@ -834,6 +859,7 @@ export default {
             case 'deck': return 'CardText'
             case 'presence': return 'OfficeBuildingIcon'
             case 'decisions': return 'GavelIcon'
+            case 'services': return 'ViewGridOutline'
             case 'collectives': return 'BookOpenOutline'
             case 'timeline': return 'TimelineIcon'
             case 'budget': return 'WalletOutlineIcon'
@@ -881,7 +907,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 14px;
+    padding: 8px 16px;
     border-radius: var(--border-radius-element, var(--border-radius-large, 8px));
     border: none;
     background: transparent;
@@ -889,7 +915,7 @@ export default {
     cursor: pointer;
     font-size: var(--th-font-body);
     font-weight: 500;
-    transition: background 0.15s, color 0.15s;
+    transition: background var(--animation-quick), color var(--animation-quick);
     text-decoration: none;
     white-space: nowrap;
     flex-shrink: 0;
@@ -922,7 +948,7 @@ export default {
 .teamhub-tab-drag-handle {
     cursor: grab;
     opacity: 0;
-    transition: opacity 0.12s;
+    transition: opacity var(--animation-quick);
     line-height: 1;
     color: var(--color-text-maxcontrast);
     user-select: none;
@@ -941,7 +967,7 @@ export default {
 
 .teamhub-tab-dragging {
     cursor: grabbing;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 2px 8px var(--color-box-shadow);
     border-radius: var(--border-radius-element, var(--border-radius-large, 8px));
 }
 
@@ -956,10 +982,10 @@ export default {
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
-    border-radius: 8px;
+    border-radius: var(--border-radius-element);
     background: var(--color-primary);
     color: var(--color-primary-text);
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     line-height: 1;
     flex-shrink: 0;
@@ -974,7 +1000,7 @@ export default {
 
 .teamhub-edit-layout-btn {
     flex-shrink: 0;
-    margin-left: auto;
+    margin-inline-start: auto;
     white-space: nowrap;
 }
 
@@ -985,7 +1011,7 @@ export default {
 }
 
 .teamhub-tab-more-trigger .material-design-icon {
-    transition: transform 0.15s;
+    transition: transform var(--animation-quick);
 }
 
 .teamhub-tab-more-trigger[aria-expanded="true"] .material-design-icon {
@@ -1010,8 +1036,8 @@ export default {
     overflow-y: auto;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    border-radius: var(--border-radius-element);
+    box-shadow: 0 2px 8px var(--color-box-shadow);
     padding: 4px 0;
 }
 

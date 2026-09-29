@@ -63,3 +63,16 @@ test('the dashboard catalog offers both with labels, even when hidden', () => {
     assert.ok(!keys.includes('widget-openproject-work'))
     for (const c of catalog) assert.ok(c.label.length > 0)
 })
+
+test('the Services widget is retired: a service team has the Services tab instead (v4.10.44)', () => {
+    const notYet = computeActiveWidgetIds({ ...base, serviceDeskConfig: { isDesk: false, isServiceTeam: true } })
+    assert.ok(!notYet.has('widget-services'))
+    assert.ok(!notYet.has('widget-service-queue'), 'the queue waits for the desk')
+
+    const desk = computeActiveWidgetIds({ ...base, serviceDeskConfig: { isDesk: true, isServiceTeam: true } })
+    assert.ok(!desk.has('widget-services'))
+    assert.ok(desk.has('widget-service-queue'))
+
+    const catalog = buildDashboardWidgetCatalog({ ...base, serviceDeskConfig: { isDesk: true, isServiceTeam: true } })
+    assert.ok(!catalog.some(c => c.key === 'widget-services'), 'not offered in the widget picker either')
+})

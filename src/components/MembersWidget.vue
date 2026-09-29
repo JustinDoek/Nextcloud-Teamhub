@@ -17,7 +17,7 @@
                 class="th-members-widget__tab"
                 :class="{ 'th-members-widget__tab--active': activeTab === tab.id }"
                 @click="setTab(tab.id)">
-                <component :is="tab.icon" :size="14" aria-hidden="true" />
+                <component :is="tab.icon" :size="ICON_INLINE" aria-hidden="true" />
                 {{ tab.label }}
             </button>
         </div>
@@ -31,11 +31,11 @@
             class="th-members-widget__panel">
 
             <div v-if="membersLoading" class="th-members-widget__state">
-                <NcLoadingIcon :size="20" />
+                <NcLoadingIcon :size="ICON_BODY" />
             </div>
 
             <div v-else-if="!sortedMembers.length" class="th-members-widget__state">
-                <AccountGroupIcon :size="36" class="th-members-widget__empty-icon" />
+                <AccountGroupIcon :size="ICON_LARGE" class="th-members-widget__empty-icon" />
                 <span>{{ t('teamhub', 'No members yet') }}</span>
             </div>
 
@@ -59,11 +59,11 @@
             class="th-members-widget__panel">
 
             <div v-if="tomorrowLoading" class="th-members-widget__state">
-                <NcLoadingIcon :size="20" />
+                <NcLoadingIcon :size="ICON_BODY" />
             </div>
 
             <div v-else-if="!sortedMembers.length" class="th-members-widget__state">
-                <AccountGroupIcon :size="36" class="th-members-widget__empty-icon" />
+                <AccountGroupIcon :size="ICON_LARGE" class="th-members-widget__empty-icon" />
                 <span>{{ t('teamhub', 'No members yet') }}</span>
             </div>
 
@@ -82,12 +82,12 @@
                     Parent (TeamWidgetGrid) re-emits as set-view='presence'.
                 -->
                 <div class="th-members-widget__footer">
-                    <button
-                        type="button"
+                    <NcButton
                         class="th-members-widget__footer-link"
-                        @click="$emit('view-presence-calendar')">
-                        {{ t('teamhub', 'View Full Presence Calendar') }}
-                    </button>
+                        @click="$emit('view-presence-calendar')"
+                        variant="tertiary">
+                        {{ t('teamhub', 'View full presence calendar') }}
+                    </NcButton>
                 </div>
             </template>
         </div>
@@ -114,12 +114,12 @@
             </div>
 
             <div v-if="!searchQuery.trim()" class="th-members-widget__state th-members-widget__state--hint">
-                <MagnifyIcon :size="24" class="th-members-widget__empty-icon" aria-hidden="true" />
+                <MagnifyIcon :size="ICON_LARGE" class="th-members-widget__empty-icon" aria-hidden="true" />
                 <span>{{ t('teamhub', 'Start typing to find a member.') }}</span>
             </div>
 
             <div v-else-if="!filteredMembers.length" class="th-members-widget__state">
-                <span>{{ t('teamhub', 'No members match your search.') }}</span>
+                <span>{{ t('teamhub', 'No members match the search.') }}</span>
             </div>
 
             <ul v-else class="th-members-widget__list">
@@ -140,7 +140,8 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { mapState } from 'vuex'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
-import { NcLoadingIcon, NcTextField } from '@nextcloud/vue'
+import { NcLoadingIcon, NcTextField, NcButton } from '@nextcloud/vue'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 import AccountGroupIcon  from 'vue-material-design-icons/AccountGroup.vue'
 import AccountIcon       from 'vue-material-design-icons/Account.vue'
@@ -154,7 +155,7 @@ export default {
     name: 'MembersWidget',
 
     components: {
-        NcLoadingIcon, NcTextField,
+         NcButton, NcLoadingIcon, NcTextField,
         AccountGroupIcon, AccountIcon, CalendarIcon, MagnifyIcon,
         MemberRow, MemberPresenceRow,
     },
@@ -163,6 +164,9 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
             activeTab: 'members',
             // Search tab — local string, filtered against the same allEffectiveMembers list.
             searchQuery: '',
@@ -411,15 +415,15 @@ export default {
     align-items: stretch;
     border-bottom: 1px solid var(--color-border);
     padding: 0 4px;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
 .th-members-widget__tab {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 8px 10px 7px;
+    gap: 4px;
+    padding: 8px 8px 8px;
     font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
@@ -428,9 +432,9 @@ export default {
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     cursor: pointer;
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    border-radius: var(--border-radius-small) var(--border-radius-small) 0 0;
     white-space: nowrap;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    transition: color var(--animation-quick), border-color var(--animation-quick), background var(--animation-quick);
     line-height: 1;
 }
 
@@ -465,7 +469,7 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
     padding: 24px 16px;
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-body);
@@ -488,7 +492,7 @@ export default {
 
 /* ── Search box ── */
 .th-members-widget__search-box {
-    padding: 10px 12px 6px;
+    padding: 8px 12px 8px;
     border-bottom: 1px solid var(--color-border);
     background: var(--color-main-background);
     position: sticky;
@@ -511,25 +515,8 @@ export default {
 
 /* ── Tomorrow tab footer ── */
 .th-members-widget__footer {
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-top: 1px solid var(--color-border);
     text-align: center;
-}
-.th-members-widget__footer-link {
-    background: transparent;
-    border: none;
-    padding: 4px 8px;
-    color: var(--color-primary-element);
-    font-size: 13px;
-    cursor: pointer;
-    border-radius: var(--border-radius);
-}
-.th-members-widget__footer-link:hover {
-    background: var(--color-background-hover);
-    text-decoration: underline;
-}
-.th-members-widget__footer-link:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 </style>

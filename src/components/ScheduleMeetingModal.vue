@@ -4,7 +4,7 @@
         @close="$emit('close')">
         <div class="schedule-modal">
             <h3 class="schedule-modal__title">
-                <VideoIcon :size="20" />
+                <VideoIcon :size="ICON_BODY" />
                 {{ t('teamhub', 'Schedule meeting') }}
             </h3>
 
@@ -35,14 +35,14 @@
                 </div>
                 <div class="schedule-modal__field">
                     <label class="schedule-modal__label">{{ t('teamhub', 'Duration (min)') }}</label>
-                    <select v-model="form.duration" class="schedule-modal__input schedule-modal__select">
-                        <option value="15">15</option>
-                        <option value="30">30</option>
-                        <option value="45">45</option>
-                        <option value="60" selected>60</option>
-                        <option value="90">90</option>
-                        <option value="120">120</option>
-                    </select>
+                    <NcSelect
+ v-model="form.duration"
+ class="schedule-modal__input schedule-modal__select"
+ :aria-label-combobox="t('teamhub', 'Duration (min)')"
+ label-outside
+ :options="[{ id: '15', label: 15 }, { id: '30', label: 30 }, { id: '45', label: 45 }, { id: '60', label: 60 }, { id: '90', label: 90 }, { id: '120', label: 120 }]"
+ :reduce="o => o.id"
+ :clearable="false" />
                 </div>
             </div>
 
@@ -66,8 +66,8 @@
             <div class="schedule-modal__actions">
                 <NcButton variant="primary" :disabled="saving" @click="submit">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="18" />
-                        <CalendarPlus v-else :size="18" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <CalendarPlus v-else :size="ICON_BODY" />
                     </template>
                     {{ saving ? t('teamhub', 'Scheduling…') : t('teamhub', 'Schedule meeting') }}
                 </NcButton>
@@ -84,13 +84,14 @@ import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea } from '@nextcloud/vue'
+import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcSelect } from '@nextcloud/vue'
 import VideoIcon from 'vue-material-design-icons/Video.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 export default {
     name: 'ScheduleMeetingModal',
-    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, VideoIcon, CalendarPlus },
+    components: {  NcSelect, NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, VideoIcon, CalendarPlus },
     props: {
         teamId:        { type: String, required: true },
         // v4.6.20 — `calendarToken` removed. It carried the calendar's public
@@ -102,6 +103,7 @@ export default {
         const now = new Date()
         const pad = n => String(n).padStart(2, '0')
         return {
+            ICON_BODY,
             saving: false,
             errors: {},
             form: {
@@ -114,6 +116,7 @@ export default {
             },
         }
     },
+
     computed: {
         todayDate() {
             const n = new Date()
@@ -185,8 +188,8 @@ export default {
 .schedule-modal__title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 18px;
+    gap: 8px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     margin: 0 0 24px;
     color: var(--color-main-text);
@@ -211,38 +214,22 @@ export default {
 
 .schedule-modal__label {
     display: block;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
-    margin-bottom: 5px;
+    margin-bottom: 4px;
 }
 
 .schedule-modal__input {
     width: 100%;
-    padding: 8px 12px;
-    border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-large);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: var(--th-font-body);
-    font-family: inherit;
     box-sizing: border-box;
-}
-
-.schedule-modal__input:focus {
-    border-color: var(--color-primary-element);
-}
-
-.schedule-modal__input:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 .schedule-modal__select { cursor: pointer; }
 
 .schedule-modal__error {
-    font-size: 13px;
-    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-error);
     margin: 0 0 16px;
 }
 

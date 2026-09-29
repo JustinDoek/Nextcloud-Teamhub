@@ -77,17 +77,17 @@ export default {
 .presence-grid-cell {
     width: 100%;
     height: 36px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-background-hover);
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     text-align: center;
     line-height: 1.2;
-    padding: 2px;
+    padding: 4px;
     word-break: break-word;
 }
 
@@ -101,8 +101,8 @@ export default {
         -45deg,
         transparent,
         transparent 3px,
-        rgba(0, 0, 0, 0.08) 3px,
-        rgba(0, 0, 0, 0.08) 6px
+        var(--color-box-shadow) 3px,
+        var(--color-box-shadow) 6px
     );
 }
 

@@ -10,10 +10,10 @@ For now, nothing — we were already preparing for this. The core app stays free
 This release is mainly about the OpenProject integration: teams linked to an OpenProject project, projects and teams created together from the create-team wizard, work packages on the team home and in My Work, and the project's news and meetings alongside the team's own.
 
 **The licensing model**
-You can read about our licensing model at: https://tldr.host/teamhub/licensing.html
+You can read about our licensing model at: https://teamhub.doekworks.eu/licensing.html
 
 **Ask for a quote**
-Interested in all features, in a TeamHub without branding, or in any of the other things mentioned on the licensing page? Mail us at teamhub@tldr.host with the subject: Supporter quote
+Interested in all features, in a TeamHub without branding, or in any of the other things mentioned on the licensing page? Mail us at sales@doekworks.eu with the subject: Supporter quote
 We will make sure you receive a celebration quote as an early supporter of the app.
 
 What we need in that e-mail: a contact e-mail address, company name, country, your instance UUID and seat count (both are on the License tab in the TeamHub admin settings).

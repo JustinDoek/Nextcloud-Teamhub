@@ -3,12 +3,12 @@
 
         <!-- Loading state -->
         <div v-if="loading" class="teamhub-int-widget__state">
-            <NcLoadingIcon :size="28" />
+            <NcLoadingIcon :size="ICON_LARGE" />
         </div>
 
         <!-- Error state -->
         <div v-else-if="loadError" class="teamhub-int-widget__state teamhub-int-widget__state--error">
-            <AlertCircleIcon :size="36" class="teamhub-int-widget__state-icon" />
+            <AlertCircleIcon :size="ICON_LARGE" class="teamhub-int-widget__state-icon" />
             <span>{{ t('teamhub', 'Widget failed to load') }}</span>
         </div>
 
@@ -26,7 +26,7 @@
             <component
                 v-else
                 :is="resolvedIcon"
-                :size="36"
+                :size="ICON_LARGE"
                 class="teamhub-int-widget__state-icon" />
             <span>{{ t('teamhub', 'No items') }}</span>
         </div>
@@ -46,8 +46,8 @@
                         <component
                             :is="resolveItemIcon(item.icon)"
                             v-if="item.icon && resolveItemIcon(item.icon)"
-                            :size="18" />
-                        <PuzzleIcon v-else :size="18" />
+                            :size="ICON_BODY" />
+                        <PuzzleIcon v-else :size="ICON_BODY" />
                     </span>
                     <!-- Label + value stacked -->
                     <span class="teamhub-int-widget__item-body">
@@ -65,7 +65,7 @@
             @close="closeActionModal">
             <div class="teamhub-int-widget__modal">
                 <div v-if="actionLoading" class="teamhub-int-widget__state">
-                    <NcLoadingIcon :size="28" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
                 <p v-else-if="actionError" class="teamhub-int-widget__error-msg">
                     {{ actionError }}
@@ -103,7 +103,7 @@
                             :disabled="actionSubmitting"
                             @click="submitAction">
                             <template v-if="actionSubmitting" #icon>
-                                <NcLoadingIcon :size="20" />
+                                <NcLoadingIcon :size="ICON_BODY" />
                             </template>
                             {{ actionSubmitLabel || t('teamhub', 'Submit') }}
                         </NcButton>
@@ -115,17 +115,11 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { translate as t } from '@nextcloud/l10n'
-import {
-    NcLoadingIcon,
-    NcModal,
-    NcButton,
-    NcTextField,
-    NcTextArea,
-    NcCheckboxRadioSwitch,
-} from '@nextcloud/vue'
+import { NcLoadingIcon, NcModal, NcButton, NcTextField, NcTextArea, NcCheckboxRadioSwitch } from '@nextcloud/vue'
 
 import PuzzleIcon        from 'vue-material-design-icons/Puzzle.vue'
 import CalendarMonthIcon from 'vue-material-design-icons/CalendarMonth.vue'
@@ -167,6 +161,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             loading:           true,
             loadError:         false,
             items:             [],
@@ -386,11 +382,11 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
     flex: 1;
     padding: 20px 16px;
     color: var(--color-text-maxcontrast);
-    font-size: 15px;
+    font-size: var(--th-font-body);
     text-align: center;
 }
 
@@ -408,9 +404,9 @@ export default {
 }
 
 /* v3.100.16: NC theme tokens (were --th-color-error hex). */
-.teamhub-int-widget__state--error { color: var(--color-error-text); }
+.teamhub-int-widget__state--error { color: var(--color-text-error); }
 .teamhub-int-widget__state--error .teamhub-int-widget__state-icon {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     opacity: 0.6;
 }
 
@@ -430,10 +426,10 @@ export default {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 14px;
+    padding: 8px 16px;
     text-decoration: none;
     color: var(--color-main-text);
-    transition: background 0.1s;
+    transition: background var(--animation-quick);
     min-width: 0;
 }
 
@@ -449,7 +445,7 @@ a.teamhub-int-widget__item-link:hover {
     flex-shrink: 0;
     width: 38px;
     height: 38px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
@@ -489,7 +485,7 @@ a.teamhub-int-widget__item-link:hover {
 /* v3.100.16: NC theme token (was --th-color-error hex). */
 .teamhub-int-widget__error-msg {
     font-size: var(--th-font-body);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     margin: 0 0 12px;
 }
 
@@ -497,7 +493,7 @@ a.teamhub-int-widget__item-link:hover {
 
 .teamhub-int-widget__field label {
     display: block;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     margin-bottom: 4px;
     color: var(--color-text-light);

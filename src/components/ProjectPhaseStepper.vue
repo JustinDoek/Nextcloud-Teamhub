@@ -8,7 +8,7 @@
                 :class="'phase-stepper__item--' + p.status"
                 :aria-current="p.status === 'active' ? 'step' : false">
                 <span class="phase-stepper__marker" aria-hidden="true">
-                    <Check v-if="p.status === 'done'" :size="14" />
+                    <Check v-if="p.status === 'done'" :size="ICON_INLINE" />
                     <span v-else class="phase-stepper__num">{{ i + 1 }}</span>
                 </span>
                 <span class="phase-stepper__label">{{ p.label }}</span>
@@ -23,7 +23,7 @@
                 class="phase-stepper__info"
                 :aria-label="t('teamhub', 'About this phase')"
                 @click="$emit('show-info')">
-                <InformationOutline :size="16" aria-hidden="true" />
+                <InformationOutline :size="ICON_BODY" aria-hidden="true" />
             </button>
         </template>
     </nav>
@@ -33,6 +33,7 @@
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import Check from 'vue-material-design-icons/Check.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 // Canonical PMC phase order — must match ProjectService::PHASES on the backend.
 const PHASE_ORDER = ['initiation', 'planning', 'execution', 'closing']
@@ -54,6 +55,13 @@ export default {
         },
     },
     emits: ['show-info'],
+    data() {
+        return {
+            ICON_BODY,
+            ICON_INLINE,
+        }
+    },
+
     computed: {
         phaseLabels() {
             return {
@@ -144,7 +152,7 @@ export default {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
     /* Upcoming phases: neutral, non-state surface. */
     background: var(--color-background-dark);
@@ -165,7 +173,7 @@ export default {
 }
 
 .phase-stepper__label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     white-space: nowrap;
     color: var(--color-text-maxcontrast);

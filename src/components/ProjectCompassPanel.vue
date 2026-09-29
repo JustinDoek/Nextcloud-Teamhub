@@ -23,7 +23,7 @@
                  it on demand from here. -->
             <div class="th-compass__header">
                 <div class="th-compass__title">
-                    <CompassOutline :size="18" aria-hidden="true" />
+                    <CompassOutline :size="ICON_BODY" aria-hidden="true" />
                     <h2>{{ t('teamhub', 'Project Compass') }}</h2>
                 </div>
                 <div class="th-compass__header-actions">
@@ -31,15 +31,17 @@
                          stepper's info button opens the same
                          ProjectPhaseGuide dialog; keeping two entry
                          points was duplication. -->
-                    <button
-                        type="button"
+                    <NcButton
                         class="th-compass__collapse"
                         :aria-expanded="!collapsed ? 'true' : 'false'"
                         :aria-label="collapsed ? t('teamhub', 'Expand Project Compass') : t('teamhub', 'Collapse Project Compass')"
-                        @click="toggleCollapsed">
-                        <ChevronUp v-if="!collapsed" :size="16" />
-                        <ChevronDown v-else :size="16" />
-                    </button>
+                        @click="toggleCollapsed"
+                        variant="tertiary">
+                        <template #icon>
+                            <ChevronUp v-if="!collapsed" :size="ICON_BODY" />
+                            <ChevronDown v-else :size="ICON_BODY" />
+                        </template>
+                    </NcButton>
                 </div>
             </div>
 
@@ -59,23 +61,25 @@
                         <span class="th-compass__nextup-text">
                             {{ readyText }}
                         </span>
-                        <button
+                        <NcButton
                             v-if="canAdvancePhase"
-                            type="button"
                             class="th-compass__advance"
-                            @click="$emit('advance-phase', payload.nextPhase)">
+                            @click="$emit('advance-phase', payload.nextPhase)"
+                            variant="tertiary">
                             {{ t('teamhub', 'Advance phase') }}
-                        </button>
+                        </NcButton>
                     </template>
                     <template v-else>
                         <span class="th-compass__nextup-text">{{ nextUpItem.label }}</span>
-                        <button
-                            type="button"
+                        <NcButton
                             class="th-compass__nextup-link"
-                            @click="followItem(nextUpItem)">
+                            @click="followItem(nextUpItem)"
+                            variant="tertiary">
+                            <template #icon>
+                                <ArrowRight :size="ICON_INLINE" aria-hidden="true" />
+                            </template>
                             {{ t('teamhub', 'Go') }}
-                            <ArrowRight :size="14" aria-hidden="true" />
-                        </button>
+                        </NcButton>
                     </template>
                 </div>
 
@@ -90,9 +94,9 @@
                             'th-compass__item--advisory': item.advisory,
                         }">
                         <span class="th-compass__item-check" aria-hidden="true">
-                            <CheckCircleOutline v-if="item.done" :size="16" />
-                            <InformationOutline v-else-if="item.advisory" :size="16" />
-                            <CircleOutline v-else :size="16" />
+                            <CheckCircleOutline v-if="item.done" :size="ICON_BODY" />
+                            <InformationOutline v-else-if="item.advisory" :size="ICON_BODY" />
+                            <CircleOutline v-else :size="ICON_BODY" />
                         </span>
                         <div class="th-compass__item-body">
                             <div class="th-compass__item-label">
@@ -104,23 +108,23 @@
                             <div class="th-compass__item-hint">{{ item.hint }}</div>
                         </div>
                         <template v-if="!item.done">
-                            <button
+                            <NcButton
                                 v-if="itemHasOpenAffordance(item)"
-                                type="button"
                                 class="th-compass__item-link"
                                 :aria-label="t('teamhub', 'Open: {label}', { label: item.label })"
-                                @click="followItem(item)">
+                                @click="followItem(item)"
+                                variant="tertiary">
                                 {{ t('teamhub', 'Open') }}
-                            </button>
-                            <button
+                            </NcButton>
+                            <NcButton
                                 v-if="item.markable"
-                                type="button"
                                 class="th-compass__item-mark"
                                 :title="t('teamhub', 'Mark this item as done')"
                                 :aria-label="t('teamhub', 'Mark as done')"
-                                @click="toggleMark(item)">
+                                @click="toggleMark(item)"
+                                variant="tertiary">
                                 {{ t('teamhub', 'Mark done') }}
-                            </button>
+                            </NcButton>
                         </template>
                         <template v-else>
                             <span
@@ -128,15 +132,15 @@
                                 :aria-label="t('teamhub', 'Done')">
                                 {{ t('teamhub', 'Done') }}
                             </span>
-                            <button
+                            <NcButton
                                 v-if="item.markable"
-                                type="button"
                                 class="th-compass__item-unmark"
                                 :title="t('teamhub', 'Unmark — this item still needs attention')"
                                 :aria-label="t('teamhub', 'Unmark')"
-                                @click="toggleMark(item)">
+                                @click="toggleMark(item)"
+                                variant="tertiary">
                                 {{ t('teamhub', 'Unmark') }}
-                            </button>
+                            </NcButton>
                         </template>
                     </li>
                 </ul>
@@ -146,6 +150,7 @@
 </template>
 
 <script>
+import { NcButton } from '@nextcloud/vue'
 import { mapState, mapMutations } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
@@ -157,6 +162,7 @@ import CircleOutline from 'vue-material-design-icons/CircleOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
 import CompassOutline from 'vue-material-design-icons/CompassOutline.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 /**
  * ProjectCompassPanel (v3.98.0).
@@ -179,7 +185,7 @@ export default {
     name: 'ProjectCompassPanel',
 
     components: {
-        ChevronUp, ChevronDown, CheckCircleOutline, CircleOutline,
+         NcButton, ChevronUp, ChevronDown, CheckCircleOutline, CircleOutline,
         ArrowRight, CompassOutline, InformationOutline,
     },
 
@@ -194,6 +200,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             payload: null,
             loading: false,
             fetchError: null,
@@ -415,7 +423,7 @@ export default {
     padding: 8px 12px;
     background: var(--color-background-hover);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 .th-compass__loading,
@@ -427,7 +435,7 @@ export default {
 .th-compass__error {
     color: var(--color-error-text);
     background: var(--color-error);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     padding: 8px 12px;
 }
 
@@ -436,7 +444,7 @@ export default {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
 .th-compass__title {
@@ -448,7 +456,7 @@ export default {
 
 .th-compass__title h2 {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
 }
@@ -456,7 +464,7 @@ export default {
 .th-compass__header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .th-compass__collapse {
@@ -466,40 +474,21 @@ export default {
     flex: 0 0 auto;
     box-sizing: border-box;
     width: 28px;
-    height: 28px;
-    min-width: 28px;
-    min-height: 28px;
     max-width: 28px;
-    max-height: 28px;
-    padding: 0;
-    border-radius: 50%;
-    border: none;
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
 }
 
 /* v3.100.14: split hover+focus so :focus-visible keeps its 2px ring. */
-.th-compass__collapse:hover {
-    background: var(--color-background-dark);
-}
-
-.th-compass__collapse:focus-visible {
-    background: var(--color-background-dark);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
 
 .th-compass__nextup {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
-    margin-bottom: 6px;
+    padding: 8px 8px;
+    margin-bottom: 8px;
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
-    border-radius: var(--border-radius);
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    font-size: var(--th-font-meta);
     flex-wrap: wrap;
 }
 
@@ -510,9 +499,7 @@ export default {
 
 .th-compass__nextup-label {
     font-weight: 700;
-    text-transform: uppercase;
     font-size: var(--th-font-micro);
-    letter-spacing: 0.05em;
     flex-shrink: 0;
 }
 
@@ -527,26 +514,9 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 12px;
-    border: none;
-    border-radius: var(--border-radius);
-    background: var(--color-primary-element-text);
-    color: var(--color-primary-element);
-    font-size: var(--th-font-meta);
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.th-compass__nextup--ready .th-compass__advance {
-    background: var(--color-success-text);
-    color: var(--color-success);
 }
 
 .th-compass__nextup-link:focus-visible,
-.th-compass__advance:focus-visible {
-    outline: 2px solid var(--color-primary-element-text);
-    outline-offset: 2px;
-}
 
 .th-compass__list {
     display: flex;
@@ -561,10 +531,10 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 10px;
+    padding: 4px 8px;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 
 .th-compass__item--done {
@@ -580,7 +550,7 @@ export default {
  * but don't gate phase advancement. Muted left border + info icon so
  * admins see them as informational rather than as a to-do. */
 .th-compass__item--advisory {
-    border-left: 3px solid var(--color-warning);
+    border-inline-start: 3px solid var(--color-warning);
 }
 
 .th-compass__item-check {
@@ -598,15 +568,13 @@ export default {
 
 .th-compass__item-advisory-tag {
     display: inline-block;
-    margin-left: 6px;
-    padding: 1px 6px;
-    border-radius: 8px;
+    margin-inline-start: 8px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-element);
     background: var(--color-warning);
     color: var(--color-warning-text);
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     vertical-align: middle;
 }
 
@@ -616,7 +584,7 @@ export default {
 }
 
 .th-compass__item-label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-main-text);
 }
@@ -630,35 +598,16 @@ export default {
 
 .th-compass__item-link {
     align-self: center;
-    padding: 4px 10px;
-    background: transparent;
-    border: 1px solid var(--color-primary-element);
-    border-radius: var(--border-radius);
-    color: var(--color-primary-element);
-    font-size: var(--th-font-meta);
-    font-weight: 500;
-    cursor: pointer;
 }
 
 /* v3.100.14: split hover+focus so :focus-visible keeps its 2px ring. */
-.th-compass__item-link:hover {
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-}
-
-.th-compass__item-link:focus-visible {
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
 
 .th-compass__item-done-badge {
     align-self: center;
-    padding: 2px 8px;
+    padding: 4px 8px;
     background: var(--color-success);
     color: var(--color-success-text);
-    border-radius: 10px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-micro);
     font-weight: 600;
 }
@@ -667,36 +616,8 @@ export default {
 .th-compass__item-mark,
 .th-compass__item-unmark {
     align-self: center;
-    padding: 4px 10px;
-    background: transparent;
-    border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius);
-    color: var(--color-main-text);
-    font-size: var(--th-font-meta);
-    font-weight: 500;
-    cursor: pointer;
 }
 /* v3.100.14: split hover+focus so keyboard users get a visible focus
    indicator. Previously :hover and :focus-visible were grouped and set
    outline: none — WCAG 2.4.7 regression. */
-.th-compass__item-mark:hover {
-    background: var(--color-success);
-    color: var(--color-success-text);
-    border-color: var(--color-success);
-}
-.th-compass__item-mark:focus-visible {
-    background: var(--color-success);
-    color: var(--color-success-text);
-    border-color: var(--color-success);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
-.th-compass__item-unmark:hover {
-    background: var(--color-background-hover);
-}
-.th-compass__item-unmark:focus-visible {
-    background: var(--color-background-hover);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
-}
 </style>

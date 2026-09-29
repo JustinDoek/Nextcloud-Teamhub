@@ -5,7 +5,7 @@
             :src="timelineUrl"
             class="th-tl__iframe"
             frameborder="0"
-            :title="t('teamhub', 'Team Timeline')"
+            :title="t('teamhub', 'Team timeline')"
             referrerpolicy="same-origin"
             sandbox="allow-same-origin allow-scripts" />
         <div v-else class="th-tl__empty">

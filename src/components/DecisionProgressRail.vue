@@ -134,7 +134,7 @@ export default {
 
 .th-rail__step {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     min-height: 44px;
 }
 
@@ -158,7 +158,7 @@ export default {
     min-height: 12px;
     max-width: 12px;
     max-height: 12px;
-    margin-top: 3px;
+    margin-top: 4px;
     border-radius: 50%;
     border: 2px solid var(--color-border-dark);
     background: var(--color-main-background);
@@ -167,7 +167,7 @@ export default {
 .th-rail__line {
     flex: 1 1 auto;
     width: 2px;
-    margin: 2px 0;
+    margin: 4px 0;
     background: var(--color-border);
 }
 
@@ -179,7 +179,7 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    padding-bottom: 10px;
+    padding-bottom: 8px;
     min-width: 0;
 }
 
@@ -192,8 +192,6 @@ export default {
 .th-rail__state {
     font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
 }
 
 /* ── States ─────────────────────────────────────────────────────────────

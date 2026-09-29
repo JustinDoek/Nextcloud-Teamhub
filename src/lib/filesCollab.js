@@ -29,24 +29,28 @@
  * That contract is why reaching into the Files app's sidebar API is
  * acceptable; keep it.
  *
- * Nextcloud version differences (verified against nextcloud/server on
- * stable32, stable33 and stable34):
+ * Nextcloud versions (the app's range is 33–35; verified against
+ * nextcloud/server stable33 and stable34, and walked on a 35.0.0 instance with
+ * Talk 25 on 2026-09-20 — same API, same row markup, the sidebar landing on
+ * Chat and the Join button left alone):
  *
- *   NC 33/34  window.OCA.Files._sidebar()  — @nextcloud/files ISidebar impl.
- *                                            setActiveTab() THROWS on an
- *                                            unavailable tab.
- *   NC 32     window.OCA.Files.Sidebar     — legacy global, state under .state
+ *   NC 33/34/35  window.OCA.Files._sidebar()  — @nextcloud/files ISidebar impl.
+ *                                               setActiveTab() THROWS on an
+ *                                               unavailable tab.
+ *
+ * NC 32's legacy `window.OCA.Files.Sidebar` global was supported until
+ * v4.10.4; it left with the version range.
  */
 import { generateUrl } from '@nextcloud/router'
 import logger from '../logger.js'
 
-/** Talk's Files-sidebar tab id. Stable across NC 32/33/34. */
+/** Talk's Files-sidebar tab id. Stable across NC 33/34/35. */
 const CHAT_TAB_ID = 'chat'
 
 /**
  * A file row in the Files list. `data-cy-*` attributes are test hooks rather
  * than API, but they are the only stable identifiers on the row and they are
- * unchanged across NC 32/33/34 (`FileEntry.vue` and `FileEntryGrid.vue`).
+ * unchanged across NC 33/34/35 (`FileEntry.vue` and `FileEntryGrid.vue`).
  */
 const ROW_SELECTOR = '[data-cy-files-list-row-fileid]'
 const ROW_FILEID_ATTR = 'data-cy-files-list-row-fileid'
@@ -57,7 +61,7 @@ const ROW_FILEID_ATTR = 'data-cy-files-list-row-fileid'
  * Deliberately narrower than the whole row: the mime / size / mtime cells bind
  * `openDetailsIfAvailable` instead, and the 3-dot menu and checkbox open
  * nothing — none of those are "open this file".
- * Same markup in the list and grid views on NC 32/33/34.
+ * Same markup in the list and grid views on NC 33/34/35.
  */
 const ROW_NAME_CELL_SELECTOR = 'td.files-list__row-name'
 
@@ -250,14 +254,13 @@ export function fileOpenUrl(fileId, { isFolder = false } = {}) {
 }
 
 /**
- * Resolve the Files sidebar implementation inside a window, normalising the
- * NC 32 legacy global and the NC 33+ store behind one shape.
+ * Resolve the Files sidebar implementation inside a window — the
+ * @nextcloud/files ISidebar store (NC 33+) behind one small shape.
  *
  * @param {Window} win the iframe's window
  * @return {{ isOpen: () => boolean, hasChatTab: () => boolean, activeTab: () => string|undefined, setChatTab: () => void }|null}
  */
 function resolveSidebar(win) {
-    // ── NC 33+ — the @nextcloud/files ISidebar implementation ──────────────
     if (typeof win.OCA?.Files?._sidebar === 'function') {
         const api = win.OCA.Files._sidebar()
         return {
@@ -266,21 +269,6 @@ function resolveSidebar(win) {
             activeTab: () => api.activeTab,
             setChatTab: () => api.setActiveTab(CHAT_TAB_ID),
             node: () => api.currentNode,
-        }
-    }
-
-    // ── NC 32 — legacy global; state lives under .state, open state is the
-    //    presence of a file path ─────────────────────────────────────────────
-    const legacy = win.OCA?.Files?.Sidebar
-    if (legacy) {
-        return {
-            isOpen: () => !!legacy.file,
-            hasChatTab: () => (legacy.state?.tabs || []).some(tab => tab?.id === CHAT_TAB_ID),
-            activeTab: () => legacy.state?.activeTab,
-            setChatTab: () => legacy.setActiveTab(CHAT_TAB_ID),
-            // Legacy tracks a path, not a node. The only consumer of this
-            // (the Viewer's sidebar handler) ignores the payload anyway.
-            node: () => undefined,
         }
     }
 

@@ -10,19 +10,18 @@
 			     same team now say so in the same colour. -->
 			<span
 				class="mywork-row__glyph"
-				:class="'mywork-row__glyph--' + teamTone"
 				aria-hidden="true">
 				<component :is="resourceIcon" :size="iconToolbar" />
 			</span>
 
 			<span class="mywork-row__text">
-				<button
-					type="button"
+				<NcButton
 					class="mywork-row__title"
 					:title="t('teamhub', 'Open {title}', { title: item.title })"
-					@click="$emit('open', item)">
+					@click="$emit('open', item)"
+					variant="tertiary">
 					{{ item.title }}
-				</button>
+				</NcButton>
 				<span class="mywork-row__sub">
 					<!-- Which source this came from, as a real chip rather
 					     than trailing grey text. With three providers this is
@@ -33,6 +32,20 @@
 						{{ providerName }}
 					</span>
 					<span v-if="item.subtitle" class="mywork-row__resource">{{ item.subtitle }}</span>
+					<!-- v4.10.20 — a row that is a step of a workflow between
+					     people says the word. It used to say it only through
+					     the branch glyph on the standalone workflow rows, and
+					     a glyph is not a label: the two kinds of row sit in
+					     one list, so the same chip marks both. Justin,
+					     2026-09-22: "the icon only is not enough." -->
+					<NcChip
+						v-if="workflow"
+						no-close
+						variant="tertiary"
+						class="mywork-row__flag"
+						:text="t('teamhub', 'Workflow')">
+						<template #icon><SourceBranch :size="iconInline" /></template>
+					</NcChip>
 					<!-- Only when the deadline column is not already saying it.
 					     On an overdue row "URGENT" beside "Overdue by 16 days"
 					     is the same fact twice, and it was the loudest thing
@@ -63,31 +76,57 @@
 					     for others" could not say which others. Generic on
 					     `metadata.reviewers`, not a file-review branch: the
 					     next source with a per-person roster gets it free. -->
-					<button
+					<NcButton
 						v-if="roster.length"
-						type="button"
 						class="mywork-row__flag mywork-row__roster-toggle"
 						:aria-expanded="rosterOpen ? 'true' : 'false'"
 						:title="rosterSummary"
-						@click="rosterOpen = !rosterOpen">
-						<ChevronDown v-if="!rosterOpen" :size="iconInline" aria-hidden="true" />
-						<ChevronUp v-else :size="iconInline" aria-hidden="true" />
+						@click="rosterOpen = !rosterOpen"
+						variant="tertiary">
+						<template #icon>
+							<ChevronDown v-if="!rosterOpen" :size="iconInline" aria-hidden="true" />
+							<ChevronUp v-else :size="iconInline" aria-hidden="true" />
+						</template>
 						{{ rosterSummary }}
-					</button>
+					</NcButton>
+					<!-- v4.10.1 — a procedure on the row, on any row whose
+					     source sends one as `metadata.steps` (translated
+					     sentences, in order). The team-space administrator
+					     items are the first: the work they describe is done
+					     by somebody else's hands in Files and Manage team, so
+					     the row has to say what to do rather than offer a
+					     button. Same disclosure pattern as the roster. -->
+					<!-- v4.10.2 — a row that is one step of a workflow between
+					     people (`metadata.workflow`) says which step it is at,
+					     and folds out the whole workflow. One disclosure for
+					     the workflow and the procedure together: the tracker
+					     says where we are, the steps say what to do here. -->
+					<NcButton
+						v-if="steps.length || workflow"
+						class="mywork-row__flag mywork-row__roster-toggle"
+						:aria-expanded="stepsOpen ? 'true' : 'false'"
+						:title="stepsSummary"
+						@click="stepsOpen = !stepsOpen"
+						variant="tertiary">
+						<template #icon>
+							<ChevronDown v-if="!stepsOpen" :size="iconInline" aria-hidden="true" />
+							<ChevronUp v-else :size="iconInline" aria-hidden="true" />
+						</template>
+						{{ stepsSummary }}
+					</NcButton>
 				</span>
 			</span>
 		</div>
 
 		<!-- ── Column 2: team badge ─────────────────────────────────────── -->
 		<div class="mywork-row__cell mywork-row__cell--team">
-			<button
-				type="button"
+			<NcButton
 				class="mywork-row__team"
-				:class="'mywork-row__team--' + teamTone"
 				:title="t('teamhub', 'Open team {team}', { team: item.teamName })"
-				@click="$emit('open-team', item)">
+				@click="$emit('open-team', item)"
+				variant="tertiary">
 				{{ item.teamName }}
-			</button>
+			</NcButton>
 			<span
 				v-if="extraTeamCount > 0"
 				class="mywork-row__team-more"
@@ -102,8 +141,8 @@
 				v-if="reasonAvatarUid"
 				:user="reasonAvatarUid"
 				:display-name="reasonAvatarName"
-				:size="20"
-				:show-user-status="false"
+				:size="AVATAR_SM"
+				:hide-status="true"
 				:disable-menu="true"
 				class="mywork-row__avatar" />
 			<span v-else class="mywork-row__reason-glyph" aria-hidden="true">
@@ -187,8 +226,8 @@
 				<NcAvatar
 					:user="person.uid"
 					:display-name="person.displayName"
-					:size="20"
-					:show-user-status="false"
+					:size="AVATAR_SM"
+					:hide-status="true"
 					:disable-menu="true"
 					class="mywork-row__avatar" />
 				<span class="mywork-row__roster-name">{{ person.displayName }}</span>
@@ -209,12 +248,55 @@
 				</span>
 			</li>
 		</ul>
+
+		<!-- ── Full-width workflow tracker (v4.10.2) ────────────────────────
+		     Every step of the workflow this row is part of, in order, with
+		     the ones already done, the one we are at, and the ones to come —
+		     so either party sees where the whole thing is, not only their
+		     own row. Rendered from `metadata.workflow` alone; any provider
+		     that attaches the same shape gets it. -->
+		<ol
+			v-if="stepsOpen && workflow"
+			class="mywork-row__workflow"
+			:aria-label="t('teamhub', 'Workflow: step {current} of {total}', { current: workflow.current, total: workflow.steps.length })">
+			<li
+				v-for="(step, index) in workflow.steps"
+				:key="index"
+				class="mywork-row__workflow-step"
+				:class="'mywork-row__workflow-step--' + step.state"
+				:aria-current="step.state === 'current' ? 'step' : null">
+				<span class="mywork-row__workflow-marker" aria-hidden="true">
+					<Check v-if="step.state === 'done'" :size="iconInline" />
+					<span v-else class="mywork-row__workflow-dot" />
+				</span>
+				<span class="mywork-row__workflow-label">{{ step.label }}</span>
+				<span v-if="step.state === 'done' && (step.actor || step.at)" class="mywork-row__workflow-meta">
+					<template v-if="step.actor && step.at">{{ t('teamhub', '{actor}, {date}', { actor: step.actor, date: formatAbsolute(step.at) }) }}</template>
+					<template v-else-if="step.actor">{{ step.actor }}</template>
+					<template v-else>{{ formatAbsolute(step.at) }}</template>
+				</span>
+				<span v-else-if="step.state === 'current'" class="mywork-row__workflow-meta">{{ t('teamhub', 'Now') }}</span>
+			</li>
+		</ol>
+
+		<!-- ── Full-width steps panel (v4.10.1) ─────────────────────────────
+		     An ordered list: the numbers are the point, because the steps
+		     are a sequence somebody follows, not a set of facts. A row with
+		     both a roster and steps shows them one under the other. -->
+		<ol v-if="stepsOpen && steps.length" class="mywork-row__steps">
+			<li
+				v-for="(step, index) in steps"
+				:key="index"
+				class="mywork-row__step">
+				{{ step }}
+			</li>
+		</ol>
 	</li>
 </template>
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import { NcButton, NcActions, NcActionButton, NcActionSeparator, NcActionCaption, NcAvatar } from '@nextcloud/vue'
+import { NcButton, NcActions, NcActionButton, NcActionSeparator, NcActionCaption, NcAvatar, NcChip } from '@nextcloud/vue'
 
 import AlarmSnooze from 'vue-material-design-icons/AlarmSnooze.vue'
 import AlarmOff from 'vue-material-design-icons/AlarmOff.vue'
@@ -225,7 +307,7 @@ import Close from 'vue-material-design-icons/Close.vue'
 import CommentEditOutline from 'vue-material-design-icons/CommentEditOutline.vue'
 import CommentOutline from 'vue-material-design-icons/CommentOutline.vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
-// v4.5.45 — Team admin rows (resource review); also the category's glyph.
+// v4.5.45 — Team admin rows (resource review).
 import ShieldAccountOutline from 'vue-material-design-icons/ShieldAccountOutline.vue'
 // v4.6.13 — team expiration rows, and requests to extend one.
 import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
@@ -238,6 +320,9 @@ import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 // v4.9.7 — an OpenProject milestone's glyph.
 import FlagOutline from 'vue-material-design-icons/FlagOutline.vue'
 import ArchiveCheckOutline from 'vue-material-design-icons/ArchiveCheckOutline.vue'
+// v4.10.20 — the workflow chip's glyph, the same one WorkflowItemRow
+// carries, so one mark means one thing across both kinds of row.
+import SourceBranch from 'vue-material-design-icons/SourceBranch.vue'
 // v4.8.19 — the roster panel's disclosure control.
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
@@ -251,6 +336,8 @@ import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 // uses, so an item's icon in My Work is the icon of the tab it opens.
 import CardText from 'vue-material-design-icons/CardText.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
+// v4.10.1 — team spaces (Nextcloud 35): a folder that belongs to somebody.
+import FolderAccountOutline from 'vue-material-design-icons/FolderAccountOutline.vue'
 import Gavel from 'vue-material-design-icons/Gavel.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
@@ -268,9 +355,8 @@ import {
 	formatDue,
 	priorityLabel,
 	snoozePresets,
-	teamBadgeTone,
 } from '../../constants/myWork.js'
-import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_NAV } from '../../constants/uiTokens.js'
+import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_NAV, AVATAR_SM } from '../../constants/uiTokens.js'
 
 /**
  * One row in the My Work queue.
@@ -288,14 +374,14 @@ import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_NAV } from '../../constants/
 export default {
 	name: 'MyWorkItemRow',
 	components: {
-		NcButton, NcActions, NcActionButton, NcActionSeparator, NcActionCaption, NcAvatar,
+		NcButton, NcActions, NcActionButton, NcActionSeparator, NcActionCaption, NcAvatar, NcChip,
 		AlarmSnooze, AlarmOff, AlertCircleOutline,
 		Check, CheckCircleOutline,
 		Close, CommentEditOutline, CommentOutline, AccountArrowRight,
 		InformationOutline, OpenInNew, VideoOutline, FileDocumentOutline, EmailOutline,
-		CardText, Folder, Gavel, Calendar, Puzzle, ShieldAccountOutline, CalendarClock,
+		CardText, Folder, FolderAccountOutline, Gavel, Calendar, Puzzle, ShieldAccountOutline, CalendarClock,
 		AccountPlusOutline, FileEyeOutline, ArchiveCheckOutline, BriefcaseOutline, FlagOutline,
-		ChevronDown, ChevronUp,
+		ChevronDown, ChevronUp, SourceBranch,
 	},
 	props: {
 		item: { type: Object, required: true },
@@ -312,6 +398,8 @@ export default {
 		return {
 			/** v4.8.19 — the roster panel starts collapsed. */
 			rosterOpen: false,
+			/** v4.10.1 — so does the steps panel. */
+			stepsOpen: false,
 		}
 	},
 
@@ -358,10 +446,6 @@ export default {
 			return PROVIDER_ICONS[this.item.providerId] || FALLBACK_ICON
 		},
 
-		teamTone() {
-			return teamBadgeTone(this.item.teamId)
-		},
-
 		providerName() {
 			return this.providerNames[this.item.providerId] || this.item.providerId
 		},
@@ -389,6 +473,55 @@ export default {
 
 		rosterDone() {
 			return this.roster.filter(r => !!r.completedAt).length
+		},
+
+		/**
+		 * v4.10.1 — the procedure a source attached to the row, as
+		 * `metadata.steps`: translated sentences in order. Only strings are
+		 * kept, so a malformed entry drops out rather than rendering
+		 * "[object Object]".
+		 */
+		steps() {
+			const list = this.item.metadata?.steps
+			return Array.isArray(list) ? list.filter(s => typeof s === 'string' && s !== '') : []
+		},
+
+		/**
+		 * v4.10.2 — the workflow this row is one step of, as
+		 * `metadata.workflow = { steps: [{ label, state, actor, at }], current }`
+		 * with `state` one of done / current / pending. Validated to that
+		 * shape; anything else is treated as absent.
+		 */
+		workflow() {
+			const wf = this.item.metadata?.workflow
+			if (!wf || !Array.isArray(wf.steps) || wf.steps.length === 0) {
+				return null
+			}
+			const steps = wf.steps
+				.filter(s => s && typeof s.label === 'string')
+				.map(s => ({
+					label: s.label,
+					state: ['done', 'current', 'pending'].includes(s.state) ? s.state : 'pending',
+					actor: typeof s.actor === 'string' && s.actor !== '' ? s.actor : null,
+					at: Number.isFinite(s.at) && s.at > 0 ? s.at : null,
+				}))
+			if (steps.length === 0) {
+				return null
+			}
+			const current = Number.isInteger(wf.current) && wf.current >= 1 && wf.current <= steps.length
+				? wf.current
+				: Math.max(1, steps.findIndex(s => s.state === 'current') + 1)
+			return { steps, current }
+		},
+
+		stepsSummary() {
+			if (this.workflow) {
+				// TRANSLATORS: disclosure on a My Work row — which step of a multi-person workflow this row is at
+				return t('teamhub', 'Step {current} of {total}', { current: this.workflow.current, total: this.workflow.steps.length })
+			}
+			return this.item.category === CATEGORY.COMPLETED
+				? n('teamhub', '{n} detail', '{n} details', this.steps.length, { n: this.steps.length })
+				: n('teamhub', '{n} step', '{n} steps', this.steps.length, { n: this.steps.length })
 		},
 
 		/**
@@ -496,12 +629,23 @@ export default {
 	methods: {
 		t,
 		n,
-		actionLabel,
 		priorityLabel,
 		// v4.8.19 — the roster panel formats each completion time in the
 		// template. Options API: a helper is only callable from the template
 		// if it is exposed here (SKILLS.md § Exposing `t` and `n`).
 		formatAbsolute,
+
+		/**
+		 * v4.10.1 — a source may give a shared verb its own words on one row
+		 * (`metadata.actionLabels`, translated server-side): the team-space
+		 * hand-over is DELEGATE and COMPLETE underneath, but reads "Hand to
+		 * team owner" and "Close" on the row, because that is what those two
+		 * clicks do there. Generic: any provider can do the same.
+		 */
+		actionLabel(action) {
+			const own = this.item.metadata?.actionLabels?.[action]
+			return typeof own === 'string' && own !== '' ? own : actionLabel(action)
+		},
 
 		actionIcon(action) {
 			return ACTION_ICONS[action] || FALLBACK_ICON
@@ -527,7 +671,7 @@ export default {
 		var(--th-mywork-col-actions, 236px);
 	align-items: center;
 	gap: 12px;
-	padding: 9px 16px;
+	padding: 8px 16px;
 	border-top: 1px solid var(--color-border);
 	background: var(--color-main-background);
 
@@ -565,8 +709,6 @@ export default {
 		}
 	}
 
-	.mywork-row__title { font-size: var(--th-font-meta, 12px); }
-
 	.mywork-row__team,
 	.mywork-row__reason-text,
 	.mywork-row__due {
@@ -585,35 +727,23 @@ export default {
 	   the default" — the carve-out is the same one the chip-remove buttons use. */
 	display: inline-flex;
 	align-items: center;
-	gap: 2px;
-	border: none;
-	background: none;
-	padding: 0;
+	gap: 4px;
 	margin: 0;
-	min-height: 0;
-	font: inherit;
-	color: var(--color-text-maxcontrast);
-	cursor: pointer;
 
 	&:hover { color: var(--color-main-text); }
 
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 1px;
-		border-radius: var(--border-radius);
-	}
 }
 
 .mywork-row__roster {
 	grid-column: 1 / -1;
 	list-style: none;
-	margin: 4px 0 2px;
+	margin: 4px 0 4px;
 	padding: 8px 12px;
-	border-radius: var(--border-radius-large);
+	border-radius: var(--border-radius-element);
 	background: var(--color-background-hover);
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 }
 
 .mywork-row__roster-item {
@@ -629,26 +759,104 @@ export default {
 .mywork-row__roster-state {
 	display: inline-flex;
 	align-items: center;
-	gap: 2px;
+	gap: 4px;
 	color: var(--color-text-maxcontrast);
 }
 
 /* Not colour alone: the state also carries a check glyph and its own words,
    so it survives a monochrome or colour-blind reading (WCAG 1.4.1). */
-.mywork-row__roster-state--done { color: var(--color-success-text, var(--color-success)); }
+.mywork-row__roster-state--done { color: var(--color-text-success); }
 
 .mywork-row__roster-remark {
 	flex-basis: 100%;
 	margin-inline-start: 28px;
 	color: var(--color-text-maxcontrast);
-	font-style: italic;
+}
+
+/* ── Workflow tracker (v4.10.2) ────────────────────────────────────────
+   The whole workflow as a vertical list of steps: a check for what is
+   done, a filled dot for where we are, a hollow one for what is to come.
+   Not colour alone — the marker's shape and the "Now" word carry the
+   state too (WCAG 1.4.1). Same surface as the roster and the steps. */
+.mywork-row__workflow {
+	grid-column: 1 / -1;
+	list-style: none;
+	margin: 4px 0 4px;
+	padding: 8px 12px;
+	border-radius: var(--border-radius-element);
+	background: var(--color-background-hover);
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: var(--th-font-meta, 12px);
+}
+
+.mywork-row__workflow-step {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	color: var(--color-text-maxcontrast);
+}
+
+.mywork-row__workflow-step--current {
+	color: var(--color-main-text);
+	font-weight: 600;
+}
+
+.mywork-row__workflow-step--done {
+	color: var(--color-main-text);
+}
+
+.mywork-row__workflow-marker {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--th-icon-inline, 16px);
+	height: var(--th-icon-inline, 16px);
+	color: var(--color-text-success);
+}
+
+.mywork-row__workflow-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	border: 2px solid var(--color-text-maxcontrast);
+	box-sizing: border-box;
+}
+
+.mywork-row__workflow-step--current .mywork-row__workflow-dot {
+	border-color: var(--color-primary-element);
+	background: var(--color-primary-element);
+}
+
+.mywork-row__workflow-meta {
+	color: var(--color-text-maxcontrast);
+	font-weight: 400;
+}
+
+/* ── Steps panel (v4.10.1) ─────────────────────────────────────────────
+   Same surface and placement as the roster; an ordered list keeps the
+   browser's numbering, which is the one thing a procedure needs. */
+.mywork-row__steps {
+	grid-column: 1 / -1;
+	margin: 4px 0 4px;
+	padding: 8px 12px 8px 32px;
+	border-radius: var(--border-radius-element);
+	background: var(--color-background-hover);
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: var(--th-font-meta, 12px);
+}
+
+.mywork-row__step {
+	padding-inline-start: 4px;
+	line-height: 1.45;
 }
 
 .mywork-row--snoozed { opacity: 0.62; }
-
-.mywork-row--completed .mywork-row__title {
-	color: var(--color-text-maxcontrast);
-}
 
 /* ── Column 1 ──────────────────────────────────────────────────────── */
 
@@ -658,7 +866,7 @@ export default {
 .mywork-row__main {
 	display: flex;
 	align-items: flex-start;
-	gap: 10px;
+	gap: 8px;
 	min-width: 0;
 }
 
@@ -701,13 +909,6 @@ export default {
 	color: var(--color-text-maxcontrast);
 }
 
-.mywork-row__glyph--1 { background: var(--th-mywork-team-1-bg); color: var(--th-mywork-team-1-ink); }
-.mywork-row__glyph--2 { background: var(--th-mywork-team-2-bg); color: var(--th-mywork-team-2-ink); }
-.mywork-row__glyph--3 { background: var(--th-mywork-team-3-bg); color: var(--th-mywork-team-3-ink); }
-.mywork-row__glyph--4 { background: var(--th-mywork-team-4-bg); color: var(--th-mywork-team-4-ink); }
-.mywork-row__glyph--5 { background: var(--th-mywork-team-5-bg); color: var(--th-mywork-team-5-ink); }
-.mywork-row__glyph--6 { background: var(--th-mywork-team-6-bg); color: var(--th-mywork-team-6-ink); }
-
 .mywork-row__text {
 	display: flex;
 	flex-direction: column;
@@ -718,35 +919,19 @@ export default {
 /* Raw <button>: a full-width text affordance inside a card row — the
    documented carve-out in SKILLS.md § "NcButton is the default". */
 .mywork-row__title {
-	background: none;
-	border: none;
-	padding: 0;
 	margin: 0;
-	text-align: left;
-	cursor: pointer;
-	color: var(--color-main-text);
-	font-size: var(--th-font-body, 14px);
-	font-weight: var(--th-font-weight-semibold, 600);
-	line-height: var(--th-line-height-tight, 1.2);
 	overflow: hidden;
 	text-overflow: ellipsis;
-	white-space: nowrap;
 
 	&:hover { text-decoration: underline; }
 	/* Split from :hover on purpose — grouping them is what silently kills
 	   the keyboard focus ring (SKILLS.md § Focus visibility standard). */
-	&:focus-visible {
-		text-decoration: underline;
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-		border-radius: 2px;
-	}
 }
 
 .mywork-row__sub {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	min-width: 0;
 	font-size: var(--th-font-micro, 11px);
 	color: var(--color-text-maxcontrast);
@@ -766,7 +951,7 @@ export default {
 	align-items: center;
 	gap: 4px;
 	flex: 0 0 auto;
-	padding: 1px 7px;
+	padding: 1px 8px;
 	border: 1px solid var(--color-border-dark, var(--color-border));
 	border-radius: var(--th-radius-pill, 999px);
 	color: var(--color-text-maxcontrast);
@@ -777,35 +962,19 @@ export default {
 .mywork-row__flag {
 	display: inline-flex;
 	align-items: center;
-	gap: 3px;
+	gap: 4px;
 	flex: 0 0 auto;
-}
-
-.mywork-row__flag--urgent {
-	padding: 0 6px;
-	border-radius: var(--th-radius-pill, 999px);
-	background: var(--color-error);
-	color: var(--color-error-text, var(--color-primary-element-text));
-	font-weight: var(--th-font-weight-semibold, 600);
-	text-transform: uppercase;
-	letter-spacing: 0.03em;
 }
 
 /* v4.9.7 — "opens in OpenProject": quiet, bordered, the same weight as the
    source chip beside it — a fact about the row, not an alarm. */
-.mywork-row__flag--external {
-	padding: 0 6px;
-	border: 1px solid var(--color-border-dark, var(--color-border));
-	border-radius: var(--th-radius-pill, 999px);
-	color: var(--color-text-maxcontrast);
-}
 
 /* ── Shared cell ───────────────────────────────────────────────────── */
 
 .mywork-row__cell {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	min-width: 0;
 	font-size: var(--th-font-micro, 11px);
 	color: var(--color-text-maxcontrast);
@@ -813,35 +982,16 @@ export default {
 
 /* ── Column 2: team badge ──────────────────────────────────────────── */
 
-/* Deterministic tint per team (teamBadgeTone) so the same team is always
-   the same colour — that is what makes it recognisable rather than
-   decorative. The team name is always present in words. */
+/* v4.10.10: one neutral NC surface for every team. The six deterministic
+   brand tints (teamBadgeTone) were TeamHub-local colour the theme could not
+   follow; the team is identified by its name in words. */
 .mywork-row__team {
 	max-width: 100%;
-	padding: 2px 9px;
-	border: none;
-	border-radius: var(--th-radius-pill, 999px);
-	cursor: pointer;
-	font-size: var(--th-font-micro, 11px);
-	font-weight: var(--th-font-weight-semibold, 600);
-	line-height: 1.5;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	white-space: nowrap;
 
 	&:hover { filter: brightness(0.96); }
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 1px;
-	}
 }
-
-.mywork-row__team--1 { background: var(--th-mywork-team-1-bg); color: var(--th-mywork-team-1-ink); }
-.mywork-row__team--2 { background: var(--th-mywork-team-2-bg); color: var(--th-mywork-team-2-ink); }
-.mywork-row__team--3 { background: var(--th-mywork-team-3-bg); color: var(--th-mywork-team-3-ink); }
-.mywork-row__team--4 { background: var(--th-mywork-team-4-bg); color: var(--th-mywork-team-4-ink); }
-.mywork-row__team--5 { background: var(--th-mywork-team-5-bg); color: var(--th-mywork-team-5-ink); }
-.mywork-row__team--6 { background: var(--th-mywork-team-6-bg); color: var(--th-mywork-team-6-ink); }
 
 .mywork-row__team-more {
 	flex: 0 0 auto;
@@ -869,7 +1019,7 @@ export default {
 .mywork-row__due {
 	display: inline-flex;
 	align-items: center;
-	gap: 3px;
+	gap: 4px;
 	white-space: nowrap;
 	font-weight: var(--th-font-weight-medium, 500);
 }
@@ -877,12 +1027,12 @@ export default {
 /* Overdue and today also carry an icon and their own words, so colour is
    never the only carrier (WCAG 1.4.1). */
 .mywork-row__due--overdue {
-	color: var(--color-error-text, var(--color-error));
+	color: var(--color-text-error);
 	font-weight: var(--th-font-weight-semibold, 600);
 }
 
 .mywork-row__due--today {
-	color: var(--th-mywork-today-accent);
+	color: var(--color-warning-text);
 	font-weight: var(--th-font-weight-semibold, 600);
 }
 
@@ -913,12 +1063,12 @@ export default {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: flex-start;
-		gap: 6px 10px;
-		padding: 12px 14px;
+		gap: 8px 8px;
+		padding: 12px 16px;
 	}
 
 	.mywork-row__main    { order: 0; flex: 1 1 auto; min-width: 0; }
-	.mywork-row__actions { order: 1; flex: 0 0 auto; margin-left: auto; }
+	.mywork-row__actions { order: 1; flex: 0 0 auto; margin-inline-start: auto; }
 
 	/* A zero-height full-width flex item: the standard way to force a line
 	   break in a wrapping flex container, so the meta cells always start a

@@ -17,18 +17,20 @@
             </div>
             <div class="th-iframe-widget__actions">
                 <slot name="actions" />
-                <button
+                <NcButton
                     v-if="collapsible"
-                    type="button"
                     class="th-iframe-widget__collapse-btn"
                     :aria-label="isCollapsed
                         ? t('teamhub', 'Expand {widget}', { widget: title })
                         : t('teamhub', 'Collapse {widget}', { widget: title })"
                     :aria-expanded="String(!isCollapsed)"
-                    @click="toggleCollapsed">
-                    <ChevronDown v-if="isCollapsed" :size="16" />
-                    <ChevronUp v-else :size="16" />
-                </button>
+                    @click="toggleCollapsed"
+                    variant="tertiary">
+                    <template #icon>
+                        <ChevronDown v-if="isCollapsed" :size="ICON_BODY" />
+                        <ChevronUp v-else :size="ICON_BODY" />
+                    </template>
+                </NcButton>
             </div>
         </header>
         <div v-show="!isCollapsed" class="th-iframe-widget__body">
@@ -41,6 +43,7 @@
 </template>
 
 <script>
+import { NcButton } from '@nextcloud/vue'
 /*
  * IframeWidgetCard — the shared widget-card chrome used by the full-tab
  * iframe views (Budget, Time, etc.). Mirrors the visual language of the
@@ -70,13 +73,14 @@
 import { translate as t } from '@nextcloud/l10n'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 let uid = 0
 
 export default {
     name: 'IframeWidgetCard',
 
-    components: { ChevronDown, ChevronUp },
+    components: {  NcButton, ChevronDown, ChevronUp },
 
     props: {
         title: { type: String, required: true },
@@ -87,6 +91,7 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
             isCollapsed: !!this.defaultCollapsed,
             titleId: 'th-iframe-widget-title-' + (++uid),
         }
@@ -125,7 +130,7 @@ export default {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 8px 14px;
+    padding: 8px 16px;
     min-height: 52px;
     border-bottom: 1px solid var(--color-border);
     background: var(--color-main-background);
@@ -163,7 +168,7 @@ export default {
     justify-content: center;
     min-width: 20px;
     height: 20px;
-    padding: 0 6px;
+    padding: 0 8px;
     border-radius: var(--border-radius-pill);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
@@ -190,36 +195,15 @@ export default {
     flex: 0 0 auto;
     box-sizing: border-box;
     width: 28px;
-    height: 28px;
-    min-width: 28px;
-    min-height: 28px;
     max-width: 28px;
-    max-height: 28px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    border-radius: 50%;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-}
-
-.th-iframe-widget__collapse-btn:hover {
-    background: var(--color-background-hover);
-    color: var(--color-main-text);
-}
-
-.th-iframe-widget__collapse-btn:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 .th-iframe-widget__body {
-    padding: 12px 14px;
+    padding: 12px 16px;
 }
 
 .th-iframe-widget__footer {
-    padding: 8px 14px;
+    padding: 8px 16px;
     border-top: 1px solid var(--color-border);
     background: var(--color-background-dark);
     font-size: var(--th-font-meta);

@@ -8,7 +8,7 @@
         v-else-if="ok"
         :size="ICON_INLINE"
         class="op-mark op-mark--ok"
-        :title="t('teamhub', 'OK')" />
+        :title="t('teamhub', 'Working')" />
     <CloseCircleOutline
         v-else
         :size="ICON_INLINE"
@@ -52,7 +52,7 @@ export default {
     flex-shrink: 0;
 }
 
-.op-mark--ok      { color: var(--color-success-text); }
-.op-mark--bad     { color: var(--color-error-text); }
+.op-mark--ok      { color: var(--color-text-success); }
+.op-mark--bad     { color: var(--color-text-error); }
 .op-mark--unknown { color: var(--color-text-maxcontrast); }
 </style>

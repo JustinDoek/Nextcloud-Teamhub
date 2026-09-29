@@ -21,11 +21,6 @@ export const CATEGORY = {
 	TODAY: 'today',
 	UPCOMING: 'upcoming',
 	WAITING_FOR_OTHERS: 'waiting_for_others',
-	// v4.5.45 — housekeeping a team admin owes their team, not the viewer's
-	// own deliverables. Ranked below Waiting for others on purpose: an
-	// unreviewed resource is real work, but it is never more urgent than a
-	// deadline. Mirror of Category::TEAM_ADMIN.
-	TEAM_ADMIN: 'team_admin',
 	COMPLETED: 'completed',
 }
 
@@ -35,9 +30,23 @@ export const CATEGORY_ORDER = [
 	CATEGORY.TODAY,
 	CATEGORY.UPCOMING,
 	CATEGORY.WAITING_FOR_OTHERS,
-	CATEGORY.TEAM_ADMIN,
 	CATEGORY.COMPLETED,
 ]
+
+/**
+ * Categories this version no longer has, and what they became (v4.10.20).
+ * Mirror of `Category::RETIRED` in PHP.
+ *
+ * The server migrates a *filter* that names one, so a bookmarked URL still
+ * selects something. A *collapsed section* key is dropped instead of migrated
+ * — carrying "Team admin was collapsed" onto Action required would fold away
+ * the most urgent section of somebody's queue, which is the 4.5.29
+ * `mentionsOnly` lesson: a stored value only travels to a new key when it
+ * means the same thing there.
+ */
+export const RETIRED_CATEGORIES = {
+	team_admin: CATEGORY.ACTION_REQUIRED,
+}
 
 /**
  * Labels are functions, not constants, because `t()` must run after
@@ -54,9 +63,6 @@ export function categoryLabel(category) {
 		return t('teamhub', 'Upcoming')
 	case CATEGORY.WAITING_FOR_OTHERS:
 		return t('teamhub', 'Waiting for others')
-	case CATEGORY.TEAM_ADMIN:
-		// TRANSLATORS: My Work category — housekeeping the viewer owes their team as its admin
-		return t('teamhub', 'Team admin')
 	case CATEGORY.COMPLETED:
 		return t('teamhub', 'Completed')
 	default:
@@ -78,8 +84,6 @@ export function categoryEmptyState(category) {
 		return t('teamhub', 'Nothing is coming up in the next few days.')
 	case CATEGORY.WAITING_FOR_OTHERS:
 		return t('teamhub', 'You are not currently waiting for actions from others.')
-	case CATEGORY.TEAM_ADMIN:
-		return t('teamhub', 'Your teams need nothing from you as their admin.')
 	case CATEGORY.COMPLETED:
 		return t('teamhub', 'Nothing has been completed recently.')
 	default:
@@ -93,11 +97,6 @@ export const CATEGORY_ICONS = {
 	[CATEGORY.TODAY]: 'CalendarToday',
 	[CATEGORY.UPCOMING]: 'CalendarClock',
 	[CATEGORY.WAITING_FOR_OTHERS]: 'AccountClock',
-	// v4.5.45 — a shield with a person: the work you have because of the role
-	// you hold, not because of what you were assigned. Deliberately not a
-	// second Account* glyph — AccountClock is already Waiting for others and
-	// the two would be a coin-flip at 16px.
-	[CATEGORY.TEAM_ADMIN]: 'ShieldAccountOutline',
 	[CATEGORY.COMPLETED]: 'CheckCircleOutline',
 }
 
@@ -111,7 +110,6 @@ export const CATEGORY_TONES = {
 	[CATEGORY.TODAY]: 'today',
 	[CATEGORY.UPCOMING]: 'upcoming',
 	[CATEGORY.WAITING_FOR_OTHERS]: 'waiting',
-	[CATEGORY.TEAM_ADMIN]: 'admin',
 	[CATEGORY.COMPLETED]: 'done',
 }
 
@@ -144,36 +142,7 @@ export function breakdownLabel(row, providerNames = {}) {
 // ── Team badges ─────────────────────────────────────────────────────────
 
 /** Number of team badge tints defined in widget-tokens.css. */
-export const TEAM_TONE_COUNT = 6
 
-/**
- * Deterministic badge tone (1–6) for a team.
- *
- * A team must be the same colour on every page, for every user, forever —
- * that is what makes the badge *recognisable* rather than decorative, which
- * is what the specification asks for. Hashing the immutable circle id gives
- * that for free, with nothing to store and nothing to migrate. Renaming a
- * team keeps its colour; that is the intent.
- *
- * FNV-1a: tiny, no dependency, and well spread over short ASCII ids — a
- * naive charCode sum clusters badly on ids sharing a prefix, which circle
- * ids frequently do.
- *
- * @param {string} teamId
- * @return {number} 1-based tone index
- */
-export function teamBadgeTone(teamId) {
-	if (!teamId) {
-		return 1
-	}
-	let hash = 0x811c9dc5
-	for (let i = 0; i < teamId.length; i++) {
-		hash ^= teamId.charCodeAt(i)
-		// 16777619, via shifts — Math.imul keeps this in 32-bit space.
-		hash = Math.imul(hash, 0x01000193) >>> 0
-	}
-	return (hash % TEAM_TONE_COUNT) + 1
-}
 
 // ── Priorities ──────────────────────────────────────────────────────────
 
@@ -668,7 +637,7 @@ export const SOURCE_GROUP = {
 export const SOURCE_GROUP_MEMBERS = {
 	[SOURCE_GROUP.FILES]: ['approval', 'file_review'],
 	[SOURCE_GROUP.TEAMS]: ['teamadmin', 'teamexpiry_team'],
-	[SOURCE_GROUP.ADMINISTRATION]: ['teamexpiry_admin'],
+	[SOURCE_GROUP.ADMINISTRATION]: ['teamexpiry_admin', 'teamspace_admin'],
 }
 
 /**
@@ -735,8 +704,10 @@ export function buildSourceTabs(providers, counts = {}, active = '') {
 		key: '',
 		label: t('teamhub', 'All'),
 		icon: 'ViewGrid',
-		// No number on All: the summary cards above already total the
+		// No number on All: the group headings below already total the
 		// queue, and repeating it here would be the same fact twice.
+		// (Until v4.10.18 the summary tiles did; they are gone, the
+		// headings carry it now, and the reasoning is unchanged.)
 		count: null,
 		active: !active,
 		members: [],
@@ -848,6 +819,16 @@ export const RESOURCE_TYPE_ICONS = {
 	// v4.9.7 — a milestone of the project: a date the whole project is
 	// heading for, not a task of yours. The flag says "marker", not "job".
 	openproject_milestone: 'FlagOutline',
+	// v4.10.1 — Nextcloud 35 team spaces, for administrators. A folder with a
+	// person on it: the subject is who a folder belongs to, which a plain
+	// Folder (a file to review) would not say. The report is a record and
+	// takes the archive glyph Completed rows already use; the conflict is a
+	// warning and says so.
+	team_space_shared_folder: 'FolderAccountOutline',
+	team_space_report: 'ArchiveCheckOutline',
+	team_space_conflict: 'AlertCircleOutline',
+	// The owner's task is the same subject seen from the other side.
+	team_space_task: 'FolderAccountOutline',
 }
 
 /** Same glyphs, keyed by provider, for the source chip. */
@@ -864,6 +845,8 @@ export const PROVIDER_ICONS = {
 	// queue, so they need to be distinguishable at a glance.
 	file_review: 'FileEyeOutline',
 	openproject: 'BriefcaseOutline',
+	// v4.10.1 — team spaces (Nextcloud 35), the second Administration source.
+	teamspace_admin: 'FolderAccountOutline',
 }
 
 export const FALLBACK_ICON = 'Puzzle'
@@ -897,6 +880,18 @@ export function resourceTypeLabel(type) {
 	case 'openproject_milestone':
 		// TRANSLATORS: the kind of thing a My Work row is — a milestone of an OpenProject project
 		return t('teamhub', 'Milestone')
+	case 'team_space_shared_folder':
+		// TRANSLATORS: the kind of thing a My Work row is — a team whose files still sit in an old shared folder instead of its Nextcloud 35 team space
+		return t('teamhub', 'Shared folder to move')
+	case 'team_space_report':
+		// TRANSLATORS: the kind of thing a My Work row is — a report of what the team-space conversion changed
+		return t('teamhub', 'Team space report')
+	case 'team_space_conflict':
+		// TRANSLATORS: the kind of thing a My Work row is — a team with two folders that both hold files
+		return t('teamhub', 'Folder conflict')
+	case 'team_space_task':
+		// TRANSLATORS: the kind of thing a My Work row is — a team owner's task to move a shared folder into the team space
+		return t('teamhub', 'Team space task')
 	default:
 		return type
 	}
@@ -937,6 +932,33 @@ export function statusLabel(status) {
 		return t('teamhub', 'Upcoming milestone')
 	case 'completed':
 		return t('teamhub', 'Completed')
+	// v4.10.1 — the team-space administrator source.
+	case 'shared_folder':
+		// TRANSLATORS: My Work status filter option — a team's files still sit in an old shared folder
+		return t('teamhub', 'Still on a shared folder')
+	case 'shares_removed':
+		// TRANSLATORS: My Work status filter option — other groups' access to a team folder was removed when it became a team space
+		return t('teamhub', 'Shares removed')
+	case 'duplicate_removed':
+		// TRANSLATORS: My Work status filter option — an empty duplicate team space was deleted
+		return t('teamhub', 'Duplicate removed')
+	case 'conflict':
+		// TRANSLATORS: My Work status filter option — a team has two folders that both contain files
+		return t('teamhub', 'Folder conflict')
+	case 'assigned_to_owner':
+		// TRANSLATORS: My Work status filter option — the folder move was handed to the team owner
+		return t('teamhub', 'With the team owner')
+	case 'owner_completed':
+		// TRANSLATORS: My Work status filter option — the team owner reported the folder move done
+		return t('teamhub', 'Reported done by the owner')
+	case 'closed':
+		// TRANSLATORS: My Work status filter option — an administrator closed the folder move
+		return t('teamhub', 'Closed')
+	case 'teamspace_task_assigned':
+		// TRANSLATORS: My Work status filter option — a folder move a Nextcloud administrator handed to the team owner
+		return t('teamhub', 'Handed to you')
+	// v4.10.2's quota_* statuses left with the ledger quota rows (v4.10.29):
+	// the quota request is a workflow on the engine and renders as one.
 	default:
 		return status
 	}

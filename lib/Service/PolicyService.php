@@ -668,12 +668,19 @@ class PolicyService {
      *
      * @return array<string,mixed> the governed values, empty when unclassified
      */
-    public function assignAtCreation(string $teamId, ?string $requestedKey, ?string $templateKey = null): array {
-        $user = $this->userSession->getUser();
-        if ($user === null) {
-            return [];
+    public function assignAtCreation(string $teamId, ?string $requestedKey, ?string $templateKey = null, ?string $actorUid = null): array {
+        // v4.10.50 — an adopted team may be accepted from a background job
+        // (no creator group: accepted by itself), which has no session; the
+        // caller names the actor instead. Without either, nothing is assigned.
+        if ($actorUid !== null && $actorUid !== '') {
+            $actor = $actorUid;
+        } else {
+            $user = $this->userSession->getUser();
+            if ($user === null) {
+                return [];
+            }
+            $actor = $user->getUID();
         }
-        $actor = $user->getUID();
 
         $requestedKey = $requestedKey === null ? '' : trim($requestedKey);
 

@@ -2,12 +2,12 @@
 
 **Feedback request**
 TeamHub grew to what it is today with the help of a few community members that shared their insights.
-For future development we need your insights! Help us by filling in the feedback form: https://tldr.host/teamhub/feedback.php 
+For future development we need your insights! Help us by filling in the feedback form: https://teamhub.doekworks.eu/feedback.php 
 
 **Import/Export**
 We added team import and export modules found in administration settings -> TeamHub -> import/export tab. 
 You can import teams from MS Teams, another Nextcloud instance or other sources that support exporting to .csv files. 
-If you are interested in a MS Teams export procedure e-mail us at teamhub@tldr.host and we will provide it to you after the holidays. 
+If you are interested in a MS Teams export procedure e-mail us at sales@doekworks.eu and we will provide it to you after the holidays. 
 
 Import function is free. For export you need a (trial) license.  
 Just go to administration settings -> TeamHub -> License tab and request the trial license. 

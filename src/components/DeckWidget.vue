@@ -11,14 +11,14 @@
                 class="th-unassigned__row"
                 :aria-label="n('teamhub', '{n} unassigned card in {board} — open board', '{n} unassigned cards in {board} — open board', b.count, { n: b.count, board: b.boardName || 'board' })"
                 @click="openBoard(b)">
-                <AlertCircleOutline :size="15" class="th-unassigned__icon" aria-hidden="true" />
+                <AlertCircleOutline :size="ICON_INLINE" class="th-unassigned__icon" aria-hidden="true" />
                 <span class="th-unassigned__text">
                     <template v-if="b.boardName">
                         <strong>{{ b.boardName }}</strong>{{ t('teamhub', ':') }}
                     </template>
                     {{ n('teamhub', '{n} unassigned card', '{n} unassigned cards', b.count, { n: b.count }) }}
                 </span>
-                <ChevronRightIcon :size="13" class="th-unassigned__ext" aria-hidden="true" />
+                <ChevronRightIcon :size="ICON_INLINE" class="th-unassigned__ext" aria-hidden="true" />
             </button>
         </div>
 
@@ -28,7 +28,7 @@
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading work packages') }}</span>
         </div>
         <div v-else-if="mergedTasks.length === 0" class="th-widget__state th-widget__state--empty">
-            <CardTextIcon :size="18" aria-hidden="true" />
+            <CardTextIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'No upcoming tasks') }}</span>
         </div>
 
@@ -47,9 +47,9 @@
                         'th-deck__badge--openproject': task.source === 'openproject',
                     }"
                     aria-hidden="true">
-                    <CheckboxMarkedOutlineIcon v-if="task.source === 'deck'" :size="18" />
-                    <BriefcaseOutlineIcon v-else-if="task.source === 'openproject'" :size="18" />
-                    <ClipboardCheckOutlineIcon v-else :size="18" />
+                    <CheckboxMarkedOutlineIcon v-if="task.source === 'deck'" :size="ICON_BODY" />
+                    <BriefcaseOutlineIcon v-else-if="task.source === 'openproject'" :size="ICON_BODY" />
+                    <ClipboardCheckOutlineIcon v-else :size="ICON_BODY" />
                 </div>
 
                 <!-- Main content -->
@@ -77,30 +77,31 @@
                         <!-- Source pills: board name + app label.
                              Shared outline pill vocabulary. -->
                         <template v-if="task.source === 'deck'">
-                            <span
+                            <NcChip
                                 v-if="task.boardName && resources.deck && resources.deck.length > 1"
-                                class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral th-deck__boardname"
+                                no-close
+                                variant="tertiary"
+                                class="th-deck__boardname"
                                 :title="task.boardName">
                                 {{ truncate(task.boardName, 20) }}
-                            </span>
-                            <span class="th-widget__pill th-widget__pill--outline th-widget__pill--primary">
+                            </NcChip>
+                            <NcChip no-close variant="secondary">
                                 {{ t('teamhub', 'Deck') }}
-                            </span>
+                            </NcChip>
                         </template>
                         <template v-else-if="task.source === 'openproject'">
-                            <span
+                            <NcChip no-close variant="tertiary"
                                 v-if="task.type"
-                                class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral"
                                 :title="task.type">
                                 {{ truncate(task.type, 20) }}
-                            </span>
-                            <span class="th-widget__pill th-widget__pill--outline th-widget__pill--primary">
+                            </NcChip>
+                            <NcChip no-close variant="secondary">
                                 {{ t('teamhub', 'OpenProject') }}
-                            </span>
+                            </NcChip>
                         </template>
-                        <span v-else class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral">
+                        <NcChip no-close variant="tertiary" v-else>
                             {{ t('teamhub', 'Personal task') }}
-                        </span>
+                        </NcChip>
 
                         <!-- Assignee avatars (Deck only) -->
                         <span v-if="task.source === 'deck' && assignees(task).length" class="th-deck__assignees">
@@ -109,9 +110,9 @@
                                 :key="u.uid"
                                 :user="u.uid"
                                 :display-name="u.displayname || u.uid"
-                                :show-user-status="false"
+                                :hide-status="true"
                                 :disable-menu="false"
-                                :size="20" />
+                                :size="24" />
                         </span>
                         <!-- Assignee name (OpenProject) — a name OpenProject
                              gave us, not a Nextcloud account, so no avatar. -->
@@ -147,7 +148,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatDateTime as fmtDateTime, formatIsoDate, zonedIsoDate, todayIso } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcAvatar, NcButton } from '@nextcloud/vue'
+import { NcAvatar, NcButton, NcChip } from '@nextcloud/vue'
 import { isPlainClick } from '../lib/internalLinks.js'
 import { classifyError, mergeItems } from '../lib/openProject.js'
 import CardTextIcon from 'vue-material-design-icons/CardText.vue'
@@ -156,6 +157,7 @@ import ClipboardCheckOutlineIcon from 'vue-material-design-icons/ClipboardCheckO
 import BriefcaseOutlineIcon from 'vue-material-design-icons/BriefcaseOutline.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 /**
  * DeckWidget — the Upcoming tasks widget: Deck cards, NC Tasks VTODOs and,
@@ -181,7 +183,7 @@ export default {
     name: 'DeckWidget',
 
     components: {
-        NcAvatar,
+         NcChip, NcAvatar,
         NcButton,
         CardTextIcon,
         CheckboxMarkedOutlineIcon,
@@ -196,6 +198,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             // v4.9.5 — the OpenProject part of the list.
             opItems: [],
             opTotal: null,
@@ -520,7 +524,7 @@ export default {
     flex-shrink: 0;
     width: 38px;
     height: 38px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     border: 1px solid var(--color-border);
 }
 /* v3.100.14: neutral decorative tile per SKILLS.md — the primary-
@@ -547,7 +551,7 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .th-deck__title {
@@ -562,18 +566,18 @@ export default {
 }
 .th-deck__title:hover { color: var(--color-primary-element); }
 /* v3.100.16: NC theme token (was --th-color-error hex). */
-.th-deck__title--overdue { color: var(--color-error-text); }
+.th-deck__title--overdue { color: var(--color-text-error); }
 
 .th-deck__meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-row-meta-weight);
     color: var(--th-widget-meta-color);
     flex-wrap: wrap;
 }
-.th-deck__meta--overdue { color: var(--color-error-text); }
+.th-deck__meta--overdue { color: var(--color-text-error); }
 
 .th-deck__boardname {
     max-width: 120px;
@@ -585,14 +589,14 @@ export default {
 .th-deck__assignees {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    margin-left: auto;
+    gap: 4px;
+    margin-inline-start: auto;
 }
 
 /* v4.9.5 — an OpenProject assignee is a name, right-aligned where Deck
    puts its avatars. */
 .th-deck__assignee-name {
-    margin-left: auto;
+    margin-inline-start: auto;
     max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -621,10 +625,10 @@ export default {
 .th-unassigned__row {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 7px 14px;
+    gap: 8px;
+    padding: 8px 16px;
     width: 100%;
-    text-align: left;
+    text-align: start;
     text-decoration: none;
     cursor: pointer;
     background: var(--color-warning);
@@ -634,7 +638,7 @@ export default {
     font-size: var(--th-widget-row-meta-size);
     font-family: inherit;
     line-height: 1.3;
-    transition: background 0.1s;
+    transition: background var(--animation-quick);
 }
 
 .th-unassigned__row:last-child {

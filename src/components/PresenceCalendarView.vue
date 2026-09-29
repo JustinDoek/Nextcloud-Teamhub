@@ -58,7 +58,7 @@
                                 <span v-if="slotFor(day.iso, 0)" class="pres-cal__slot-label">
                                     {{ slotFor(day.iso, 0).presence_type_label }}
                                 </span>
-                                <LockIcon v-if="isLocked(day.iso, 0)" :size="9" class="pres-cal__lock" />
+                                <LockIcon v-if="isLocked(day.iso, 0)" :size="ICON_INLINE" class="pres-cal__lock" />
                             </div>
 
                             <!-- Afternoon block -->
@@ -80,7 +80,7 @@
                                 <span v-if="slotFor(day.iso, 1)" class="pres-cal__slot-label">
                                     {{ slotFor(day.iso, 1).presence_type_label }}
                                 </span>
-                                <LockIcon v-if="isLocked(day.iso, 1)" :size="9" class="pres-cal__lock" />
+                                <LockIcon v-if="isLocked(day.iso, 1)" :size="ICON_INLINE" class="pres-cal__lock" />
                             </div>
                         </template>
                     </div>
@@ -94,6 +94,7 @@
 import { translate as t } from '@nextcloud/l10n'
 import { todayIso, formatIsoDate, shiftIsoDate } from '../lib/localDate.js'
 import LockIcon from 'vue-material-design-icons/Lock.vue'
+import { ICON_INLINE } from '../constants/uiTokens.js'
 
 /**
  * Two-month calendar showing materialised presence slots.
@@ -116,6 +117,12 @@ export default {
         loading: { type: Boolean, default: false },
     },
     emits: ['pick'],
+    data() {
+        return {
+            ICON_INLINE,
+        }
+    },
+
     computed: {
         today() {
             return todayIso()
@@ -267,27 +274,27 @@ export default {
 .pres-cal__dow-row {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
-    margin-bottom: 2px;
+    gap: 4px;
+    margin-bottom: 4px;
 }
 .pres-cal__dow-label {
     font-size: var(--th-font-micro);
     font-weight: 500;
     text-align: center;
     color: var(--color-text-maxcontrast);
-    padding: 2px 0;
+    padding: 4px 0;
 }
 
 .pres-cal__week {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    gap: 2px;
-    margin-bottom: 2px;
+    gap: 4px;
+    margin-bottom: 4px;
 }
 
 .pres-cal__day {
     min-height: 58px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-background-hover);
     display: flex;
     flex-direction: column;
@@ -309,8 +316,8 @@ export default {
 
 .pres-cal__day-num {
     font-size: var(--th-font-micro);
-    text-align: right;
-    padding: 2px 4px;
+    text-align: end;
+    padding: 4px 4px;
     color: var(--color-text-maxcontrast);
     line-height: 1.2;
 }
@@ -320,17 +327,17 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 9px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     text-align: center;
     overflow: hidden;
     position: relative;
     line-height: 1.1;
-    padding: 1px 2px;
+    padding: 1px 4px;
     cursor: default;
 }
 .pres-cal__slot--am {
-    border-bottom: 1px solid rgba(0,0,0,0.06);
+    border-bottom: 1px solid var(--color-box-shadow);
 }
 .pres-cal__slot[role="button"] {
     cursor: pointer;
@@ -351,8 +358,8 @@ export default {
         -45deg,
         transparent,
         transparent 2px,
-        rgba(0,0,0,0.07) 2px,
-        rgba(0,0,0,0.07) 4px
+        var(--color-box-shadow) 2px,
+        var(--color-box-shadow) 4px
     );
 }
 .pres-cal__slot--past[role="button"] {
@@ -370,7 +377,7 @@ export default {
 .pres-cal__lock {
     position: absolute;
     top: 1px;
-    right: 2px;
+    inset-inline-end: 2px;
     opacity: 0.5;
 }
 </style>

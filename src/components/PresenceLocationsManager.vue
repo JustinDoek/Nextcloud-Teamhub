@@ -5,7 +5,7 @@
             :description="t('teamhub', 'The places people can pick when they set a presence status that requires a location. Organised as a tree of buildings, floors, and rooms.')">
 
             <div v-if="loading" class="presence-loading">
-                <NcLoadingIcon :size="24" />
+                <NcLoadingIcon :size="ICON_LARGE" />
             </div>
             <div v-else-if="error" class="presence-error" role="alert">
                 {{ error }}
@@ -15,7 +15,7 @@
                     variant="primary"
                     class="presence-add-btn"
                     @click="openCreate('building')">
-                    <template #icon><PlusIcon :size="18" /></template>
+                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Add building') }}
                 </NcButton>
 
@@ -41,11 +41,11 @@
                                     : t('teamhub', 'Expand')"
                                 @click="toggle('b'+b.id)">
                                 <template #icon>
-                                    <ChevronDownIcon v-if="expanded['b'+b.id] !== false" :size="16" />
-                                    <ChevronRightIcon v-else :size="16" />
+                                    <ChevronDownIcon v-if="expanded['b'+b.id] !== false" :size="ICON_BODY" />
+                                    <ChevronRightIcon v-else :size="ICON_BODY" />
                                 </template>
                             </NcButton>
-                            <OfficeBuildingIcon :size="18" class="presence-node__icon" />
+                            <OfficeBuildingIcon :size="ICON_BODY" class="presence-node__icon" />
                             <div class="presence-node__label">
                                 <strong>{{ b.name }}</strong>
                                 <span v-if="b.address" class="presence-node__sub">{{ b.address }}</span>
@@ -55,19 +55,19 @@
                                     variant="tertiary"
                                     :aria-label="t('teamhub', 'Add floor')"
                                     @click="openCreate('floor', { building_id: b.id })">
-                                    <template #icon><PlusIcon :size="16" /></template>
+                                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                                 <NcButton
                                     variant="tertiary"
                                     :aria-label="t('teamhub', 'Edit building')"
                                     @click="openEdit('building', b)">
-                                    <template #icon><PencilIcon :size="16" /></template>
+                                    <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                                 <NcButton
                                     variant="tertiary"
                                     :aria-label="t('teamhub', 'Delete building')"
                                     @click="confirmDelete('building', b)">
-                                    <template #icon><DeleteIcon :size="16" /></template>
+                                    <template #icon><DeleteIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                             </div>
                         </div>
@@ -91,11 +91,11 @@
                                             : t('teamhub', 'Expand')"
                                         @click="toggle('f'+f.id)">
                                         <template #icon>
-                                            <ChevronDownIcon v-if="expanded['f'+f.id] !== false" :size="16" />
-                                            <ChevronRightIcon v-else :size="16" />
+                                            <ChevronDownIcon v-if="expanded['f'+f.id] !== false" :size="ICON_BODY" />
+                                            <ChevronRightIcon v-else :size="ICON_BODY" />
                                         </template>
                                     </NcButton>
-                                    <LayersOutlineIcon :size="16" class="presence-node__icon" />
+                                    <LayersOutlineIcon :size="ICON_BODY" class="presence-node__icon" />
                                     <div class="presence-node__label">
                                         <span>{{ f.name }}</span>
                                     </div>
@@ -104,19 +104,19 @@
                                             variant="tertiary"
                                             :aria-label="t('teamhub', 'Add room')"
                                             @click="openCreate('room', { floor_id: f.id })">
-                                            <template #icon><PlusIcon :size="16" /></template>
+                                            <template #icon><PlusIcon :size="ICON_BODY" /></template>
                                         </NcButton>
                                         <NcButton
                                             variant="tertiary"
                                             :aria-label="t('teamhub', 'Edit floor')"
                                             @click="openEdit('floor', f)">
-                                            <template #icon><PencilIcon :size="16" /></template>
+                                            <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                         </NcButton>
                                         <NcButton
                                             variant="tertiary"
                                             :aria-label="t('teamhub', 'Delete floor')"
                                             @click="confirmDelete('floor', f)">
-                                            <template #icon><DeleteIcon :size="16" /></template>
+                                            <template #icon><DeleteIcon :size="ICON_BODY" /></template>
                                         </NcButton>
                                     </div>
                                 </div>
@@ -133,7 +133,7 @@
 
                                         <div class="presence-node__row">
                                             <span class="presence-node__indent" aria-hidden="true"></span>
-                                            <DoorClosedIcon :size="16" class="presence-node__icon" />
+                                            <DoorClosedIcon :size="ICON_BODY" class="presence-node__icon" />
                                             <div class="presence-node__label">
                                                 <span>{{ r.name }}</span>
                                             </div>
@@ -142,13 +142,13 @@
                                                     variant="tertiary"
                                                     :aria-label="t('teamhub', 'Edit room')"
                                                     @click="openEdit('room', r)">
-                                                    <template #icon><PencilIcon :size="16" /></template>
+                                                    <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                                 </NcButton>
                                                 <NcButton
                                                     variant="tertiary"
                                                     :aria-label="t('teamhub', 'Delete room')"
                                                     @click="confirmDelete('room', r)">
-                                                    <template #icon><DeleteIcon :size="16" /></template>
+                                                    <template #icon><DeleteIcon :size="ICON_BODY" /></template>
                                                 </NcButton>
                                             </div>
                                         </div>
@@ -203,8 +203,8 @@
                     :disabled="!dialog.name.trim() || saving"
                     @click="save">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="16" />
-                        <ContentSaveIcon v-else :size="16" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <ContentSaveIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Save') }}
                 </NcButton>
@@ -241,13 +241,12 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import {
-    NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog,
-} from '@nextcloud/vue'
+import { NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog } from '@nextcloud/vue'
 import PlusIcon            from 'vue-material-design-icons/Plus.vue'
 import PencilIcon          from 'vue-material-design-icons/Pencil.vue'
 import DeleteIcon          from 'vue-material-design-icons/Delete.vue'
@@ -277,6 +276,8 @@ export default {
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             loading: true,
             error: null,
             saving: false,
@@ -500,10 +501,10 @@ export default {
     padding: 20px;
 }
 .presence-error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     padding: 12px 16px;
     background: var(--color-error-background, var(--color-background-hover));
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     margin-bottom: 12px;
 }
 .presence-add-btn { margin-bottom: 12px; }
@@ -513,7 +514,7 @@ export default {
     text-align: center;
     color: var(--color-text-maxcontrast);
     border: 1px dashed var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 .presence-empty-inline {
     padding: 4px 8px 4px 36px;
@@ -527,9 +528,9 @@ export default {
     padding: 0;
 }
 .presence-tree--nested {
-    margin-left: 28px;
-    border-left: 1px solid var(--color-border);
-    padding-left: 8px;
+    margin-inline-start: 28px;
+    border-inline-start: 1px solid var(--color-border);
+    padding-inline-start: 8px;
     margin-top: 4px;
     margin-bottom: 8px;
 }
@@ -543,7 +544,7 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 4px 8px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 .presence-node__row:hover {
     background: var(--color-background-hover);
@@ -565,7 +566,7 @@ export default {
 }
 .presence-node__actions {
     display: flex;
-    gap: 2px;
+    gap: 4px;
 }
 
 .presence-form {

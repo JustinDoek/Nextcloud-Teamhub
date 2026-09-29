@@ -58,7 +58,6 @@
 				:close-on-select="false"
 				:loading="loadingTeams"
 				:clearable="true"
-				label="label"
 				track-by="id"
 				:placeholder="t('teamhub', 'Search teams…')"
 				:aria-label="t('teamhub', 'Teams to export')" />
@@ -345,7 +344,7 @@ export default {
 .team-export {
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	gap: 16px;
 	max-width: 980px;
 }
 
@@ -361,7 +360,7 @@ export default {
    read as something having gone wrong. */
 .team-export__intro--caution {
 	border-inline-start: 3px solid var(--color-border-dark);
-	padding-inline-start: 10px;
+	padding-inline-start: 8px;
 	color: var(--color-text-maxcontrast);
 	font-size: var(--th-font-meta, 12px);
 }
@@ -377,11 +376,11 @@ export default {
 }
 
 .team-export__status-err {
-	color: var(--color-error-text);
+	color: var(--color-text-error);
 }
 
 .team-export__status-ok {
-	color: var(--color-success-text);
+	color: var(--color-text-success);
 }
 
 .team-export__scope {
@@ -427,7 +426,7 @@ export default {
 }
 
 .team-export__heading {
-	margin: 6px 0 0;
+	margin: 8px 0 0;
 	font-size: var(--th-font-heading, 16px);
 	font-weight: var(--th-font-weight-semibold, 600);
 }
@@ -449,7 +448,7 @@ export default {
 	th,
 	td {
 		text-align: start;
-		padding: 6px 10px;
+		padding: 8px 8px;
 		border-bottom: 1px solid var(--color-border);
 		vertical-align: top;
 	}

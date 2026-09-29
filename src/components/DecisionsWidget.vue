@@ -13,7 +13,7 @@
                 class="th-decisions-widget__tab"
                 :class="{ 'th-decisions-widget__tab--active': activeTab === tab.id }"
                 @click="setTab(tab.id)">
-                <component :is="tab.icon" :size="14" aria-hidden="true" />
+                <component :is="tab.icon" :size="ICON_INLINE" aria-hidden="true" />
                 {{ tab.label }}
                 <span
                     v-if="tab.id === 'approve' && approveDecisions.length"
@@ -65,7 +65,7 @@
                 :decisions="approveDecisions"
                 :loading="loadingApprove"
                 :error="errorApprove"
-                :empty-label="t('teamhub', 'Nothing awaiting your approval')"
+                :empty-label="t('teamhub', 'Nothing awaiting approval')"
                 :show-approver-actions="true"
                 :acting-decision-id="approvingDecisionId"
                 @review-decision="onReviewOpen" />
@@ -112,6 +112,7 @@ import SuggestMeetingWizard                     from './SuggestMeetingWizard.vue
 import GavelIcon                                from 'vue-material-design-icons/Gavel.vue'
 import ClockOutlineIcon                         from 'vue-material-design-icons/ClockOutline.vue'
 import CheckBoldIcon                            from 'vue-material-design-icons/CheckBold.vue'
+import { ICON_INLINE } from '../constants/uiTokens.js'
 
 export default {
     name: 'DecisionsWidget',
@@ -129,6 +130,7 @@ export default {
 
     data() {
         return {
+            ICON_INLINE,
             activeTab: 'latest',
 
             latestDecisions: [],
@@ -533,15 +535,15 @@ export default {
     align-items: stretch;
     border-bottom: 1px solid var(--color-border);
     padding: 0 4px;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
 .th-decisions-widget__tab {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 8px 10px 7px;
+    gap: 4px;
+    padding: 8px 8px 8px;
     /* Tokens — tabs use the row-meta size (12px) at row-primary weight */
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-row-primary-weight);
@@ -551,9 +553,9 @@ export default {
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     cursor: pointer;
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    border-radius: var(--border-radius-small) var(--border-radius-small) 0 0;
     white-space: nowrap;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    transition: color var(--animation-quick), border-color var(--animation-quick), background var(--animation-quick);
     line-height: 1;
 }
 
@@ -585,9 +587,9 @@ export default {
     justify-content: center;
     min-width: 18px;
     height: 18px;
-    padding: 0 6px;
-    margin-left: 6px;
-    border-radius: 9px;
+    padding: 0 8px;
+    margin-inline-start: 8px;
+    border-radius: var(--border-radius-element);
     /* v3.100.16: NC theme tokens (was hard-coded #c8253f red + #ffffff
        with !important — the pinned hex didn't follow the dark theme
        and the !important papered over other CSS bleed). The !important
@@ -599,7 +601,7 @@ export default {
     font-size: var(--th-font-micro);
     font-weight: var(--th-widget-pill-weight);
     line-height: 1;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25), 0 1px 2px rgba(0,0,0,0.15);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-main-background) 25%, transparent), 0 1px 2px var(--color-box-shadow);
 }
 
 .th-decisions-widget__tab--active .th-decisions-widget__tab-badge {

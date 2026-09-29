@@ -6,7 +6,7 @@
 		<div class="fr-modal">
 			<h3 class="fr-modal__title">{{ t('teamhub', 'Request review') }}</h3>
 
-			<NcLoadingIcon v-if="loading" :size="32" class="fr-modal__loading" />
+			<NcLoadingIcon v-if="loading" :size="ICON_LARGE" class="fr-modal__loading" />
 
 			<!-- The action only appears for files in a team folder, so this is
 			     a race rather than a normal outcome: a folder detached between
@@ -17,7 +17,7 @@
 
 			<template v-else>
 				<p class="fr-modal__file">
-					<FileEyeOutline :size="20" aria-hidden="true" />
+					<FileEyeOutline :size="ICON_BODY" aria-hidden="true" />
 					<span class="fr-modal__file-name">{{ context.fileName }}</span>
 					<span class="fr-modal__file-team">{{ context.teamName }}</span>
 				</p>
@@ -78,12 +78,14 @@
 
 				<label class="fr-modal__field">
 					<span class="fr-modal__label">{{ t('teamhub', 'Message (optional)') }}</span>
-					<textarea
+					<NcTextArea
 						v-model="message"
 						class="fr-modal__textarea"
 						rows="3"
 						maxlength="4000"
-						:placeholder="t('teamhub', 'What would you like them to look at?')" />
+						:placeholder="t('teamhub', 'What would you like them to look at?')"
+						label-outside
+						:aria-label="t('teamhub', 'Message (optional)')" />
 				</label>
 
 				<label class="fr-modal__field">
@@ -128,11 +130,12 @@
  * changed since the modal opened.
  */
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import { NcModal, NcButton, NcSelect, NcLoadingIcon, NcCheckboxRadioSwitch } from '@nextcloud/vue'
+import { NcModal, NcButton, NcSelect, NcLoadingIcon, NcCheckboxRadioSwitch, NcTextArea } from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess } from '@nextcloud/dialogs'
 import FileEyeOutline from 'vue-material-design-icons/FileEyeOutline.vue'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 import { fromDateInput } from '../lib/localDate.js'
 import logger from '../logger.js'
@@ -141,7 +144,7 @@ export default {
 	name: 'RequestFileReviewModal',
 
 	components: {
-		NcModal, NcButton, NcSelect, NcLoadingIcon, NcCheckboxRadioSwitch,
+		 NcTextArea, NcModal, NcButton, NcSelect, NcLoadingIcon, NcCheckboxRadioSwitch,
 		FileEyeOutline,
 	},
 
@@ -154,6 +157,8 @@ export default {
 
 	data() {
 		return {
+			ICON_BODY,
+			ICON_LARGE,
 			loading: true,
 			submitting: false,
 			error: '',
@@ -214,7 +219,7 @@ export default {
 				}
 			} catch (e) {
 				logger.warn('TeamHub: could not load the review context', { error: e })
-				this.error = t('teamhub', 'This file could not be checked. Please try again.')
+				this.error = t('teamhub', 'This file could not be checked. Try again.')
 			} finally {
 				this.loading = false
 			}
@@ -278,7 +283,7 @@ export default {
 	padding: 20px 24px 24px;
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	gap: 16px;
 	max-width: 520px;
 }
 
@@ -299,7 +304,7 @@ export default {
 	gap: 8px;
 	margin: 0;
 	padding: 8px 12px;
-	border-radius: var(--border-radius-large);
+	border-radius: var(--border-radius-element);
 	background: var(--color-background-hover);
 }
 
@@ -324,17 +329,17 @@ export default {
 }
 
 .fr-modal__warning {
-	color: var(--color-warning-text, var(--color-text-maxcontrast));
+	color: var(--color-warning-text);
 }
 
 .fr-modal__error {
-	color: var(--color-error-text, var(--color-error));
+	color: var(--color-text-error);
 }
 
 .fr-modal__field {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 }
 
 .fr-modal__label {
@@ -354,11 +359,6 @@ export default {
 .fr-modal__textarea {
 	width: 100%;
 	box-sizing: border-box;
-}
-
-.fr-modal__textarea {
-	resize: vertical;
-	min-height: 68px;
 }
 
 .fr-modal__actions {

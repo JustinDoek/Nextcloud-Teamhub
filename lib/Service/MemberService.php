@@ -8,6 +8,7 @@ use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Constants\CirclesMemberType;
 use OCA\TeamHub\Constants\PolicyField;
 use OCA\TeamHub\Db\PendingDeletionMapper;
+use OCA\TeamHub\Db\TeamRegistryMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TalkService;
@@ -72,7 +73,28 @@ class MemberService {
         // v4.7.9 — every membership change ends by asking this to bring the
         // team's connected resources back in line. See GitHub #87.
         private ResourceMembershipService $resourceMembership,
+        // v4.10.6 — which circles are TeamHub's. A DI leaf (IDBConnection only).
+        private TeamRegistryMapper   $teamRegistry,
+        // v4.10.7 — the subline under a person's name. A DI leaf.
+        private PersonSublineService $sublineService,
     ) {
+    }
+
+    /**
+     * v4.10.6 — a circle TeamHub did not create is not a team, so no role in
+     * it means anything here. Every `require*Level()` gate starts with this,
+     * which makes it the one check the hundred-odd team-scoped controller
+     * methods share: a member of a Contacts- or Collectives-made circle
+     * cannot drive TeamHub's features on it through the API any more than
+     * through the sidebar. Same wording as a missing team — the caller
+     * learns nothing about the circle.
+     *
+     * @throws AccessDeniedException
+     */
+    private function assertTeamHubTeam(string $teamId): void {
+        if (!$this->teamRegistry->exists($teamId)) {
+            throw new AccessDeniedException('Team not found');
+        }
     }
 
     /**
@@ -243,30 +265,27 @@ class MemberService {
 
         // Second pass: look up last-login timestamps from oc_preferences in a single query.
         // NC stores the last-login value under app='login', configkey='lastLogin' (ms since epoch).
-        // Table name is 'preferences' on <= NC29, 'user_preferences' on NC30+.
+        // The table is `oc_preferences` on every supported NC version — no
+        // probing of other names (a failed query aborts a Postgres transaction).
         if (!empty($allDirect)) {
             $uids = array_column($allDirect, 'userId');
             $loginByUid = [];
-            foreach (['user_preferences', 'preferences'] as $prefTable) {
-                try {
-                    $pQb = $db->getQueryBuilder();
-                    // Column names differ: 'appid'/'app' and 'configkey'/'key' between versions.
-                    // Try the NC30+ shape first; on failure fall through to the older one.
-                    $pRes = $pQb->select('userid', 'configvalue')
-                        ->from($prefTable)
-                        ->where($pQb->expr()->eq('appid',     $pQb->createNamedParameter('login')))
-                        ->andWhere($pQb->expr()->eq('configkey', $pQb->createNamedParameter('lastLogin')))
-                        ->andWhere($pQb->expr()->in('userid', $pQb->createNamedParameter($uids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
-                        ->executeQuery();
-                    while ($pRow = $pRes->fetch()) {
-                        $loginByUid[(string)$pRow['userid']] = (int)$pRow['configvalue'];
-                    }
-                    $pRes->closeCursor();
-                    break;
-                } catch (\Throwable $e) {
-                    // Try the next table name
-                    continue;
+            try {
+                $pQb = $db->getQueryBuilder();
+                $pRes = $pQb->select('userid', 'configvalue')
+                    ->from('preferences')
+                    ->where($pQb->expr()->eq('appid',     $pQb->createNamedParameter('login')))
+                    ->andWhere($pQb->expr()->eq('configkey', $pQb->createNamedParameter('lastLogin')))
+                    ->andWhere($pQb->expr()->in('userid', $pQb->createNamedParameter($uids, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)))
+                    ->executeQuery();
+                while ($pRow = $pRes->fetch()) {
+                    $loginByUid[(string)$pRow['userid']] = (int)$pRow['configvalue'];
                 }
+                $pRes->closeCursor();
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MemberService] last-login lookup failed', [
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
             }
             foreach ($allDirect as &$d) {
                 $d['lastLogin'] = $loginByUid[$d['userId']] ?? 0;
@@ -657,12 +676,18 @@ class MemberService {
 
         $am = $this->getAccountManager();
 
+        // v4.10.7 — the line that tells two people with the same name apart,
+        // the same one every picker shows (PersonSublineService). The
+        // @mention autocomplete reads it from this list.
+        $sublines = $this->sublineService->sublinesFor($userIds, false);
+
         // ── Per-user enrichment ──
         foreach ($list as &$row) {
             $uid = $row['userId'];
             $row['email']    = null;
             $row['phone']    = null;
             $row['ncStatus'] = $statusByUid[$uid] ?? null;
+            $row['subline']  = $sublines[$uid] ?? '';
 
             $user = $this->userManager->get($uid);
             if ($user === null) {
@@ -1364,6 +1389,7 @@ class MemberService {
         if (!$user) {
             throw new AccessDeniedException('User not authenticated');
         }
+        $this->assertTeamHubTeam($teamId);
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
@@ -1394,6 +1420,7 @@ class MemberService {
         if (!$user) {
             throw new AccessDeniedException('User not authenticated');
         }
+        $this->assertTeamHubTeam($teamId);
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
@@ -1417,6 +1444,7 @@ class MemberService {
         if (!$user) {
             throw new AccessDeniedException('User not authenticated');
         }
+        $this->assertTeamHubTeam($teamId);
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
@@ -1440,6 +1468,7 @@ class MemberService {
         if (!$user) {
             throw new AccessDeniedException('User not authenticated');
         }
+        $this->assertTeamHubTeam($teamId);
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
@@ -1739,6 +1768,191 @@ class MemberService {
             // v4.8.18 — same treatment for outstanding file reviews.
             $this->forgetFileReviews($teamId, $targetId);
         }
+    }
+
+    /**
+     * Confirm the team's 'Invited' group and sub-team rows — write, read back,
+     * rewrite, a bounded number of times. Extracted unchanged from
+     * inviteMembers() in v4.10.47 so relinkGroup() confirms the same way; the
+     * reasoning (GitHub #87, v4.7.12) is at the call site in inviteMembers().
+     *
+     * @return array{confirmed: bool, updated: int}
+     */
+    private function confirmContainerRows(\OCP\IDBConnection $db, string $teamId): array {
+        $confirmed = false;
+        $updated   = 0;
+
+        for ($attempt = 1; $attempt <= self::CONFIRM_MAX_ATTEMPTS; $attempt++) {
+            $confirmQb = $db->getQueryBuilder();
+            $updated  += $confirmQb->update('circles_member')
+                ->set('status', $confirmQb->createNamedParameter('Member'))
+                ->set('level',  $confirmQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->where($confirmQb->expr()->eq('circle_id', $confirmQb->createNamedParameter($teamId)))
+                ->andWhere($confirmQb->expr()->in(
+                    'user_type',
+                    $confirmQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                ))
+                ->andWhere($confirmQb->expr()->eq('status', $confirmQb->createNamedParameter('Invited')))
+                ->executeStatement();
+
+            // Read back rather than trusting the affected-row count:
+            // 0 rows changed is the correct answer both when the row
+            // was already 'Member' and when it has not appeared yet,
+            // and those two need opposite responses.
+            $checkQb  = $db->getQueryBuilder();
+            $checkRes = $checkQb->select($checkQb->func()->count('*', 'cnt'))
+                ->from('circles_member')
+                ->where($checkQb->expr()->eq('circle_id', $checkQb->createNamedParameter($teamId)))
+                ->andWhere($checkQb->expr()->in(
+                    'user_type',
+                    $checkQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                ))
+                ->andWhere($checkQb->expr()->eq('status', $checkQb->createNamedParameter('Invited')))
+                ->executeQuery();
+            $stillInvited = (int)$checkRes->fetchOne();
+            $checkRes->closeCursor();
+
+            if ($stillInvited === 0) {
+                $confirmed = true;
+                break;
+            }
+
+            if ($attempt < self::CONFIRM_MAX_ATTEMPTS) {
+                usleep(self::CONFIRM_RETRY_DELAY_US);
+            }
+        }
+
+        return ['confirmed' => $confirmed, 'updated' => $updated];
+    }
+
+    /**
+     * Move a team from a stale copy of a Nextcloud group to the copy Circles
+     * maintains now (v4.10.47). Called only by GroupMirrorSyncService, from
+     * cron — there is no session and no permission check here, because the
+     * team's own admins already chose "this group is a member"; this restores
+     * that choice, it does not make a new one.
+     *
+     * Circles keeps one hidden circle per group and finds it by name, config,
+     * source *and owner* — the owner being Circles' own app identity. When
+     * that identity is recreated (seen twice on the test instance: 2026-08-07
+     * and 2026-09-25), Circles makes a fresh copy of every group on the next
+     * sync and maintains only that one. A team attached earlier still holds
+     * the old copy, which nothing updates again: people who join the group do
+     * not reach the team, and **people who leave it keep their access**.
+     *
+     * Order is the point: attach the current copy first (Circles' addMember,
+     * as the team owner, confirmed exactly like inviteMembers()), and only
+     * when that row is confirmed remove the stale one (the same row delete
+     * removeMember() does for a group). Anyone in both copies therefore never
+     * drops out of the team in between. A failure before the delete leaves the
+     * stale row in place — no worse than before — and the next hourly run
+     * tries again.
+     *
+     * @return bool true when the team now holds the current copy only
+     */
+    public function relinkGroup(string $teamId, string $groupId, string $staleSingleId): bool {
+        $db = $this->container->get(\OCP\IDBConnection::class);
+
+        $owner = $this->findOwnerUser($db, $teamId);
+        if ($owner === null) {
+            // Circles' addMember() needs an initiator with rights in the team.
+            // An ownerless team is Maintenance's business first (Admin →
+            // TeamHub → Maintenance lists them).
+            $this->logger->warning('[TeamHub][MemberService] relinkGroup: team has no owner; group not relinked', [
+                'teamId' => $teamId, 'groupId' => $groupId, 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+
+        try {
+            $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $circleMemberService  = $this->container->get(\OCA\Circles\Service\MemberService::class);
+            $federatedUserService->setLocalCurrentUser($owner);
+
+            // Resolves the group to the copy Circles maintains today.
+            $invitee   = $federatedUserService->generateFederatedUser($groupId, CirclesMemberType::TYPE_GROUP);
+            $currentId = (string)$invitee->getSingleId();
+            if ($currentId === '' || $currentId === $staleSingleId) {
+                return false;
+            }
+
+            if (!$this->hasContainerRow($db, $teamId, $currentId)) {
+                $circleMemberService->addMember($teamId, $invitee);
+            }
+            ['confirmed' => $confirmed] = $this->confirmContainerRows($db, $teamId);
+            if (!$confirmed || !$this->hasContainerRow($db, $teamId, $currentId)) {
+                $this->logger->warning('[TeamHub][MemberService] relinkGroup: current copy not confirmed; stale copy kept', [
+                    'teamId' => $teamId, 'groupId' => $groupId, 'app' => Application::APP_ID,
+                ]);
+                return false;
+            }
+
+            $delQb = $db->getQueryBuilder();
+            $delQb->delete('circles_member')
+                ->where($delQb->expr()->eq('circle_id', $delQb->createNamedParameter($teamId)))
+                ->andWhere($delQb->expr()->eq('single_id', $delQb->createNamedParameter($staleSingleId)))
+                ->andWhere($delQb->expr()->in(
+                    'user_type',
+                    $delQb->createNamedParameter(CirclesMemberType::CONTAINERS, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+                ))
+                ->executeStatement();
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] relinkGroup failed', [
+                'teamId' => $teamId, 'groupId' => $groupId,
+                'error'  => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+
+        // Rebuilds circles_membership for the team (both paths changed) and
+        // brings Talk along — the same call removeMember() ends with.
+        $this->resourceMembership->reconcileTeamMembership($teamId, 'group_relinked');
+
+        $this->auditService->log(
+            $teamId,
+            'member.group_relinked',
+            null,
+            'member',
+            $groupId,
+            ['reason' => 'stale_group_copy'],
+        );
+        $this->logger->info('[TeamHub][MemberService] relinkGroup: team moved to the current group copy', [
+            'teamId' => $teamId, 'groupId' => $groupId, 'app' => Application::APP_ID,
+        ]);
+        return true;
+    }
+
+    /** Does the team hold this group or sub-team copy (any status)? */
+    private function hasContainerRow(\OCP\IDBConnection $db, string $teamId, string $singleId): bool {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select($qb->func()->count('*', 'cnt'))
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('single_id', $qb->createNamedParameter($singleId)))
+            ->andWhere($qb->expr()->in(
+                'user_type',
+                $qb->createNamedParameter(CirclesMemberType::CONTAINERS, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
+            ))
+            ->executeQuery();
+        $cnt = (int)$res->fetchOne();
+        $res->closeCursor();
+        return $cnt > 0;
+    }
+
+    /** The team's owner as an account, or null for an ownerless team. */
+    private function findOwnerUser(\OCP\IDBConnection $db, string $teamId): ?\OCP\IUser {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('user_id')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(CirclesMemberType::TYPE_USER, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('level', $qb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $uid = $res->fetchOne();
+        $res->closeCursor();
+        return ($uid === false || $uid === null) ? null : $this->userManager->get((string)$uid);
     }
 
     /**
@@ -2087,48 +2301,7 @@ class MemberService {
                         // 2026-08-29 produced no oc_circles_event row at all — so a
                         // bounded re-apply is enough. It only costs anything on the
                         // path that was previously failing outright.
-                        $confirmed = false;
-                        $updated   = 0;
-
-                        for ($attempt = 1; $attempt <= self::CONFIRM_MAX_ATTEMPTS; $attempt++) {
-                            $confirmQb = $db->getQueryBuilder();
-                            $updated  += $confirmQb->update('circles_member')
-                                ->set('status', $confirmQb->createNamedParameter('Member'))
-                                ->set('level',  $confirmQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
-                                ->where($confirmQb->expr()->eq('circle_id', $confirmQb->createNamedParameter($teamId)))
-                                ->andWhere($confirmQb->expr()->in(
-                                    'user_type',
-                                    $confirmQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
-                                ))
-                                ->andWhere($confirmQb->expr()->eq('status', $confirmQb->createNamedParameter('Invited')))
-                                ->executeStatement();
-
-                            // Read back rather than trusting the affected-row count:
-                            // 0 rows changed is the correct answer both when the row
-                            // was already 'Member' and when it has not appeared yet,
-                            // and those two need opposite responses.
-                            $checkQb  = $db->getQueryBuilder();
-                            $checkRes = $checkQb->select($checkQb->func()->count('*', 'cnt'))
-                                ->from('circles_member')
-                                ->where($checkQb->expr()->eq('circle_id', $checkQb->createNamedParameter($teamId)))
-                                ->andWhere($checkQb->expr()->in(
-                                    'user_type',
-                                    $checkQb->createNamedParameter([2, 16], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)
-                                ))
-                                ->andWhere($checkQb->expr()->eq('status', $checkQb->createNamedParameter('Invited')))
-                                ->executeQuery();
-                            $stillInvited = (int)$checkRes->fetchOne();
-                            $checkRes->closeCursor();
-
-                            if ($stillInvited === 0) {
-                                $confirmed = true;
-                                break;
-                            }
-
-                            if ($attempt < self::CONFIRM_MAX_ATTEMPTS) {
-                                usleep(self::CONFIRM_RETRY_DELAY_US);
-                            }
-                        }
+                        ['confirmed' => $confirmed, 'updated' => $updated] = $this->confirmContainerRows($db, $teamId);
 
                         if (!$confirmed) {
                             // Warning, not info: this is the state in which a group or
@@ -2759,36 +2932,31 @@ class MemberService {
     public function resolveUserSingleId(string $uid, \OCP\IDBConnection $db): ?string {
 
         // Strategy 1: NC preferences — 'circles' app, 'userSingleId' key.
-        // NC QueryBuilder adds the oc_ prefix automatically, so we pass bare names.
-        // NC 30+ uses 'user_preferences'; older versions use 'preferences'.
-        foreach (['user_preferences', 'preferences'] as $prefTable) {
-            try {
-                $pQb  = $db->getQueryBuilder();
-
-                // Column names differ between tables
-                $userCol = ($prefTable === 'user_preferences') ? 'userid' : 'userid';
-                $appCol  = ($prefTable === 'user_preferences') ? 'appid'  : 'appid';
-                $keyCol  = ($prefTable === 'user_preferences') ? 'configkey' : 'configkey';
-                $valCol  = ($prefTable === 'user_preferences') ? 'configvalue' : 'configvalue';
-
-                $pRes = $pQb->select($valCol)
-                    ->from($prefTable)
-                    ->where($pQb->expr()->eq($userCol, $pQb->createNamedParameter($uid)))
-                    ->andWhere($pQb->expr()->eq($appCol, $pQb->createNamedParameter('circles')))
-                    ->andWhere($pQb->expr()->eq($keyCol, $pQb->createNamedParameter('userSingleId')))
-                    ->setMaxResults(1)
-                    ->executeQuery();
-                $pRow = $pRes->fetch();
-                $pRes->closeCursor();
-                if ($pRow && !empty($pRow[$valCol])) {
-                    $this->logger->info('[TeamHub][MemberService] resolveUserSingleId: found via preferences', [
-                        'uid' => $uid, 'table' => $prefTable, 'app' => Application::APP_ID,
-                    ]);
-                    return (string)$pRow[$valCol];
-                }
-            } catch (\Throwable $e) {
-                // Table may not exist on this NC version — try next
+        // The table is `oc_preferences` on every supported NC version. Never
+        // probe a table name that may not exist: on Postgres the failed
+        // query aborts the caller's transaction (WorkflowEngine runs this
+        // inside one), and every later query in it fails with 25P02.
+        try {
+            $pQb  = $db->getQueryBuilder();
+            $pRes = $pQb->select('configvalue')
+                ->from('preferences')
+                ->where($pQb->expr()->eq('userid', $pQb->createNamedParameter($uid)))
+                ->andWhere($pQb->expr()->eq('appid', $pQb->createNamedParameter('circles')))
+                ->andWhere($pQb->expr()->eq('configkey', $pQb->createNamedParameter('userSingleId')))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $pRow = $pRes->fetch();
+            $pRes->closeCursor();
+            if ($pRow && !empty($pRow['configvalue'])) {
+                $this->logger->info('[TeamHub][MemberService] resolveUserSingleId: found via preferences', [
+                    'uid' => $uid, 'app' => Application::APP_ID,
+                ]);
+                return (string)$pRow['configvalue'];
             }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] resolveUserSingleId: preferences lookup failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
         }
 
         // Strategy 2: DB join on circles_circle + circles_member.

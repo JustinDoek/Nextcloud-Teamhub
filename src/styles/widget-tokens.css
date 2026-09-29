@@ -32,33 +32,31 @@
  * ────────────────────────────────────────────────────────────────────── */
 
 :root {
-    /* ── Typography scale — five sizes, four weights ──────────────────
-       Size is the primary hierarchy signal, weight secondary. NC's
-       default body size is 15px (--default-font-size); our scale sits
-       one step tighter because widget/list rows read better at 14px in
-       a dense app shell. Any new .vue scoped style should reach for
-       one of these tokens instead of a raw px value.
+    /* ── Typography scale — Nextcloud's, by name ──────────────────
+       v4.10.10 (NC design sweep): the scale is Nextcloud's own.
+       Body is --default-font-size (15px), supporting text is
+       --font-size-small (13px), headings are 20px and titles 24px —
+       the four sizes the NC 35 foundations page names. The earlier
+       14/12/11/10px scale ("one step tighter") was drift; --th-font-micro
+       and the 10px widget pill now resolve to --font-size-small, because
+       NC has no size below 13px. NC also asks for no uppercase and no
+       italics, so neither appears in a scoped style any more.
 
        Role → token mapping:
        - a single number read at a glance → --th-font-display
-       - view-level heading (H1)   → --th-font-heading-lg
-       - section heading   (H2/H3) → --th-font-heading
-       - body / labels / buttons   → --th-font-body
-       - hint / meta / help text   → --th-font-meta
-       - timestamp / pill / caption→ --th-font-micro
-
-       v4.5.39 added --th-font-display, above the heading scale rather
-       than inside it. It is not a heading size: the only thing that
-       may use it is a bare figure whose job is to be legible across
-       the room — today the My Work summary counts. Reach for
-       --th-font-heading-lg for any text that is words.
+       - view title (H1)                  → --th-font-title      (24px)
+       - view / section heading (H2)      → --th-font-heading-lg (20px)
+       - card / widget heading (H3)       → --th-font-heading    (16px)
+       - body / labels / buttons          → --th-font-body       (15px)
+       - hint / meta / caption / pill     → --th-font-meta       (13px)
     */
     --th-font-display:     30px;
+    --th-font-title:       24px;
     --th-font-heading-lg:  20px;
     --th-font-heading:     16px;
-    --th-font-body:        14px;
-    --th-font-meta:        12px;
-    --th-font-micro:       11px;
+    --th-font-body:        var(--default-font-size);
+    --th-font-meta:        var(--font-size-small);
+    --th-font-micro:       var(--font-size-small);   /* retired alias */
 
     --th-font-weight-bold:      700;
     --th-font-weight-semibold:  600;
@@ -66,48 +64,57 @@
     --th-font-weight-regular:   400;
 
     --th-line-height-tight:  1.2;
-    --th-line-height-body:   1.4;
-    --th-line-height-relaxed: 1.5;
+    --th-line-height-body:   var(--default-line-height);
+    --th-line-height-relaxed: var(--default-line-height);   /* retired alias */
 
-    /* ── Border-radius scale ──────────────────────────────────────────
-       Prefer the NC-provided tokens (--border-radius,
-       --border-radius-large, --border-radius-pill) — they follow the
-       user's theme. We define one aliased set so consumers can reach
-       for role-named tokens without having to remember which of the
-       three NC tokens fits which role, plus one custom size for the
-       chip radius used by widget pills.
+    /* ── Border-radius scale — NC 35 names ─────────────────────────
+       --border-radius-small (4px) tags · --border-radius-element (8px)
+       buttons and navigation items · --border-radius-container (12px)
+       dialogs and large elements · --border-radius-pill (100px). The
+       legacy --border-radius / --border-radius-large still resolve but
+       are no longer written; the 10px chip radius is gone — a chip is a
+       pill (NcChip's own shape).
 
        Role → token mapping:
-       - chip / pill      → --th-radius-chip     (10px, matches widget pill)
-       - button / control → --th-radius-control  (NC --border-radius)
-       - card / section   → --th-radius-card     (NC --border-radius-large)
-       - pill / round btn → --th-radius-pill     (NC --border-radius-pill)
+       - chip / pill      → --th-radius-chip     (--border-radius-pill)
+       - button / control → --th-radius-control  (--border-radius-element)
+       - card / section   → --th-radius-card     (--border-radius-container)
+       - pill / round btn → --th-radius-pill     (--border-radius-pill)
     */
-    --th-radius-chip:     10px;
-    --th-radius-control:  var(--border-radius);
-    --th-radius-card:     var(--border-radius-large);
+    --th-radius-chip:     var(--border-radius-pill);
+    --th-radius-control:  var(--border-radius-element);
+    --th-radius-card:     var(--border-radius-container);
     --th-radius-pill:     var(--border-radius-pill);
 
     /* ── Icon-size scale ──────────────────────────────────────────────
-       Not directly usable in vue-material-design-icons `:size="N"` props
-       (props take numbers at compile time), so these values are mirrored
-       as numeric JS constants in src/constants/uiTokens.js. Keep the two
-       in sync. The CSS names below exist so an SVG that is styled via
-       width/height in scoped CSS (e.g. an inline SVG icon in a template)
-       can reach for the same scale.
+       NC 35 foundations: icons are 20px. vue-material-design-icons takes
+       a numeric :size at compile time, so the values are mirrored in
+       src/constants/uiTokens.js — keep the two in sync.
 
        Role → token mapping:
-       - inline with meta text (12px) → --th-icon-inline    (14px)
-       - inline with body text (14px) → --th-icon-body      (16px, most buttons)
-       - toolbar / tab bar            → --th-icon-toolbar   (18px)
-       - NcAppNavigationItem canonical→ --th-icon-nav       (20px)
-       - NcEmptyContent hero          → --th-icon-hero      (64px)
+       - inline with supporting text (13px) → --th-icon-inline   (16px)
+       - everything else: buttons, rows, tabs, navigation → --th-icon-body (20px)
+       - decorative tile / step glyph      → --th-icon-large    (32px)
+       - section illustration              → --th-icon-xl       (48px)
+       - NcEmptyContent hero               → --th-icon-hero     (64px)
+       --th-icon-toolbar and --th-icon-nav remain as aliases of the 20px size.
     */
-    --th-icon-inline:   14px;
-    --th-icon-body:     16px;
-    --th-icon-toolbar:  18px;
+    --th-icon-inline:   16px;
+    --th-icon-body:     20px;
+    --th-icon-toolbar:  20px;
     --th-icon-nav:      20px;
+    --th-icon-large:    32px;
+    --th-icon-xl:       48px;
     --th-icon-hero:     64px;
+
+    /* Avatar scale (v4.10.7) — NC's 24 / 32 / 44 steps. Mirrored as
+       AVATAR_SM / AVATAR_MD / AVATAR_LG in uiTokens.js.
+       - table cell, chip, compact row → --th-avatar-sm (24px)
+       - picker result, member row     → --th-avatar-md (32px)
+       - header / profile              → --th-avatar-lg (44px) */
+    --th-avatar-sm:     24px;
+    --th-avatar-md:     32px;
+    --th-avatar-lg:     44px;
 
     /* v3.100.16: the four --th-color-* hard-contrast hex tokens
        (success, warning, error, neutral) were removed. The original
@@ -119,111 +126,19 @@
        (light/dark/branded) instead of pinning specific hex values.
        See gui.md § 2. */
 
-    /* ── My Work category accents (v4.5.22) ───────────────────────────
-       The one place in the app where a *set* of colours has to be
-       distinguishable from each other at a glance — five categories on
-       one screen, each with an icon chip, a section header and a filter
-       card. NC's semantic tokens only supply three usable hues
-       (primary / success / error), which is not enough, so this is a
-       deliberate, documented extension of the scale rather than the
-       usual "reach for --color-*".
-
-       The palette is TeamHub's own brand set (marketing/brand.html —
-       the same values the sidebar mark uses), so the view reads as
-       ours rather than as a generic dashboard:
-         Signal Orange #FB5000, Coral #FE7161,
-         Hub Blue #328FB7, Cyan #7FDDEE.
-
-       Each category gets THREE tokens:
-         -accent  strong hue, for the icon glyph and the left rail
-         -soft    tint for the icon chip background
-         -border  the accent at card-border weight
-
-       Colour is never the only signal: every category also carries its
-       own icon and its name in words (WCAG 1.4.1). The accents are used
-       for glyphs and 3px rails, not as text-on-fill, so they are not
-       required to pass 4.5:1 as body text — the one place text sits on
-       an accent (the urgent pill) uses NC's --color-error pair instead.
-
-       Dark theme: the soft tints are alpha-composited over whatever
-       background is behind them, so they work on both themes without a
-       second set of values. */
-    --th-mywork-action-accent:   #d63b1f;
-    --th-mywork-action-soft:     rgba(254, 113, 97, 0.16);
-    --th-mywork-today-accent:    #c24000;
-    --th-mywork-today-soft:      rgba(251, 80, 0, 0.14);
-    --th-mywork-upcoming-accent: #2a7ba0;
-    --th-mywork-upcoming-soft:   rgba(50, 143, 183, 0.16);
-    --th-mywork-waiting-accent:  #4a8fa3;
-    --th-mywork-waiting-soft:    rgba(127, 221, 238, 0.24);
-    /* v4.5.45 — Team admin. A muted violet: distinct from the four work tones
-       either side of it, and deliberately the least insistent of the set,
-       because housekeeping should read as present rather than as pressing. */
-    --th-mywork-admin-accent:    #6b5ca8;
-    --th-mywork-admin-soft:      rgba(107, 92, 168, 0.16);
-    --th-mywork-done-accent:     #2f7d4f;
-    --th-mywork-done-soft:       rgba(47, 125, 79, 0.14);
-
-    /* Team badge tints. A team is identified by a coloured pill, and the
-       colour is derived deterministically from the team id (see
-       teamBadgeTone() in src/constants/myWork.js) so the same team is
-       always the same colour for every user, without storing anything.
-       Six is enough to disambiguate the handful of teams one person is
-       realistically in, while staying visually calm. Text sits on these,
-       so each pairs a soft fill with a dark ink that clears 4.5:1. */
-    --th-mywork-team-1-bg:  rgba(50, 143, 183, 0.16);   /* hub blue   */
-    --th-mywork-team-1-ink: #23617c;
-    --th-mywork-team-2-bg:  rgba(251, 80, 0, 0.13);     /* signal     */
-    --th-mywork-team-2-ink: #a83800;
-    --th-mywork-team-3-bg:  rgba(106, 90, 205, 0.15);   /* violet     */
-    --th-mywork-team-3-ink: #4b3f9e;
-    --th-mywork-team-4-bg:  rgba(47, 125, 79, 0.14);    /* green      */
-    --th-mywork-team-4-ink: #256340;
-    --th-mywork-team-5-bg:  rgba(196, 120, 0, 0.15);    /* amber      */
-    --th-mywork-team-5-ink: #8a5300;
-    --th-mywork-team-6-bg:  rgba(190, 60, 130, 0.14);   /* magenta    */
-    --th-mywork-team-6-ink: #8f2f63;
-
-    /* ── "What's new" feed item tones (v4.5.26).
-
-       Each kind of feed item gets a soft-tinted glyph chip so the eye can
-       sort the list by shape before reading a word of it. Same three-part
-       structure as the My Work category tones above (-soft fill, -ink
-       glyph) and the same hues, because the two pages sit next to each
-       other in the sidebar and a second palette would read as a second
-       product.
-
-       Colour is never the only signal here either: every card carries a
-       distinct icon AND a named badge in words (WCAG 1.4.1). The ink
-       values sit on their own soft fill and clear 4.5:1 in the light
-       theme; the dark-theme block further down lightens each one, because
-       an alpha tint over a dark surface is dark and the light-theme inks
-       would disappear into it. */
-    --th-feed-message-soft:  rgba(50, 143, 183, 0.16);   /* hub blue   */
-    --th-feed-message-ink:   #23617c;
-    --th-feed-question-soft: rgba(196, 120, 0, 0.15);    /* amber      */
-    --th-feed-question-ink:  #8a5300;
-    --th-feed-poll-soft:     rgba(106, 90, 205, 0.15);   /* violet     */
-    --th-feed-poll-ink:      #4b3f9e;
-    --th-feed-decision-soft: rgba(190, 60, 130, 0.14);   /* magenta    */
-    --th-feed-decision-ink:  #8f2f63;
-    --th-feed-public-soft:   rgba(47, 125, 79, 0.14);    /* green      */
-    --th-feed-public-ink:    #256340;
-    --th-feed-talk-soft:     rgba(127, 221, 238, 0.24);  /* cyan       */
-    --th-feed-talk-ink:      #2a6d7d;
-    --th-feed-system-soft:   rgba(130, 130, 130, 0.16);  /* neutral    */
-    --th-feed-system-ink:    #5b5b5b;
-    /* v4.9.7 — OpenProject activity: a teal one step off Talk's cyan and
-       away from every My Work tone; the badge word and the briefcase glyph
-       carry the meaning, the tint only groups. */
-    --th-feed-openproject-soft: rgba(26, 103, 108, 0.16);  /* teal       */
-    --th-feed-openproject-ink:  #145a5e;
+    /* v4.10.10 (NC design sweep): the My Work category accents, the six
+       team-badge tints and the feed tones — some forty brand hex / rgba
+       values with a hand-kept dark-theme block — were removed. Every
+       consumer now pairs an NC --color-* fill with its -text ink, so the
+       app follows the user's theme (light, dark, high-contrast, branded)
+       instead of carrying a second palette. Colour was never the only
+       signal; the icon and the word still are. */
 
     /* ── Widget typography aliases — point at the app-wide typography
        scale above so widget CSS keeps working. Size is the primary
-       signal, weight is secondary. Pills keep a raw 10px because they
-       intentionally sit one step below --th-font-micro (11px) — that
-       drop is what makes a pill visually distinct. */
+       signal, weight is secondary. v4.10.10: the pill's raw 10px is gone;
+       NC's smallest size is --font-size-small and a pill is set apart by
+       its fill and weight, not by being smaller than everything else. */
     --th-widget-title-size:        var(--th-font-body);
     --th-widget-title-weight:      var(--th-font-weight-semibold);   /* widget HEADER only */
 
@@ -233,38 +148,43 @@
     --th-widget-row-meta-size:     var(--th-font-meta);
     --th-widget-row-meta-weight:   var(--th-font-weight-regular);
 
-    --th-widget-pill-size:         10px;
+    --th-widget-pill-size:         var(--th-font-meta);
     --th-widget-pill-weight:       var(--th-font-weight-bold);   /* pills stay heavy — that's what makes a pill a pill */
 
     --th-widget-empty-size:        var(--th-font-meta);
     --th-widget-empty-weight:      var(--th-font-weight-regular);
 
-    /* Spacing — row geometry. Three widgets already share these values
-       (10px 14px padding, 12px gap); we promote them to canonical. */
-    --th-widget-row-padding:       10px 14px;
-    --th-widget-row-gap:           12px;
+    /* Spacing — row geometry, on NC's 4px baseline (v4.10.10: was
+       10px 14px, which sat between grid lines). */
+    --th-widget-row-padding:       var(--th-space-sm) var(--th-space-lg);
+    --th-widget-row-gap:           var(--th-space-md);
 
-    /* Spacing scale (v4.9.3). Until now every gap and padding in a scoped
-       style was a raw px, which the "no new hard-coded px" rule could only
-       forbid, not replace. This is the replacement — a 4 px grid plus one
-       hairline step. New code reaches for these; existing raw values are
-       migrated as their files are touched, not in a sweep.
+    /* Spacing scale (v4.9.3) — whole multiples of NC's
+       --default-grid-baseline (4px), which the foundations page asks for.
+       v4.10.10 retired the 2px "hairline" step (NC: whole multiples only)
+       and snapped every off-grid padding / margin / gap in a scoped style
+       to the nearest grid line.
        Role → token mapping:
-       - hairline (chip inner gap, icon-to-text)      → --th-space-xxs (2px)
        - tight (inline gaps, list rows)               → --th-space-xs  (4px)
        - default (between controls, tile padding)     → --th-space-sm  (8px)
        - roomy (card padding, section gaps)           → --th-space-md  (12px)
        - section (between blocks)                     → --th-space-lg  (16px)
-       - panel (dialog / panel padding)               → --th-space-xl  (24px) */
-    --th-space-xxs: 2px;
-    --th-space-xs:  4px;
-    --th-space-sm:  8px;
-    --th-space-md:  12px;
-    --th-space-lg:  16px;
-    --th-space-xl:  24px;
+       - block (view sections)                        → --th-space-xl  (24px)
+       - canvas (view padding)                        → --th-space-xxl (32px) */
+    --th-space-xxs: var(--default-grid-baseline);   /* retired alias */
+    --th-space-xs:  var(--default-grid-baseline);
+    --th-space-sm:  calc(2 * var(--default-grid-baseline));
+    --th-space-md:  calc(3 * var(--default-grid-baseline));
+    --th-space-lg:  calc(4 * var(--default-grid-baseline));
+    --th-space-xl:  calc(6 * var(--default-grid-baseline));
+    --th-space-xxl: calc(8 * var(--default-grid-baseline));
     /* The state-coloured left edge every cockpit tile carries (v4.9.3;
        ProjectHealthWidget wrote it as a raw 3px). */
     --th-accent-border: 3px;
+    /* v4.10.43 — the readable width of a page of forms inside a team tab
+       (the Services tab and its builder): wide enough for two fields side
+       by side, narrow enough that a line of help text stays readable. */
+    --th-page-width: calc(240 * var(--default-grid-baseline));
 
     /* Aliases used elsewhere in the codebase.
        v3.100.16: --th-widget-success-strong was defined but had no
@@ -272,74 +192,6 @@
        hex tokens it wrapped. */
     --th-widget-meta-color:        var(--color-text-maxcontrast);
     --th-widget-empty-color:       var(--color-text-maxcontrast);
-}
-
-/* ──────────────────────────────────────────────────────────────────────
- * My Work — dark-theme accents (v4.5.22)
- *
- * The accents and inks above are tuned for dark text on a light surface.
- * On a dark surface the same values disappear, so each is lifted to a
- * brighter, less saturated variant. The *soft* fills are alpha and need
- * no override — they composite over whatever is behind them.
- *
- * Nextcloud's two dark signals, both required: `dark` covers an explicitly
- * chosen dark theme, and the media query covers "default theme + OS is
- * dark". Matching only one of them leaves half of dark-mode users with
- * unreadable badges.
- * ────────────────────────────────────────────────────────────────────── */
-
-body[data-themes*='dark'],
-body[data-theme-dark],
-body[data-theme-dark-highcontrast] {
-    --th-mywork-action-accent:   #ff8a76;
-    --th-mywork-today-accent:    #ff9153;
-    --th-mywork-upcoming-accent: #6fc0e0;
-    --th-mywork-waiting-accent:  #8fd8e8;
-    --th-mywork-admin-accent:    #a99ae0;
-    --th-mywork-done-accent:     #63c88c;
-
-    --th-mywork-team-1-ink: #8ecbe6;
-    --th-mywork-team-2-ink: #ffa070;
-    --th-mywork-team-3-ink: #b0a4f0;
-    --th-mywork-team-4-ink: #7fd0a0;
-    --th-mywork-team-5-ink: #e8b45c;
-    --th-mywork-team-6-ink: #e88ec0;
-
-    --th-feed-message-ink:  #8ecbe6;
-    --th-feed-question-ink: #e8b45c;
-    --th-feed-poll-ink:     #b0a4f0;
-    --th-feed-decision-ink: #e88ec0;
-    --th-feed-public-ink:   #7fd0a0;
-    --th-feed-talk-ink:     #8fd8e8;
-    --th-feed-system-ink:   #b0b0b0;
-    --th-feed-openproject-ink: #7fd3d8;
-}
-
-@media (prefers-color-scheme: dark) {
-    body[data-themes*='default'] {
-        --th-mywork-action-accent:   #ff8a76;
-        --th-mywork-today-accent:    #ff9153;
-        --th-mywork-upcoming-accent: #6fc0e0;
-        --th-mywork-waiting-accent:  #8fd8e8;
-        --th-mywork-admin-accent:    #a99ae0;
-        --th-mywork-done-accent:     #63c88c;
-
-        --th-mywork-team-1-ink: #8ecbe6;
-        --th-mywork-team-2-ink: #ffa070;
-        --th-mywork-team-3-ink: #b0a4f0;
-        --th-mywork-team-4-ink: #7fd0a0;
-        --th-mywork-team-5-ink: #e8b45c;
-        --th-mywork-team-6-ink: #e88ec0;
-
-        --th-feed-message-ink:  #8ecbe6;
-        --th-feed-question-ink: #e8b45c;
-        --th-feed-poll-ink:     #b0a4f0;
-        --th-feed-decision-ink: #e88ec0;
-        --th-feed-public-ink:   #7fd0a0;
-        --th-feed-talk-ink:     #8fd8e8;
-        --th-feed-system-ink:   #b0b0b0;
-        --th-feed-openproject-ink: #7fd3d8;
-    }
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -393,7 +245,7 @@ body[data-theme-dark-highcontrast] {
 
 .th-widget__row--clickable {
     cursor: pointer;
-    transition: background 0.1s ease;
+    transition: background var(--animation-quick) ease;
 }
 
 .th-widget__row--clickable:hover {
@@ -435,20 +287,15 @@ body[data-theme-dark-highcontrast] {
 .th-widget__state {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 16px 14px;
+    gap: var(--th-space-sm);
+    padding: var(--th-space-lg);
     font-size: var(--th-widget-empty-size);
     font-weight: var(--th-widget-empty-weight);
     color: var(--th-widget-empty-color);
 }
 
-.th-widget__state--empty {
-    font-style: italic;
-}
-
 .th-widget__state--error {
-    color: var(--color-error-text);
-    font-style: normal;
+    color: var(--color-text-error);
 }
 
 .th-widget__state-text {
@@ -456,35 +303,20 @@ body[data-theme-dark-highcontrast] {
     min-width: 0;
 }
 
-/* Spinner — small, themed, used by state="loading" rows */
-.th-widget__spinner {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--color-border-dark);
-    border-top-color: var(--color-primary-element);
-    border-radius: 50%;
-    animation: th-widget-spin 0.7s linear infinite;
-    flex-shrink: 0;
-}
-
-@keyframes th-widget-spin { to { transform: rotate(360deg); } }
-
-/* Pill base — solid filled, matching text token. v3.100.16: switched
-   from a hard-coded `color: #fff` to `--color-primary-element-text`
-   (the default modifier is primary; other modifiers override the text
-   colour to match their fill). Matches the detail-panel link-pill
-   family so widget pills and detail-panel pills read as the same
-   element across the app. Use modifier classes for colour. */
+/* Pill base — the shape and colour pairs NcChip uses (24px tall, pill
+   radius, --color-X fill with --color-X-text ink). v4.10.10: no uppercase,
+   no letter-spacing, no 10px type — NC's foundations rule both out, and
+   the fill is what makes a pill a pill. Use modifier classes for colour;
+   reach for <NcChip variant="…"> in new code. */
 .th-widget__pill {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--clickable-area-small);
+    padding: 0 var(--th-space-sm);
+    border-radius: var(--border-radius-pill);
     font-size: var(--th-widget-pill-size);
     font-weight: var(--th-widget-pill-weight);
-    line-height: 1.4;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+    line-height: var(--th-line-height-tight);
     white-space: nowrap;
     color: var(--color-primary-element-text);
     background: var(--th-widget-meta-color);

@@ -24,7 +24,7 @@
             <template #action>
                 <NcButton variant="secondary" @click="$emit('browse')">
                     <template #icon><Magnify :size="iconNav" /></template>
-                    {{ t('teamhub', 'Browse Teams') }}
+                    {{ t('teamhub', 'Browse teams') }}
                 </NcButton>
             </template>
         </NcEmptyContent>
@@ -58,7 +58,7 @@
                 <NcNoteCard
                     v-else-if="isPending"
                     type="info"
-                    :heading="t('teamhub', 'Your request is waiting for approval')">
+                    :heading="t('teamhub', 'The request is waiting for approval')">
                     <p>{{ t('teamhub', 'A moderator of {team} has been asked to approve your request. You will be able to open the team once they do.', { team: team.name }) }}</p>
                 </NcNoteCard>
 
@@ -248,7 +248,7 @@ export default {
                     showSuccess(t('teamhub', 'You have joined {team}', { team: teamName }))
                     this.$emit('joined', this.teamId)
                 } else if (this.isPending) {
-                    showSuccess(t('teamhub', 'Your request to join {team} has been sent', { team: teamName }))
+                    showSuccess(t('teamhub', 'Request to join {team} sent', { team: teamName }))
                 }
                 // Neither, and no error: nothing to announce that would be true.
                 // The reloaded page shows whatever the team now actually offers.
@@ -318,7 +318,7 @@ export default {
 .th-join__icon--image {
     width: 96px;
     height: 96px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     object-fit: cover;
     border: 1px solid var(--color-border);
 }

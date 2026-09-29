@@ -137,7 +137,7 @@ class MessageSearchProvider implements IProvider {
      * - $title         — message subject
      * - $subline       — author + truncated body
      * - $resourceUrl   — deep link into TeamHub opening the correct team
-     * - $icon          — icon CSS class shown next to the result
+     * - $icon          — icon CSS class shown next to the result (icon-teamhub)
      * - $rounded       — false (not an avatar/person result)
      */
     private function rowToEntry(array $row): SearchResultEntry {
@@ -160,16 +160,22 @@ class MessageSearchProvider implements IProvider {
             $subline .= ' — ' . $bodySnippet;
         }
 
-        // Deep link: /apps/teamhub#team={teamId}
-        // The hash route is how TeamHub's Vue router navigates to a team.
-        $resourceUrl = $this->urlGenerator->linkToRoute('teamhub.page.index')
-            . '#/team/' . urlencode($teamId);
+        // Deep link: /apps/teamhub?team={teamId}&message={id} — the shape
+        // App.vue's consumeDeepLink() reads (v4.8.7 added `message`, so the
+        // reader lands on the thread). v4.10.4: until now this was the
+        // `#/team/` hash, which nothing consumes — every result opened the
+        // welcome screen. Icon class: css/search.css via UnifiedSearchStyleListener.
+        $resourceUrl = $this->urlGenerator->linkToRoute('teamhub.page.index', [
+            'team'    => $teamId,
+            'message' => (string)($row['id'] ?? ''),
+        ]);
 
         return new SearchResultEntry(
-            '',          // thumbnailUrl — no thumbnail for messages
-            $subject,    // title
-            $subline,    // subline
-            $resourceUrl // resourceUrl
+            '',             // thumbnailUrl — no thumbnail for messages
+            $subject,       // title
+            $subline,       // subline
+            $resourceUrl,   // resourceUrl
+            'icon-teamhub', // icon
         );
     }
 }

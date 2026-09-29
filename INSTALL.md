@@ -3,7 +3,7 @@
 ## Requirements
 
 - Nextcloud 33 or later
-- PHP 8.1, 8.2, 8.3, or 8.4
+- PHP 8.1, 8.2, 8.3, 8.4 or 8.5
 - Nextcloud Teams (Circles) app enabled
 - PostgreSQL or MySQL/MariaDB
 
@@ -135,8 +135,8 @@ Whether TeamHub reports anonymous usage statistics is **derived from your licenc
 | No licence installed (community / free tier) | Yes |
 | Malformed or unreadable licence key | Yes — treated as unlicensed |
 | Active licence **or trial** | **Never** |
-| Licence expired, within the 30-day grace window | **Never** |
-| Licence expired beyond the grace window | Yes |
+| Paid licence expired, within its 14-day grace window | **Never** |
+| Paid licence expired beyond the grace window, or trial expired (no grace) | Yes |
 
 When an instance does report, `TelemetryReportJob` sends one aggregate payload per day to `https://tldr.host/teamhub/report/`:
 

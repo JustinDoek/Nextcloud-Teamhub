@@ -1,7 +1,7 @@
 <template>
     <div class="pages-widget">
         <div v-if="loading" class="pages-widget__loading">
-            <NcLoadingIcon :size="20" />
+            <NcLoadingIcon :size="ICON_BODY" />
         </div>
 
         <template v-else>
@@ -10,9 +10,9 @@
                  is off or the team has no page yet. -->
             <div v-if="teamPage" class="pages-widget__section">
                 <a :href="getIntravoxUrl(teamPage)" target="_blank" class="pages-page-link pages-page-link--main">
-                    <FileDocumentOutline :size="20" />
+                    <FileDocumentOutline :size="ICON_BODY" />
                     <span class="pages-page-title">{{ teamPage.title }}</span>
-                    <OpenInNew :size="14" class="pages-page-icon" />
+                    <OpenInNew :size="ICON_INLINE" class="pages-page-icon" />
                 </a>
                 <div v-if="subPages.length > 0" class="pages-subpages">
                     <a
@@ -21,9 +21,9 @@
                         :href="getIntravoxUrl(page)"
                         target="_blank"
                         class="pages-page-link pages-page-link--sub">
-                        <FileDocumentOutline :size="16" />
+                        <FileDocumentOutline :size="ICON_BODY" />
                         <span class="pages-page-title">{{ page.title }}</span>
-                        <OpenInNew :size="12" class="pages-page-icon" />
+                        <OpenInNew :size="ICON_INLINE" class="pages-page-icon" />
                     </a>
                 </div>
             </div>
@@ -34,9 +34,9 @@
             <div v-if="collective" class="pages-widget__section">
                 <a :href="collective.url" class="pages-page-link pages-page-link--main" @click="openInWikiEmbed($event, collective.url)">
                     <span v-if="collective.emoji" class="pages-page-emoji" aria-hidden="true">{{ collective.emoji }}</span>
-                    <BookOpenOutline v-else :size="20" />
+                    <BookOpenOutline v-else :size="ICON_BODY" />
                     <span class="pages-page-title">{{ collective.name }}</span>
-                    <OpenInNew :size="14" class="pages-page-icon" />
+                    <OpenInNew :size="ICON_INLINE" class="pages-page-icon" />
                 </a>
                 <div v-if="collectivePages.length > 0" class="pages-subpages">
                     <a
@@ -45,9 +45,9 @@
                         :href="page.url"
                         class="pages-page-link pages-page-link--sub"
                         @click="openInWikiEmbed($event, page.url)">
-                        <FileDocumentOutline :size="16" />
+                        <FileDocumentOutline :size="ICON_BODY" />
                         <span class="pages-page-title">{{ page.title }}</span>
-                        <OpenInNew :size="12" class="pages-page-icon" />
+                        <OpenInNew :size="ICON_INLINE" class="pages-page-icon" />
                     </a>
                 </div>
             </div>
@@ -70,6 +70,7 @@ import axios from '@nextcloud/axios'
 import BookOpenOutline from 'vue-material-design-icons/BookOpenOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 /**
  * Pages widget (formerly IntravoxWidget — filename kept so grid + mobile +
@@ -99,6 +100,8 @@ export default {
     emits: ['pages-loaded', 'collective-loaded'],
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             loading: true,
             // Intravox
             teamPage: null,
@@ -281,7 +284,7 @@ export default {
 
 .pages-widget__message {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .pages-widget__section {
@@ -299,11 +302,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
-    border-radius: var(--border-radius);
+    padding: 8px 8px;
+    border-radius: var(--border-radius-small);
     text-decoration: none;
     color: var(--color-main-text);
-    transition: background-color 0.2s;
+    transition: background-color var(--animation-quick);
 }
 
 .pages-page-link:hover {
@@ -315,12 +318,12 @@ export default {
 }
 
 .pages-page-link--sub {
-    font-size: 13px;
-    padding-left: 24px;
+    font-size: var(--th-font-meta);
+    padding-inline-start: 24px;
 }
 
 .pages-page-emoji {
-    font-size: 18px;
+    font-size: var(--th-font-heading);
     line-height: 1;
     width: 20px;
     text-align: center;
@@ -346,7 +349,7 @@ export default {
 .pages-subpages {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     margin-top: 4px;
 }
 </style>

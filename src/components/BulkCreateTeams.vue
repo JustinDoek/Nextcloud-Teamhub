@@ -42,15 +42,15 @@
 							<td class="btc__col-num">{{ index + 1 }}</td>
 							<td>
 								<label class="btc__sr" :for="'btc-name-' + row.key">{{ t('teamhub', 'Team name') }}</label>
-								<input
+								<NcTextField
 									:id="'btc-name-' + row.key"
 									v-model="row.name"
-									type="text"
 									class="btc__input"
 									:class="{ 'btc__input--error': !!row.error }"
 									:placeholder="t('teamhub', 'Team name')"
 									maxlength="120"
-									@input="row.error = ''">
+									@input="row.error = ''"
+									label-outside />
 								<!-- The server's reason, on the row that caused
 								     it. A list of messages above the table
 								     makes the reader count rows to find theirs. -->
@@ -58,29 +58,26 @@
 							</td>
 							<td>
 								<label class="btc__sr" :for="'btc-tpl-' + row.key">{{ t('teamhub', 'Template') }}</label>
-								<select
-									:id="'btc-tpl-' + row.key"
+								<NcSelect
+									:input-id="'btc-tpl-' + row.key"
+									label-outside
 									v-model="row.template"
 									class="btc__input"
-									@change="onTemplateChange(row)">
-									<!-- v4.9.3 — no OpenProject teams in bulk: the project
-									     must be picked per team by its creator, which a
-									     row cannot express. The importer refuses it too. -->
-									<option v-for="tpl in bulkTemplates" :key="tpl.templateKey" :value="tpl.templateKey">
-										{{ tpl.label }}
-									</option>
-								</select>
+									@update:model-value="onTemplateChange(row)"
+									:options="bulkTemplates.map(tpl => ({ id: tpl.templateKey, label: tpl.label }))"
+									:reduce="o => o.id"
+									:clearable="false" />
 							</td>
 							<td>
 								<label class="btc__sr" :for="'btc-pol-' + row.key">{{ t('teamhub', 'Policy') }}</label>
-								<select
-									:id="'btc-pol-' + row.key"
+								<NcSelect
+									:input-id="'btc-pol-' + row.key"
+									label-outside
 									v-model="row.policy"
-									class="btc__input">
-									<option v-for="p in profiles" :key="p.profileKey" :value="p.profileKey">
-										{{ p.label }}
-									</option>
-								</select>
+									class="btc__input"
+									:options="profiles.map(p => ({ id: p.profileKey, label: p.label }))"
+									:reduce="o => o.id"
+									:clearable="false" />
 							</td>
 							<!-- v4.8.12 — Owner and Team admins are separate
 							     columns. One "Administrator" field where the
@@ -121,11 +118,11 @@
 							</td>
 							<td>
 								<NcButton
-									type="tertiary"
+									variant="tertiary"
 									:aria-label="t('teamhub', 'Remove row {n}', { n: index + 1 })"
 									:disabled="rows.length === 1"
 									@click="removeRow(index)">
-									<template #icon><Close :size="18" /></template>
+									<template #icon><Close :size="ICON_BODY" /></template>
 								</NcButton>
 							</td>
 						</tr>
@@ -134,8 +131,8 @@
 			</div>
 
 			<div class="btc__actions">
-				<NcButton type="secondary" @click="addRow()">
-					<template #icon><Plus :size="18" /></template>
+				<NcButton variant="secondary" @click="addRow()">
+					<template #icon><Plus :size="ICON_BODY" /></template>
 					{{ t('teamhub', 'Add row') }}
 				</NcButton>
 				<span class="btc__hint">
@@ -147,7 +144,7 @@
 				     fail validation come back annotated in place. -->
 				<div class="btc__actions-right">
 					<NcButton
-						type="primary"
+						variant="primary"
 						:disabled="checking || filledRows.length === 0"
 						@click="createTeams">
 						{{ checking
@@ -199,12 +196,12 @@
 			</div>
 
 			<div class="btc__actions">
-				<NcButton type="tertiary" @click="backToEdit">
+				<NcButton variant="tertiary" @click="backToEdit">
 					{{ t('teamhub', 'Back') }}
 				</NcButton>
 				<div class="btc__actions-right">
 					<NcButton
-						type="primary"
+						variant="primary"
 						:disabled="summary.ready === 0 || running"
 						@click="createAll">
 						{{ n('teamhub', 'Create %n team', 'Create %n teams', summary.ready, { n: summary.ready }) }}
@@ -259,10 +256,10 @@
 
 			<div v-if="stage === 'done'" class="btc__actions">
 				<div class="btc__actions-right">
-					<NcButton type="secondary" @click="reset">
+					<NcButton variant="secondary" @click="reset">
 						{{ t('teamhub', 'Create more teams') }}
 					</NcButton>
-					<NcButton type="primary" @click="$emit('done')">
+					<NcButton variant="secondary" @click="$emit('done')">
 						{{ t('teamhub', 'Close') }}
 					</NcButton>
 				</div>
@@ -275,12 +272,12 @@
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcButton, NcLoadingIcon } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcTextField, NcSelect } from '@nextcloud/vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 
-import { ICON_INLINE, ICON_TOOLBAR } from '../constants/uiTokens.js'
+import { ICON_INLINE, ICON_TOOLBAR, ICON_BODY } from '../constants/uiTokens.js'
 import { shiftToday } from '../lib/localDate.js'
 // v4.8.12 — resolves accounts as you type, replacing the free-text cells and
 // the separate Check pass that used to validate them.
@@ -310,7 +307,7 @@ import BulkUserCell from './admin/BulkUserCell.vue'
  */
 export default {
 	name: 'BulkCreateTeams',
-	components: { NcButton, NcLoadingIcon, AlertCircleOutline, Close, Plus, BulkUserCell },
+	components: {   NcSelect, NcTextField, NcButton, NcLoadingIcon, AlertCircleOutline, Close, Plus, BulkUserCell },
 
 	props: {
 		/** Template rows, already fetched by the parent — no second request. */
@@ -323,6 +320,7 @@ export default {
 
 	data() {
 		return {
+			ICON_BODY,
 			loading: false,
 			checking: false,
 			running: false,
@@ -642,8 +640,8 @@ export default {
 .btc__error {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	color: var(--color-error-text);
+	gap: 8px;
+	color: var(--color-text-error);
 	font-size: var(--th-font-body);
 }
 
@@ -674,7 +672,7 @@ export default {
 .btc__table th,
 .btc__table td {
 	text-align: start;
-	padding: 6px 8px 6px 0;
+	padding: 8px 8px 8px 0;
 	border-bottom: 1px solid var(--color-border);
 	font-size: var(--th-font-body);
 	vertical-align: middle;
@@ -696,13 +694,12 @@ export default {
 .btc__input {
 	width: 100%;
 	min-width: 8rem;
-	border-radius: var(--th-radius-control);
 }
 
 /* v4.8.12 — a row the server refused. Border and message, never colour alone:
    the text under the name field is what says what to do about it. */
 .btc__input--error {
-	border-color: var(--color-error-text);
+	border-color: var(--color-text-error);
 }
 
 .btc__row--error > td {
@@ -711,22 +708,14 @@ export default {
 
 .btc__row-error {
 	display: block;
-	margin-top: 2px;
+	margin-top: 4px;
 	font-size: var(--th-font-micro);
-	color: var(--color-error-text);
+	color: var(--color-text-error);
 	max-width: 22ch;
 }
 
 /* NC's field pattern: no outline, a border change on focus. Kept out of a
    grouped :hover selector — grouping is what silences the keyboard ring. */
-.btc__input:focus {
-	outline: none;
-	border-color: var(--color-primary-element);
-}
-
-.btc__input:focus-visible {
-	box-shadow: 0 0 0 2px var(--color-primary-element);
-}
 
 .btc__input:disabled {
 	opacity: 0.5;
@@ -763,13 +752,13 @@ export default {
 }
 
 .btc__pill--ok {
-	border-color: var(--color-success-text);
-	color: var(--color-success-text);
+	border-color: var(--color-text-success);
+	color: var(--color-text-success);
 }
 
 .btc__pill--error {
-	border-color: var(--color-error-text);
-	color: var(--color-error-text);
+	border-color: var(--color-text-error);
+	color: var(--color-text-error);
 }
 
 .btc__pill--warn {

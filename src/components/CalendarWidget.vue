@@ -1,11 +1,11 @@
 <template>
     <div class="th-widget">
         <div v-if="loading" class="th-widget__state">
-            <span class="th-widget__spinner" aria-hidden="true" />
+            <NcLoadingIcon :size="ICON_INLINE" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
         <div v-else-if="rows.length === 0" class="th-widget__state th-widget__state--empty">
-            <CalendarIcon :size="18" aria-hidden="true" />
+            <CalendarIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'No upcoming events') }}</span>
         </div>
         <ul v-else class="th-widget__rows">
@@ -49,7 +49,7 @@
                             rel="noopener noreferrer"
                             class="th-cal__join-btn"
                             :title="t('teamhub', 'Join meeting')">
-                            <VideoIcon :size="14" />
+                            <VideoIcon :size="ICON_INLINE" />
                             {{
                                 // TRANSLATORS: short button label to join a video/conference meeting link
                                 t('teamhub', 'Join')
@@ -59,34 +59,34 @@
                     <div class="th-cal__meta">
                         <span>{{ formatTimeRange(event.start, event.end, event.allDay) }}</span>
                         <span v-if="locationText(event)" class="th-cal__meta-sep">
-                            <MapMarkerIcon :size="12" />{{ locationText(event) }}
+                            <MapMarkerIcon :size="ICON_INLINE" />{{ locationText(event) }}
                         </span>
                         <!-- Source pills: calendar name + app label.
                              Use shared outline pill vocabulary. -->
-                        <span
+                        <NcChip
                             v-if="event.calendarName && resources.calendar && resources.calendar.length > 1"
-                            class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral th-cal__calname"
+                            no-close
+                            variant="tertiary"
+                            class="th-cal__calname"
                             :title="event.calendarName">
                             {{ truncate(event.calendarName, 20) }}
-                        </span>
-                        <span
+                        </NcChip>
+                        <NcChip no-close variant="tertiary"
                             v-if="event.source === 'openproject'"
-                            class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral"
                             :title="t('teamhub', 'A meeting scheduled in OpenProject')">
                             {{ t('teamhub', 'OpenProject') }}
-                        </span>
+                        </NcChip>
                         <template v-else>
-                            <span class="th-widget__pill th-widget__pill--outline th-widget__pill--primary">
+                            <NcChip no-close variant="secondary">
                                 {{ t('teamhub', 'Calendar') }}
-                            </span>
+                            </NcChip>
                             <!-- v4.9.10 — a copy the OpenProject meeting sync wrote
                                  into the team calendar: both pills, one row. -->
-                            <span
+                            <NcChip no-close variant="tertiary"
                                 v-if="event.openProjectMeetingId"
-                                class="th-widget__pill th-widget__pill--outline th-widget__pill--neutral"
                                 :title="t('teamhub', 'A meeting scheduled in OpenProject, copied into the team calendar')">
                                 {{ t('teamhub', 'OpenProject') }}
-                            </span>
+                            </NcChip>
                         </template>
                     </div>
                 </div>
@@ -107,16 +107,19 @@ import { formatTime, formatIsoDate, zonedIsoDate, todayIso, shiftIsoDate } from 
 import { generateUrl } from '@nextcloud/router'
 import { isPlainClick } from '../lib/internalLinks.js'
 import axios from '@nextcloud/axios'
-import { NcLoadingIcon } from '@nextcloud/vue'
+import { NcLoadingIcon, NcChip } from '@nextcloud/vue'
 import CalendarIcon  from 'vue-material-design-icons/Calendar.vue'
 import MapMarkerIcon from 'vue-material-design-icons/MapMarker.vue'
 import VideoIcon     from 'vue-material-design-icons/Video.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 export default {
     name: 'CalendarWidget',
-    components: { NcLoadingIcon, CalendarIcon, MapMarkerIcon, VideoIcon },
+    components: {  NcChip, NcLoadingIcon, CalendarIcon, MapMarkerIcon, VideoIcon },
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             loading: false,
             events: [],
             /**
@@ -378,17 +381,15 @@ export default {
     flex-shrink: 0;
     width: 38px;
     height: 38px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-background-dark);
     border: 1px solid var(--color-border);
 }
 .th-cal__date-badge-month {
-    font-size: 9px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
-    letter-spacing: 0.06em;
     color: var(--color-primary-element);
     line-height: 1;
-    text-transform: uppercase;
 }
 .th-cal__date-badge-day {
     font-size: var(--th-font-heading);
@@ -402,7 +403,7 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .th-cal__title-row {
@@ -430,7 +431,7 @@ export default {
 .th-cal__meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-row-meta-weight);
     color: var(--th-widget-meta-color);
@@ -440,11 +441,11 @@ export default {
 .th-cal__meta-sep {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
 }
 .th-cal__meta-sep::before {
     content: '·';
-    margin-right: 4px;
+    margin-inline-end: 4px;
     color: var(--color-border-dark);
 }
 
@@ -454,14 +455,14 @@ export default {
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
-    padding: 2px 8px;
+    padding: 4px 8px;
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-pill-weight);
     border-radius: var(--border-radius-pill);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
     text-decoration: none;
-    transition: opacity 0.15s;
+    transition: opacity var(--animation-quick);
 }
 .th-cal__join-btn:hover { opacity: 0.85; }
 

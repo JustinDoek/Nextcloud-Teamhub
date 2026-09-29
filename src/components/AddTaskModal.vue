@@ -4,7 +4,7 @@
         @close="$emit('close')">
         <div class="addtask-modal">
             <h3 class="addtask-modal__title">
-                <CheckboxMarkedOutline :size="20" />
+                <CheckboxMarkedOutline :size="ICON_BODY" />
                 {{ t('teamhub', 'Add task') }}
             </h3>
 
@@ -48,21 +48,21 @@
             <div v-if="showBoardPicker" class="addtask-modal__field">
                 <label class="addtask-modal__label">{{ t('teamhub', 'Board') }}</label>
                 <div class="resource-inline-picker">
-                    <button
+                    <NcButton
                         v-for="board in boards"
                         :key="board.board_id"
-                        type="button"
                         class="resource-inline-picker__item"
                         :class="{ 'resource-inline-picker__item--selected': activeBoardId === board.board_id }"
-                        :aria-pressed="activeBoardId === board.board_id ? 'true' : 'false'"
-                        @click="selectedBoardId = board.board_id">
+                        @click="selectedBoardId = board.board_id"
+                        :pressed="activeBoardId === board.board_id"
+                        variant="tertiary">
                         <span
-                            v-if="board.color"
-                            class="resource-inline-picker__color"
-                            :style="{ background: board.color }"
-                            aria-hidden="true" />
+                        v-if="board.color"
+                        class="resource-inline-picker__color"
+                        :style="{ background: board.color }"
+                        aria-hidden="true" />
                         {{ board.name }}
-                    </button>
+                    </NcButton>
                 </div>
             </div>
 
@@ -71,8 +71,8 @@
             <div class="addtask-modal__actions">
                 <NcButton variant="primary" :disabled="saving" @click="submit">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="18" />
-                        <CheckboxMarkedOutline v-else :size="18" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <CheckboxMarkedOutline v-else :size="ICON_BODY" />
                     </template>
                     {{ saving ? t('teamhub', 'Adding…') : t('teamhub', 'Add task') }}
                 </NcButton>
@@ -91,6 +91,7 @@ import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea } from '@nextcloud/vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 export default {
     name: 'AddTaskModal',
@@ -101,6 +102,7 @@ export default {
     emits: ['close', 'created'],
     data() {
         return {
+            ICON_BODY,
             saving: false,
             errors: {},
             stacks: [],
@@ -159,7 +161,7 @@ export default {
             this.errors = {}
 
             if (this.stacks.length === 0) {
-                this.errors.general = t('teamhub', 'No stack found on this board. Please add a stack in Deck first.')
+                this.errors.general = t('teamhub', 'No stack found on this board. Add a stack in Deck first.')
                 this.saving = false
                 return
             }
@@ -224,8 +226,8 @@ export default {
 .addtask-modal__title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 18px;
+    gap: 8px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     margin: 0 0 24px;
     color: var(--color-main-text);
@@ -248,17 +250,17 @@ export default {
 
 .addtask-modal__label {
     display: block;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
-    margin-bottom: 5px;
+    margin-bottom: 4px;
 }
 
 .addtask-modal__input {
     width: 100%;
     padding: 8px 12px;
     border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-main-background);
     color: var(--color-main-text);
     font-size: var(--th-font-body);
@@ -281,8 +283,8 @@ export default {
 }
 
 .addtask-modal__error {
-    font-size: 13px;
-    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-error);
     margin: 0 0 16px;
 }
 
@@ -294,31 +296,12 @@ export default {
 .resource-inline-picker {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
 }
 .resource-inline-picker__item {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-pill);
-    background: var(--color-background-hover);
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--color-main-text);
-    transition: background 0.15s, border-color 0.15s;
-}
-.resource-inline-picker__item:hover {
-    background: var(--color-primary-light);
-}
-.resource-inline-picker__item--selected {
-    background: var(--color-primary);
-    color: var(--color-primary-text);
-    border-color: var(--color-primary);
-}
-.resource-inline-picker__item:focus-visible {
-    outline: 2px solid var(--color-primary);
+    gap: 8px;
 }
 .resource-inline-picker__color {
     width: 10px;

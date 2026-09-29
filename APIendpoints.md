@@ -5,6 +5,29 @@
 
 ---
 
+## Creating a team (changed 4.10.26)
+
+`POST /api/v1/teams` now answers **403** `{ "error": "You are not allowed to create teams" }` when the caller is outside the *who may create teams* groups (`createTeamGroup`; empty = everyone), checked before anything is read or written. Before 4.10.26 only the sidebar button, the OpenProject search and the provisioning routes asked, so a member the policy excluded could create a team with one POST instead of using *Request a new team*. The same rule `GET /api/v1/user/can-create-team` reports, so the UI and the route cannot disagree.
+
+## Which circles are teams (changed 4.10.6)
+
+No endpoint was added or removed. Every team-scoped endpoint now answers for **teams TeamHub created** only (a row in `teamhub_team_registry`, written by `TeamService::createTeam()`): `GET /api/v1/teams` and `GET /api/v1/teams/browse` list registered teams, `GET /api/v1/teams/{teamId}` and `…/preview` answer **404** for a circle made in Contacts, Collectives, `occ` or another app, and every gate in `MemberService::require*Level()` — the membership check behind the team-scoped routes — throws *Team not found* for one, so the usual 403/404 of the calling controller applies. Teams that existed at the upgrade were registered by the migration. DESIGN §2.136.
+
+## Person search (changed 4.10.7)
+
+One row shape for every person search, from `PersonSearchService`:
+
+```json
+{ "id": "jfeet2", "type": "user", "displayName": "Jari Feet", "subline": "Controller · Finance", "icon": "user" }
+```
+
+- `GET /api/v1/users/search?q=&teamId=` — unchanged filters (Nextcloud's collaborator search + TeamHub's invite types); every `user` row now carries `subline`. Rows of type `group` / `circle` / `email` / `federated` carry `subline: ""`.
+- `GET /api/v1/admin/users/search?q=` (admin) — **breaking for its two callers, both updated:** rows are `{id, type, displayName, subline, icon}` instead of `{uid, displayName}`; matches on display name **and** uid; the subline includes fields the person set to private.
+- `GET /api/v1/teams/{teamId}/members/all` — each member row gains `subline`.
+- `GET|POST /api/v1/admin/settings` — new `personSublineFields` (comma list, canonical order; `none` stored for an empty choice) and read-only `personSublineFieldsAvailable` (`role, organisation, headline, manager, groups, email, uid`).
+
+The line is `PersonSublineService`'s: the administrator's fields in order, the first two filled in, groups as one value of up to three names. DESIGN §2.137.
+
 ## My Work endpoints (added 4.5.21)
 
 Personal, cross-team work queue. **No route carries a `{teamId}`** — My Work is cross-team by definition, and the team boundary is resolved server-side from the session user's own memberships (`TeamService::getUserTeams()`). There is deliberately no team parameter for a caller to tamper with.
@@ -136,7 +159,7 @@ The target travels in the **body, not the path**: provider item ids are opaque s
 
 Server-side, every action re-reads the item from its provider, re-checks the caller's team access and the source app's own permissions, and checks the administrator's per-provider allow-list. Source-mutating actions are written to the audit log as `mywork.action.{action}`.
 
-**`teamexpiry_team` declares two categories from 4.6.17** — `team_admin` while the team can still act, and `waiting_for_others` from the moment an extension request is in flight. The second is not cosmetic: `MyWorkService::applyUrgency()` promotes any dated item into `action_required` as its deadline nears, and `waiting_for_others` is the one category it skips, so a team awaiting a decision is no longer escalated daily for something it cannot do. Those rows carry `waitingFor` naming the Nextcloud administrators group.
+**`teamexpiry_team` declares two categories from 4.6.17** — `action_required` while the team can still act (`team_admin` until 4.10.20, when that category was folded into this one), and `waiting_for_others` from the moment an extension request is in flight. The second is not cosmetic: `MyWorkService::applyUrgency()` promotes any dated item into `action_required` as its deadline nears, and `waiting_for_others` is the one category it skips, so a team awaiting a decision is no longer escalated daily for something it cannot do. Those rows carry `waitingFor` naming the Nextcloud administrators group.
 
 **`GET /api/v1/admin/maintenance/teams` gains `owner_mailto` in 4.6.17** — an absolute compose URL for writing to the team's owner, or `null` when the team has no owner or the owner has no address on their account. Nextcloud Mail's `/apps/mail/compose?uri=…` when the **viewer** has an account configured in Mail, a plain `mailto:` otherwise; see `TeamExpiryService::mailComposeUrl()`. The frontend hides the button on `null` rather than rendering one that opens an empty compose window.
 
@@ -158,7 +181,7 @@ NC admin only. Removes the team's link to its OpenProject project — **the only
 
 Computed by `PolicyService::classificationForTeams()` — one batch for the page through the same `compareTeams()` the Compliance tab uses, four reads regardless of page size. It degrades to `null` on every row rather than failing the grid, matching the expiry block beside it.
 
-**`teamadmin` gains a second resource type in 4.6.17** — `team_join_request`, status `join_requested`, alongside the existing `team_resource` / `resource_pending_review`. It carries somebody's pending request to join a team into that team's admins' queue, under `team_admin`, with `approve` and `reject`. Item ids are `joinreq:{teamId}:{uid}`, told apart from a resource's `{teamId}:{appId}:{resourceId}` by the leading marker. Both verbs route through `MemberService::approveRequest` / `rejectRequest`, which re-check the caller's team level independently — a request already decided returns `409 conflict`, not an error.
+**`teamadmin` gains a second resource type in 4.6.17** — `team_join_request`, status `join_requested`, alongside the existing `team_resource` / `resource_pending_review`. It carries somebody's pending request to join a team into that team's admins' queue, under `action_required` (`team_admin` until 4.10.20), with `approve` and `reject`. Item ids are `joinreq:{teamId}:{uid}`, told apart from a resource's `{teamId}:{appId}:{resourceId}` by the leading marker. Both verbs route through `MemberService::approveRequest` / `rejectRequest`, which re-check the caller's team level independently — a request already decided returns `409 conflict`, not an error.
 
 ### `GET|PUT /api/v1/mywork/preferences`
 
@@ -178,9 +201,9 @@ All four require an instance admin. Enforced by the absence of `#[NoAdminRequire
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/v1/admin/mywork/config` | Horizons (including `actionRequiredDays`), cache TTL, request budget, approval expiry thresholds, effective category map, shipped defaults, and the bounds the UI constrains its inputs to |
+| `GET /api/v1/admin/mywork/config` | Horizons (including `actionRequiredDays`), cache TTL, request budget, approval expiry thresholds, and the bounds the UI constrains its inputs to. **`categoryMap` and `defaultCategoryMap` were removed in 4.10.20** — a category is decided by the provider that emits the item, not by an instance-wide status→category table (DESIGN §2.143). `PUT` ignores a `categoryMap` in the body |
 | `PUT /api/v1/admin/mywork/config` | Any subset of the above. Out-of-range numbers are **clamped, not rejected** |
-| `GET /api/v1/admin/mywork/status` | Every registered provider with availability, unavailability reason, capabilities, allowed actions, last successful sync, last error, and `diagnostics`. Also carries **`talkThreading`** — not a My Work fact, but this is the only admin-gated status endpoint that exists: `sendMessageSignature` (the installed `ChatManager::sendMessage()` parameter list), `threadTitlePlacement` (`metadata` / `parameter` / `none`), `threadServiceExists`, `threadServiceMethods`, `talkThreadsTable`. Reflection and schema only — nothing is sent to Talk |
+| `GET /api/v1/admin/mywork/status` | Every registered provider with availability, unavailability reason, capabilities, allowed actions, last successful sync, last error, and `diagnostics`. **`talkThreading` was removed in 4.10.20** — it was a Talk fact on a My Work endpoint, rendered as raw reflection output on a tab it did not belong to. `TalkService::getThreadingDiagnostics()` remains for a debug session |
 | `PUT /api/v1/admin/mywork/providers/{providerId}` | `{ "enabled": bool, "actions": string[] }`. Native actions (snooze, unsnooze) are dropped from the list — they touch no source app, so there is nothing to govern |
 
 ### Resource review — availability (added 4.5.41)
@@ -198,7 +221,346 @@ Rows returned by `GET /api/v1/teams/{teamId}/resources/panel` with `status: "pen
 
 Only `pending` rows carry the field. Active rows are a known gap — see HANDOFF.
 
+### Team spaces (added 4.10.1, Nextcloud 35 only)
+
+On a Nextcloud that offers a team-folder provider (35 with Team folders), every `files` row whose `resourceId` starts with `gf:` carries two more fields; on 33/34 neither is present.
+
+| Field | Meaning |
+|---|---|
+| `isTeamSpace` | `true` when the folder is this team's own Nextcloud team space (`group_folders.team_circle_id` = the team), `false` for a plain team folder |
+| `quota` | The space's quota in bytes, `0` for unlimited, `null` when the folder is not the team's space |
+
+`GET /api/v1/apps/check` carries **`teamSpaces`** (`bool`): whether the running Nextcloud offers team spaces. Manage team labels the create button and the folder badge by it.
+
+`POST /api/v1/teams/{teamId}/resources/files/connect` answers **400** with `error` when the folder is another team's space — Team folders refuses to share a space, and a row the team cannot open is never written. The `success` payload carries `team_space` (`bool`): whether the folder became the team's space on connect (it does when it is applicable to this circle alone and the team has no space yet).
+
+No endpoint of its own for the conversion: it runs in `TeamSpaceReconcileJob` (daily cron), the administrator items are My Work rows of the `teamspace_admin` provider, and the notifications use the existing notifier. The hand-over rides `POST /api/v1/mywork/action`: `delegate` on a `teamspace_admin` shared-folder row (optional `params.reason` = the note to the owner) hands it to the team owner, whose own row (`teamadmin`, item `teamspace:{teamId}:task`) takes `complete`; `complete` on the administrator's row then closes it. Rows may carry `metadata.actionLabels` (a row's own label for a shared action), `metadata.confirm[action]` (`{title, body, reasonLabel?}` — the row scripts its confirmation dialog) and `metadata.steps` (a numbered procedure); all three are optional and generic. TeamHub also registers `OCP\Teams\ITeamResourceProvider`, so core's `GET /ocs/v2.php/teams/{teamId}/resources` lists the team's TeamHub home.
+
+### Team-space quota request (added 4.10.2; a Nextcloud service since 4.10.29)
+
+**Removed 4.10.29:** `POST /api/v1/teams/{teamId}/team-space/quota-request`, the `teamspace_admin` / `quota:{teamId}` and `teamadmin` / `quota:{teamId}:request` My Work rows, and `quotaRequests` in `GET /api/v1/apps/check`. The quota request is a Nextcloud service on the workflow engine — see *Service Teams → the quota request* below.
+
+Every `gf:` resource row that is the team's space still carries **`quotaRequest`** — now `{ workflowId, status: pending|answered, requestedBytes, requestedAt }` for the team's open engine request (`answered` = waiting for the requester to close it), or `null`. Manage team shows its state instead of the ⋯ menu by it.
+
+**Workflow rows** (the ledger-era workflows, every party) carry `metadata.workflow = { steps: [{ label, state: done|current|pending, actor, at }], current }` — the whole workflow with the row's position in it, computed by the owning service; the row's disclosure renders it as a tracker. Optional and generic like `actionLabels`, `confirm` and `steps`.
+
 `POST /api/v1/teams/{teamId}/resources/{app}/{resourceId}/dismiss` deletes a pending row whose resource is gone or detached. Team admin required. The verdict is **recomputed server-side**, not taken from the request: a row that has become available again is refused with `400` and `{"error": "resource_available_again"}` so the client can refetch and offer Accept / Ignore instead. Dismissing drops the row from the `pending` count that feeds the Team info "N resources need review" strip.
+
+---
+
+## WorkflowHub endpoints (added 4.10.14)
+
+The built-in workflows over the workflow engine (`docs/workflowhub-architecture.md`). Every route is `#[NoAdminRequired]` and **CSRF-protected, reads included** — no `#[NoCSRFRequired]` anywhere on the controller; `@nextcloud/axios` sends the request token. **No licence gate on the routes**: usable on licensed and unlicensed instances alike, and **no route ever refuses an action on a workflow that exists because a licence expired** — see § The licence below. The My Work endpoints above are unchanged.
+
+**The caller is the session user and nothing else.** No route and no body carries an actor, a participant, a step or a status. The engine acts on *the caller's own active step*, decides what the caller may see or do from the live roles (Circles level, group membership — resolved server-side at the moment of the call) and the participant rows, and ignores anything else a client sends (`data` is passed through the definition's `validateStart`, which keeps only the fields it knows).
+
+**Who sees what.** A workflow is visible to its participants — the initiator, the holders of every step's actor (by uid, group membership, or team role on the instance's team), everybody who acted — and to Nextcloud administrators. Nobody else: `403`.
+
+**Errors.** `401` no session · `403` not yours · `404` no such workflow or definition · `400` bad input · `409 {error, conflict: true}` the step or workflow is no longer in a state that allows this (the caller's view is stale — reload) · `429 {error, retryAfter}` + `Retry-After` header for a repeated status request · `500 {error, ref}` unexpected, with a correlation id and no detail.
+
+### Reading
+
+| Method & path | Answer |
+|---|---|
+| `GET /api/v1/workflows?status=` | `{ workflows: [ …view ], tier, capabilities }` — every workflow the caller takes part in, most recently updated first. `status` narrows to one of `submitted`, `in_progress`, `waiting`, `blocked`, `cancelled`, `rejected`, `completed`; on an unlicensed instance a terminal status answers `[]`. |
+| `GET /api/v1/workflows/definitions` | `{ definitions: [ { key, version, name, concurrency, unlicensed, steps: [ { key, label, actor } ] } ], tier, capabilities }` — the built-in workflows a client may offer, step labels in the caller's language. An unlicensed instance lists only those with `unlicensed: true`. Whether *this* caller may start one on *a* team is decided at start. |
+| `GET /api/v1/workflows/{id}` | `{ workflow: …view + history, tier, capabilities }`. `history` is the event log, oldest first: `[ { type, stepKey, actorUid, occurredAt, payload } ]`; on an unlicensed instance it is the **basic timeline** (fewer event types, `stepId` and `stepKey` null). **404 for an ended workflow.** |
+
+### Starting
+
+`POST /api/v1/teams/{teamId}/workflows/{definitionKey}` — body `{ "data": { … } }`, the definition's opening payload. `201 { workflow }`. The definition decides who may start (team request: any effective member of `{teamId}`; team-space quota: level ≥ 8) and validates `data`. `409` when a workflow of this kind is already open on the team and the definition allows only one (`concurrency: one_open_per_team`).
+
+**`404` when the definition is unknown *or not startable on this instance*** (v4.10.17). A definition may be registered but **dark** — its shape ships before the service behind it is wired — and a dark definition is left out of `GET …/workflows/definitions` and refused here with the same answer as an unknown key. `teamspace_quota` is dark until `workflow_engine_quota` is set to `1`, because the live quota request still runs on the ledger: before the gate existed this route answered `201` and created a parallel request the ledger could not see, whose `decide` step would have reported a quota grant that was never written.
+
+**Rate-limited: ten a hour per user** (`#[UserRateLimit(limit: 10, period: 3600)]`, v4.10.17). `team_request`'s concurrency is `unbounded` — asking for several teams is legitimate — and every start notifies the requesting team's owner and moderators, so without a cap one member could ring their bell arbitrarily often. Exceeding it is Nextcloud's own `429`, not a workflow error body.
+
+### Acting on the caller's active step
+
+All `POST /api/v1/workflows/{id}/…`, all answer `200 { workflow }` with the updated view.
+
+| Path | Body | Who | Effect |
+|---|---|---|---|
+| `complete` | `{ note? }` | a holder of the active step's actor | Completes the step (an *available* step is started and completed in one go). The next step becomes available and its holders are notified; completing the last step completes the workflow and every named participant is notified. |
+| `reject` | `{ reason }` required | a holder of the active step's actor | Rejects the step: workflow `rejected`, the steps never reached `skipped`. |
+| `request-information` | `{ note }` required | a holder of the active step's actor | Step → `waiting_for_information`, workflow → `waiting`; the initiator is notified. |
+| `provide-information` | `{ note }` required | any participant | Only on a waiting step (`409` otherwise): step → `in_progress`; the step's holders are notified. |
+| `cancel` | `{ reason? }` | the initiator, or a Nextcloud administrator | Workflow `cancelled`; the active and pending steps `cancelled`; named participants notified. |
+| `status-request` | `{ note? }` | a participant who is **not** a holder of the active step (the holder gets `400`) | **Changes no status.** Records a `status_requested` event and notifies every holder of the active step. Rate-limited twice: once per participant per step per 24 h in the engine (`429`, `retryAfter` seconds), and at most 10 calls per user per hour at the edge (`#[UserRateLimit]`). |
+| `message` (v4.11.0) | `{ note, fileIds? }` — note required | on a **service request** only: the requester, or on the desk's side whoever claimed it (or an admin of the service team); everybody else `403`, and so is a desk member on an unclaimed request | **Changes no status.** Records a `message` event (`visibility = all`) while the request is open (`409` once it has ended). Notifies the other side: the requester's message → whoever claimed it, **nobody** while it is unclaimed; the desk's → the requester (and the claimant, when a team admin wrote it). Each recipient's earlier `workflow_message` notification about the request is withdrawn first, so the bell holds one per request. Licensed with the service-teams module (`403` otherwise). At most 60 calls per user per hour (`#[UserRateLimit]`). |
+
+### The workflow view
+
+```json
+{
+  "id": 12,
+  "definitionKey": "team_request",
+  "definitionVersion": 1,
+  "title": "Team request: Marketing",
+  "teamId": "aBcDeF…",
+  "subject": { "type": "team_request", "id": "Marketing" },
+  "status": "in_progress",
+  "outcome": null,
+  "currentStep": "approve",
+  "startedBy": "jaap",
+  "startedAt": 1790000000,
+  "updatedAt": 1790000001,
+  "endedBy": null,
+  "endedAt": null,
+  "teamName": "Sales",
+  "description": "Campaign work needs its own space.",
+  "data": { "teamName": "Marketing", "reason": "Campaign work needs its own space." },
+  "people": { "jaap": "Jaap Tel" },
+  "steps": [
+    { "key": "submit",  "order": 1, "status": "completed", "label": "Request submitted",                        "actor": { "type": "user", "id": "jaap" },         "enteredAt": 1790000000, "startedAt": 1790000000, "completedAt": 1790000000, "completedBy": "jaap", "actionTaken": "complete", "reason": null },
+    { "key": "approve", "order": 2, "status": "available", "label": "Team owner or moderator approves",         "actor": { "type": "team_moderator", "id": "" },   "enteredAt": 1790000001, "startedAt": null, "completedAt": null, "completedBy": null, "actionTaken": null, "reason": null },
+    { "key": "process", "order": 3, "status": "pending",   "label": "Nextcloud administrator creates the team", "actor": { "type": "group", "id": "admin" },       "enteredAt": null, "startedAt": null, "completedAt": null, "completedBy": null, "actionTaken": null, "reason": null },
+    { "key": "confirm", "order": 4, "status": "pending",   "label": "Requester confirms",                       "actor": { "type": "user", "id": "jaap" },         "enteredAt": null, "startedAt": null, "completedAt": null, "completedBy": null, "actionTaken": null, "reason": null }
+  ],
+  "participants": [
+    { "actor": { "type": "user", "id": "jaap" },          "role": "initiator",   "addedAt": 1790000000 },
+    { "actor": { "type": "team_moderator", "id": "" },    "role": "responsible", "addedAt": 1790000000 },
+    { "actor": { "type": "group", "id": "admin" },        "role": "responsible", "addedAt": 1790000000 }
+  ],
+  "responsible": { "type": "team_moderator", "id": "" },
+  "purged": false,
+  "viewer": { "isParticipant": true, "isResponsible": false, "canAct": false, "canCancel": true, "canRequestStatus": true }
+}
+```
+
+Actor types: `user` (uid), `group` (Nextcloud group id; `admin` = the administrators), `team_owner` (level 9 of the instance's team), `team_moderator` (level ≥ 4), `team` (any effective member). `viewer` is computed for the caller and is a rendering hint only — every action re-checks. Row ids of steps and participants, retention and removed participants are not exposed.
+
+**Added 4.11.0** (the conversation on a service request): `viewer.canMessage` — the caller may `POST …/message` now; `viewer.messageSide` — `'requester'`, `'desk'` or `null`; `viewer.canAskRequester` — the caller's message may instead be sent as `request-information` (their own claimed desk task, not already waiting); `viewer.answersQuestion` — the caller is the requester and a desk task is waiting for their answer, so their next message goes as `provide-information`. All four are `false`/`null` on a workflow no service team handles.
+
+**Changed 4.10.17:** `viewer.canRequestStatus` now also honours its own cooldown — one ask per person per step per 24 hours — so it is `false` while the caller is inside that window and the client stops offering a button whose press would answer `429` (CLAUDE.md § Permissions: hidden, not left to fail). One batched query serves a whole list, so this costs no extra request per row.
+
+**Added 4.10.16** (the licence tier): `responsible` — the active step's actor, `null` once the workflow has ended — which is the field a client reads to say who is up, **on both tiers**; and `purged: true` on the single view returned by the call that ended a workflow on an unlicensed instance (the workflow is deleted by then; every later read answers 404).
+
+**Added 4.10.15** (for the My Work workflow sections): `teamName` (the requesting team's display name, `""` when unknown), `description` (the definition's sentence for the instance — the team request's reason), and `people` — `{ uid: displayName }` for every uid the view mentions (initiator, step actors and completers, user participants; on `GET /workflows/{id}` also the history's actors). Only uids the caller was already given are resolved; the client shows names, never looks them up.
+
+### The reference workflow — request a new team (`team_request`)
+
+`POST /api/v1/teams/{teamId}/workflows/team_request` with `{ "data": { "teamName": "Marketing", "reason": "…" } }` by any member of `{teamId}`. Steps: `submit` (done at creation, in the requester's name) → `approve` (owner or moderator of the requesting team; `complete` or `reject`) → `process` (**the group configured in Admin → TeamHub → Team requests**, default `admin`; read when the request is created and frozen on the instance) → `confirm` (the requester) → completed. Several may be open per team. The team itself is created by the processing group with the tools they have; the workflow carries the request and the answers, no side effects.
+
+Admin setting: `GET /api/v1/admin/settings` carries `workflowTeamRequestGroup: { id, displayName }`; `POST /api/v1/admin/settings` accepts `workflowTeamRequestGroup` (a group id; `""` restores `admin`; a group that does not exist is refused).
+
+### The licence (added 4.10.16)
+
+The instance is licensed or it is not — never per user, team or workflow. Every read carries `tier` (`"full"` | `"basic"`) and `capabilities`, a flat `{ capability: bool }` map, so a client **hides** what this instance does not have instead of offering it and failing. The capabilities and the full data lifecycle are in `docs/unlicensed-workflow-data-lifecycle.md`.
+
+What a `basic` (unlicensed) answer differs in:
+
+| | `basic` | `full` |
+|---|---|---|
+| `steps` | `[]` | the step rows |
+| `currentStep` | `null` | the active step's key |
+| `responsible` | the active step's actor | the same |
+| `viewer.canRequestStatus` | always `false` | as computed |
+| `history` | the basic timeline: `created`, `step_completed`, `step_rejected`, `information_requested`, `information_provided`, `status_requested`, `blocked`, `unblocked`, `completed`, `rejected`, `cancelled`, each with `stepId`/`stepKey` null | every event |
+| `GET /workflows/{id}` on an **ended** workflow | `404` | the view |
+| `GET /workflows?status=completed` | `[]` | the ended workflows |
+| `GET /workflows/definitions` | only `unlicensed: true` | all |
+
+Two calls, and only these two, can answer **`403 { error, licenseGate: true, enforcementLevel }`** — the shape `MyWorkController` and the Budget/Time routes already use:
+
+- `POST /api/v1/teams/{teamId}/workflows/{definitionKey}` when the definition is not allowed for unlicensed use;
+- `POST /api/v1/workflows/{id}/status-request`, which is licensed.
+
+`complete`, `reject`, `request-information`, `provide-information` and `cancel` **never** carry a licence check, at the controller or in the engine: a workflow that exists can always be finished, whatever the licence did in the meantime.
+
+**Completion on an unlicensed instance deletes the workflow** in the same transaction that ends it. The ending call returns the last view once (`purged: true`); after it the workflow is 404 for everybody including administrators, is in no list, and has no archive or result record anywhere.
+
+Notifications (`Notifier.php`, per recipient language, object `workflow/{id}`): `workflow_step_available` to the holders of a step that just became available (minus whoever handed it over), `workflow_status_requested`, `workflow_information_requested` (initiator), `workflow_information_provided` (holders), `workflow_ended` (every named participant), and since 4.10.20 `workflow_step_assigned` to the one agent a request was handed to. A step moving on withdraws the instance's earlier notifications. Recipients of a team-role actor are the team's *direct* members at that level.
+
+
+### Service Teams (v4.10.20, WorkflowHub phase 5)
+
+**v4.10.27 — the desk works from its own team's home** (`/service-teams`). The global *Service desk* page (removed 4.10.26) is replaced by two widgets on the service team; what changed on the wire:
+
+| Endpoint | Change |
+|---|---|
+| `GET /api/v1/service-teams` | Each desk adds `unclaimedCount` — the navigation badge behind the team's name |
+| `GET /api/v1/service-teams/{teamId}/queue` | Adds `closed`: requests whose service step finished in the last 30 days, newest first, each with `desk: { status, closedAt, closedBy }` (`completed` = answered, `rejected`, `cancelled` = withdrawn by the requester) |
+| `GET /api/v1/service-teams/{teamId}/statistics?days=30` | **New.** `{ statistics: { days, since, totals, services } }`. `days` is 7, 30 or 90 (else **400**). `totals` and every `services[]` entry carry `received`, `claimed`, `closed`, `withdrawn`, `open`, `unclaimed`, `medianFirstClaim`, `medianClose` (seconds, `null` when nothing was measured); services add `serviceKey`, `label`. Members of the service team only (**403** otherwise); licensed |
+| `POST /api/v1/workflows/{id}/assign` | **Team admins only** — a member gets **403**. `internal.canAssign` on every row says so in advance |
+| `GET /api/v1/teams/{teamId}/layout` (bundle) | Adds `serviceDeskConfig: { isDesk, isAdmin }` — gates the two widgets; `widget-service-queue` and `widget-service-stats` are accepted layout ids |
+
+The team's activity feed (`GET /api/v1/teams/{teamId}/activity`) now includes the desk's state changes for members of a service team: rows with `app: "teamhub"`, `subject` one of `service.request_received|claimed|assigned|released|answered|rejected|cancelled`, and `subjectparams: { title, to_user, to_name }`.
+
+A **service team** is a team created from the **Service** template that answers requests, with a catalogue of services each wired to one built-in workflow definition. Everything here is **licensed** — every route below answers `403` with `{"licenseGate": true, "enforcementLevel": "…"}` on an unlicensed instance, and there is no reduced version. A workflow that is already running is unaffected: no transition verb reads the licence.
+
+**v4.10.23 — the desk's people are the team's people.** The roster is gone. **Who is eligible** to work a desk's queue: any member of the service team, directly or through a group that is a member of it. **Who owns the service** (may reconfigure it, and may take a request off another agent): a **team admin**, Circles level ≥ 8, resolved live — `isServiceOwner` still carries it under that name. A Nextcloud administrator is **not** eligible by being one. The rule lives in `ServiceTeamService::isEligibleAgent()` and nothing else decides it.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/service-teams` | The desks the caller may work, each with `teamId`, `teamName`, `isServiceOwner` and its `catalogue`. Empty for everybody who is not an agent — not an error |
+| `GET /api/v1/service-teams/catalogue` | Every service any **active** desk offers: `serviceKey`, `definitionKey`, `label`, `description`, `category`, `categoryLabel`, `leadTime`, `serviceTeamId`, `serviceTeamName`. One payload for the whole Services page — A–Z, the grouping by team and the category tiles are all derived from it client-side (v4.10.25, DESIGN §2.147) |
+| `GET /api/v1/service-teams/claim-status` | `{ available, claimed, holderName, availableServices }` — whether this instance has the Nextcloud services and whether a team already holds them. Any signed-in account: it is what the creation wizard's checkbox reads before the team it would belong to exists, and it discloses the holding team's **name** and nothing else |
+| `GET /api/v1/service-teams/{teamId}/queue` | `{ unclaimed, mine, others, withOthers, closed }` — `unclaimed` / `mine` / `others`: the open workflows whose active step is this desk's; **`withOthers`** (v4.10.31): this desk's open workflows whose active step is somebody else's — back with the requester for a planned action or the confirmation, or before the desk's step; `closed`: the desk's part ended in the last 30 days. Eligible agents only (`403` otherwise) |
+
+Four verbs act on one workflow's active step and live under `/workflows/{id}` because that is what they act on. Each returns `{"workflow": …}`, the same view `GET /workflows/{id}` gives.
+
+| Endpoint | Body | Notes |
+|---|---|---|
+| `POST /api/v1/workflows/{id}/claim` | — | Takes an unclaimed request out of the queue and starts the step. `409` when somebody else already has it |
+| `POST /api/v1/workflows/{id}/assign` | `{ uid }` | Hands it to an eligible agent; naming yourself is how you take it over. `400` when the target is not eligible |
+| `POST /api/v1/workflows/{id}/release` | `{ reason? }` | Back to the queue. The assignee or the service owner only (`403` otherwise) |
+| `POST /api/v1/workflows/{id}/internal-note` | `{ note }` | A note only the desk reads. Changes no status and moves no step |
+| `POST /api/v1/workflows/{id}/close-request` | `{ note? }` | **v4.10.31.** An **admin of the handling service team** closes the request, at any step (`403` for anybody else, and for a definition that is not closable — the quota request and the team request, whose desk step does something). At the requester's confirmation it completes that step (`outcome: "completed"`); before it, the workflow ends `status: "completed"`, **`outcome: "closed"`**, the active and later steps `skipped`, event `closed` with the note. Written to the desk's activity stream as `service.request_closed` |
+
+**Claiming narrows, it does not replace.** A desk's step is held by every eligible agent; once one has claimed it, only they — or the service owner — may complete or reject it, and any other agent must take it over explicitly. That is `WorkflowEngine::assertHolder()`, so the API and the buttons cannot disagree.
+
+**The internal half.** `GET /workflows/{id}` gains **`internal`**, present only for an eligible agent of the handling desk and `null` for everybody else: `{ serviceTeamId, serviceTeamName, assignee, assigneeName, claimable, canAssign, canRelease, isServiceOwner, agents, involved }` (`involved`, v4.10.31: this member claimed or completed one of its desk steps). `viewer.isServiceAgent` says whether it is there. The history gains **`visibility`** per event (`all` / `internal`), and `internal` events are **removed from the response** for the requester, for every other participant and for a Nextcloud administrator — the filter runs before the licence tier's, so a licence can never widen what a requester reads. `responsible` is unchanged and still names the desk, so a requester always knows who has it.
+
+**v4.10.31 — whose action is required, and who lists what.** The view's `viewer` block gains **`actionRequired`** (this viewer's action is required: they may act on the active step *and*, for a desk step, have claimed it — an unclaimed desk step is the desk's, not any one member's; My Work labels it *Action required*) and **`canClose`** (see `close-request`). Each step in `steps` gains **`roleLabel`**, the role a built service's desk step needs (`''` otherwise). `GET /api/v1/workflows` (My Work) lists a desk's request for a desk member **only when they worked on it** (claimed, were assigned or completed one of its desk steps); `GET /workflows/{id}` still lets any member of the desk open any of its requests.
+
+**Starting a service request** uses the existing route: `POST /api/v1/teams/{teamId}/workflows/{definitionKey}` with `{ "data": { "summary", "details" } }`, where `definitionKey` comes from a catalogue entry. A definition no active desk offers is dark — `isStartable()` is false, so it is not listed and `create()` answers `404`.
+
+**v4.10.45 — icons, the administrator's categories, links, and more time for a team.**
+
+- `GET /api/v1/service-teams/catalogue` answers `{ catalogue, categories, links, tier }`. `categories` is `[{ key, label, icon }]` in the administrator's order (the tiles follow it); `links` is `{ serviceDesk, knowledgePortal }`, each `''` or an `https://` URL. Every entry gains **`categoryIcon`**, and a built service **`icon`** (one of `ServiceIcons::ALLOWED`, default `HelpCircleOutline`). The entry `team_expiry` (*Request more time for a team*) is listed only for a caller who administers a team with an expiration date; `team_archive` is not listed while archiving before deletion is on, and cannot be started then. `team_change` is retired: no longer listed or startable, its running requests finish.
+- `GET /api/v1/service-teams/expiry-teams` — `{ teams: [{ teamId, teamName, expiresOn, openRequest: { workflowId, proposedOn } | null }] }`: the teams the caller administers (level ≥ 8) with an expiration date. `workflowId` 0 is a ledger request still waiting for an administrator. Licensed.
+- **Starting it:** `POST /api/v1/teams/{teamId}/workflows/team_expiry` with `{ data: { proposedOn: "YYYY-MM-DD", reason } }` — a team admin, while a desk offers it; the date must be later than the current one, the server records `currentOn`. The desk's step is *Grant* / *Decline*; granting sets the date (`TeamExpiryService::extendByServiceTeam()`).
+- `GET /api/v1/teams/{teamId}/expiry` gains **`viaServiceTeam`** (a desk answers requests for more time) and **`serviceRequest`** (`{ workflowId, proposedOn }` of the open one, or `null`). `POST /api/v1/teams/{teamId}/expiry/request` answers `400` while `viaServiceTeam` is true.
+- Built-service documents (`/built-services`) carry **`icon`** (`''` = default); `options.icons` lists the names the builder offers, and `options.categories` is the administrator's list.
+- **Settings → TeamHub → Services** (`#[AuthorizedAdminSetting]`, not licensed): `GET /api/v1/admin/services/settings` → `{ categories: [{ key, label, icon, builtIn, customLabel, usage }], links, icons }`; `PUT /api/v1/admin/services/settings/categories` with `{ categories: [{ key?, label, icon }] }` in display order (a row without `key` is new; `400` when a removed category still has services, when two share a name, or when the list is empty); `PUT /api/v1/admin/services/settings/links` with `{ serviceDesk?, knowledgePortal? }` (`''` removes one; `400` for anything but `https://`).
+
+**v4.10.44 — a request without a team.** Every catalogue entry carries **`teamOptional`**: `true` for a service a team built and for `new_team`, `external_access`, `shared_folder` and `general`; `false` for `team_modify`, `team_archive` and `team_quota`. A service with `teamOptional` may be started with `{teamId}` = the entry's `serviceTeamId` by anybody signed in — a personal request; any other `{teamId}` still needs the caller to be a member of that team (`403` otherwise). `team_request` (the new team) also accepts the generic form: `summary` is read as `teamName` and `details` as `reason` when those are absent.
+
+**The quota request (v4.10.29)** is the seventh Nextcloud service: catalogue entry `serviceKey: "team_quota"`, `definitionKey: "teamspace_quota"`, category `files_storage`, offered by the desk that holds the Nextcloud services.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/v1/service-teams/catalogue` | Lists the quota entry **only for a caller who administers a team with a team space** (`QuotaTeamsService`); every other entry is unchanged |
+| `GET /api/v1/service-teams/quota-teams` | **New.** `{ teams: [{ teamId, teamName, quota, openRequest: { workflowId, requestedBytes } \| null }] }` — the teams the caller administers (direct Circles level ≥ 8) that have a team space, by name. Licensed (`403` + `licenseGate` otherwise); empty is an answer |
+| `POST /api/v1/teams/{teamId}/workflows/teamspace_quota` | Body `{ "data": { "requestedBytes", "reason" } }`. Team admin or owner of `{teamId}` while a desk offers it (`403` otherwise; `404` when no desk does or the instance has no team spaces); `400` for a size ≤ 0, > 10 TiB, not an increase, or no reason; `409` when the team has no space or already has a request open. The server records `currentBytes` itself — a client-sent one is dropped |
+
+Steps: `submit` (done at creation) → `handle` (the desk: `complete` **grants** — the quota is written inside the same transaction, and a provider refusal leaves the step unanswered; `reject` **declines**, reason required) → `confirm` (the requester closes). A grant refuses (`409`) when the space has meanwhile reached the requested size or has gone.
+
+**Added 4.10.29 to the workflow view:** `actionLabels` — `{ complete?, reject? }`, the active step's own words for the engine's verbs in the viewer's language (`{ complete: "Grant", reject: "Decline" }` on the quota request's desk step, `{ complete: "Close" }` on its last step), `[]` when the engine's own words apply. Words only: the verbs and routes are the same.
+
+### Manage team → Services (v4.10.23, team admins)
+
+`TeamServiceController`. All `#[NoAdminRequired]` — a Nextcloud administrator has no part in this. **Two gates, both re-checked on every call:** the caller is a **team admin** (Circles level ≥ 8) *and* the team was created from the **Service** template. Either failing answers the same way a missing team does, so a caller learns nothing about a team they may not administer. Licensed like every other half.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/teams/{teamId}/services` | `{ services: { holdsServices, claimedByOther, holderTeamId, holderName, agentCount, updatedAt }, availableServices }` — what the Services tab renders, including the six services behind its **?** panel |
+| `POST /api/v1/teams/{teamId}/services` | Claim the **Nextcloud services** for this team — all six at once. `400` when another team holds them; idempotent for the team that already does |
+| `DELETE /api/v1/teams/{teamId}/services` | Give them back. The team stays a service team and may claim again; open requests keep their step actor. **v4.10.33:** a team that has ever published a service of its own stays an active desk |
+
+**The creation wizard posts to the same claim route**, after writing the team type, so ticking the box during creation and ticking it a week later are one code path.
+
+### The service builder (v4.10.33, WorkflowHub phase 8a)
+
+`ServiceBuilderController` + `TeamServiceBuilder`; design in `docs/service-builder.md`. The services a service team builds and publishes **itself**, beside the Nextcloud services. All `#[NoAdminRequired]`. **Gates, re-checked on every call:** the team was created from the **Service** template (else `403` *Team not found*); **reading** — any member, directly or through a group; **writing** — a team admin (Circles level ≥ 8). Licensed (`403` + `licenseGate`).
+
+| Endpoint | Body | Notes |
+|---|---|---|
+| `GET /api/v1/teams/{teamId}/built-services` | — | `{ services: [service], canEdit, categories: [{ key, label }], limits: { services, steps, title, description, stepLabel, role, leadDays, links, linkLabel, url, tasks, fileDays } }` (`links`, `linkLabel`, `url` v4.10.36; `tasks` v4.10.37; `fileDays` v4.10.38) — drafts included, in display order |
+| `POST /api/v1/teams/{teamId}/built-services` | `{ service: document }` | A new **draft**: nothing listed, nothing requestable. `201` + `{ service }`. `400` for an invalid document or past `limits.services` (50) |
+| `PUT /api/v1/teams/{teamId}/built-services/{serviceId}` | `{ service: document }` | Save the draft. Requests keep starting from the published version until the draft is published |
+| `DELETE /api/v1/teams/{teamId}/built-services/{serviceId}` | — | `{ deleted: true }`. **A never-published draft only** — `400` otherwise: requests may reference a published one, so it is unpublished instead |
+| `POST /api/v1/teams/{teamId}/built-services/{serviceId}/publish` | — | Copies the draft to *published*, raises `version`, lists it on the Services page and makes the team an **active desk** if it was not one. `400` with the reasons joined when `publishProblems` is not empty |
+| `POST /api/v1/teams/{teamId}/built-services/{serviceId}/unpublish` | — | Off the Services page at once; `version` and `published` stay, so running requests finish on the version they started on |
+
+A service of another team answers `404`, whatever the path's team.
+
+**The layout bundle (v4.10.34).** `GET /api/v1/teams/{teamId}/layout` adds two flags to `serviceDeskConfig`: **`isServiceTeam`** (licensed and a team created from the Service template, desk or not yet; the bundle is members-only, so this is the builder's read gate) and **`canBuild`** (a team admin of it, the write gate). The first gates the *Services* widget, layout id **`widget-services`**, which the layout save accepts and the default layout places under the statistics.
+
+**The document** (`TeamServiceBuilder::normalise()` is its only writer; unknown keys are dropped):
+
+```json
+{
+  "title": "Application intake",
+  "description": "Ask for a new application.",
+  "category": "apps_tools",
+  "leadDays": 3,
+  "askTeam": false,
+  "steps": [
+    { "kind": "desk", "label": "Assess the request", "tasks": [
+      { "label": "Privacy check", "role": "Privacy officer", "nonBlocking": false,
+        "links": [{ "label": "Intake checklist", "url": "https://wiki.example.org/intake", "kind": "link" }] },
+      { "label": "Security check", "role": "CISO", "nonBlocking": true, "links": [] }
+    ] },
+    { "kind": "requester", "label": "Sign the agreement", "tasks": [
+      { "label": "", "role": "", "nonBlocking": false,
+        "links": [{ "label": "Agreement form", "url": "https://forms.example.org/agreement", "kind": "form" }] }
+    ] },
+    { "kind": "desk", "label": "Install the app", "tasks": [{ "label": "", "role": "", "nonBlocking": false, "links": [] }] }
+  ],
+  "files": { "allowed": true, "edit": false, "days": 14 }
+}
+```
+
+`title` required, ≤ 100, one line. `description` ≤ 1000, line breaks allowed. `category` one of `ServiceCatalogue::CATEGORIES` (default `support_requests`). `leadDays` 0–60 whole working days, `0` / `""` / `null` = none said. `askTeam` stored for personal requests (a later step; today every request carries the team it is asked from). `steps` a list of at most 10; `kind` `desk` (the service team) or `requester` (a planned action); `label` ≤ 100, one line. The engine adds *Request submitted* before and *Requester confirms* after.
+
+**v4.10.37 — tasks (`docs/service-builder.md` § 4).** Every step holds `tasks`, 1–10, done at the same time: `{ label ≤ 100, role ≤ 64, nonBlocking, links }`. `role` and `nonBlocking` mean something on a `desk` step only (`role` is a label, not a permission; `nonBlocking` lets the request move on while the task is open — it must still be done before the request ends); on a `requester` step they are dropped. One task may leave `label` empty and borrows the step's. **A step saved before v4.10.37** — `role` and `links` on the step itself — is read as one task that has them; the next save writes the new shape. **`start` / `startUrl` (v4.10.36, the link service) are withdrawn**: dropped on save; a service still *published* with `start: "link"` is left off the catalogue and cannot be started until it is published again.
+
+**Links (v4.10.36, on tasks since v4.10.37).** Every task carries `links`, at most 5, each `{ label ≤ 100 one line, url, kind: link | form }` (`kind` defaults to `link`; it sets the button's words and icon). **Every `url` is `''` or an absolute `https://` address with a host, no spaces or control characters, ≤ 2000** — anything else (`http:`, `javascript:`, a relative path) is `400` on any save, draft included. A draft may hold a link without a name or an address; publishing may not. On a requester task, pressing a link in the client completes the task (`POST /workflows/{id}/complete` with its `step`).
+
+**`files` (v4.10.38, the paperclip, § 7):** `{ allowed (default true), edit (default false: view only), days 1–365 (default 14) }`. Copied into each request's data as `fileSharing` when it starts.
+
+**A service** in every response: `{ id, teamId, definitionKey: "team_service_{id}", draft, published | null, version, listed, hasChanges, publishProblems: [string], createdBy, createdAt, updatedAt, publishedBy, publishedAt }`. `publishProblems` is what stands between the draft and publishing, in the viewer's language: no step for the team, a step without a name, a requester step first (v4.10.35: every request reaches the team first) or last, a link without a name or an address (v4.10.36), a task without a name in a step of several, a team step whose every task is non-blocking (v4.10.37).
+
+**On the Services page** a published, listed service is one more `GET /api/v1/service-teams/catalogue` entry of its team: `serviceKey` = `definitionKey` = `team_service_{id}`, `label` / `description` in the team's own words (not translated), `leadTime` *Usually within {n} working days* or `""`, **`builtService: true`**, and (v4.10.38) **`fileSharing`** `{ allowed, edit, days }` for the request form's paperclip. It is requested with the generic form, `POST /api/v1/teams/{teamId}/workflows/team_service_{id}` + `{ data: { summary, details, fileIds? } }`.
+
+**Step links on a request (v4.10.36).** A request copies each task's `links` onto its row at start (`teamhub_wf_step.links`), like the label and the role, and every workflow view's `steps[]` carries **`links: [{ label, url, kind }]`** — `[]` for a step without any, which is every step of a built-in workflow. **A desk task's links are the team's own material: they are sent only to an agent of the desk handling the request**; everybody else on the request receives `[]` for that task. A requester task's links go to everybody on the request. The client renders only `https://` addresses.
+
+**Personal requests (v4.10.40).** A service a team built may be started on the **service team's own id** — `POST /api/v1/teams/{serviceTeamId}/workflows/team_service_{id}` — by anybody signed in: a request asked from no team. Every workflow view carries **`personal`**: true when the request is recorded against the service team handling it. Started on any other team, the caller must still be a member of it; the built-in Nextcloud services still need a team.
+
+**A team task is claimed first (v4.10.39).** `complete`, `reject`, `request-information`, `block` and `unblock` on a service-team task nobody has claimed answer `403` *Claim this task before you act on it.* — for every member, the team's admins included; `claim` (or an admin's `assign`) comes first. The view says so: `viewer.canAct` and each task's `canAct` are false and `internal.claimable` is true until then. **A service may start with the requester** again (the v4.10.35 publish rule is lifted): the new request's view answers for the requester's first task (`viewer.stepKey`, `canAct: true`), and the team lists it under `withOthers` until it is done.
+
+**Tasks on a request (v4.10.37).** A task is a row of `steps[]`; the tasks of one step share its `order`. Each row adds **`stageLabel`** (the step's name when it holds several tasks, else `''`), **`nonBlocking`**, **`canAct`** (this viewer may act on this task now — what a requester's link completes) and **`assignee`** (who has a team task — sent to the desk's agents only, `''` otherwise). **`viewer.stepKey`** names the task the view answers for: the queue row's, the one just acted on, or the viewer's own; `viewer.*`, `responsible`, `actionLabels` and `internal` all answer for that task. `GET /workflows/{id}?step=` opens a request on one task. **Every verb takes an optional `step`** in its body — `complete`, `reject`, `request-information`, `provide-information`, `status-request`, `claim`, `assign`, `release`, `internal-note` — and acts on that task; `409` when it is no longer open; without it the server picks the caller's own task (claimed by or assigned to them, theirs by name, one they may take up), which is what every client before v4.10.37 gets. **The queue lists one row per open team task** (`GET /service-teams/{teamId}/queue`), and `unclaimedCount` counts tasks. **`GET /workflows`** lists a request once per open task that is the caller's own when they have two or more (two requester tasks of one step, two team tasks they claimed), each answering for its task; otherwise once. Completing the task that would end the request while another task is still open (a non-blocking one) is `409` *This request cannot end while "…" is still open*. Rejecting a task rejects the request and skips every other open task; withdrawing cancels them all.
+
+**The paperclip on a request (v4.10.38, § 7).** `complete`, `reject`, `request-information`, `provide-information`, `internal-note` and `close-request` take **`fileIds: [int]`**, and the request form takes `data.fileIds` — files **of the caller's own** (`oc_filecache` ids they can read and may share), at most 10. `400` when a file cannot be found or shared, when the request is not handled by a service team, or when its service takes no files (`data.fileSharing.allowed: false`). The event of that write carries **`payload.files: [{ fileId, name }]`**. After the write commits, each file is shared — the requester's with the service team (a team share), a team member's with the requester (a user share), an internal note's with the team — for `fileSharing.days`, ending at 23:59:59 and never past the administrator's enforced maximum for internal shares; permission read, or read + update when `fileSharing.edit`. Each share is recorded as a workflow document (`teamhub_wf_attachment.share_id`, `share_until`, `unshared_at`); the documents endpoint adds `shared`, `sharedUntil`, `unsharedAt`. **When the request ends every share is removed**, and files attached to the very write that ended it are not shared. `ExpireWorkflowSharesJob` (daily) removes any share past its date.
+
+### Service Teams — what an administrator keeps (Nextcloud administrators only)
+
+`ServiceTeamAdminController`; **every method lacks `#[NoAdminRequired]`**, and that absence is the gate. Licensed like the agent half.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/admin/service-teams` | `{ holderTeamId, holderName, agentCount, availableServices, tier }` — who holds the Nextcloud services, for the Setup checklist row. No holder answers `holderTeamId: ""`, which is that row's "nothing set up yet" state |
+| `DELETE /api/v1/admin/service-teams/{teamId}` | Release the claim. The team is untouched and so is its queue |
+
+**The setup flow is gone (v4.10.23).** A service team is created from the Service template and claims the services itself; an administrator neither declares one nor names its people. The release survives because the claim is instance-wide: without it, a bundle taken by the wrong team could only ever be given back by that team's own admins.
+
+### The workflow archive (v4.10.21, WorkflowHub phase 6)
+
+All `#[NoAdminRequired]`, none CSRF-exempt, none public. **Licensed** (`archive_results`): every route answers `403 { licenseGate: true }` on an unlicensed instance, where a completed workflow is deleted rather than recorded (`docs/unlicensed-workflow-data-lifecycle.md`). Full design: `docs/workflow-archiving.md`.
+
+**`audience` is a request, not a grant.** `requesting_team` (the default) or `service_team`. The service view is `403` for anybody who is not an eligible agent of the handling desk — a Nextcloud administrator included — and the requesting-team view **never carries an internal note or an internal document to anybody at all**, because that filter belongs to the audience rather than to the viewer.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/archive/workflows` | Search. **Query**: `audience`, `q` (free text over the request's own words, or an exact reference), `outcome`, `definitionKey`, `serviceKey`, `from`, `to` (Unix seconds, on the completion date), `limit` (≤ 100, default 25), `offset`. With no `audience` both are searched. **Response 200**: `{ results: [ { archiveId, reference, audience, viewerRole, title, teamId, teamName, outcome, decision, completedAt, serviceKey, link } ], scope: [ { audience, teamId, teamName } ], audiences, tier, capabilities }`. The scope is resolved from the caller's **live** roles, never from the query; rows the per-archive rule refuses are dropped silently. No total is returned (deferred) |
+| `GET /api/v1/archive/workflows/{id}` | One projection. **Response 200**: `{ archive, tier, capabilities }` — see the shape below |
+| `GET /api/v1/archive/workflows/{id}/record` | **The link from a projection to the authoritative record**: `{ record: { archiveId, reference, audience, viewerRole, authoritative: { instanceId, definitionKey, definitionVersion, teamId, serviceTeamId, subject, status, outcome, startedAt, completedAt, archivedAt }, integrity: { eventCount, sealed, verified }, history, retention } }`. `definitionVersion` is the version the workflow was **created** on. `history` is filtered for the audience — a link to the record is not a way around the filter |
+| `GET /api/v1/archive/workflows/by-instance/{instanceId}` | The archive of one workflow, by the workflow's own id — what a finished My Work row links to. Same response as `{id}` |
+
+**The projection** (`archive`): `{ archiveId, reference, audience, viewerRole, request: { title, summary, teamId, teamName, subject, submittedBy, submittedAt, serviceKey }, outcome: { status, outcome, decision, completedAt, completedBy, closingNote }, documents: [ { id, fileId, fileName, visibility, stepKey, addedBy, addedAt } ], followUp: [ { kind, stepKey, text, at, by } ], history, retention: { archivedAt, retentionUntil, policy, legalHold, enforced }, link, people, internal }`.
+
+- `decision` is `approved` / `rejected` / `withdrawn` — the approval-or-rejection in one word.
+- `followUp.kind` is `closing_note`, `rejection_reason`, `cancellation_reason` or `unanswered_question`; the list is **derived** from the record, and a workflow that ended cleanly has an empty one.
+- `retention.enforced` is always `false` in this version: the metadata is written and **nothing deletes on it**.
+- `viewerRole` is `requester`, `participant`, `team_admin`, `nc_admin`, `service_agent` or `service_owner` — why this caller may read this archive.
+- **`internal` is `null`** on the requesting-team projection and absent-not-empty for a workflow no desk handled. On the service projection it is `{ serviceTeamId, serviceTeamName, isServiceOwner, assignedAgents, processingSteps, internalNotes, escalations, technicalActions, operationalOutcome: { handledBy, handlingStepKey, secondsInQueue, secondsInProgress, totalSeconds, claims, reassignments, releases }, documents }`.
+
+**Who may read what.** `service_team`: the desk's service owner or an eligible agent, and nobody else. `requesting_team`: a Nextcloud administrator, or a **current** effective member of the requesting team who is a team administrator (Circles level ≥ 8), the requester, or a participant who still holds their actor. A plain member of the team reads nothing. Every check is at read time against live roles, so a membership or an agent seat that ends closes the archive with it.
+
+### Workflow documents (v4.10.21)
+
+A document is a **reference to a file already in Nextcloud**, never a copy, and every one carries a visibility that is always stated. Licensed like the archive it feeds.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/workflows/{id}/attachments` | `{ attachments: [ { id, instanceId, fileId, fileName, visibility, stepKey, addedBy, addedByName, addedAt } ] }`, as this caller may see them — a participant or a Nextcloud administrator gets the `requester` ones, an eligible agent of the handling desk gets all |
+| `POST /api/v1/workflows/{id}/attachments` | `{ fileId, visibility, stepKey? }` → **201** `{ attachment }`. **`visibility` is required and has no default** (`requester` \| `internal`); anything else is `400`. `internal` needs an eligible agent of the handling desk (`403` otherwise). The file is resolved in the **caller's own** Nextcloud, so `404` for a file they cannot read and for a folder. `400` on a duplicate or at 50 documents. `409` once the workflow has ended |
+| `DELETE /api/v1/workflows/{id}/attachments/{attachmentId}` | The person who attached it, or the service owner for an internal one (`403` otherwise). `409` once the workflow has ended — an archived record's evidence is immutable too |
+
+Every read resolves `fileId` against the **reader's** Nextcloud, so attaching grants nobody access to anything; `fileName` is the name at the moment of attaching, a label for the record rather than an access path.
+
+**Audit events added**: `workflow.<definitionKey>.archived`, `workflow.<definitionKey>.attachment_added`, `workflow.<definitionKey>.attachment_removed` — the last two without the file name.
 
 ---
 
@@ -1532,7 +1894,7 @@ Returns the full license status envelope for the License tab and the enforcement
   "daysRemaining":        45,
   "paidUntil":            1733097600,
   "paidDaysRemaining":    15,
-  "graceDays":            30,
+  "graceDays":            14,
   "enforcementLevel":     "none",
   "graceRemaining":       null,
   "invalidReason":        null,
@@ -1548,9 +1910,9 @@ Returns the full license status envelope for the License tab and the enforcement
 ```
 
 **Field notes**:
-- **`enforcementLevel`** (`none` / `grace` / `soft-lock` / `unlicensed`) — temporal state, driven by JWT `exp` vs now. `grace` runs for `GRACE_DAYS = 30` past `exp`.
+- **`enforcementLevel`** (`none` / `grace` / `soft-lock` / `unlicensed`) — temporal state, driven by JWT `exp` vs now. `grace` runs for `LicenseService::PAID_GRACE_DAYS = 14` past `exp` for a paid key (the Commercial Licence and Support Agreement's art. 13.4; **was 30 until 4.10.12**) and not at all for a trial (`is_trial`, art. 14.3): a trial is `soft-lock` from the moment it expires. The boundary is inclusive — on the fourteenth day a paid key is soft-locked.
 - **`seatEnforcement`** (added 4.4.0; `none` / `over-warn` / `over-lock`) — seat-count state. `count > seats` → `over-warn` (banner only); `count > ceil(1.2 × seats)` → `over-lock` (blocks new-Advanced creation + writes on existing Advanced surfaces). Unlimited tier (999999), missing `seats` claim on legacy JWTs, and unlicensed instances all resolve to `none`.
-- **`paidUntil`, `paidDaysRemaining`, `graceDays`** (added 4.3.21) — new-model JWTs carry `paid_until` + `grace_days` claims. Legacy JWTs without them fall back to `paid_until = exp` and `graceDays = 0` so the API shape stays valid.
+- **`paidUntil`, `paidDaysRemaining`** (added 4.3.21) — new-model JWTs carry a `paid_until` claim. Legacy JWTs without it fall back to `paid_until = exp` so the API shape stays valid. **`graceDays`** (changed 4.10.12) is the window the key is *entitled to* — `14` for a paid key, `0` for a trial — computed by `LicenseService::graceDaysFor()`; the JWT's `grace_days` claim is no longer echoed or consulted.
 - **`lastTelemetryAt`, `lastTelemetryPayload`** — always `null` from 4.4.0 onward (the daily-report writer was deleted). Fields kept for API back-compat; frontend does not read them.
 
 ### `PUT /api/v1/admin/license`
@@ -1587,7 +1949,7 @@ Deliberately does NOT expose seats, customer, license id, or any admin-only fiel
 ### Removed license endpoints
 
 - **`POST /api/v1/admin/license/refresh`** — removed 4.3.20. Manually scheduled the (now-deleted) `SendTelemetryJob`. The "Refresh now" button it powered was already gone from the UI.
-- **`POST /api/v1/admin/license/trial`** — removed 4.4.0. Server-to-server trial-request endpoint. Superseded by the "Request trial by email" mailto in the License tab, which opens the admin's mail client and sends the instance UUID to `teamhub@tldr.host`; Justin issues the JWT by hand from the licensing dashboard and replies.
+- **`POST /api/v1/admin/license/trial`** — removed 4.4.0. Server-to-server trial-request endpoint. Superseded by the "Request trial by email" mailto in the License tab, which opens the admin's mail client and sends the instance UUID to `sales@doekworks.eu` (was `teamhub@tldr.host` until 4.11.0); Justin issues the JWT by hand from the licensing dashboard and replies.
 
 ---
 
@@ -2878,3 +3240,33 @@ Rate limit 10/min. The OpenProject roles and templates as the administrator's ow
 GET: `{ templateKey, stored, blueprint, vocabulary }`. PUT **body** `{ blueprint }` — validated by name (unknown application, module, widget, role key, copy key or behaviour → 400 naming it; `openproject.required` on any template but `openproject` → 400); `apps`, `modules` and the per-application behaviours are re-derived from the template row on every read, so the section stores only what the row cannot say. DELETE resets to the shipped blueprint (`openproject`) or removes it (the others). Audited as `policy.blueprint_updated` / `policy.blueprint_reset`.
 
 **Audit events added**: `provisioning.started`, `provisioning.step_failed`, `provisioning.completed`, `provisioning.needs_attention`, `provisioning.retried`, `provisioning.rolled_back`, `provisioning.run_as_creator`, `openproject.membership_synced`, `policy.blueprint_updated`, `policy.blueprint_reset`.
+
+## Teams made outside TeamHub — the adoption grid (added 4.10.50)
+
+The grid of teams made in Contacts, on the Teams page, by occ or by a provisioning tool, where each is accepted into TeamHub with a template and a policy, or declined. Design: DESIGN §2.149. Every route is `#[NoAdminRequired]` and the service checks `TeamAdoptionDecisionService::mayDecide()`: a **Nextcloud administrator**, or a **member of the team that holds the Nextcloud services** while it holds `team_adoption`. Anybody else gets **403**. CSRF is intact on every route.
+
+### `GET /api/v1/team-adoptions`
+
+**Response 200**: `{ pending: [row], decided: [row], templates: [ { templateKey, label, defaultProfileKey } ], profiles: [ { profileKey, label } ], defaultTemplate }`. `decided` covers the last 30 days. `templates` excludes `openproject` and `service`.
+
+`row`: `{ id, teamId, teamName, ownerUid, ownerName, status (pending|accepted|declined|withdrawn), route (auto|desk|admin|grid), workflowId, templateKey, profileKey, decidedBy, decidedByName, decidedAt, reason, provisionStatus (none|queued|done|failed), provisionNote, detectedAt, claimedBy, claimedByName, claimedByOther }`. On a pending row `templateKey` / `profileKey` come back **resolved** (the defaults filled in), so the pickers show what *Accept* will do. `claimedByOther` is true when another desk member has claimed the request and the viewer is not an administrator; the grid hides the buttons for that row.
+
+### `PUT /api/v1/team-adoptions/{id}`
+
+**Body**: `{ templateKey, profileKey }`. Stores the choice on a pending row, so the request's own *Accept* in a queue or My Work uses it. **200** `{ adoption: row }`; **400** for a template the grid does not offer or a policy that does not exist; **409** when the row is no longer pending.
+
+### `POST /api/v1/team-adoptions/{id}/accept`
+
+**Body**: `{ templateKey, profileKey }` (both optional; defaults apply). Accepts at once: registry row (origin `adopted`), lock, team type, policy; the template's apps follow in `TeamAdoptionProvisionJob`, run as the team owner. When the row has an open request the decider holds, the answer goes through it (a desk member claims then completes; an administrator on the administrators' route completes); an administrator deciding a request in a desk's queue decides directly and the request is cancelled with the reason. **200** `{ adoption: row }`; **409** when already decided, the circle is gone, or another desk member has the request.
+
+### `POST /api/v1/team-adoptions/{id}/decline`
+
+**Body**: `{ reason }` — required (**400** without). Final: the team is never offered again and is left as it is in Nextcloud. The owner is told (through the request's own rejection notice, or `team_adoption_declined` when there was no request). **200** `{ adoption: row }`; **409** when already decided.
+
+**Workflow**: `team_adoption` (`TeamAdoptionDefinition`), the eighth Nextcloud service, system-started — `POST /api/v1/workflows` with it answers 404. Its view carries `reference: { label, url }` for a desk member or administrator (the grid); `reference` is a new optional field on every workflow view, null unless the definition implements `IWorkflowDefinitionReference`.
+
+**Layout**: `serviceDeskConfig.handlesAdoption` (new) — the viewer is a desk member of the team that holds `team_adoption`; the widget `widget-team-adoption` shows on exactly that.
+
+**Notifications added**: `team_adoption_pending` (administrators, unlicensed route, links to `#team-adoption`), `team_adoption_accepted` and `team_adoption_declined` (the owner, when no request carried the answer).
+
+**Audit events added**: `team.adopted`, `team.adoption_declined`, `team.adoption_withdrawn`.

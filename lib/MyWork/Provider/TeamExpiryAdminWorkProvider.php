@@ -22,7 +22,8 @@ use Psr\Log\LoggerInterface;
  * My Work provider for the Nextcloud administrator's side of team expiration
  * (v4.6.13).
  *
- * Two kinds of item, both filed under `Category::TEAM_ADMIN`:
+ * Two kinds of item, both filed under `Category::ACTION_REQUIRED` (they were
+ * `TEAM_ADMIN` until v4.10.20, when that category was folded into this one):
  *
  *   - **A team is approaching its expiration date.** Surfaces once the date is
  *     inside the configured warning window (7 days by default) and keeps
@@ -57,11 +58,11 @@ use Psr\Log\LoggerInterface;
  *
  * ## Ranking
  *
- * `Priority::HIGH` once the window opens and `URGENT` once the date has passed
- * — but still `Category::TEAM_ADMIN`, which sits below Waiting for others. The
- * category says what kind of work this is; the priority says how pressing it is
- * within that kind. An expiring team should not outrank the viewer's own
- * overdue approval, and a category is how that is expressed here.
+ * `Priority::HIGH` once the window opens and `URGENT` once the date has passed.
+ * Since v4.10.20 the priority is the *only* thing that ranks these rows: they
+ * share Action required with the viewer's own overdue work, and how an
+ * expiring team compares to an overdue approval is a question about urgency,
+ * not about kind.
  */
 class TeamExpiryAdminWorkProvider implements IWorkProvider {
 
@@ -141,11 +142,11 @@ class TeamExpiryAdminWorkProvider implements IWorkProvider {
                 self::STATUS_EXPIRING, self::STATUS_EXPIRED, self::STATUS_REQUEST,
                 self::STATUS_APPROVED, self::STATUS_DENIED, self::STATUS_SUPERSEDED,
             ],
-            // v4.6.22 — COMPLETED joins TEAM_ADMIN. There is no
+            // v4.6.22 — COMPLETED joins the actionable half. There is no
             // WAITING_FOR_OTHERS here on purpose: once a request reaches this
             // queue the administrator *is* the other party, so there is nobody
             // for them to wait on. The team's own provider carries that half.
-            'categories'    => [Category::TEAM_ADMIN, Category::COMPLETED],
+            'categories'    => [Category::ACTION_REQUIRED, Category::COMPLETED],
             'pagination'    => false,
             'incremental'   => false,
         ];
@@ -503,7 +504,7 @@ class TeamExpiryAdminWorkProvider implements IWorkProvider {
             'providerItemId' => 'req:' . $request['id'],
             'teamId'         => $teamId,
             'teamName'       => $teamName,
-            'category'       => Category::TEAM_ADMIN,
+            'category'       => Category::ACTION_REQUIRED,
             'title'          => $this->l->t('%s asked to extend its expiration date', [$teamName]),
             'subtitle'       => $this->l->t('Requested until %s', [(string)$request['proposedOn']]),
             'resourceType'   => self::TYPE_REQUEST,
@@ -563,7 +564,7 @@ class TeamExpiryAdminWorkProvider implements IWorkProvider {
             'providerItemId' => 'exp:' . $teamId,
             'teamId'         => $teamId,
             'teamName'       => $teamName,
-            'category'       => Category::TEAM_ADMIN,
+            'category'       => Category::ACTION_REQUIRED,
             'title'          => $expired
                 ? $this->l->t('%s has passed its expiration date', [$teamName])
                 : $this->l->t('%s expires soon', [$teamName]),

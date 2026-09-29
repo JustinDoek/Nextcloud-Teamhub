@@ -4,7 +4,7 @@
         @close="$emit('close')">
         <div class="delete-events-modal">
             <h3 class="delete-events-modal__title">
-                <CalendarRemove :size="20" aria-hidden="true" />
+                <CalendarRemove :size="ICON_BODY" aria-hidden="true" />
                 {{ t('teamhub', 'Delete calendar events') }}
             </h3>
 
@@ -14,20 +14,20 @@
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Previous week')"
                     @click="shiftWeek(-1)">
-                    <template #icon><ChevronLeft :size="20" /></template>
+                    <template #icon><ChevronLeft :size="ICON_BODY" /></template>
                 </NcButton>
                 <span class="delete-events-modal__week-label">{{ weekLabel }}</span>
                 <NcButton
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Next week')"
                     @click="shiftWeek(1)">
-                    <template #icon><ChevronRight :size="20" /></template>
+                    <template #icon><ChevronRight :size="ICON_BODY" /></template>
                 </NcButton>
             </div>
 
             <!-- Loading state -->
             <div v-if="loading" class="delete-events-modal__loading">
-                <NcLoadingIcon :size="24" />
+                <NcLoadingIcon :size="ICON_LARGE" />
                 <span>{{ t('teamhub', 'Loading events…') }}</span>
             </div>
 
@@ -92,8 +92,8 @@
                     :disabled="checkedEvents.length === 0 || deleting"
                     @click="confirmDelete">
                     <template #icon>
-                        <NcLoadingIcon v-if="deleting" :size="18" />
-                        <Delete v-else :size="18" />
+                        <NcLoadingIcon v-if="deleting" :size="ICON_BODY" />
+                        <Delete v-else :size="ICON_BODY" />
                     </template>
                     {{ deleting
                         ? t('teamhub', 'Deleting…')
@@ -119,6 +119,7 @@ import CalendarRemove from 'vue-material-design-icons/CalendarRemove.vue'
 import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
 import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 export default {
     name: 'DeleteEventsModal',
@@ -137,6 +138,8 @@ export default {
         // Start on Monday of the current week.
         const monday = this.getMondayOfWeek(new Date())
         return {
+            ICON_BODY,
+            ICON_LARGE,
             weekStart:    monday,   // Date object — Monday 00:00:00
             events:       [],       // raw events from API for this week
             checkedEvents: [],      // events the user has ticked
@@ -146,6 +149,7 @@ export default {
             deleteError:  null,
         }
     },
+
 
     computed: {
         weekLabel() {
@@ -249,7 +253,7 @@ export default {
 
                 if (result.errors > 0 && result.deleted === 0) {
                     showError(t('teamhub', 'Failed to delete events'))
-                    this.deleteError = t('teamhub', 'Could not delete the selected events. Please try again.')
+                    this.deleteError = t('teamhub', 'Could not delete the selected events. Try again.')
                 } else if (result.errors > 0) {
                     showError(
                         n('teamhub',
@@ -320,8 +324,8 @@ export default {
 .delete-events-modal__title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 18px;
+    gap: 8px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     margin: 0 0 20px;
     color: var(--color-main-text);
@@ -334,13 +338,13 @@ export default {
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 20px;
-    padding: 6px 4px;
+    padding: 8px 4px;
     background: var(--color-background-dark);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 .delete-events-modal__week-label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-main-text);
     text-align: center;
@@ -351,22 +355,22 @@ export default {
 .delete-events-modal__loading {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 24px 0;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .delete-events-modal__empty {
     padding: 20px 0;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     margin: 0;
 }
 
 .delete-events-modal__error {
-    font-size: 13px;
-    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-error);
     margin: 0 0 16px;
 }
 
@@ -376,7 +380,7 @@ export default {
     overflow-y: auto;
     margin-bottom: 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 .delete-events-modal__day-group {
@@ -389,11 +393,9 @@ export default {
 
 .delete-events-modal__day-label {
     margin: 0;
-    padding: 6px 14px;
+    padding: 8px 16px;
     font-size: var(--th-font-micro);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--color-text-maxcontrast);
     background: var(--color-background-dark);
 }
@@ -401,10 +403,10 @@ export default {
 .delete-events-modal__event {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 8px 16px;
     cursor: pointer;
-    transition: background 0.12s;
+    transition: background var(--animation-quick);
     border-bottom: 1px solid var(--color-border-dark);
 }
 
@@ -421,7 +423,7 @@ export default {
 }
 
 .delete-events-modal__checkbox {
-    margin-top: 2px;
+    margin-top: 4px;
     flex-shrink: 0;
     cursor: pointer;
     accent-color: var(--color-primary-element);
@@ -432,7 +434,7 @@ export default {
 .delete-events-modal__event-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     flex: 1;
     min-width: 0;
 }

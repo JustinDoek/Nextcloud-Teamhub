@@ -2,19 +2,19 @@
     <div class="th-widget">
         <!-- Loading state -->
         <div v-if="loading" class="th-widget__state">
-            <span class="th-widget__spinner" aria-hidden="true" />
+            <NcLoadingIcon :size="ICON_INLINE" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
         <!-- No files resource for this team -->
         <div v-else-if="!resources.files" class="th-widget__state th-widget__state--empty">
-            <FolderIcon :size="18" aria-hidden="true" />
+            <FolderIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'No team folder configured') }}</span>
         </div>
 
         <!-- Empty — team folder has no files yet -->
         <div v-else-if="files.length === 0" class="th-widget__state th-widget__state--empty">
-            <FolderOpenIcon :size="18" aria-hidden="true" />
+            <FolderOpenIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'No files in this team folder yet') }}</span>
         </div>
 
@@ -27,7 +27,7 @@
 
                 <!-- File-type icon badge -->
                 <div class="th-files-recent__badge" aria-hidden="true">
-                    <component :is="fileIcon(file)" :size="18" />
+                    <component :is="fileIcon(file)" :size="ICON_BODY" />
                 </div>
 
                 <!-- Main content — two-line, size-driven hierarchy -->
@@ -61,6 +61,7 @@ import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon } from '@nextcloud/vue'
 import { fileOpenUrl } from '../lib/filesCollab.js'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 // Icons
 import FolderIcon           from 'vue-material-design-icons/Folder.vue'
@@ -88,6 +89,8 @@ export default {
 
     data() {
         return {
+            ICON_INLINE,
+            ICON_BODY,
             loading: false,
             files: [],
         }
@@ -205,7 +208,7 @@ export default {
     flex-shrink: 0;
     width: 38px;
     height: 38px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
@@ -217,7 +220,7 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .th-files-recent__title {
@@ -239,7 +242,7 @@ export default {
 .th-files-recent__meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     /* Tokens: meta typography */
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-row-meta-weight);
@@ -249,7 +252,7 @@ export default {
 
 .th-files-recent__meta-sep::before {
     content: '·';
-    margin-right: 4px;
+    margin-inline-end: 4px;
     color: var(--color-border-dark);
 }
 </style>

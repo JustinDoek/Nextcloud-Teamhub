@@ -281,7 +281,7 @@ export function feedKindLabel(kind) {
  * Talk kinds share the cyan and a public post borrows the green.
  *
  * @param {string} kind from feedItemKind()
- * @return {string} the token family name, e.g. 'talk' for --th-feed-talk-*
+ * @return {string} the tone name, e.g. 'talk' — FeedItemCard maps it to an NC colour pair
  */
 export function feedKindTone(kind) {
 	switch (kind) {

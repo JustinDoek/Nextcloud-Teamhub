@@ -12,7 +12,7 @@
              button leads (Manage Team → Project → Time investment). Gated
              on isTeamAdmin — only users with manage-team access see it. -->
         <IframeWidgetCard :title="t('teamhub', 'Time overview')">
-            <template #icon><ClockOutline :size="18" /></template>
+            <template #icon><ClockOutline :size="ICON_BODY" /></template>
             <template #actions>
                 <!-- v3.103.3: primary variant so this reads at the same
                      colour rank as the widget-header Log-time button.
@@ -20,10 +20,10 @@
                      Manage Team → Project via SET_MANAGE_TEAM_DEEP_LINK
                      (same pattern the Compass uses). -->
                 <NcButton v-if="isTeamAdmin"
-                    variant="primary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Open Manage Team — Project — Time investment')"
                     @click="openTimeSettings">
-                    <template #icon><CogOutline :size="16" /></template>
+                    <template #icon><CogOutline :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Time settings') }}
                 </NcButton>
             </template>
@@ -101,13 +101,13 @@
              in a widget card) so the initial view stays a single clean
              status message instead of an empty widget with a spinner. -->
         <div v-if="loading && time.members.length === 0" class="th-time__loading">
-            <NcLoadingIcon :size="32" />
+            <NcLoadingIcon :size="ICON_LARGE" />
             <p>{{ t('teamhub', 'Loading time data') }}</p>
         </div>
         <div v-else-if="error" class="th-time__error">
-            <AlertCircleOutline :size="32" />
+            <AlertCircleOutline :size="ICON_LARGE" />
             <p>{{ error }}</p>
-            <NcButton type="primary" @click="fetchTime">{{ t('teamhub', 'Retry') }}</NcButton>
+            <NcButton variant="primary" @click="fetchTime">{{ t('teamhub', 'Retry') }}</NcButton>
         </div>
 
         <!-- No project members yet — admin needs to add someone from
@@ -119,8 +119,8 @@
                 : t('teamhub', 'The project admin has not added any members to the time budget yet.')">
             <template #icon><ClockOutline /></template>
             <template v-if="isTeamAdmin" #action>
-                <NcButton type="primary" @click="$emit('open-project-settings')">
-                    <template #icon><CogOutline :size="20" /></template>
+                <NcButton variant="primary" @click="$emit('open-project-settings')">
+                    <template #icon><CogOutline :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Time settings') }}
                 </NcButton>
             </template>
@@ -142,7 +142,7 @@
             <IframeWidgetCard
                 v-if="hasChartData || time.lanes.length > 0"
                 :title="t('teamhub', 'Utilisation')">
-                <template #icon><ChartBarIcon :size="18" /></template>
+                <template #icon><ChartBarIcon :size="ICON_BODY" /></template>
 
                 <!-- v3.104.3: Time-utilisation donut — mirrors the Budget
                      iframe's donut. Denominator is total time available for
@@ -243,12 +243,12 @@
                  primary to match the "Add expense" button in the Budget
                  iframe — both are the primary action of their widget. -->
             <IframeWidgetCard :title="t('teamhub', 'Time report')">
-                <template #icon><FormatListBulletedIcon :size="18" /></template>
+                <template #icon><FormatListBulletedIcon :size="ICON_BODY" /></template>
                 <template #actions>
                     <NcButton v-if="canLogSelf"
                         variant="primary"
                         @click="openLogSelfModal">
-                        <template #icon><Plus :size="16" /></template>
+                        <template #icon><Plus :size="ICON_BODY" /></template>
                         {{ t('teamhub', 'Log time') }}
                     </NcButton>
                 </template>
@@ -256,18 +256,22 @@
                 <div class="th-time__report">
                 <div class="th-time__report-head">
                     <div class="th-time__view-toggle" role="group" :aria-label="t('teamhub', 'Report view')">
-                        <button type="button"
+                        <NcButton
+                            class="th-time__view-btn"
                             :class="{ active: viewMode === 'lane' }"
-                            :aria-pressed="viewMode === 'lane' ? 'true' : 'false'"
-                            @click="viewMode = 'lane'">
+                            @click="viewMode = 'lane'"
+                            :pressed="viewMode === 'lane'"
+                            variant="tertiary">
                             {{ t('teamhub', 'Per lane') }}
-                        </button>
-                        <button type="button"
+                        </NcButton>
+                        <NcButton
+                            class="th-time__view-btn"
                             :class="{ active: viewMode === 'member' }"
-                            :aria-pressed="viewMode === 'member' ? 'true' : 'false'"
-                            @click="viewMode = 'member'">
+                            @click="viewMode = 'member'"
+                            :pressed="viewMode === 'member'"
+                            variant="tertiary">
                             {{ t('teamhub', 'Per member') }}
-                        </button>
+                        </NcButton>
                     </div>
                     <!-- v3.103.2: member picker sits INSIDE the report body
                          next to the Per lane / Per member toggle instead of in
@@ -276,14 +280,15 @@
                          is selected, and puts the picker where the user's eye
                          is already looking (right beside the toggle they just
                          clicked). Only rendered in Per member view. -->
-                    <select v-if="viewMode === 'member'"
+                    <NcSelect
+                        v-if="viewMode === 'member'"
                         v-model="selectedMemberUserId"
                         class="th-time__member-picker"
-                        :aria-label="t('teamhub', 'Choose member')">
-                        <option v-for="m in time.members" :key="'ms-' + m.userId" :value="m.userId">
-                            {{ m.displayName }}
-                        </option>
-                    </select>
+                        :aria-label-combobox="t('teamhub', 'Choose member')"
+                        label-outside
+                        :options="time.members.map(m => ({ id: m.userId, label: m.displayName }))"
+                        :reduce="o => o.id"
+                        :clearable="false" />
                 </div>
 
                 <!-- Per-lane view: one section per Deck stack, table of
@@ -324,11 +329,11 @@
                                     <td class="th-time__action-col">
                                         <NcActions v-if="canEditLog(log)">
                                             <NcActionButton @click="openEditLog(log)">
-                                                <template #icon><Pencil :size="20" /></template>
+                                                <template #icon><Pencil :size="ICON_BODY" /></template>
                                                 {{ t('teamhub', 'Edit') }}
                                             </NcActionButton>
                                             <NcActionButton @click="confirmDeleteLog(log)">
-                                                <template #icon><Delete :size="20" /></template>
+                                                <template #icon><Delete :size="ICON_BODY" /></template>
                                                 {{ t('teamhub', 'Delete') }}
                                             </NcActionButton>
                                         </NcActions>
@@ -396,11 +401,11 @@
                                 <td class="th-time__action-col">
                                     <NcActions v-if="canEditLog(log)">
                                         <NcActionButton @click="openEditLog(log)">
-                                            <template #icon><Pencil :size="20" /></template>
+                                            <template #icon><Pencil :size="ICON_BODY" /></template>
                                             {{ t('teamhub', 'Edit') }}
                                         </NcActionButton>
                                         <NcActionButton @click="confirmDeleteLog(log)">
-                                            <template #icon><Delete :size="20" /></template>
+                                            <template #icon><Delete :size="ICON_BODY" /></template>
                                             {{ t('teamhub', 'Delete') }}
                                         </NcActionButton>
                                     </NcActions>
@@ -430,25 +435,28 @@
                 <form class="th-time__form">
                     <div v-if="!editingLog && isTeamAdmin && time.members.length > 1" class="th-time__form-field">
                         <label for="th-time-forwho" class="th-time__form-label">{{ t('teamhub', 'Log for') }}</label>
-                        <select
-                            id="th-time-forwho"
+                        <NcSelect
+                            input-id="th-time-forwho"
+                            label-outside
                             v-model="form.forUserId"
                             class="th-time__input"
-                            @change="onForUserChange">
-                            <option v-for="m in time.members" :key="'lf-' + m.userId" :value="m.userId">
-                                {{ m.displayName }}
-                            </option>
-                        </select>
+                            @update:model-value="onForUserChange"
+                            :options="time.members.map(m => ({ id: m.userId, label: m.displayName }))"
+                            :reduce="o => o.id"
+                            :clearable="false" />
                     </div>
 
                     <div v-if="!editingLog" class="th-time__form-field">
                         <label for="th-time-card" class="th-time__form-label">{{ t('teamhub', 'Deck card') }}</label>
-                        <select id="th-time-card" v-model="form.cardId" class="th-time__input">
-                            <option :value="null" disabled>{{ t('teamhub', 'Choose a card') }}</option>
-                            <option v-for="c in loggableCards" :key="c.cardId" :value="c.cardId">
-                                {{ c.cardTitle }} — {{ c.stackTitle }}
-                            </option>
-                        </select>
+                        <NcSelect
+                            input-id="th-time-card"
+                            label-outside
+                            v-model="form.cardId"
+                            class="th-time__input"
+                            :options="loggableCards.map(c => ({ id: c.cardId, label: `${c.cardTitle} — ${c.stackTitle}` }))"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            :placeholder="t('teamhub', 'Choose a card')" />
                         <div v-if="loggableCards.length === 0" class="th-time__form-hint">
                             {{ t('teamhub', 'No cards to log against. Ask the project lead to assign you to a card first.') }}
                         </div>
@@ -457,19 +465,27 @@
                     <div class="th-time__form-row">
                         <div class="th-time__form-field">
                             <label for="th-time-h" class="th-time__form-label">{{ t('teamhub', 'Hours') }}</label>
-                            <input
+                            <NcTextField
                                 id="th-time-h"
                                 v-model.number="form.hours"
-                                type="number" min="0" max="24" step="1"
-                                class="th-time__input" />
+                                type="number"
+                                min="0"
+                                max="24"
+                                step="1"
+                                class="th-time__input"
+                                label-outside />
                         </div>
                         <div class="th-time__form-field">
                             <label for="th-time-m" class="th-time__form-label">{{ t('teamhub', 'Minutes') }}</label>
-                            <input
+                            <NcTextField
                                 id="th-time-m"
                                 v-model.number="form.mins"
-                                type="number" min="0" max="59" step="5"
-                                class="th-time__input" />
+                                type="number"
+                                min="0"
+                                max="59"
+                                step="5"
+                                class="th-time__input"
+                                label-outside />
                         </div>
                         <div class="th-time__form-field">
                             <label for="th-time-date" class="th-time__form-label">{{ t('teamhub', 'Date worked') }}</label>
@@ -479,20 +495,20 @@
 
                     <div class="th-time__form-field">
                         <label for="th-time-note" class="th-time__form-label">{{ t('teamhub', 'Note (optional)') }}</label>
-                        <input
+                        <NcTextField
                             id="th-time-note"
                             v-model="form.description"
-                            type="text"
                             :placeholder="t('teamhub', 'Short note')"
-                            class="th-time__input" />
+                            class="th-time__input"
+                            label-outside />
                     </div>
 
                     <div v-if="formError" class="th-time__form-error">{{ formError }}</div>
                 </form>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="closeLogModal">{{ t('teamhub', 'Cancel') }}</NcButton>
-                <NcButton type="primary" :disabled="submitting" @click="submitLog">
+                <NcButton variant="tertiary" @click="closeLogModal">{{ t('teamhub', 'Cancel') }}</NcButton>
+                <NcButton variant="primary" :disabled="submitting" @click="submitLog">
                     {{ editingLog ? t('teamhub', 'Save') : t('teamhub', 'Log') }}
                 </NcButton>
             </template>
@@ -509,8 +525,8 @@
                 </p>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="deleteTarget = null">{{ t('teamhub', 'Cancel') }}</NcButton>
-                <NcButton type="error" :disabled="submitting" @click="submitDeleteLog">{{ t('teamhub', 'Delete') }}</NcButton>
+                <NcButton variant="tertiary" @click="deleteTarget = null">{{ t('teamhub', 'Cancel') }}</NcButton>
+                <NcButton variant="error" :disabled="submitting" @click="submitDeleteLog">{{ t('teamhub', 'Delete') }}</NcButton>
             </template>
         </NcDialog>
     </div>
@@ -523,11 +539,9 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { todayIso as localTodayIso, formatEpochDate, epochDateToIso } from '../lib/localDate.js'
 import { mapState, mapGetters, mapMutations } from 'vuex'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
-import {
-    NcActions, NcActionButton, NcButton, NcDialog,
-    NcEmptyContent, NcLoadingIcon,
-} from '@nextcloud/vue'
+import { NcActions, NcActionButton, NcButton, NcDialog, NcEmptyContent, NcLoadingIcon, NcTextField, NcSelect } from '@nextcloud/vue'
 
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import ChartBarIcon from 'vue-material-design-icons/ChartBar.vue'
@@ -557,7 +571,7 @@ function laneColour(stackOrder, stackId, idx) {
 export default {
     name: 'ProjectTimeView',
     components: {
-        NcActions, NcActionButton, NcButton, NcDialog, NcEmptyContent,
+          NcSelect, NcTextField, NcActions, NcActionButton, NcButton, NcDialog, NcEmptyContent,
         NcLoadingIcon,
         AlertCircleOutline, ChartBarIcon, ClockOutline, CogOutline,
         Delete, FormatListBulletedIcon, Pencil, Plus,
@@ -566,6 +580,8 @@ export default {
     emits: ['open-project-settings'],
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             loading: true,
             error: null,
             time: {
@@ -1151,12 +1167,12 @@ export default {
 .th-time__kpi {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    padding: 12px 14px;
+    border-radius: var(--border-radius-element);
+    padding: 12px 16px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border-left-width: 4px;
+    border-inline-start-width: 4px;
 }
 .th-time__kpi-head {
     display: flex;
@@ -1186,25 +1202,25 @@ export default {
     color: var(--color-text-lighter);
 }
 .th-time__kpi--available {
-    border-left-color: var(--color-primary-element);
+    border-inline-start-color: var(--color-primary-element);
 }
 .th-time__kpi--available .th-time__kpi-swatch {
     background: var(--color-primary-element);
 }
 .th-time__kpi--logged {
-    border-left-color: var(--color-text-success);
+    border-inline-start-color: var(--color-text-success);
 }
 .th-time__kpi--logged .th-time__kpi-swatch {
     background: var(--color-text-success);
 }
 .th-time__kpi--remaining {
-    border-left-color: var(--color-text-warning);
+    border-inline-start-color: var(--color-text-warning);
 }
 .th-time__kpi--remaining .th-time__kpi-swatch {
     background: var(--color-text-warning);
 }
 .th-time__kpi--remaining-over {
-    border-left-color: var(--color-text-error);
+    border-inline-start-color: var(--color-text-error);
 }
 .th-time__kpi--remaining-over .th-time__kpi-swatch {
     background: var(--color-text-error);
@@ -1213,7 +1229,7 @@ export default {
     color: var(--color-text-error);
 }
 .th-time__kpi--utilisation {
-    border-left-color: var(--color-primary-element);
+    border-inline-start-color: var(--color-primary-element);
 }
 .th-time__kpi--utilisation .th-time__kpi-swatch {
     background: var(--color-primary-element);
@@ -1258,8 +1274,8 @@ export default {
 .th-time__chart-card {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    padding: 12px 14px;
+    border-radius: var(--border-radius-element);
+    padding: 12px 16px;
 }
 .th-time__chart-card + .th-time__chart-card {
     margin-top: 12px;
@@ -1291,13 +1307,13 @@ export default {
 }
 .th-time__donut-arc {
     stroke: var(--color-primary-element);
-    transition: stroke-dasharray 250ms ease-out;
+    transition: stroke-dasharray var(--animation-slow) ease-out;
 }
 .th-time__donut-arc.th-time__over   { stroke: var(--color-text-error); }
 .th-time__donut-arc.th-time__under  { stroke: var(--color-text-success); }
 .th-time__donut-arc.th-time__equal  { stroke: var(--color-primary-element); }
 .th-time__donut-pct {
-    font-size: 26px;
+    font-size: var(--th-font-display);
     font-weight: 700;
     fill: var(--color-main-text);
 }
@@ -1305,8 +1321,7 @@ export default {
 .th-time__donut-pct.th-time__under  { fill: var(--color-text-success); }
 .th-time__donut-pct.th-time__equal  { fill: var(--color-main-text); }
 .th-time__donut-sub {
-    font-size: 11px;
-    text-transform: uppercase;
+    font-size: var(--th-font-meta);
     letter-spacing: 0.4px;
     fill: var(--color-text-maxcontrast);
 }
@@ -1322,14 +1337,14 @@ export default {
 .th-time__donut-legend strong {
     color: var(--color-main-text);
     font-weight: 600;
-    margin-left: 4px;
+    margin-inline-start: 4px;
 }
 .th-time__donut-swatch {
     display: inline-block;
     width: 10px;
     height: 10px;
-    border-radius: 2px;
-    margin-right: 6px;
+    border-radius: var(--border-radius-small);
+    margin-inline-end: 8px;
     vertical-align: middle;
     background: var(--color-primary-element);
 }
@@ -1340,7 +1355,7 @@ export default {
 .th-time__bars {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 .th-time__bar-row {
     display: grid;
@@ -1352,7 +1367,7 @@ export default {
 .th-time__bar-name {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     color: var(--color-main-text);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1362,28 +1377,28 @@ export default {
     display: inline-block;
     width: 10px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--border-radius-small);
     flex: 0 0 auto;
 }
 .th-time__bar-track {
     position: relative;
     height: 14px;
     background: var(--color-background-dark);
-    border-radius: 7px;
+    border-radius: var(--border-radius-element);
     overflow: hidden;
 }
 .th-time__bar-alloc {
     position: absolute;
     top: 0; left: 0; bottom: 0;
     background: var(--color-background-darker);
-    border-radius: 7px;
+    border-radius: var(--border-radius-element);
 }
 .th-time__bar-real {
     position: absolute;
     top: 0; left: 0; bottom: 0;
     background: var(--color-primary-element);
-    border-radius: 7px;
-    transition: width 0.2s ease-out;
+    border-radius: var(--border-radius-element);
+    transition: width var(--animation-quick) ease-out;
 }
 .th-time__bar-real.th-time__over {
     background: var(--color-text-error);
@@ -1396,7 +1411,7 @@ export default {
     background: var(--color-text-warning);
 }
 .th-time__bar-nums {
-    text-align: right;
+    text-align: end;
     font-variant-numeric: tabular-nums;
     color: var(--color-text-lighter);
 }
@@ -1410,8 +1425,8 @@ export default {
 .th-time__report {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    padding: 12px 14px;
+    border-radius: var(--border-radius-element);
+    padding: 12px 16px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -1431,13 +1446,13 @@ export default {
 .th-time__view-toggle {
     display: inline-flex;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     overflow: hidden;
 }
 .th-time__view-toggle button {
     background: transparent;
     border: none;
-    padding: 6px 14px;
+    padding: 8px 16px;
     color: var(--color-main-text);
     cursor: pointer;
     font-size: 0.9em;
@@ -1447,7 +1462,7 @@ export default {
     color: var(--color-primary-element-text);
 }
 .th-time__view-toggle button + button {
-    border-left: 1px solid var(--color-border);
+    border-inline-start: 1px solid var(--color-border);
 }
 .th-time__view-toggle button:focus-visible {
     outline: 2px solid var(--color-primary-element);
@@ -1457,43 +1472,31 @@ export default {
    body next to the Per lane / Per member toggle group. Height matches
    the toggle group's rendered height so both sit on a level baseline. */
 .th-time__member-picker {
-    height: 34px;
     box-sizing: border-box;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
     min-width: 200px;
 }
 .th-time__member-picker:focus,
-.th-time__member-picker:focus-visible {
-    outline: none;
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px var(--color-primary-element);
-}
 /* v3.103.4: empty-state pattern brought in line with the rest of the
    app — italic + --th-font-meta + maxcontrast text on a soft neutral
    surface (matches .th-widget__state / .th-widget__state--empty in
    widget-tokens.css). No more heavy background-hover block. */
 .th-time__report-empty {
-    padding: 16px 14px;
+    padding: 16px 16px;
     text-align: center;
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
-    font-style: italic;
 }
 .th-time__report-empty--small {
-    padding: 10px 14px;
+    padding: 8px 16px;
     font-size: var(--th-font-micro);
-    text-align: left;
+    text-align: start;
 }
 
 /* Per-lane sections */
 .th-time__lane-section {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 .th-time__lane-head {
     display: flex;
@@ -1504,13 +1507,13 @@ export default {
     display: inline-block;
     width: 12px;
     height: 12px;
-    border-radius: 2px;
+    border-radius: var(--border-radius-small);
     flex: 0 0 auto;
 }
 .th-time__lane-swatch--inline {
     width: 10px;
     height: 10px;
-    margin-right: 6px;
+    margin-inline-end: 8px;
     vertical-align: middle;
 }
 .th-time__lane-title {
@@ -1533,27 +1536,25 @@ export default {
 }
 .th-time__report-table th,
 .th-time__report-table td {
-    text-align: left;
-    padding: 8px 6px;
+    text-align: start;
+    padding: 8px 8px;
     border-bottom: 1px solid var(--color-border);
     vertical-align: top;
 }
 .th-time__report-table th {
     font-size: 0.8em;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
     color: var(--color-text-lighter);
     font-weight: 600;
 }
 .th-time__report-table tr:last-child td { border-bottom: none; }
 .th-time__num-col {
-    text-align: right;
+    text-align: end;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 .th-time__action-col {
     width: 44px;
-    text-align: right;
+    text-align: end;
 }
 
 .th-time__log-title {
@@ -1563,12 +1564,12 @@ export default {
 .th-time__log-sub {
     font-size: 0.85em;
     color: var(--color-text-lighter);
-    margin-top: 2px;
+    margin-top: 4px;
 }
 .th-time__log-meta {
     font-size: 0.8em;
     color: var(--color-text-maxcontrast);
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 /* Per-member summary strip */
@@ -1576,9 +1577,9 @@ export default {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
-    padding: 10px 12px;
+    padding: 8px 12px;
     background: var(--color-background-hover);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 .th-time__stat-label {
     font-size: 0.8em;
@@ -1601,13 +1602,13 @@ export default {
 .th-time__form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     min-width: 380px;
 }
 .th-time__form-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
 }
@@ -1629,39 +1630,19 @@ export default {
 }
 .th-time__input {
     width: 100%;
-    height: 36px;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font: inherit;
     box-sizing: border-box;
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-.th-time__input:hover:not(:disabled) {
-    border-color: var(--color-border-dark);
 }
 .th-time__input:focus,
-.th-time__input:focus-visible {
-    outline: none;
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px var(--color-primary-element);
-}
-select.th-time__input {
-    padding-right: 32px;
-    appearance: auto;
-}
 .th-time__form-hint {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin-top: 2px;
+    margin-top: 4px;
 }
 .th-time__form-error {
     color: var(--color-error-text);
     background: var(--color-error);
     padding: 8px 12px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     margin: 0;
     font-size: var(--th-font-meta);
 }

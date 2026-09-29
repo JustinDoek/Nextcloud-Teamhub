@@ -15,8 +15,9 @@ namespace OCA\TeamHub\Exception;
  *
  * $enforcementLevel is one of:
  *   'unlicensed' — no key entered
- *   'grace'      — key exists but expired ≤ GRACE_DAYS ago; existing teams still write
- *   'soft-lock'  — key exists and expired > GRACE_DAYS ago; existing teams read-only
+ *   'grace'      — paid key expired < PAID_GRACE_DAYS ago; existing teams still write
+ *   'soft-lock'  — paid key expired ≥ PAID_GRACE_DAYS ago, or a trial expired at all;
+ *                  existing teams read-only
  *
  * See LicenseService for the full lifecycle.
  */

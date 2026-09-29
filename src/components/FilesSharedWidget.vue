@@ -2,13 +2,13 @@
     <div class="th-widget">
         <!-- Loading state -->
         <div v-if="loading" class="th-widget__state">
-            <span class="th-widget__spinner" aria-hidden="true" />
+            <NcLoadingIcon :size="ICON_INLINE" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
         <!-- Toggle is on but nothing has been shared yet -->
         <div v-else-if="items.length === 0" class="th-widget__state th-widget__state--empty">
-            <ShareVariantIcon :size="18" aria-hidden="true" />
+            <ShareVariantIcon :size="ICON_BODY" aria-hidden="true" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Nothing shared with this team yet') }}</span>
         </div>
 
@@ -22,7 +22,7 @@
 
                     <!-- Type icon badge -->
                     <div class="th-files-shared__badge" aria-hidden="true">
-                        <component :is="itemIcon(item)" :size="18" />
+                        <component :is="itemIcon(item)" :size="ICON_BODY" />
                     </div>
 
                     <!-- Main content -->
@@ -40,8 +40,8 @@
                             <NcAvatar
                                 :user="item.shared_by_id"
                                 :display-name="item.shared_by"
-                                :show-user-status="false"
-                                :size="16"
+                                :hide-status="true"
+                                :size="24"
                                 class="th-files-shared__avatar" />
                             <span>{{ item.shared_by }}</span>
                             <span class="th-files-shared__meta-sep">{{ formatDate(item.shared_at) }}</span>
@@ -60,7 +60,7 @@
                     :aria-label="t('teamhub', 'Previous page')"
                     @click="goToPage(page - 1)">
                     <template #icon>
-                        <ChevronLeftIcon :size="16" />
+                        <ChevronLeftIcon :size="ICON_BODY" />
                     </template>
                 </NcButton>
                 <span class="th-files-shared__page-info">
@@ -72,7 +72,7 @@
                     :aria-label="t('teamhub', 'Next page')"
                     @click="goToPage(page + 1)">
                     <template #icon>
-                        <ChevronRightIcon :size="16" />
+                        <ChevronRightIcon :size="ICON_BODY" />
                     </template>
                 </NcButton>
             </div>
@@ -88,6 +88,7 @@ import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcAvatar, NcButton } from '@nextcloud/vue'
 import { fileOpenUrl } from '../lib/filesCollab.js'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 // Icons
 
@@ -122,6 +123,8 @@ export default {
 
     data() {
         return {
+            ICON_INLINE,
+            ICON_BODY,
             loading: false,
             items: [],
             total: 0,
@@ -245,7 +248,7 @@ export default {
     flex-shrink: 0;
     width: 38px;
     height: 38px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: var(--color-background-dark);
     border: 1px solid var(--color-border);
     color: var(--color-primary-element);
@@ -256,7 +259,7 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .th-files-shared__title {
@@ -276,7 +279,7 @@ export default {
 .th-files-shared__meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-row-meta-weight);
     color: var(--th-widget-meta-color);
@@ -286,7 +289,7 @@ export default {
 
 .th-files-shared__meta-sep::before {
     content: '·';
-    margin-right: 4px;
+    margin-inline-end: 4px;
     color: var(--color-border-dark);
 }
 
@@ -296,7 +299,7 @@ export default {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 8px 16px;
     border-top: 1px solid var(--color-border);
 }
 /* v3.100.15: .th-files-shared__page-btn block retired — the two prev/next

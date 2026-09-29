@@ -8,7 +8,7 @@
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Previous week')"
                     @click="navigateBack">
-                    <template #icon><ChevronLeftIcon :size="20" /></template>
+                    <template #icon><ChevronLeftIcon :size="ICON_BODY" /></template>
                 </NcButton>
 
                 <span class="presence-toolbar__period" aria-live="polite">
@@ -19,7 +19,7 @@
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Next week')"
                     @click="navigateForward">
-                    <template #icon><ChevronRightIcon :size="20" /></template>
+                    <template #icon><ChevronRightIcon :size="ICON_BODY" /></template>
                 </NcButton>
 
                 <NcButton
@@ -36,14 +36,14 @@
                 v-if="isTeamAdmin && hideReasons"
                 class="presence-toolbar__privacy-badge"
                 :title="t('teamhub', 'Status details are hidden from team members')">
-                <EyeOffIcon :size="16" />
+                <EyeOffIcon :size="ICON_BODY" />
                 {{ t('teamhub', 'Details hidden') }}
             </div>
         </div>
 
         <!-- ── Loading / error ───────────────────────────────────────────── -->
         <div v-if="loading" class="presence-grid-loading">
-            <NcLoadingIcon :size="32" />
+            <NcLoadingIcon :size="ICON_LARGE" />
         </div>
         <div v-else-if="error" class="presence-grid-error" role="alert">
             {{ error }}
@@ -90,7 +90,7 @@
                         <NcAvatar
                             :user="member.userId"
                             :display-name="member.displayName"
-                            :size="22"
+                            :size="24"
                             :disable-tooltip="true"
                             :disable-menu="true" />
                         <span class="presence-week-grid__member-name">{{ member.displayName }}</span>
@@ -153,6 +153,7 @@ import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 import EyeOffIcon       from 'vue-material-design-icons/EyeOff.vue'
 import { mapGetters } from 'vuex'
 import PresenceGridCell from './PresenceGridCell.vue'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
  * Team presence grid view — rendered inside TeamView alongside the other
@@ -182,6 +183,8 @@ export default {
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             mode: 'day',   // day-only; week mode removed
             anchorDate: this.isoToday(),
             loading: false,
@@ -384,7 +387,7 @@ export default {
     padding: 4px 8px;
     border-radius: var(--border-radius-pill, 12px);
     background: var(--color-background-hover);
-    margin-left: auto;
+    margin-inline-start: auto;
 }
 
 /* ── Loading / error / empty ────────────────────────────────────── */
@@ -396,10 +399,10 @@ export default {
 }
 .presence-grid-error {
     padding: 20px;
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     background: var(--color-error-background, var(--color-background-hover));
     margin: 12px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 .presence-grid-empty {
     padding: 40px;
@@ -427,12 +430,12 @@ export default {
 .presence-week-grid__member-col {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     padding: 4px 8px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     overflow: hidden;
     position: sticky;
-    left: 0;
+    inset-inline-start: 0;
     background: var(--color-main-background);
     z-index: 1;
 }
@@ -441,7 +444,7 @@ export default {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .presence-week-grid__day-col {
@@ -449,10 +452,10 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 4px 2px;
+    padding: 4px 4px;
     font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
-    border-left: 1px solid var(--color-border);
+    border-inline-start: 1px solid var(--color-border);
     gap: 1px;
 }
 
@@ -463,12 +466,12 @@ export default {
 }
 
 .presence-week-grid__day-name { font-weight: 500; }
-.presence-week-grid__day-date { opacity: 0.7; font-size: 10px; }
+.presence-week-grid__day-date { opacity: 0.7; font-size: var(--th-font-meta); }
 
 .presence-week-grid__day-cell {
     display: flex;
     flex-direction: column;
-    border-left: 1px solid var(--color-border);
+    border-inline-start: 1px solid var(--color-border);
 }
 
 /* ── Shared block styles ─────────────────────────────────────────── */
@@ -482,7 +485,7 @@ export default {
 
 .presence-day-block--half {
     height: 30px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    border-bottom: 1px solid var(--color-box-shadow);
 }
 .presence-day-block--half:last-child {
     border-bottom: none;
@@ -493,7 +496,7 @@ export default {
 }
 
 .presence-day-block__label {
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     overflow: hidden;
     white-space: nowrap;

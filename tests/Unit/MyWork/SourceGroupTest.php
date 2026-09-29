@@ -10,6 +10,7 @@ use OCA\TeamHub\MyWork\Provider\OpenProjectWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryTeamWorkProvider;
+use OCA\TeamHub\MyWork\Provider\TeamSpaceAdminWorkProvider;
 use OCA\TeamHub\MyWork\SourceGroup;
 use PHPUnit\Framework\TestCase;
 
@@ -24,7 +25,8 @@ class SourceGroupTest extends TestCase {
         // provider fails here rather than silently leaving its group.
         $this->assertSame([ApprovalWorkProvider::ID, FileReviewWorkProvider::ID], SourceGroup::MEMBERS[SourceGroup::FILES]);
         $this->assertSame([TeamAdminWorkProvider::ID, TeamExpiryTeamWorkProvider::ID], SourceGroup::MEMBERS[SourceGroup::TEAMS]);
-        $this->assertSame([TeamExpiryAdminWorkProvider::ID], SourceGroup::MEMBERS[SourceGroup::ADMINISTRATION]);
+        // v4.10.1 — team spaces joined the Administration group.
+        $this->assertSame([TeamExpiryAdminWorkProvider::ID, TeamSpaceAdminWorkProvider::ID], SourceGroup::MEMBERS[SourceGroup::ADMINISTRATION]);
     }
 
     public function testOfAndIsGroup(): void {
@@ -56,6 +58,7 @@ class SourceGroupTest extends TestCase {
         foreach (SourceGroup::MEMBERS[SourceGroup::ADMINISTRATION] as $id) {
             $class = match ($id) {
                 TeamExpiryAdminWorkProvider::ID => TeamExpiryAdminWorkProvider::class,
+                TeamSpaceAdminWorkProvider::ID  => TeamSpaceAdminWorkProvider::class,
                 default => $this->fail('Unknown Administration member ' . $id . ' — add its class here'),
             };
             $this->assertTrue(method_exists($class, 'isInstanceScoped'), $class . ' must declare isInstanceScoped()');

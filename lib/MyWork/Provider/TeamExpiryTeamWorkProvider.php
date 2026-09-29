@@ -46,10 +46,11 @@ use Psr\Log\LoggerInterface;
  *
  * ## Two categories, decided per row
  *
- * `Category::TEAM_ADMIN` while there is something to do, `WAITING_FOR_OTHERS`
+ * `Category::ACTION_REQUIRED` while there is something to do, `WAITING_FOR_OTHERS`
  * from the moment an extension request is in flight — the decision belongs to a
  * Nextcloud administrator from then on, and that second category also exempts
- * the row from urgency promotion. See `buildItem()`.
+ * the row from urgency promotion. See `buildItem()`. (The first was
+ * `TEAM_ADMIN` until v4.10.20; the two are one category now.)
  *
  * ## Requesting from the queue (v4.6.17)
  *
@@ -117,11 +118,11 @@ class TeamExpiryTeamWorkProvider implements IWorkProvider {
                 self::STATUS_APPROVED, self::STATUS_DENIED, self::STATUS_SUPERSEDED,
             ],
             // All three states the workflow can be in, since v4.6.22:
-            //   TEAM_ADMIN         — the team has something to do.
+            //   ACTION_REQUIRED    — the team has something to do (TEAM_ADMIN until v4.10.20).
             //   WAITING_FOR_OTHERS — asked; a Nextcloud administrator decides (v4.6.17).
             //   COMPLETED          — decided, either way (v4.6.22).
             // See buildItem() and buildDecidedItem().
-            'categories'    => [Category::TEAM_ADMIN, Category::WAITING_FOR_OTHERS, Category::COMPLETED],
+            'categories'    => [Category::ACTION_REQUIRED, Category::WAITING_FOR_OTHERS, Category::COMPLETED],
             'pagination'    => false,
             'incremental'   => false,
         ];
@@ -384,10 +385,11 @@ class TeamExpiryTeamWorkProvider implements IWorkProvider {
             // v4.6.17 — no longer points at Manage team: Request extension on
             // this row opens the form here.
             $reason = $this->l->t('Ask for an extension if this team is still needed. Nothing is deleted when the date passes.');
-            // Higher once the date has gone by, but never above TEAM_ADMIN's
-            // place in the category order — see Category's docblock.
+            // Higher once the date has gone by. Since v4.10.20 this row shares
+            // Action required with the viewer's own work, so the priority is
+            // what places it among them — see Category's docblock.
             $priority = $expired ? Priority::HIGH : Priority::NORMAL;
-            $category = Category::TEAM_ADMIN;
+            $category = Category::ACTION_REQUIRED;
         }
 
         return WorkItem::make([

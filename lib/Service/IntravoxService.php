@@ -309,7 +309,7 @@ class IntravoxService {
             'widgets'         => [
                 [
                     'type' => 'heading', 'column' => 1, 'order' => 1, 'id' => 'widget-1',
-                    'content' => (string)$l->t('Project Contract'), 'level' => 1,
+                    'content' => (string)$l->t('Project contract'), 'level' => 1,
                 ],
                 [
                     'type' => 'text', 'column' => 1, 'order' => 2, 'id' => 'widget-2',

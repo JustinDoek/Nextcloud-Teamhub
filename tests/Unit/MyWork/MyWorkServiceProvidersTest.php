@@ -27,7 +27,11 @@ class MyWorkServiceProvidersTest extends TestCase {
     /** @var array<string, IWorkProvider> */
     private array $providers = [];
 
-    private function service(bool $isAdmin): MyWorkService {
+    /**
+     * @param bool $isAdmin   a Nextcloud administrator (the Administration group)
+     * @param bool $teamAdmin holds admin level in at least one team (the Teams group, v4.10.4)
+     */
+    private function service(bool $isAdmin, bool $teamAdmin = true): MyWorkService {
         $ordinary = $this->createMock(IWorkProvider::class);
         $admin    = $this->createMock(TeamExpiryAdminWorkProvider::class);
         $admin->method('isInstanceScoped')->willReturn(true);
@@ -50,11 +54,16 @@ class MyWorkServiceProvidersTest extends TestCase {
         $groups = $this->createMock(IGroupManager::class);
         $groups->method('isAdmin')->willReturn($isAdmin);
 
+        $teams = $this->createMock(TeamService::class);
+        $teams->method('getUserTeams')->willReturn($teamAdmin
+            ? [['id' => 't1', 'name' => 'One', 'level' => 1], ['id' => 't2', 'name' => 'Two', 'level' => 8]]
+            : [['id' => 't1', 'name' => 'One', 'level' => 1], ['id' => 't3', 'name' => 'Three', 'level' => 4]]);
+
         return new MyWorkService(
             $registry,
             $this->createMock(MyWorkConfigService::class),
             $this->createMock(MyWorkStateMapper::class),
-            $this->createMock(TeamService::class),
+            $teams,
             $this->createMock(AuditService::class),
             $this->createMock(ICacheFactory::class),
             $groups,
@@ -80,6 +89,19 @@ class MyWorkServiceProvidersTest extends TestCase {
         $byId = array_column($listed, 'group', 'id');
         $this->assertSame('administration', $byId['teamexpiry_admin']);
         $this->assertNull($byId['deck']);
+    }
+
+    public function testAMemberWhoAdministersNoTeamIsNotToldAboutTheTeamsGroup(): void {
+        // v4.10.4 — level 4 (moderator) in one team, member in another: the
+        // Teams providers would return nothing, so no tab and no card.
+        $listed = $this->service(isAdmin: false, teamAdmin: false)->describeProvidersForViewer('jaap');
+        $this->assertSame(['deck', 'approval', 'file_review'], array_column($listed, 'id'));
+        $this->assertNotContains('teams', array_map(static fn (array $p) => $p['group'], $listed));
+    }
+
+    public function testANextcloudAdministratorWhoAdministersNoTeamKeepsAdministrationButNotTeams(): void {
+        $listed = $this->service(isAdmin: true, teamAdmin: false)->describeProvidersForViewer('lieke');
+        $this->assertSame(['deck', 'approval', 'teamexpiry_admin', 'file_review'], array_column($listed, 'id'));
     }
 
     public function testTheUnfilteredListIsUntouchedForTheAdminPage(): void {

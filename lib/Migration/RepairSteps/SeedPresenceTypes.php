@@ -13,7 +13,10 @@ use Psr\Log\LoggerInterface;
  * Idempotent slug-keyed upsert of the five built-in presence types.
  *
  * Registered in appinfo/info.xml under <repair-steps><post-migration> so it
- * runs after every NC update. Slug is the natural key and unique-indexed, so
+ * runs after every NC update, and since v4.10.3 under <install> as well — a
+ * fresh install runs no post-migration step (see SeedTemplatesAndProfiles),
+ * so until then a new instance had no presence types at all. Slug is the
+ * natural key and unique-indexed, so
  * re-running can never duplicate. Lets us evolve the built-in catalogue
  * across versions without writing a new migration for each change — change
  * the array, the next NC update applies it.

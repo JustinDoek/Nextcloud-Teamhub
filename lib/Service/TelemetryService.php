@@ -115,11 +115,18 @@ class TelemetryService {
             return true;
         }
         $exp = $payload['exp'] ?? null;
-        // Grace window: LicenseService::GRACE_DAYS is 30 days past exp.
-        // Anything within [not-yet-expired, exp + 30d] counts as "licensed".
-        // Beyond that, soft-lock — telemetry resumes.
-        $graceCutoff = is_int($exp) ? ($exp + 30 * 86400) : 0;
-        return time() > $graceCutoff;
+        // Grace window: LicenseService::graceDaysFor() — fourteen days past
+        // exp for a paid key, none for a trial (Commercial Licence and Support
+        // Agreement art. 13.4 / 14.3 / 17.4; v4.10.12, was a flat 30 days).
+        // Anything within [not-yet-expired, exp + grace) counts as
+        // "licensed". From the cutoff on, soft-lock — telemetry resumes. The
+        // static helper keeps this the same rule LicenseService applies,
+        // without the circular dependency described above.
+        if (!is_int($exp)) {
+            return true;
+        }
+        $graceCutoff = $exp + LicenseService::graceDaysFor($payload) * 86400;
+        return time() >= $graceCutoff;
     }
 
     /**

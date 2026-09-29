@@ -12,7 +12,7 @@
         :disabled="saving"
         @click="$emit('pick', $event)">
 
-        <NcLoadingIcon v-if="saving" :size="14" class="presence-cell__spinner" />
+        <NcLoadingIcon v-if="saving" :size="ICON_INLINE" class="presence-cell__spinner" />
         <template v-else-if="typeInfo">
             <span class="presence-cell__label">{{ typeInfo.label }}</span>
         </template>
@@ -25,6 +25,7 @@
 <script>
 import { translate as t } from '@nextcloud/l10n'
 import { NcLoadingIcon } from '@nextcloud/vue'
+import { ICON_INLINE } from '../constants/uiTokens.js'
 
 /**
  * Single cell in the 7×2 week template grid.
@@ -67,6 +68,12 @@ export default {
         },
     },
     emits: ['pick'],
+    data() {
+        return {
+            ICON_INLINE,
+        }
+    },
+
     computed: {
         typeInfo() {
             if (this.cell.presence_type_id === null) return null
@@ -118,14 +125,14 @@ export default {
 .presence-cell {
     width: 100%;
     min-height: 52px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     border: 2px dashed var(--color-border);
     background: var(--color-main-background);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: filter 0.1s, transform 0.1s;
+    transition: filter var(--animation-quick), transform var(--animation-quick);
     padding: 4px;
     font-size: var(--th-font-micro);
     line-height: 1.2;
@@ -175,7 +182,7 @@ export default {
 }
 
 .presence-cell__empty {
-    font-size: 18px;
+    font-size: var(--th-font-heading);
     color: var(--color-text-maxcontrast);
     line-height: 1;
 }

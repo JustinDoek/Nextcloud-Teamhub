@@ -1,7 +1,7 @@
 <template>
     <div class="activity-feed">
         <div class="activity-feed__header">
-            <h2 class="activity-feed__title">{{ t('teamhub', 'Team Activity') }}</h2>
+            <h2 class="activity-feed__title">{{ t('teamhub', 'Team activity') }}</h2>
             <span class="activity-feed__subtitle">{{ t('teamhub', 'Past 30 days') }}</span>
             <!-- v3.100.15: NcButton (was a raw <button> with bespoke
                  hover / focus CSS). -->
@@ -12,14 +12,14 @@
                 :disabled="loading"
                 @click="load">
                 <template #icon>
-                    <Refresh :size="16" aria-hidden="true" />
+                    <Refresh :size="ICON_BODY" aria-hidden="true" />
                 </template>
             </NcButton>
         </div>
 
         <!-- Loading -->
         <div v-if="loading" class="activity-feed__loading">
-            <NcLoadingIcon :size="32" />
+            <NcLoadingIcon :size="ICON_LARGE" />
         </div>
 
         <!-- Empty -->
@@ -27,7 +27,7 @@
             v-else-if="!grouped.length"
             :name="t('teamhub', 'No activity this week')"
             :description="t('teamhub', 'Activity from files, calendar, tasks and team changes will appear here')">
-            <template #icon><ClockOutline :size="48" /></template>
+            <template #icon><ClockOutline :size="ICON_XL" /></template>
         </NcEmptyContent>
 
         <!-- Grouped by day -->
@@ -44,7 +44,7 @@
                         class="activity-feed__item">
                         <!-- Badge -->
                         <div class="activity-feed__badge" :class="'activity-feed__badge--' + item.app">
-                            <component :is="iconComponent(item.icon)" :size="15" />
+                            <component :is="iconComponent(item.icon)" :size="ICON_INLINE" />
                         </div>
                         <!-- Body -->
                         <div class="activity-feed__body">
@@ -53,8 +53,8 @@
                                     v-if="item.user"
                                     :user="item.user"
                                     :display-name="item.user"
-                                    :size="22"
-                                    :show-user-status="false"
+                                    :size="24"
+                                    :hide-status="true"
                                     :disable-menu="true"
                                     class="activity-feed__avatar" />
                                 <!--
@@ -80,7 +80,7 @@
                                 <span v-else class="activity-feed__subject">{{ item.subjectText }}</span>
                             </div>
                             <div class="activity-feed__meta">
-                                <span class="activity-feed__app-label">{{ appLabel(item.app) }}</span>
+                                <span class="activity-feed__app-label">{{ appLabel(item.app, item) }}</span>
                                 <span class="activity-feed__sep">·</span>
                                 <span class="activity-feed__time">{{ formatTime(item.datetime) }}</span>
                                 <a
@@ -90,7 +90,7 @@
                                     rel="noopener"
                                     class="activity-feed__link"
                                     @click="onItemOpen($event, item)">
-                                    <OpenInNew :size="11" />
+                                    <OpenInNew :size="ICON_INLINE" />
                                 </a>
                             </div>
                         </div>
@@ -122,11 +122,16 @@ import OpenInNew       from 'vue-material-design-icons/OpenInNew.vue'
 import Refresh         from 'vue-material-design-icons/Refresh.vue'
 import ClockOutline    from 'vue-material-design-icons/ClockOutline.vue'
 import WalletOutline   from 'vue-material-design-icons/WalletOutline.vue'
+import Lifebuoy from 'vue-material-design-icons/Lifebuoy.vue'
+import { deskActivityLine, isDeskActivity } from '../constants/serviceTeams.js'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 
 const ICON_MAP = {
     AccountMultiple, File, FilePlus, FileEdit, FileRemove,
     CardText, Calendar, Chat, Bell,
     ClockOutline, WalletOutline,
+    // v4.10.27 — a service team's desk events.
+    Lifebuoy,
 }
 const APP_LABELS = {
     circles: 'Team', files: 'Files', files_sharing: 'Sharing',
@@ -194,8 +199,9 @@ export default {
         CardText, Calendar, Chat, Bell,
     },
     data() {
-        return { activities: [], loading: false }
+        return { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL, activities: [], loading: false }
     },
+
     computed: {
         ...mapState(['currentTeamId']),
         grouped() {
@@ -238,7 +244,14 @@ export default {
             }
         },
         iconComponent(name) { return ICON_MAP[name] || Bell },
-        appLabel(app) { return APP_LABELS[app] || app },
+        appLabel(app, item = null) {
+            // v4.10.27 — a desk event is TeamHub's, but not a project event.
+            if (isDeskActivity(item)) {
+                // TRANSLATORS: activity source label for a service team's request events
+                return t('teamhub', 'Requests')
+            }
+            return APP_LABELS[app] || app
+        },
 
         /**
          * File id for a file activity, or null for anything else (v4.5.6).
@@ -320,6 +333,10 @@ export default {
 
             // TeamHub project events — time logs + budget expenses (v3.96.0)
             if (item.app === 'teamhub') {
+                // v4.10.27 — a service team's desk events (shared wording).
+                if (isDeskActivity(item)) {
+                    return deskActivityLine(item, raw) || fallback
+                }
                 const p     = item.subjectparams || {}
                 const mins  = p.minutes || 0
                 const hours = formatMinutes(mins)
@@ -462,7 +479,7 @@ export default {
 .activity-feed__header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-bottom: 24px;
 }
 
@@ -473,9 +490,9 @@ export default {
 }
 
 .activity-feed__subtitle {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin-right: auto;
+    margin-inline-end: auto;
 }
 
 /* v3.100.15: the .activity-feed__refresh block was retired when the
@@ -496,8 +513,6 @@ export default {
 .activity-feed__day-label {
     font-size: var(--th-font-meta);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--color-text-maxcontrast);
     padding-bottom: 8px;
     border-bottom: 1px solid var(--color-border);
@@ -513,7 +528,7 @@ export default {
 .activity-feed__item {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px;
     padding: 8px 0;
     border-bottom: 1px solid var(--color-border-dark);
 }
@@ -562,11 +577,11 @@ export default {
 .activity-feed__row {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
 }
 
 .activity-feed__subject {
-    font-size: 13.5px;
+    font-size: var(--th-font-meta);
     color: var(--color-main-text);
     line-height: 1.4;
 }
@@ -578,7 +593,7 @@ export default {
     color: var(--color-main-text);
     text-decoration: none;
     cursor: pointer;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 .activity-feed__subject--open:hover {
     text-decoration: underline;
@@ -595,8 +610,8 @@ export default {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-top: 2px;
-    font-size: 11.5px;
+    margin-top: 4px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -607,7 +622,7 @@ export default {
     align-items: center;
     color: var(--color-text-maxcontrast);
     opacity: 0.6;
-    transition: opacity 0.15s;
+    transition: opacity var(--animation-quick);
 }
 
 .activity-feed__link:hover { opacity: 1; color: var(--color-primary-element); }

@@ -147,6 +147,7 @@
                 :intercept-file-links="true"
                 link-self-type="talk"
                 :label="t('teamhub', 'Chat')"
+                @loaded="onEmbedLoaded('talk')"
                 @open-target="onEmbedOpenTarget" />
             <AppEmbed
                 v-if="((preloadedViews.has('files') || currentView === 'files') && resources.files) || filesEmbedFileUrl"
@@ -157,6 +158,7 @@
                 :intercept-file-links="true"
                 link-self-type="file"
                 :label="t('teamhub', 'Files')"
+                @loaded="onEmbedLoaded('files')"
                 @open-target="onEmbedOpenTarget" />
             <!--
                 Calendar tab (v4.6.20) — TeamHub's own grid, hosted inside
@@ -193,6 +195,7 @@
                 :intercept-file-links="true"
                 link-self-type="deck"
                 :label="t('teamhub', 'Deck')"
+                @loaded="onEmbedLoaded('deck')"
                 @open-target="onEmbedOpenTarget" />
 
             <!-- Collectives tab (v4.3.5) — iframes the team's collective.
@@ -223,6 +226,7 @@
                     :label="t('teamhub', 'Collectives')"
                     class="th-collectives-tab__frame"
                     @navigate="collectivesFrameUrl = $event"
+                    @loaded="onEmbedLoaded('collectives')"
                     @open-target="onEmbedOpenTarget" />
             </div>
 
@@ -237,6 +241,12 @@
                 v-if="currentView === 'decisions' && decisionsModuleEnabled && decisionsConfig.decisions_enabled"
                 @propose-decision="openCompose"
                 @propose-decision-superseding="openDecisionCompose" />
+
+            <!-- Services tab (v4.10.41) — the service team's services and the
+                 service builder on the whole tab. -->
+            <div v-if="currentView === 'services' && serviceDeskConfig.isServiceTeam" class="teamhub-services-tab">
+                <ServicesWidget page />
+            </div>
 
             <!-- Timeline tab — Advanced-mode projects get the Planning-phase
                  swimlane view (Session 3): a native Vue component with Deck
@@ -264,7 +274,8 @@
                 :embed-menu="timelineEmbedMenu"
                 @action="onTimelineEmbedAction"
                 @select="onTimelineEmbedSelect"
-                @menu-toggle="onTimelineEmbedMenuToggle" />
+                @menu-toggle="onTimelineEmbedMenuToggle"
+                @loaded="onEmbedLoaded('timeline')" />
 
             <!-- Budget tab — Advanced-mode projects only. Per-lane
                  view_min_level filters visible lanes server-side; the tab is
@@ -351,7 +362,7 @@
             :open="true"
             @update:open="showCreatePage = false">
             <template #default>
-                <p style="margin: 0 0 12px; font-size: 13px; color: var(--color-text-maxcontrast);">
+                <p class="teamhub-pages-hint">
                     {{ t('teamhub', 'The new page will be created inside the team folder in Intravox.') }}
                 </p>
                 <NcTextField
@@ -366,7 +377,7 @@
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton variant="primary" :disabled="!newPageTitle.trim() || creatingPage" @click="submitCreatePage">
-                    <template #icon><NcLoadingIcon v-if="creatingPage" :size="20" /></template>
+                    <template #icon><NcLoadingIcon v-if="creatingPage" :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Create') }}
                 </NcButton>
             </template>
@@ -380,7 +391,7 @@
             :open="true"
             @update:open="showCreateWikiPage = false">
             <template #default>
-                <p style="margin: 0 0 12px; font-size: 13px; color: var(--color-text-maxcontrast);">
+                <p class="teamhub-pages-hint">
                     {{ t('teamhub', 'The new page will be created inside the team\'s collective in Collectives.') }}
                 </p>
                 <NcTextField
@@ -395,7 +406,7 @@
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton variant="primary" :disabled="!newWikiPageTitle.trim() || creatingWikiPage" @click="submitCreateWikiPage">
-                    <template #icon><NcLoadingIcon v-if="creatingWikiPage" :size="20" /></template>
+                    <template #icon><NcLoadingIcon v-if="creatingWikiPage" :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Create') }}
                 </NcButton>
             </template>
@@ -407,11 +418,11 @@
             :open="true"
             @update:open="showDeletePage = false">
             <template #default>
-                <p style="margin: 0 0 12px; font-size: 13px; color: var(--color-text-maxcontrast);">
+                <p class="teamhub-pages-hint">
                     {{ t('teamhub', 'Select a sub-page to delete. This cannot be undone.') }}
                 </p>
                 <div class="teamhub-page-delete-list">
-                    <p v-if="pagesData.subPages.length === 0" style="font-size:13px; color: var(--color-text-maxcontrast); margin: 0;">
+                    <p v-if="pagesData.subPages.length === 0" class="teamhub-pages-hint teamhub-pages-hint--tight">
                         {{ t('teamhub', 'No sub-pages to delete. The main team page can only be removed by disabling the Pages app for this team.') }}
                     </p>
                     <label
@@ -420,7 +431,7 @@
                         class="teamhub-page-delete-option"
                         :class="{ 'teamhub-page-delete-option--selected': deletePageTarget && deletePageTarget.uniqueId === page.uniqueId }">
                         <input v-model="deletePageTarget" type="radio" :value="page" class="teamhub-page-delete-radio" />
-                        <FileDocumentOutline :size="16" />
+                        <FileDocumentOutline :size="ICON_BODY" />
                         <span>{{ page.title }}</span>
                     </label>
                 </div>
@@ -428,7 +439,7 @@
             <template #actions>
                 <NcButton variant="tertiary" @click="showDeletePage = false">{{ t('teamhub', 'Cancel') }}</NcButton>
                 <NcButton variant="error" :disabled="!deletePageTarget || deletingPage" @click="submitDeletePage">
-                    <template #icon><NcLoadingIcon v-if="deletingPage" :size="20" /></template>
+                    <template #icon><NcLoadingIcon v-if="deletingPage" :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
             </template>
@@ -489,6 +500,7 @@
 </template>
 
 <script>
+import { ICON_BODY } from '../constants/uiTokens.js'
 import { mapState, mapGetters, mapActions, mapMutations } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { formatIsoDate, toIsoDate } from '../lib/localDate.js'
@@ -535,6 +547,7 @@ import ProjectBudgetView from './ProjectBudgetView.vue'
 import ProjectTimeView from './ProjectTimeView.vue'
 import TeamPresenceView   from './TeamPresenceView.vue'
 import TeamDecisionsView  from './TeamDecisionsView.vue'
+import ServicesWidget     from './ServicesWidget.vue'
 import ComposeDecisionModal from './ComposeDecisionModal.vue'
 import ProjectPhaseStepper from './ProjectPhaseStepper.vue'
 import ProjectPhaseGuide from './ProjectPhaseGuide.vue'
@@ -582,6 +595,23 @@ function TeamView_subPeriod(d, mode) {
 }
 
 /**
+ * Sequential warm-up of the app tabs (v4.10.11) — see schedulePreload().
+ *
+ * SETTLE: how long after a frame's `load` the next app may start. `load` is the
+ * document and its scripts; the app still lists its folder / fetches its board
+ * and paints, and that first render is what the gap is for.
+ *
+ * LOAD_TIMEOUT: the longest one frame may hold the queue. Alone, the Files app
+ * loads in ~6 s on the test instance; a frame that has not loaded in ten is
+ * blocked on something the queue cannot fix, and the others should not wait.
+ *
+ * NATIVE_GAP: a view TeamHub draws itself costs a paint, not a boot.
+ */
+const PRELOAD_SETTLE_MS = 600
+const PRELOAD_LOAD_TIMEOUT_MS = 10000
+const PRELOAD_NATIVE_GAP_MS = 300
+
+/**
  * The date a pinned calendar event falls on, from the URL the backend built
  * for it (v4.6.20).
  *
@@ -616,6 +646,7 @@ export default {
         AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AddOpenProjectWorkPackageModal, AppEmbed, TeamCalendarGrid, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
         TeamPresenceView,
         TeamDecisionsView,
+        ServicesWidget,
         ComposeDecisionModal,
         ProjectPhaseStepper,
         ProjectPhaseGuide,
@@ -627,6 +658,7 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
             gridLayout: [],
             userDefaultLayout: [],
             orderedTabs: [],
@@ -740,6 +772,10 @@ export default {
             // (v-show) rather than destroyed, so tab switches are instant.
             preloadedViews: new Set(),
             // Pending preload timers, cleared on re-schedule and on unmount.
+            // The queue itself (`_preloadQueue`), the frames that have loaded
+            // (`_loadedEmbeds`) and the view being waited on
+            // (`_preloadAwaiting`) are plain instance fields set up by
+            // schedulePreload() — not reactive, nothing renders from them.
             _preloadTimers: [],
             // Presence module — per-team config loaded from store (B3/B4)
         }
@@ -752,6 +788,8 @@ export default {
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
+            // v4.10.41 — the Services tab.
+            'serviceDeskConfig',
             'timelineConfig', 'messagesConfig', 'collectivesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
             // Sidebar 3-dot action intent — TeamView consumes it after the
             // team's layout has loaded, then clears it.
@@ -1282,6 +1320,15 @@ export default {
     },
 
     watch: {
+        // v4.10.11 — the warm-up queue cannot decide which tabs boot a frame
+        // until the team's resources are known; resume it when they are (and
+        // only if it is idle: nothing in flight, no timer pending).
+        'loading.resources'(isLoading) {
+            if (!isLoading && this._preloadQueue?.length > 0
+                && !this._preloadAwaiting && this._preloadTimers?.length === 0) {
+                this.advancePreload()
+            }
+        },
         // v4.6.20 — a pin now moves the grid to the event's date rather than
         // starting a watcher on an iframe that no longer exists.
         calendarEmbedEvent(ev) {
@@ -1356,6 +1403,14 @@ export default {
         // gap when adding new config-gated tabs — see the presenceConfig /
         // decisionsConfig / timelineConfig watchers above.
         collectivesConfig: {
+            deep: true,
+            handler() {
+                this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
+            },
+        },
+        // v4.10.41 — the Services tab appears with the layout bundle's
+        // serviceDeskConfig; rebuild when it arrives, as for the configs above.
+        serviceDeskConfig: {
             deep: true,
             handler() {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
@@ -1561,35 +1616,139 @@ export default {
         },
 
         /**
-         * Stagger the built-in app tabs into existence shortly after a team is
-         * opened, so clicking one is instant rather than a cold NC app boot.
+         * Warm the built-in app tabs after a team is opened, so clicking one is
+         * instant rather than a cold NC app boot — **one app at a time, Files
+         * first** (v4.10.11).
          *
          * Runs on mount AND on every team switch — `preloadedViews` is cleared
          * per team, so a schedule that only fired once left every tab cold from
          * the first switch onwards (fixed v4.5.10).
          *
-         * Still staggered: six embedded Nextcloud apps starting at once makes
-         * the team view janky on arrival, which is the moment the user is
-         * actually looking at it. The stagger is much tighter than the original
-         * 1.5–5.5 s, and hover-intent (see TeamTabBar's `preload` event)
-         * short-circuits it for the tab the user is actually reaching for.
+         * Why sequential and not a timer stagger: measured on the test
+         * instance, a Files page is ~20 MB of JavaScript from every app that
+         * hooks into Files, Talk ~32 MB, Deck ~30 MB, Collectives ~25 MB — all
+         * cached, all parsed and executed on the parent's own main thread,
+         * because same-origin frames share it. The old 400 ms stagger had four
+         * of those booting together within three seconds of arrival: Files
+         * took 7.3 s instead of the 5.9 s it takes alone, and the Home tab the
+         * user was actually looking at was janky throughout. Now the next app
+         * starts only when the previous frame has fired `load` and had a
+         * moment to render (or a timeout has passed, so a frame that never
+         * loads cannot hold the rest hostage). The tab on screen always goes
+         * first; hover intent (TeamTabBar's `preload` event) still jumps the
+         * queue for the tab the user is reaching for.
          */
         schedulePreload() {
             this.cancelPreload()
-            const views = ['talk', 'files', 'calendar', 'deck', 'collectives', 'timeline']
-            views.forEach((view, i) => {
-                this._preloadTimers.push(
-                    setTimeout(() => this.preloadView(view), 800 + i * 400),
-                )
-            })
+            // Files first, per the decision of 2026-09-21: it is the tab most
+            // often opened from a widget and the one whose cold boot is felt.
+            // Calendar and the Advanced-project timeline are native views and
+            // cost only a paint; Collectives goes last because its per-team
+            // config rides on the layout bundle, which may land after the
+            // resources do.
+            this._preloadQueue = ['files', 'talk', 'deck', 'calendar', 'timeline', 'collectives']
+            this._loadedEmbeds = new Set()
+            this.advancePreload()
         },
 
-        /** Drop pending preload timers so a previous team's schedule can't fire late. */
-        cancelPreload() {
+        /**
+         * Start the next warm-up, or wait for the one in flight.
+         *
+         * Nothing starts until the team's resources are known: whether a view
+         * boots a frame at all depends on them, and deciding on an empty
+         * `resources` would skip every app tab (the `loading.resources`
+         * watcher calls back in).
+         */
+        advancePreload() {
+            this.clearPreloadWait()
+            if (this.loading?.resources) {
+                return
+            }
+            // The tab on screen always goes first: if the user opened an app
+            // tab that is still booting, nothing else may compete with it.
+            const active = this.currentView
+            if (this.embedBoots(active) && !this._loadedEmbeds.has(active)) {
+                this.awaitEmbed(active)
+                return
+            }
+            while (this._preloadQueue.length > 0) {
+                const view = this._preloadQueue.shift()
+                if (this._loadedEmbeds.has(view)) {
+                    continue
+                }
+                this.preloadView(view)
+                if (this.embedBoots(view)) {
+                    this.awaitEmbed(view)
+                    return
+                }
+                // A native view: give it one frame's worth of breathing room
+                // and move on.
+                this._preloadTimers.push(setTimeout(() => this.advancePreload(), PRELOAD_NATIVE_GAP_MS))
+                return
+            }
+        },
+
+        /**
+         * Does this view boot a Nextcloud app in an iframe for this team?
+         * False for native views (the Calendar grid, an Advanced project's
+         * timeline) and for app tabs the team has no resource for — those
+         * never mount, so they must never be waited on.
+         *
+         * @param {string} view
+         * @return {boolean}
+         */
+        embedBoots(view) {
+            switch (view) {
+            case 'talk':        return !!this.resources?.talk
+            case 'files':       return !!this.resources?.files
+            case 'deck':        return (this.resources?.deck || []).length > 0
+            case 'collectives': return !!this.collectivesConfig?.collectives_enabled
+            case 'timeline':    return !!this.currentTeamId && !this.isAdvancedProject
+            default:            return false
+            }
+        },
+
+        /** Wait for `view`'s frame to load, bounded. */
+        awaitEmbed(view) {
+            this._preloadAwaiting = view
+            this._preloadTimers.push(setTimeout(() => {
+                this._preloadAwaiting = null
+                this.advancePreload()
+            }, PRELOAD_LOAD_TIMEOUT_MS))
+        },
+
+        /**
+         * An embed's frame fired `load`. Marks it warm (so it is kept alive
+         * across tab switches even when opened by a click rather than the
+         * queue) and, if it was the one being waited on, lets the queue move
+         * on once the app has had a moment to fetch and render.
+         *
+         * @param {string} view
+         */
+        onEmbedLoaded(view) {
+            this._loadedEmbeds?.add(view)
+            this.preloadView(view)
+            if (view !== this._preloadAwaiting) {
+                return
+            }
+            this.clearPreloadWait()
+            this._preloadTimers.push(setTimeout(() => this.advancePreload(), PRELOAD_SETTLE_MS))
+        },
+
+        /** Drop the in-flight wait and any pending timers. */
+        clearPreloadWait() {
+            this._preloadAwaiting = null
             if (Array.isArray(this._preloadTimers)) {
                 this._preloadTimers.forEach(id => clearTimeout(id))
             }
             this._preloadTimers = []
+        },
+
+        /** Abandon the queue so a previous team's schedule can't fire late. */
+        cancelPreload() {
+            this.clearPreloadWait()
+            this._preloadQueue = []
+            this._loadedEmbeds = new Set()
         },
 
         /**
@@ -1822,9 +1981,13 @@ export default {
         syncExtTabs() {
             const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
                 .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            const builtinKeys = new Set(['talk', 'files', 'calendar', 'deck', 'collectives', 'presence', 'decisions', 'timeline', 'budget', 'time'])
+            // v4.10.45 — keep every tab that is not an app's or a link, rather
+            // than a hand-kept list of built-in keys: that list never gained
+            // 'services' (v4.10.41), so the Services tab vanished whenever
+            // the registered apps synced after the layout bundle arrived.
+            const isOwn = t => !t.key.startsWith('ext-') && !t.key.startsWith('link-')
             this.orderedTabs = [
-                ...this.orderedTabs.filter(t => builtinKeys.has(t.key)),
+                ...this.orderedTabs.filter(isOwn),
                 ...extTabs,
                 ...this.orderedTabs.filter(t => t.key.startsWith('link-')),
             ]
@@ -2414,27 +2577,36 @@ export default {
 </script>
 
 <style scoped>
+/* v4.10.10: replaced four inline style="" hints so the size comes from the token scale. */
+.teamhub-pages-hint {
+    margin: 0 0 var(--th-space-md);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+.teamhub-pages-hint--tight {
+    margin: 0;
+}
 /* Resource picker modal */
 .teamhub-resource-picker {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     padding: 8px 0;
     min-width: 260px;
 }
 .teamhub-resource-picker__item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 8px;
+    padding: 8px 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-background-hover);
     cursor: pointer;
-    text-align: left;
+    text-align: start;
     font-size: var(--th-font-body);
     color: var(--color-main-text);
-    transition: background 0.15s;
+    transition: background var(--animation-quick);
 }
 .teamhub-resource-picker__item:hover {
     background: var(--color-primary-light);
@@ -2470,6 +2642,20 @@ export default {
     position: relative;
 }
 
+/* Services tab (v4.10.41): the content area is a fixed-height column
+   (.teamhub-content hides overflow), so the tab scrolls itself. */
+.teamhub-services-tab {
+    height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: var(--th-space-lg, 16px) var(--th-space-xl, 24px);
+}
+
+/* v4.10.43 — not the whole width (Justin, 2026-09-25). */
+.teamhub-services-tab > * {
+    max-width: var(--th-page-width, 960px);
+}
+
 /* Collectives tab: page rail beside the frame (v4.8.8). The rail is a
    fixed column and the frame takes the rest; min-width:0 on the frame is
    what stops a wide page inside the iframe from pushing the rail off. */
@@ -2489,7 +2675,7 @@ export default {
 .teamhub-page-delete-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     max-height: 260px;
     overflow-y: auto;
 }
@@ -2498,12 +2684,12 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 9px 12px;
-    border-radius: var(--border-radius-large);
+    padding: 8px 12px;
+    border-radius: var(--border-radius-element);
     border: 2px solid var(--color-border);
     cursor: pointer;
     font-size: var(--th-font-body);
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
 
 .teamhub-page-delete-option:hover {

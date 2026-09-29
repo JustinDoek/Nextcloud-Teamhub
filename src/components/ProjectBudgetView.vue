@@ -13,7 +13,7 @@
              on isTeamAdmin — only users with manage-team access see it,
              matching the target section's own permission gate. -->
         <IframeWidgetCard :title="t('teamhub', 'Budget overview')">
-            <template #icon><WalletOutline :size="18" /></template>
+            <template #icon><WalletOutline :size="ICON_BODY" /></template>
             <template #actions>
                 <!-- v3.103.3: switched to primary variant so this button
                      reads as the same colour rank as the widget-header
@@ -25,10 +25,10 @@
                      on the scrolled + highlighted Budget block rather
                      than the top of Manage Team. -->
                 <NcButton v-if="isTeamAdmin"
-                    variant="primary"
+                    variant="tertiary"
                     :title="t('teamhub', 'Open Manage Team — Project — Budget')"
                     @click="openBudgetSettings">
-                    <template #icon><CogOutline :size="16" /></template>
+                    <template #icon><CogOutline :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Budget settings') }}
                 </NcButton>
             </template>
@@ -108,7 +108,7 @@
              expenses recorded) since the KPI row above already carries the
              zeros — a chart of zeros is just visual noise. -->
         <IframeWidgetCard v-if="hasChartData" :title="t('teamhub', 'Utilisation')">
-            <template #icon><ChartArc :size="18" /></template>
+            <template #icon><ChartArc :size="ICON_BODY" /></template>
             <div class="th-budget__charts">
             <!-- Donut: total spent as % of total allocated. Colour follows
                  the same over/under/equal semantics as the "real" figures. -->
@@ -191,33 +191,31 @@
         <IframeWidgetCard
             :title="t('teamhub', 'Workstream lanes')"
             :badge="budget.lanes.length || null">
-            <template #icon><FormatListBulletedIcon :size="18" /></template>
+            <template #icon><FormatListBulletedIcon :size="ICON_BODY" /></template>
             <template #actions>
                 <NcButton v-if="canAddAnyExpense"
                     variant="primary"
                     @click="openAddExpense(null)">
-                    <template #icon><Plus :size="16" /></template>
+                    <template #icon><Plus :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Add expense') }}
                 </NcButton>
             </template>
 
             <div v-if="loading" class="th-budget__status">
-                <NcLoadingIcon :size="32" />
+                <NcLoadingIcon :size="ICON_LARGE" />
             </div>
 
-            <NcEmptyContent v-else-if="error"
-                :name="t('teamhub', 'Could not load the budget')"
-                :description="error">
-                <template #icon><AlertCircleOutline :size="48" /></template>
-                <template #action>
-                    <NcButton @click="fetchBudget">{{ t('teamhub', 'Retry') }}</NcButton>
-                </template>
-            </NcEmptyContent>
+            <!-- v4.10.10: a recoverable error is a note card with a retry, not
+                 an empty state (NC design guide § Empty content). -->
+            <NcNoteCard v-else-if="error" type="error" :heading="t('teamhub', 'Could not load the budget')">
+                <p>{{ error }}</p>
+                <NcButton @click="fetchBudget">{{ t('teamhub', 'Retry') }}</NcButton>
+            </NcNoteCard>
 
             <NcEmptyContent v-else-if="!budget.lanes.length"
                 :name="t('teamhub', 'No visible workstreams')"
                 :description="t('teamhub', 'This project has no Deck stacks yet, or you do not have permission to view any of its budget lanes.')">
-                <template #icon><WalletOutline :size="48" /></template>
+                <template #icon><WalletOutline :size="ICON_XL" /></template>
             </NcEmptyContent>
 
             <!-- v3.103.3: lane sections rebuilt to mirror the Time-report
@@ -272,11 +270,11 @@
                             <td v-if="lane.canEdit" class="th-budget__col-actions">
                                 <NcActions>
                                     <NcActionButton @click="openEditExpense(lane, expense)">
-                                        <template #icon><Pencil :size="20" /></template>
+                                        <template #icon><Pencil :size="ICON_BODY" /></template>
                                         {{ t('teamhub', 'Edit') }}
                                     </NcActionButton>
                                     <NcActionButton @click="confirmDeleteExpense(lane, expense)">
-                                        <template #icon><Delete :size="20" /></template>
+                                        <template #icon><Delete :size="ICON_BODY" /></template>
                                         {{ t('teamhub', 'Delete') }}
                                     </NcActionButton>
                                 </NcActions>
@@ -307,33 +305,28 @@
                 <form class="th-budget__form" @submit.prevent="submitExpense">
                     <div class="th-budget__form-field">
                         <label for="th-budget-lane" class="th-budget__form-label">{{ t('teamhub', 'Lane') }}</label>
-                        <select
-                            id="th-budget-lane"
+                        <NcSelect
+                            input-id="th-budget-lane"
+                            label-outside
                             v-model="form.laneId"
                             :disabled="!!editingExpense"
-                            required
-                            class="th-budget__input">
-                            <option v-if="!form.laneId" :value="null" disabled>
-                                {{ t('teamhub', 'Choose a lane…') }}
-                            </option>
-                            <option v-for="lane in editableLanes"
-                                :key="'sel-' + lane.laneId"
-                                :value="lane.laneId">
-                                {{ lane.stackTitle }}
-                            </option>
-                        </select>
+                            class="th-budget__input"
+                            :options="[...(!form.laneId ? [{ id: null, label: t('teamhub', 'Choose a lane…') }] : []), ...editableLanes.map(lane => ({ id: lane.laneId, label: lane.stackTitle }))]"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            :placeholder="t('teamhub', 'Choose a lane…')" />
                     </div>
 
                     <div class="th-budget__form-field">
                         <label for="th-budget-desc" class="th-budget__form-label">{{ t('teamhub', 'Description') }}</label>
-                        <input
+                        <NcTextField
                             id="th-budget-desc"
                             v-model="form.description"
-                            type="text"
                             required
                             autofocus
                             :placeholder="t('teamhub', 'What is this for?')"
-                            class="th-budget__input" />
+                            class="th-budget__input"
+                            label-outside />
                     </div>
 
                     <div class="th-budget__form-row">
@@ -341,25 +334,27 @@
                             <label for="th-budget-projected" class="th-budget__form-label">
                                 {{ t('teamhub', 'Projected amount ({currency})', { currency: budget.currency || t('teamhub', 'currency not set') }) }}
                             </label>
-                            <input
+                            <NcTextField
                                 id="th-budget-projected"
                                 v-model.number="form.projected"
                                 type="number"
                                 step="0.01"
                                 min="0"
                                 required
-                                class="th-budget__input" />
+                                class="th-budget__input"
+                                label-outside />
                         </div>
                         <div class="th-budget__form-field">
                             <label for="th-budget-real" class="th-budget__form-label">{{ t('teamhub', 'Real amount') }}</label>
-                            <input
+                            <NcTextField
                                 id="th-budget-real"
                                 v-model.number="form.real"
                                 type="number"
                                 step="0.01"
                                 min="0"
                                 :placeholder="t('teamhub', 'leave empty until incurred')"
-                                class="th-budget__input" />
+                                class="th-budget__input"
+                                label-outside />
                         </div>
                     </div>
 
@@ -376,14 +371,14 @@
                 </form>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="closeExpenseModal">
+                <NcButton variant="tertiary" @click="closeExpenseModal">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
                 <NcButton
-                    type="primary"
+                    variant="primary"
                     :disabled="submitting || !form.description.trim() || !form.laneId"
                     @click="submitExpense">
-                    <template #icon><NcLoadingIcon v-if="submitting" :size="20" /></template>
+                    <template #icon><NcLoadingIcon v-if="submitting" :size="ICON_BODY" /></template>
                     {{ editingExpense ? t('teamhub', 'Save') : t('teamhub', 'Add') }}
                 </NcButton>
             </template>
@@ -400,10 +395,10 @@
                 </p>
             </template>
             <template #actions>
-                <NcButton type="tertiary" @click="deleteTarget = null">
+                <NcButton variant="tertiary" @click="deleteTarget = null">
                     {{ t('teamhub', 'Cancel') }}
                 </NcButton>
-                <NcButton type="error" :disabled="submitting" @click="submitDeleteExpense">
+                <NcButton variant="error" :disabled="submitting" @click="submitDeleteExpense">
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
             </template>
@@ -418,13 +413,10 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatEpochDate, epochDateToIso } from '../lib/localDate.js'
 import { mapState, mapGetters, mapMutations } from 'vuex'
+import { ICON_BODY, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 
-import {
-    NcActions, NcActionButton, NcButton, NcDialog,
-    NcEmptyContent, NcLoadingIcon,
-} from '@nextcloud/vue'
+import { NcActions, NcActionButton, NcButton, NcDialog, NcEmptyContent, NcLoadingIcon, NcNoteCard, NcTextField, NcSelect } from '@nextcloud/vue'
 
-import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import ChartArc from 'vue-material-design-icons/ChartArc.vue'
 import CogOutline from 'vue-material-design-icons/CogOutline.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
@@ -454,15 +446,18 @@ function laneColour(stackOrder, stackId, idx) {
 export default {
     name: 'ProjectBudgetView',
     components: {
-        NcActions, NcActionButton, NcButton, NcDialog, NcEmptyContent,
+          NcSelect, NcTextField, NcActions, NcActionButton, NcButton, NcDialog, NcEmptyContent, NcNoteCard,
         NcLoadingIcon,
-        AlertCircleOutline, ChartArc, CogOutline, Delete,
+        ChartArc, CogOutline, Delete,
         FormatListBulletedIcon, Pencil, Plus, WalletOutline,
         IframeWidgetCard,
     },
     emits: ['open-project-settings'],
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
+            ICON_XL,
             loading: true,
             error: null,
             budget: {
@@ -1012,13 +1007,13 @@ export default {
 .th-budget__kpi {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-left: 4px solid var(--th-kpi-color);
+    border-inline-start: 4px solid var(--th-kpi-color);
     border-radius: var(--border-radius-large, 8px);
-    padding: 14px 16px;
+    padding: 16px 16px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    gap: 8px;
+    box-shadow: 0 1px 2px var(--color-box-shadow);
 }
 .th-budget__kpi-head {
     display: flex;
@@ -1026,7 +1021,6 @@ export default {
     gap: 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
     letter-spacing: 0.4px;
     font-weight: 600;
 }
@@ -1043,7 +1037,7 @@ export default {
    on the KPI card allows the value box to actually shrink to the grid
    track — without it the value's intrinsic width overrides the track. */
 .th-budget__kpi-value {
-    font-size: 26px;
+    font-size: var(--th-font-display);
     font-weight: 700;
     color: var(--color-main-text);
     line-height: 1.1;
@@ -1053,7 +1047,7 @@ export default {
 }
 @media (max-width: 720px) {
     .th-budget__kpi-value {
-        font-size: 20px;
+        font-size: var(--th-font-heading-lg);
     }
 }
 .th-budget__kpi-sub {
@@ -1073,7 +1067,7 @@ export default {
 .th-budget__kpi--remaining        { --th-kpi-color: var(--color-success); }
 .th-budget__kpi--remaining-over   { --th-kpi-color: var(--color-error); }
 .th-budget__kpi--remaining-over .th-budget__kpi-value {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 /* Real-vs-projected state colours.
@@ -1083,8 +1077,8 @@ export default {
      - regular text elements     → color
      - .th-budget__lane-bar-real → background
      - SVG rect (chart bars)     → fill  */
-.th-budget__over          { color: var(--color-error-text); }
-.th-budget__under         { color: var(--color-success-text); }
+.th-budget__over          { color: var(--color-text-error); }
+.th-budget__under         { color: var(--color-text-success); }
 .th-budget__equal         { color: var(--color-main-text); }
 
 .th-budget__lane-bar-real.th-budget__over  { background: var(--color-error); }
@@ -1135,7 +1129,6 @@ export default {
 .th-budget__chart-card-title {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
     letter-spacing: 0.4px;
     margin-bottom: 12px;
     font-weight: 600;
@@ -1155,13 +1148,13 @@ export default {
 .th-budget__donut-arc {
     /* Default (equal); state classes fan out below */
     stroke: var(--color-primary-element);
-    transition: stroke-dasharray 250ms ease-out;
+    transition: stroke-dasharray var(--animation-slow) ease-out;
 }
 .th-budget__donut-arc.th-budget__over   { stroke: var(--color-error); }
 .th-budget__donut-arc.th-budget__under  { stroke: var(--color-success); }
 .th-budget__donut-arc.th-budget__equal  { stroke: var(--color-primary-element); }
 .th-budget__donut-pct {
-    font-size: 34px;
+    font-size: var(--th-font-display);
     font-weight: 700;
     fill: var(--color-main-text);
 }
@@ -1171,7 +1164,6 @@ export default {
 .th-budget__donut-sub {
     font-size: var(--th-font-micro);
     fill: var(--color-text-maxcontrast);
-    text-transform: uppercase;
     letter-spacing: 0.4px;
 }
 .th-budget__donut-legend {
@@ -1179,7 +1171,7 @@ export default {
     flex-direction: column;
     gap: 4px;
     margin-top: 12px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     align-self: stretch;
 }
@@ -1190,8 +1182,8 @@ export default {
 .th-budget__donut-swatch {
     display: inline-block;
     width: 10px; height: 10px;
-    border-radius: 2px;
-    margin-right: 6px;
+    border-radius: var(--border-radius-small);
+    margin-inline-end: 8px;
     vertical-align: middle;
     background: var(--color-primary-element);
 }
@@ -1209,7 +1201,7 @@ export default {
 .th-budget__bars {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 .th-budget__bar-row {
     display: grid;
@@ -1221,7 +1213,7 @@ export default {
 .th-budget__bar-name {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     color: var(--color-main-text);
     overflow: hidden;
 }
@@ -1229,7 +1221,7 @@ export default {
     display: inline-block;
     width: 10px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--border-radius-small);
     flex: 0 0 auto;
 }
 .th-budget__bar-name-text {
@@ -1242,21 +1234,21 @@ export default {
     position: relative;
     height: 14px;
     background: var(--color-background-dark);
-    border-radius: 7px;
+    border-radius: var(--border-radius-element);
     overflow: hidden;
 }
 .th-budget__bar-allocated {
     position: absolute;
-    left: 0; top: 0; bottom: 0;
+    inset-inline-start: 0; top: 0; bottom: 0;
     background: var(--color-background-darker);
-    border-radius: 7px;
+    border-radius: var(--border-radius-element);
 }
 .th-budget__bar-real {
     position: absolute;
-    left: 0; top: 0; bottom: 0;
+    inset-inline-start: 0; top: 0; bottom: 0;
     background: var(--color-primary-element);
-    border-radius: 7px;
-    transition: width 250ms ease-out;
+    border-radius: var(--border-radius-element);
+    transition: width var(--animation-slow) ease-out;
 }
 .th-budget__bar-real.th-budget__over   { background: var(--color-error); }
 .th-budget__bar-real.th-budget__under  { background: var(--color-success); }
@@ -1317,7 +1309,7 @@ export default {
 .th-budget__lane {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
 }
 
@@ -1334,7 +1326,7 @@ export default {
     display: inline-block;
     width: 12px;
     height: 12px;
-    border-radius: 2px;
+    border-radius: var(--border-radius-small);
     background: var(--th-budget-lane-color, var(--color-primary));
     flex: 0 0 auto;
 }
@@ -1361,7 +1353,7 @@ export default {
 }
 .th-budget__expenses th,
 .th-budget__expenses td {
-    text-align: left;
+    text-align: start;
     padding: 8px;
     border-bottom: 1px solid var(--color-border);
     font-size: var(--th-font-meta);
@@ -1370,8 +1362,6 @@ export default {
 .th-budget__expenses th {
     color: var(--color-text-maxcontrast);
     font-weight: var(--th-font-weight-medium);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     font-size: var(--th-font-micro);
 }
 .th-budget__expenses tr:last-child td {
@@ -1389,17 +1379,17 @@ export default {
 .th-budget__expense-meta {
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-micro);
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 .th-budget__col-num {
-    text-align: right;
+    text-align: end;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 .th-budget__col-actions {
     width: 48px;
-    text-align: right;
+    text-align: end;
 }
 
 /* v3.103.4: matches .th-time__report-empty--small — italic +
@@ -1409,8 +1399,7 @@ export default {
 .th-budget__lane-empty {
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-micro);
-    font-style: italic;
-    padding: 10px 14px;
+    padding: 8px 16px;
 }
 
 /* v3.103.2: modal form styling rebuilt for a clean, consistent look.
@@ -1420,14 +1409,14 @@ export default {
 .th-budget__form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     min-width: 340px;
 }
 
 .th-budget__form-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
 }
@@ -1452,40 +1441,19 @@ export default {
 
 .th-budget__input {
     width: 100%;
-    height: 36px;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font: inherit;
     box-sizing: border-box;
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-.th-budget__input:hover:not(:disabled) {
-    border-color: var(--color-border-dark);
 }
 .th-budget__input:focus,
-.th-budget__input:focus-visible {
-    outline: none;
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px var(--color-primary-element);
-}
 .th-budget__input:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-    background: var(--color-background-dark);
-}
-select.th-budget__input {
-    padding-right: 32px;
-    appearance: auto;
 }
 
 .th-budget__form-error {
     color: var(--color-error-text);
     background: var(--color-error);
     padding: 8px 12px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     margin: 0;
     font-size: var(--th-font-meta);
 }

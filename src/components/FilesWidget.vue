@@ -13,7 +13,7 @@
                 class="th-files-widget__tab"
                 :class="{ 'th-files-widget__tab--active': activeTab === tab.id }"
                 @click="setTab(tab.id)">
-                <component :is="tab.icon" :size="14" aria-hidden="true" />
+                <component :is="tab.icon" :size="ICON_INLINE" aria-hidden="true" />
                 {{ tab.label }}
             </button>
         </div>
@@ -46,6 +46,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import { ICON_INLINE } from '../constants/uiTokens.js'
 
 import FilesFavoritesWidget from './FilesFavoritesWidget.vue'
 import FilesRecentWidget    from './FilesRecentWidget.vue'
@@ -69,6 +70,7 @@ export default {
 
     data() {
         return {
+            ICON_INLINE,
             activeTab: 'recent',
         }
     },
@@ -79,19 +81,19 @@ export default {
                 {
                     id: 'favorites',
                     // TRANSLATORS: tab label — files the user has starred/favourited
-                    label: t('teamhub', 'Favourite Files'),
+                    label: t('teamhub', 'Favourite files'),
                     icon: 'StarOutlineIcon',
                 },
                 {
                     id: 'recent',
                     // TRANSLATORS: tab label — files most recently changed in the team folder
-                    label: t('teamhub', 'Recently Modified'),
+                    label: t('teamhub', 'Recently modified'),
                     icon: 'ClockOutlineIcon',
                 },
                 {
                     id: 'shared',
                     // TRANSLATORS: tab label — files shared directly with this team
-                    label: t('teamhub', 'Shared Files'),
+                    label: t('teamhub', 'Shared files'),
                     icon: 'ShareVariantIcon',
                 },
             ]
@@ -121,15 +123,15 @@ export default {
     align-items: stretch;
     border-bottom: 1px solid var(--color-border);
     padding: 0 4px;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
 }
 
 .th-files-widget__tab {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 8px 10px 7px;
+    gap: 4px;
+    padding: 8px 8px 8px;
     /* Tokens — tabs use row-meta size at row-primary weight */
     font-size: var(--th-widget-row-meta-size);
     font-weight: var(--th-widget-row-primary-weight);
@@ -139,9 +141,9 @@ export default {
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
     cursor: pointer;
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
+    border-radius: var(--border-radius-small) var(--border-radius-small) 0 0;
     white-space: nowrap;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    transition: color var(--animation-quick), border-color var(--animation-quick), background var(--animation-quick);
     line-height: 1;
 }
 

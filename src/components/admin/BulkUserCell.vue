@@ -1,26 +1,25 @@
 <template>
 	<div class="buc">
-		<ul v-if="selected.length" class="buc__chips">
-			<li v-for="u in selected" :key="keyOf(u)" class="buc__chip">
-				<AccountGroup v-if="u.type === 'group'" :size="12" aria-hidden="true" />
-				<span class="buc__chip-name">{{ u.displayName }}</span>
-				<button
-					type="button"
-					class="buc__chip-remove"
-					:aria-label="t('teamhub', 'Remove {name}', { name: u.displayName })"
-					@click="remove(u)">
-					<Close :size="12" aria-hidden="true" />
-				</button>
-			</li>
-		</ul>
+		<!-- v4.10.10: selected values are removable NcChips (design guide § Chips). -->
+		<div v-if="selected.length" class="buc__chips">
+			<NcChip
+				v-for="u in selected"
+				:key="keyOf(u)"
+				:text="u.displayName"
+				:aria-label-close="t('teamhub', 'Remove {name}', { name: u.displayName })"
+				@close="remove(u)">
+				<template v-if="u.type === 'group'" #icon>
+					<AccountGroup :size="ICON_INLINE" aria-hidden="true" />
+				</template>
+			</NcChip>
+		</div>
 
 		<!-- Single-select hides its input once something is chosen: a second
 		     box that silently replaces the first pick is worse than no box. -->
-		<input
+		<NcTextField
 			v-if="multiple || selected.length === 0"
 			:id="inputId"
 			v-model="query"
-			type="text"
 			class="buc__input"
 			role="combobox"
 			aria-autocomplete="list"
@@ -34,7 +33,8 @@
 			@keydown.up.prevent="move(-1)"
 			@keydown.enter.prevent="pickCursor"
 			@keydown.esc="close"
-			@blur="onBlur">
+			@blur="onBlur"
+			label-outside />
 
 		<div v-if="open" :id="listId" class="buc__results" role="listbox">
 			<p v-if="searching" class="buc__state">{{ t('teamhub', 'Searching…') }}</p>
@@ -49,9 +49,13 @@
 				:aria-selected="i === cursor ? 'true' : 'false'"
 				:class="['buc__result', { 'buc__result--active': i === cursor }]"
 				@mousedown.prevent="pick(r)">
-				<AccountGroup v-if="r.type === 'group'" :size="14" aria-hidden="true" />
-				<span class="buc__result-name">{{ r.displayName }}</span>
-				<span class="buc__result-meta">{{ r.type === 'group' ? t('teamhub', 'Group') : r.id }}</span>
+				<!-- v4.10.7 — the shared person row, compact for a table cell. -->
+				<PersonRow
+					:id="r.id"
+					:display-name="r.displayName"
+					:type="r.type || 'user'"
+					:subline="r.subline"
+					compact />
 			</button>
 		</div>
 	</div>
@@ -61,8 +65,10 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import Close from 'vue-material-design-icons/Close.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
+import { NcChip, NcTextField } from '@nextcloud/vue'
+import PersonRow from '../PersonRow.vue'
+import { ICON_INLINE } from '../../constants/uiTokens.js'
 
 let cellSeq = 0
 
@@ -83,7 +89,7 @@ let cellSeq = 0
  */
 export default {
 	name: 'BulkUserCell',
-	components: { Close, AccountGroup },
+	components: {  NcTextField, NcChip, AccountGroup, PersonRow },
 
 	props: {
 		/** @type {Array<{id: string, displayName: string, type?: string}>} */
@@ -100,6 +106,7 @@ export default {
 	data() {
 		cellSeq += 1
 		return {
+			ICON_INLINE,
 			query: '',
 			results: [],
 			open: false,
@@ -110,6 +117,7 @@ export default {
 			listId: 'buc-list-' + cellSeq,
 		}
 	},
+
 
 	computed: {
 		selected() {
@@ -151,7 +159,7 @@ export default {
 				)
 				const taken = new Set(this.selected.map(this.keyOf))
 				this.results = (data || [])
-					.map(u => ({ id: u.id, displayName: u.displayName || u.id, type: u.type || 'user' }))
+					.map(u => ({ id: u.id, displayName: u.displayName || u.id, type: u.type || 'user', subline: u.subline || '' }))
 					.filter(u => this.allowGroups || u.type !== 'group')
 					.filter(u => !taken.has(this.keyOf(u)))
 					.slice(0, 8)
@@ -210,79 +218,16 @@ export default {
 }
 
 .buc__chips {
-	list-style: none;
-	margin: 0 0 2px;
-	padding: 0;
+	margin: 0 0 4px;
 	display: flex;
 	flex-wrap: wrap;
-	gap: 2px;
-}
-
-.buc__chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 2px;
-	max-width: 100%;
-	padding: 1px 2px 1px 6px;
-	border-radius: var(--th-radius-pill);
-	background: var(--color-background-dark);
-	font-size: var(--th-font-micro);
-}
-
-/* Same reason as .buc__result-name: without min-width the ellipsis is inert
-   and a long display name widens the chip past the cell. */
-.buc__chip-name {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-/* Six locks — NC's global button rule sets min-width AND min-height to 44px,
-   and per spec min-* beats an unqualified width/height. SKILLS.md § UI shapes. */
-.buc__chip-remove {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 auto;
-	box-sizing: border-box;
-	width: 16px;
-	height: 16px;
-	min-width: 16px;
-	min-height: 16px;
-	max-width: 16px;
-	max-height: 16px;
-	padding: 0;
-	border: none;
-	border-radius: 50%;
-	background: transparent;
-	color: var(--color-text-maxcontrast);
-	cursor: pointer;
-}
-
-.buc__chip-remove:hover {
-	background: var(--color-background-hover);
-}
-
-.buc__chip-remove:focus-visible {
-	outline: 2px solid var(--color-primary-element);
+	gap: 4px;
 }
 
 .buc__input {
 	width: 100%;
 	min-width: 0;
 	box-sizing: border-box;
-	font-size: var(--th-font-meta);
-	border-radius: var(--th-radius-control);
-}
-
-.buc__input:focus {
-	outline: none;
-	border-color: var(--color-primary-element);
-}
-
-.buc__input:focus-visible {
-	box-shadow: 0 0 0 2px var(--color-primary-element);
 }
 
 .buc__results {
@@ -307,7 +252,7 @@ export default {
 
 .buc__state {
 	margin: 0;
-	padding: 8px 10px;
+	padding: 8px 8px;
 	font-size: var(--th-font-meta);
 	color: var(--color-text-maxcontrast);
 }
@@ -315,9 +260,9 @@ export default {
 .buc__result {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	width: 100%;
-	padding: 6px 10px;
+	padding: 8px 8px;
 	border: none;
 	background: transparent;
 	text-align: start;
@@ -336,29 +281,4 @@ export default {
 	outline-offset: -2px;
 }
 
-/* `min-width: 0` is what makes the ellipsis rules beside it do anything. A
-   flex item's min-width defaults to `auto`, i.e. its min-content width, so
-   without this the name refuses to shrink, `overflow: hidden` never fires and
-   the row pushes the dropdown wider than its own max-width instead.
-   Unrelated to SKILLS.md's "don't use min-width: 0" note — that is about
-   pinning a circular *button*, not about letting text inside one truncate. */
-.buc__result-name {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-/* Shrinkable too: this is the account id, and an id long enough to need the
-   room is exactly the case that was overflowing. */
-.buc__result-meta {
-	flex: 0 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	color: var(--color-text-maxcontrast);
-	font-size: var(--th-font-micro);
-}
 </style>

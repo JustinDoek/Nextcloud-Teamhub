@@ -2,8 +2,8 @@
     <div class="message-stream" :class="{ 'message-stream--no-header': hideHeader }">
         <div v-if="!hideHeader" class="message-stream__header">
             <NcButton v-if="canPost" variant="primary" @click="showPostForm = true">
-                <template #icon><Plus :size="20" /></template>
-                {{ t('teamhub', 'Post Message') }}
+                <template #icon><Plus :size="ICON_BODY" /></template>
+                {{ t('teamhub', 'Post message') }}
             </NcButton>
         </div>
 
@@ -12,14 +12,14 @@
 
         <!-- Loading -->
         <div v-if="loading.messages" class="message-stream__loading">
-            <NcLoadingIcon :size="32" />
+            <NcLoadingIcon :size="ICON_LARGE" />
         </div>
 
         <template v-else>
             <!-- Pinned message — always shown above the stream when present -->
             <div v-if="pinnedMessage" class="message-stream__pinned-wrapper">
                 <div class="message-stream__pinned-label">
-                    <Pin :size="14" />
+                    <Pin :size="ICON_INLINE" />
                     {{ t('teamhub', 'Pinned') }}
                 </div>
                 <MessageCard
@@ -33,7 +33,7 @@
                 v-if="messages.length === 0 && !showPostForm && !pinnedMessage"
                 :name="t('teamhub', 'No messages yet')"
                 :description="t('teamhub', 'Be the first to post a message')">
-                <template #icon><MessageOutline :size="64" /></template>
+                <template #icon><MessageOutline :size="ICON_HERO" /></template>
             </NcEmptyContent>
 
             <!-- Regular messages — direct-proposal decisions (sourceType='direct') are
@@ -59,7 +59,7 @@
                     :disabled="messagesPage <= 1"
                     :aria-label="t('teamhub', 'Previous page')"
                     @click="goToPage(messagesPage - 1)">
-                    <template #icon><ChevronLeft :size="20" /></template>
+                    <template #icon><ChevronLeft :size="ICON_BODY" /></template>
                 </NcButton>
 
                 <span class="message-stream__pagination-info">
@@ -71,7 +71,7 @@
                     :disabled="messagesPage >= totalPages"
                     :aria-label="t('teamhub', 'Next page')"
                     @click="goToPage(messagesPage + 1)">
-                    <template #icon><ChevronRight :size="20" /></template>
+                    <template #icon><ChevronRight :size="ICON_BODY" /></template>
                 </NcButton>
             </div>
         </template>
@@ -89,6 +89,7 @@ import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import MessageCard from './MessageCard.vue'
 import PostMessageForm from './PostMessageForm.vue'
+import { ICON_BODY, ICON_HERO, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 export default {
     name: 'MessageStream',
@@ -102,6 +103,10 @@ export default {
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_HERO,
+            ICON_INLINE,
+            ICON_LARGE,
             showPostForm: false,
             // Highlighted id, cleared on a timer so the glow is a hint rather
             // than a permanent state the user has to work out how to dismiss.
@@ -250,14 +255,12 @@ export default {
 .message-stream__pinned-label {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     font-size: var(--th-font-micro);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--color-primary-element);
-    margin-bottom: 6px;
-    padding-left: 2px;
+    margin-bottom: 8px;
+    padding-inline-start: 4px;
 }
 
 .message-stream__list {
@@ -270,8 +273,8 @@ export default {
    it reads on top of whatever the card itself is doing, and it fades out on
    its own after a couple of seconds. */
 .message-stream__item {
-    border-radius: var(--th-radius-card, var(--border-radius-large));
-    transition: box-shadow 400ms ease-out;
+    border-radius: var(--th-radius-card, var(--border-radius-element));
+    transition: box-shadow var(--animation-slow) ease-out;
 }
 
 .message-stream__item--highlighted {
@@ -288,7 +291,7 @@ export default {
 }
 
 .msg-list-enter-active, .msg-list-leave-active {
-    transition: all 0.3s ease;
+    transition: all var(--animation-slow) ease;
 }
 
 .msg-list-enter, .msg-list-leave-to {
@@ -307,7 +310,7 @@ export default {
 }
 
 .message-stream__pagination-info {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     min-width: 100px;
     text-align: center;

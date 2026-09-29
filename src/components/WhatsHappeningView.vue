@@ -14,7 +14,7 @@
                 <div class="whats-happening__header-text">
                     <h2 class="whats-happening__title">{{ t('teamhub', 'What’s new') }}</h2>
                     <span class="whats-happening__subtitle">
-                        {{ t('teamhub', 'Stay up to date across all your teams') }}
+                        {{ t('teamhub', 'Stay up to date across all teams') }}
                     </span>
                 </div>
                 <!-- v4.5.39 — opens the control drawer. Narrow screens only:
@@ -76,7 +76,7 @@
             </div>
 
             <div v-if="loading && !items.length" class="whats-happening__loading">
-                <NcLoadingIcon :size="32" />
+                <NcLoadingIcon :size="ICON_LARGE" />
             </div>
 
             <NcEmptyContent
@@ -157,17 +157,13 @@ import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
 import { showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import {
-    NcButton,
-    NcLoadingIcon,
-    NcEmptyContent,
-} from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcEmptyContent } from '@nextcloud/vue'
 import FilterVariant from 'vue-material-design-icons/FilterVariant.vue'
 import Rss from 'vue-material-design-icons/Rss.vue'
 import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 import FeedItemCard from './feed/FeedItemCard.vue'
 import FeedControlRail from './feed/FeedControlRail.vue'
-import { ICON_BODY, ICON_HERO } from '../constants/uiTokens.js'
+import { ICON_BODY, ICON_HERO, ICON_LARGE } from '../constants/uiTokens.js'
 import { mentionsUser } from '../lib/mentions.js'
 import { personalSettingsUrl } from '../lib/openProject.js'
 import {
@@ -245,6 +241,7 @@ export default {
 
     data() {
         return {
+            ICON_LARGE,
             items: [],
             loading: false,
             loadingMore: false,
@@ -656,7 +653,7 @@ export default {
                 }
                 this.savedDefaultsAt = Date.now()
             } catch (e) {
-                showError(t('teamhub', 'Could not save your feed defaults.'))
+                showError(t('teamhub', 'Could not save the feed defaults.'))
             } finally {
                 this.savingDefaults = false
             }
@@ -765,7 +762,7 @@ export default {
        the content gets ~93% of a 390px screen. */
     @media (max-width: 900px) {
         flex-direction: column;
-        padding: 16px 14px 24px 14px;
+        padding: 16px 16px 24px 16px;
     }
 }
 
@@ -774,7 +771,7 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
 }
 
 .whats-happening__header {
@@ -789,7 +786,7 @@ export default {
 .whats-happening__header-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     flex: 1 1 auto;
     min-width: 0;
 }
@@ -825,14 +822,14 @@ export default {
         position: fixed;
         // Matches the drawer: both start below NC's own header rather than
         // under it.
-        inset: var(--header-height, 50px) 0 0 0;
+        inset: var(--header-height, 52px) 0 0 0;
         z-index: 1000; // under the drawer, over everything else
-        background: rgba(0, 0, 0, 0.32);
+        background: var(--color-box-shadow);
     }
 
     // Clearance for NC's sidebar-toggle button, which sits over this row only.
     .whats-happening__header {
-        padding-left: 44px;
+        padding-inline-start: 44px;
     }
 }
 
@@ -848,8 +845,8 @@ export default {
 .whats-happening__tab {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
+    gap: 8px;
+    padding: 4px 12px;
     border: 1px solid var(--color-border);
     border-radius: var(--th-radius-pill, 999px);
     background: var(--color-main-background);
@@ -915,7 +912,7 @@ export default {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 .whats-happening__loading {
@@ -934,7 +931,7 @@ export default {
     margin-bottom: 12px;
     padding: 8px 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--th-radius-card, var(--border-radius-large));
+    border-radius: var(--th-radius-card, var(--border-radius-element));
     background: var(--color-background-hover);
     color: var(--color-main-text);
     font-size: var(--th-font-meta, 12px);

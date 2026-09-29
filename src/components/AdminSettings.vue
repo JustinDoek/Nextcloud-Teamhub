@@ -12,7 +12,7 @@
                 :aria-selected="activeTab === tab.id"
                 :aria-controls="'tab-panel-' + tab.id"
                 @click="activeTab = tab.id">
-                <component :is="tab.icon" :size="18" />
+                <component :is="tab.icon" :size="ICON_BODY" />
                 {{ tab.label }}
             </button>
         </div>
@@ -32,7 +32,7 @@
                  saving/saved appears and clears. -->
             <div class="admin-autosave" role="status" aria-live="polite">
                 <template v-if="saving">
-                    <NcLoadingIcon :size="16" />
+                    <NcLoadingIcon :size="ICON_BODY" />
                     <span>{{ t('teamhub', 'Saving…') }}</span>
                 </template>
                 <span v-else-if="saveError" class="admin-autosave__err">{{ saveError }}</span>
@@ -48,9 +48,25 @@
                  "this instance has been reviewed" is a fact about the
                  instance. Dismissing is reversible via the button below, so
                  an admin can't lose the checklist permanently. -->
-            <div v-if="!form.onboardingChecklistDismissed" class="admin-setup">
+            <!-- v4.10.51 — redesigned as a card in the app's own style:
+                 the main background (no grey panel), a summary chip in the
+                 head, and a round MDI status icon per row instead of the
+                 ✓ ⚠ • glyphs (ui-standards: MDI icons, not glyph characters).
+                 The state is still carried in text as well as colour. -->
+            <section
+                v-if="!form.onboardingChecklistDismissed"
+                class="admin-setup"
+                aria-labelledby="admin-setup-title">
                 <div class="admin-setup__head">
-                    <h3 class="admin-setup__title">{{ t('teamhub', 'Setup checklist') }}</h3>
+                    <div class="admin-setup__heading">
+                        <h3 id="admin-setup-title" class="admin-setup__title">{{ t('teamhub', 'Setup checklist') }}</h3>
+                        <NcChip
+                            no-close
+                            :variant="setupAttentionCount > 0 ? 'warning' : 'success'"
+                            :text="setupAttentionCount > 0
+                                ? n('teamhub', '{n} to review', '{n} to review', setupAttentionCount, { n: setupAttentionCount })
+                                : t('teamhub', 'All set')" />
+                    </div>
                     <!-- TRANSLATORS: button label — hides the setup checklist
                          from this instance's admin settings. "Dismiss" here
                          means hide/close, not reject or decline. -->
@@ -65,25 +81,74 @@
                     {{ t('teamhub', 'Current state of the settings that most affect how TeamHub behaves on this server. These rows read live configuration, so they always reflect what is set right now.') }}
                 </p>
 
-                <div class="admin-setup__rows">
-                    <div v-for="row in setupChecklist" :key="row.id" class="admin-setup__row">
-                        <span
-                            class="admin-setup__indicator"
-                            :class="'admin-setup__indicator--' + row.state"
-                            aria-hidden="true">
-                            {{ row.glyph }}
+                <ul class="admin-setup__rows">
+                    <li
+                        v-for="row in setupChecklist"
+                        :key="row.id"
+                        class="admin-setup__row"
+                        :class="'admin-setup__row--' + row.state">
+                        <span class="admin-setup__status" :class="'admin-setup__status--' + row.state">
+                            <component :is="setupStatusIcon(row.state)" :size="ICON_INLINE" />
+                            <span class="admin-setup__sr">{{ setupStatusLabel(row.state) }}</span>
                         </span>
-                        <span class="admin-setup__label">{{ row.label }}</span>
-                        <span class="admin-setup__value">{{ row.value }}</span>
-                        <span v-if="row.hint" class="admin-setup__hint">{{ row.hint }}</span>
-                    </div>
-                </div>
-            </div>
+                        <div class="admin-setup__body">
+                            <div class="admin-setup__line">
+                                <span class="admin-setup__label">{{ row.label }}</span>
+                                <span class="admin-setup__value">{{ row.value }}</span>
+                            </div>
+                            <p v-if="row.hint" class="admin-setup__hint">{{ row.hint }}</p>
+                        </div>
+                        <!-- v4.10.23 — the one write on this checklist. An
+                             instance-wide claim that only the holding team
+                             could undo would leave an administrator with no
+                             way to move a desk that ended up in the wrong
+                             team. Deliberately a release, not a reassign:
+                             where it goes instead is the next team's own
+                             decision, in their Services tab. -->
+                        <NcButton
+                            v-if="row.id === 'servicedesk' && serviceDesk && serviceDesk.holderTeamId"
+                            class="admin-setup__action"
+                            variant="secondary"
+                            :disabled="serviceDeskReleasing"
+                            @click="serviceDeskConfirm = true">
+                            {{ t('teamhub', 'Release') }}
+                        </NcButton>
+                    </li>
+                </ul>
+            </section>
             <div v-else class="admin-setup__restore">
                 <NcButton variant="tertiary" @click="setChecklistDismissed(false)">
                     {{ t('teamhub', 'Show setup checklist') }}
                 </NcButton>
             </div>
+
+            <!-- Taking an instance-wide claim off a team stops every request
+                 button on the server. Confirmed first, naming the team, and
+                 saying the two things that are easy to assume wrongly: the
+                 team itself survives, and so does what is already in its
+                 queue. -->
+            <NcDialog
+                v-if="serviceDeskConfirm && serviceDesk && serviceDesk.holderTeamId"
+                :name="t('teamhub', 'Release the Nextcloud services?')"
+                :open="serviceDeskConfirm"
+                @update:open="serviceDeskConfirm = $event">
+                <div class="admin-setup__confirm">
+                    <p>
+                        {{ t('teamhub', '{team} will stop answering the Nextcloud services. The buttons that start these requests disappear for everybody on this server until a team answers them again.', { team: serviceDesk.holderName }) }}
+                    </p>
+                    <p>
+                        {{ t('teamhub', 'The team itself is not changed, and requests already in its queue can still be finished. Its admins can switch the services back on from the team\'s Services tab.') }}
+                    </p>
+                    <div class="admin-setup__confirm-footer">
+                        <NcButton variant="secondary" @click="serviceDeskConfirm = false">
+                            {{ t('teamhub', 'Cancel') }}
+                        </NcButton>
+                        <NcButton variant="primary" :disabled="serviceDeskReleasing" @click="releaseServiceDesk">
+                            {{ t('teamhub', 'Release') }}
+                        </NcButton>
+                    </div>
+                </div>
+            </NcDialog>
 
             <NcSettingsSection
                 :name="t('teamhub', 'Team creation wizard')"
@@ -109,7 +174,7 @@
                     <label for="admin-expiry-warning-days" class="admin-inline-field__label">
                         {{ t('teamhub', 'Warn this many days before the date') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="admin-expiry-warning-days"
                         v-model.number="form.expiryWarningDays"
                         type="number"
@@ -117,7 +182,8 @@
                         :min="expiryWarningDaysMin"
                         :max="expiryWarningDaysMax"
                         aria-describedby="admin-expiry-warning-hint"
-                        @change="onExpiryWarningDaysInput" />
+                        @change="onExpiryWarningDaysInput"
+                        label-outside />
                 </div>
                 <p id="admin-expiry-warning-hint" class="admin-section-hint">
                     {{ t('teamhub', 'Between {min} and {max}. A value outside that range is stored as the nearest allowed one.', { min: expiryWarningDaysMin, max: expiryWarningDaysMax }) }}
@@ -129,20 +195,19 @@
                 :description="t('teamhub', 'Only members of the selected groups can create teams. Leave empty to allow all users.')">
 
                 <!-- Selected group chips -->
+                <!-- v4.10.10: selected groups are removable NcChips (design guide § Chips). -->
                 <div v-if="selectedGroups.length" class="admin-group-chips">
-                    <span
+                    <NcChip
                         v-for="g in selectedGroups"
                         :key="g.id"
-                        class="admin-group-chip">
-                        <AccountGroup :size="14" />
-                        {{ g.displayName }}
-                        <button
-                            class="admin-group-chip__remove"
-                            :aria-label="t('teamhub', 'Remove {name}', { name: g.displayName })"
-                            @click="removeGroup(g)">
-                            <CloseIcon :size="14" />
-                        </button>
-                    </span>
+                        variant="primary"
+                        :text="g.displayName"
+                        :aria-label-close="t('teamhub', 'Remove {name}', { name: g.displayName })"
+                        @close="removeGroup(g)">
+                        <template #icon>
+                            <AccountGroup :size="ICON_INLINE" />
+                        </template>
+                    </NcChip>
                 </div>
 
                 <!-- Group typeahead search -->
@@ -159,19 +224,25 @@
                             :key="g.id"
                             class="admin-group-result"
                             @mousedown.prevent="addGroup(g)">
-                            <AccountGroup :size="18" />
+                            <AccountGroup :size="ICON_BODY" />
                             <span class="admin-group-result__name">{{ g.displayName }}</span>
                             <span class="admin-group-result__id">{{ g.id }}</span>
                         </li>
                     </ul>
                     <p v-else-if="groupSearching" class="admin-group-hint">
-                        <NcLoadingIcon :size="16" /> {{ t('teamhub', 'Searching…') }}
+                        <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Searching…') }}
                     </p>
                     <p v-else-if="groupQuery.length >= 1 && !groupSearching" class="admin-group-hint">
                         {{ t('teamhub', 'No groups found') }}
                     </p>
                 </div>
             </NcSettingsSection>
+
+            <!-- v4.10.23 — the "group that processes team requests" section
+                 was here. Requesting a new team is one of the six Nextcloud
+                 services, and the service team that holds them creates the
+                 team; there is no group left to pick (DESIGN §2.146). Which
+                 team holds them is the checklist row above. -->
 
             <!-- ── Allowed invite types (moved here from the Invitations tab
                  in v4.4.13) ────────────────────────────────────────────────
@@ -227,59 +298,94 @@
                 </div>
             </NcSettingsSection>
 
+            <!-- ── Telling people apart (v4.10.7) ──────────────────────────
+                 Two colleagues with the same name: the line under the name
+                 in every picker (invite, wizard, bulk create, owner picker,
+                 audit filter, @mentions) is built from the profile fields
+                 ticked here, in this order, two values at most. The email or
+                 the uid — Nextcloud's own fallback — says nothing in most
+                 organisations; the job title, the organisation or the
+                 department-as-group does. Which of those is filled in is a
+                 property of this instance, hence a setting. Autosaves like
+                 the invite types above. -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Telling people apart')"
+                :description="t('teamhub', 'When two people share a name, the line under the name in every search result says which one it is. Choose the profile fields that line is built from; the first two that are filled in are shown, in this order. A field a person set to private on their profile is only shown to administrators.')">
+                <div class="admin-invite-types">
+                    <NcCheckboxRadioSwitch
+                        v-for="field in sublineFieldsAvailable"
+                        :key="field"
+                        :model-value="sublineFields.includes(field)"
+                        type="checkbox"
+                        @update:model-value="toggleSublineField(field, $event)">
+                        {{ sublineFieldLabel(field) }}
+                        <template #description>{{ sublineFieldHint(field) }}</template>
+                    </NcCheckboxRadioSwitch>
+                </div>
+                <p v-if="sublineFields.length === 0" class="admin-section-hint">
+                    {{ t('teamhub', 'No field is selected: search results show the name only.') }}
+                </p>
+            </NcSettingsSection>
+
             <!-- ── Team Folders integration status ────────────────────────── -->
             <NcSettingsSection
                 :name="t('teamhub', 'Team Folders integration')"
                 :description="t('teamhub', 'When Team Folders is installed and properly configured, TeamHub will automatically create a Team Folder for each new team instead of a shared personal folder. Team Folders are owned by the server, not by individual users.')">
 
-                <div class="admin-gf-status">
-                    <div class="admin-gf-status__row">
-                        <span
-                            class="admin-gf-status__indicator"
-                            :class="gfDelegation.groupFoldersInstalled ? 'admin-gf-status__indicator--ok' : 'admin-gf-status__indicator--warn'"
-                            aria-hidden="true">
-                            {{ gfDelegation.groupFoldersInstalled ? '✓' : '✗' }}
+                <!-- v4.10.51 — the checklist's row style (round MDI status
+                     icon, label, hint) and NcNoteCard for the verdict, in
+                     place of ✓ ✗ ⚠ glyphs and hand-tinted banners. -->
+                <ul class="admin-setup__rows admin-gf-status">
+                    <li class="admin-setup__row">
+                        <span class="admin-setup__status" :class="gfDelegation.groupFoldersInstalled ? 'admin-setup__status--ok' : 'admin-setup__status--warn'">
+                            <component :is="setupStatusIcon(gfDelegation.groupFoldersInstalled ? 'ok' : 'warn')" :size="ICON_INLINE" />
+                            <span class="admin-setup__sr">{{ setupStatusLabel(gfDelegation.groupFoldersInstalled ? 'ok' : 'warn') }}</span>
                         </span>
-                        <span class="admin-gf-status__label">
-                            {{ t('teamhub', 'Team Folders app installed') }}
+                        <div class="admin-setup__body">
+                            <span class="admin-setup__label">{{ t('teamhub', 'Team Folders app installed') }}</span>
+                            <p v-if="!gfDelegation.groupFoldersInstalled" class="admin-setup__hint">
+                                {{ t('teamhub', 'Install the Team Folders app to enable automatic team folder creation.') }}
+                            </p>
+                        </div>
+                    </li>
+                    <li class="admin-setup__row">
+                        <span class="admin-setup__status" :class="gfDelegation.teamCreatorGroupsConfigured ? 'admin-setup__status--ok' : 'admin-setup__status--warn'">
+                            <component :is="setupStatusIcon(gfDelegation.teamCreatorGroupsConfigured ? 'ok' : 'warn')" :size="ICON_INLINE" />
+                            <span class="admin-setup__sr">{{ setupStatusLabel(gfDelegation.teamCreatorGroupsConfigured ? 'ok' : 'warn') }}</span>
                         </span>
-                        <span v-if="!gfDelegation.groupFoldersInstalled" class="admin-gf-status__hint">
-                            {{ t('teamhub', 'Install the Team Folders app to enable automatic team folder creation.') }}
-                        </span>
-                    </div>
+                        <div class="admin-setup__body">
+                            <span class="admin-setup__label">{{ t('teamhub', 'Team-creator group configured above') }}</span>
+                            <p v-if="!gfDelegation.teamCreatorGroupsConfigured" class="admin-setup__hint">
+                                {{ t('teamhub', 'Set a team-creator group above. Without one, group creation permissions cannot be verified.') }}
+                            </p>
+                        </div>
+                    </li>
+                </ul>
 
-                    <div class="admin-gf-status__row">
-                        <span
-                            class="admin-gf-status__indicator"
-                            :class="gfDelegation.teamCreatorGroupsConfigured ? 'admin-gf-status__indicator--ok' : 'admin-gf-status__indicator--warn'"
-                            aria-hidden="true">
-                            {{ gfDelegation.teamCreatorGroupsConfigured ? '✓' : '⚠' }}
-                        </span>
-                        <span class="admin-gf-status__label">
-                            {{ t('teamhub', 'Team-creator group configured above') }}
-                        </span>
-                        <span v-if="!gfDelegation.teamCreatorGroupsConfigured" class="admin-gf-status__hint">
-                            {{ t('teamhub', 'Set a team-creator group above. Without one, group creation permissions cannot be verified.') }}
-                        </span>
-                    </div>
-
-                    <p
-                        v-if="gfDelegation.groupFoldersInstalled && gfDelegation.teamCreatorGroupsConfigured"
-                        class="admin-gf-status__summary admin-gf-status__summary--ok">
-                        {{ t('teamhub', 'Team Folders is correctly configured. New teams will automatically get a Team Folder.') }}
-                    </p>
-                    <p
-                        v-else-if="gfDelegation.groupFoldersInstalled"
-                        class="admin-gf-status__summary admin-gf-status__summary--warn">
-                        {{ t('teamhub', 'Team Folders is installed but not fully configured. New teams will fall back to shared personal folders until the issues above are resolved.') }}
-                    </p>
-                    <p
-                        v-else
-                        class="admin-gf-status__summary">
-                        {{ t('teamhub', 'Team Folders is not installed. New teams will use shared personal folders.') }}
-                    </p>
-                </div>
+                <NcNoteCard
+                    v-if="gfDelegation.groupFoldersInstalled && gfDelegation.teamCreatorGroupsConfigured"
+                    type="success">
+                    {{ t('teamhub', 'Team Folders is correctly configured. New teams will automatically get a Team Folder.') }}
+                </NcNoteCard>
+                <NcNoteCard v-else-if="gfDelegation.groupFoldersInstalled" type="warning">
+                    {{ t('teamhub', 'Team Folders is installed but not fully configured. New teams will fall back to shared personal folders until the issues above are resolved.') }}
+                </NcNoteCard>
+                <NcNoteCard v-else type="info">
+                    {{ t('teamhub', 'Team Folders is not installed. New teams will use shared personal folders.') }}
+                </NcNoteCard>
             </NcSettingsSection>
+
+            <!-- v4.10.50 — teams made outside TeamHub (DESIGN §2.149). The
+                 same grid is a widget on the team that holds the Nextcloud
+                 services; notifications and requests link to #team-adoption.
+                 `v-if` so it fetches only while this tab is open. -->
+            <div id="team-adoption">
+                <NcSettingsSection
+                    :name="t('teamhub', 'Teams made outside TeamHub')"
+                    :description="t('teamhub', 'Teams made in Contacts, on the Teams page or by a provisioning tool are not in TeamHub until they are accepted here, with a template and a policy. Without a team creator group they are accepted by themselves; when a team holds the Nextcloud services, its members decide too.')">
+                    <TeamAdoptionGrid v-if="activeTab === 'creation'" />
+                </NcSettingsSection>
+            </div>
 
         </div>
 
@@ -332,7 +438,7 @@
                 :description="t('teamhub', 'Write teams out to a CSV file in the importer’s own format, either all of them or a selection.')">
                 <TeamExportPanel v-if="licenseActive && activeTab === 'importexport'" />
                 <div v-else-if="!licenseActive" class="integrity-banner integrity-banner--info">
-                    <InformationOutline :size="18" />
+                    <InformationOutline :size="ICON_BODY" />
                     <span>
                         {{ t('teamhub', 'Bulk team export requires an active TeamHub license. Add or renew a license in the License tab to unlock it.') }}
                     </span>
@@ -353,7 +459,7 @@
                  nothing shifts as saving/saved appears and clears. -->
             <div class="admin-autosave" role="status" aria-live="polite">
                 <template v-if="saving">
-                    <NcLoadingIcon :size="16" />
+                    <NcLoadingIcon :size="ICON_BODY" />
                     <span>{{ t('teamhub', 'Saving…') }}</span>
                 </template>
                 <span v-else-if="saveError" class="admin-autosave__err">{{ saveError }}</span>
@@ -439,6 +545,32 @@
                             {{ t('teamhub', 'Needs a license') }}
                         </span>
                     </div>
+
+                    <!-- v4.10.46 — Service teams: licensed, with a switch, and
+                         off by default. Not because it needs something else
+                         installed the way OpenProject does, but because it
+                         changes how the organisation asks each other for
+                         things, and a client adopts that when its people are
+                         ready. Like the OpenProject row, the switch appears
+                         only while a licence is active. -->
+                    <div class="admin-compact-row">
+                        <div class="admin-compact-row__text">
+                            <span class="admin-compact-row__name">{{ t('teamhub', 'Service teams module') }}</span>
+                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the Service template, publish services and answer requests from a queue, and everybody on the server gets the Service catalog in the navigation. When disabled, all of it is hidden across the app. Nothing is deleted: existing service teams, their services and their requests come back when it is switched on again.') }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            v-if="licenseActive"
+                            class="admin-compact-row__control"
+                            :model-value="form.serviceTeamsModuleEnabled"
+                            type="switch"
+                            :aria-label="t('teamhub', 'Enable service teams module for all teams')"
+                            @update:model-value="form.serviceTeamsModuleEnabled = $event; save()">
+                            {{ form.serviceTeamsModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                        </NcCheckboxRadioSwitch>
+                        <span v-else class="admin-compact-row__control admin-compact-row__derived">
+                            {{ t('teamhub', 'Needs a license') }}
+                        </span>
+                    </div>
                 </div>
             </NcSettingsSection>
 
@@ -493,7 +625,7 @@
                 :description="t('teamhub', 'Integrations registered by installed apps via the TeamHub API. Registration and deregistration require NC admin access and are done via the REST API or the app\'s own settings.')">
 
                 <div v-if="integrationsLoading" class="admin-integrations-loading">
-                    <NcLoadingIcon :size="24" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                     <span>{{ t('teamhub', 'Loading integrations…') }}</span>
                 </div>
 
@@ -562,7 +694,7 @@
                 :description="t('teamhub', 'Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team — directly, via a group, or via a sub-team — and is the metric per-seat licensing keys off.')">
 
                 <div v-if="telemetryLoading" class="admin-loading">
-                    <NcLoadingIcon :size="24" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
                 <div v-else class="admin-stat-grid">
                     <div class="admin-stat-card">
@@ -591,22 +723,23 @@
                         @input="onAuditUserQueryInput"
                         @keydown.enter.prevent="runAuditUserSearchNow">
                         <template #icon>
-                            <MagnifyIcon :size="18" />
+                            <MagnifyIcon :size="ICON_BODY" />
                         </template>
                     </NcTextField>
 
                     <ul v-if="audit_userResults.length" class="admin-owner-results audit-user-lookup__results">
+                        <!-- v4.10.7 — the shared person row; an administrator's
+                             picker also sees private profile fields. -->
                         <li
                             v-for="u in audit_userResults"
-                            :key="u.uid"
+                            :key="u.id"
                             class="admin-owner-result"
                             @mousedown.prevent="selectAuditUser(u)">
-                            {{ u.displayName }}
-                            <span class="admin-owner-result__uid">({{ u.uid }})</span>
+                            <PersonRow :id="u.id" :display-name="u.displayName" :subline="u.subline" />
                         </li>
                     </ul>
                     <p v-else-if="audit_userSearching" class="admin-section-hint">
-                        <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
+                        <NcLoadingIcon :size="ICON_INLINE" /> {{ t('teamhub', 'Searching…') }}
                     </p>
                 </div>
 
@@ -625,7 +758,7 @@
 
                 <!-- Loading -->
                 <div v-if="audit_teamsLoading" class="admin-loading">
-                    <NcLoadingIcon :size="24" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                     <span>{{ t('teamhub', 'Loading teams…') }}</span>
                 </div>
 
@@ -752,8 +885,8 @@
                             :disabled="audit_selectedTeamIds.length === 0 || audit_removeBusy"
                             @click="openAuditRemoveConfirm">
                             <template #icon>
-                                <NcLoadingIcon v-if="audit_removeBusy" :size="18" />
-                                <AccountRemoveIcon v-else :size="18" />
+                                <NcLoadingIcon v-if="audit_removeBusy" :size="ICON_BODY" />
+                                <AccountRemoveIcon v-else :size="ICON_BODY" />
                             </template>
                             {{ t('teamhub', 'Remove from selected teams') }}
                         </NcButton>
@@ -794,7 +927,7 @@
                 :description="t('teamhub', 'The fields listed here are everything TeamHub would include in an anonymous daily usage report. An active license (paid or trial) disables all telemetry — nothing on this list leaves the instance while your license is active. Unlicensed and soft-locked instances contribute this aggregate for capacity planning; no user IDs, no message bodies, no custom-link URLs (only bare hostnames).')">
 
                 <div v-if="telemetryLoading" class="admin-loading">
-                    <NcLoadingIcon :size="24" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
                 <template v-else>
                     <div
@@ -876,16 +1009,15 @@
                     <label for="maint-perpage-select" class="maint-perpage-label">
                         {{ t('teamhub', 'Per page:') }}
                     </label>
-                    <select
-                        id="maint-perpage-select"
+                    <NcSelect
+                        input-id="maint-perpage-select"
+                        label-outside
                         v-model="teamsPerPage"
                         class="admin-select"
-                        @change="reloadTeams">
-                        <option :value="10">10</option>
-                        <option :value="20">20</option>
-                        <option :value="50">50</option>
-                        <option :value="100">100</option>
-                    </select>
+                        @update:model-value="reloadTeams"
+                        :options="[{ id: 10, label: 10 }, { id: 20, label: 20 }, { id: 50, label: 50 }, { id: 100, label: 100 }]"
+                        :reduce="o => o.id"
+                        :clearable="false" />
                 </div>
             </div>
 
@@ -896,7 +1028,7 @@
                  otherwise be invisible. Each name searches the table down to
                  that team, which is where the request is decided. -->
             <div v-if="expiryRequests.length" class="maint-req-banner" role="status">
-                <CalendarClockIcon :size="18" aria-hidden="true" />
+                <CalendarClockIcon :size="ICON_BODY" aria-hidden="true" />
                 <span class="maint-req-banner__text">
                     {{ n('teamhub',
                          '{n} team is waiting for a decision on its expiration date:',
@@ -917,7 +1049,7 @@
 
             <!-- ── Loading / error / empty states ─────────────────────── -->
             <div v-if="teamsLoading" class="admin-loading">
-                <NcLoadingIcon :size="24" />
+                <NcLoadingIcon :size="ICON_LARGE" />
                 <span>{{ t('teamhub', 'Loading teams…') }}</span>
             </div>
             <div v-else-if="teamsError" class="admin-error">
@@ -1019,7 +1151,7 @@
                                  A stale link (made against another host) is
                                  said in words, not only in tone. -->
                             <p v-if="team.openproject" class="maint-op-link">
-                                <LinkVariantIcon :size="14" aria-hidden="true" />
+                                <LinkVariantIcon :size="ICON_INLINE" aria-hidden="true" />
                                 <span class="maint-op-link__label">{{ t('teamhub', 'OpenProject:') }}</span>
                                 <a
                                     v-if="team.openproject.url"
@@ -1105,8 +1237,8 @@
                                         :title="t('teamhub', 'Save')"
                                         @click="saveTeamExpiry(team)">
                                         <template #icon>
-                                            <NcLoadingIcon v-if="expirySaving" :size="18" />
-                                            <ContentSave v-else :size="18" />
+                                            <NcLoadingIcon v-if="expirySaving" :size="ICON_BODY" />
+                                            <ContentSave v-else :size="ICON_BODY" />
                                         </template>
                                     </NcButton>
                                     <NcButton
@@ -1116,7 +1248,7 @@
                                         :aria-label="t('teamhub', 'Remove the expiration date for {name}', { name: team.name })"
                                         :title="t('teamhub', 'Remove the expiration date entirely')"
                                         @click="clearTeamExpiry(team)">
-                                        <template #icon><CalendarRemoveIcon :size="18" /></template>
+                                        <template #icon><CalendarRemoveIcon :size="ICON_BODY" /></template>
                                     </NcButton>
                                     <NcButton
                                         variant="tertiary"
@@ -1124,31 +1256,33 @@
                                         :aria-label="t('teamhub', 'Cancel editing the expiration date')"
                                         :title="t('teamhub', 'Cancel')"
                                         @click="cancelExpiryEdit">
-                                        <template #icon><CloseIcon :size="18" /></template>
+                                        <template #icon><CloseIcon :size="ICON_BODY" /></template>
                                     </NcButton>
                                 </div>
                             </div>
 
                             <!-- Read state -->
-                            <button
+                            <NcButton
                                 v-else
-                                type="button"
                                 class="maint-expiry-btn"
                                 :class="expiryToneClass(team)"
                                 :aria-label="team.expiry
                                     ? t('teamhub', 'Change the expiration date for {name}', { name: team.name })
                                     : t('teamhub', 'Set an expiration date for {name}', { name: team.name })"
                                 :title="expiryTitle(team)"
-                                @click="startExpiryEdit(team)">
-                                <!-- Never colour alone (WCAG 1.4.1): an expiring
-                                     or expired date carries an icon and words
-                                     as well as a tone. -->
-                                <AlertCircleOutlineIcon
+                                @click="startExpiryEdit(team)"
+                                variant="tertiary">
+                                <template #icon>
+                                    <AlertCircleOutlineIcon
                                     v-if="team.expiry && (team.expiry.expired || team.expiry.warning)"
-                                    :size="14"
+                                    :size="ICON_INLINE"
                                     aria-hidden="true" />
+                                </template>
+                                <!-- Never colour alone (WCAG 1.4.1): an expiring
+                                or expired date carries an icon and words
+                                as well as a tone. -->
                                 <span>{{ expiryLabel(team) }}</span>
-                            </button>
+                            </NcButton>
 
                             <!-- Pending request — the decision is made from this
                                  row rather than a second table further down the
@@ -1162,13 +1296,13 @@
                                  horizontal scroll clipped it. A decision with four
                                  fields is not a popout. -->
                             <div v-if="team.expiry_request_pending" class="maint-expiry-req">
-                                <button
-                                    type="button"
+                                <NcButton
                                     class="maint-expiry-pending maint-expiry-pending--btn"
                                     :aria-label="t('teamhub', 'Decide the extension request for {name}', { name: team.name })"
-                                    @click="openExpiryRequest(team)">
+                                    @click="openExpiryRequest(team)"
+                                    variant="tertiary">
                                     <span>{{ t('teamhub', 'Extension requested') }}</span>
-                                </button>
+                                </NcButton>
                             </div>
                         </div>
 
@@ -1183,17 +1317,17 @@
                                     :placeholder="t('teamhub', 'Type a username…')"
                                     @input="onOwnerSearch" />
                                 <ul v-if="ownerResults.length" class="admin-owner-results">
+                                    <!-- v4.10.7 — the shared person row. -->
                                     <li
                                         v-for="u in ownerResults"
-                                        :key="u.uid"
+                                        :key="u.id"
                                         class="admin-owner-result"
                                         @mousedown.prevent="confirmAssignOwner(team, u)">
-                                        {{ u.displayName }}
-                                        <span class="admin-owner-result__uid">({{ u.uid }})</span>
+                                        <PersonRow :id="u.id" :display-name="u.displayName" :subline="u.subline" />
                                     </li>
                                 </ul>
                                 <p v-else-if="ownerSearching" class="admin-section-hint">
-                                    <NcLoadingIcon :size="14" /> {{ t('teamhub', 'Searching…') }}
+                                    <NcLoadingIcon :size="ICON_INLINE" /> {{ t('teamhub', 'Searching…') }}
                                 </p>
                                 <!-- v4.8.35 — until now this form rendered
                                      nothing at all unless it had results: a
@@ -1221,7 +1355,7 @@
                                     :aria-label="t('teamhub', 'Set owner for {name}', { name: team.name })"
                                     :title="t('teamhub', 'Set owner')"
                                     @click="startAssignOwner(team)">
-                                    <template #icon><AccountEditIcon :size="18" /></template>
+                                    <template #icon><AccountEditIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                                 <!-- v4.6.17 — write to the team's owner, in the
                                      admin's own mail client. Present only when
@@ -1236,7 +1370,7 @@
                                     target="_blank"
                                     :aria-label="t('teamhub', 'Email the owner of {name}', { name: team.name })"
                                     :title="t('teamhub', 'Email owner ({owner})', { owner: team.owner_display_name })">
-                                    <template #icon><EmailOutlineIcon :size="18" /></template>
+                                    <template #icon><EmailOutlineIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                                 <!-- v4.8.16 — apply a policy profile to a team
                                      that already exists (Track F2b).
@@ -1258,7 +1392,7 @@
                                     :aria-label="t('teamhub', 'Apply a policy profile to {name}', { name: team.name })"
                                     :title="t('teamhub', 'Apply a policy profile')"
                                     @click="openAssignPolicy(team)">
-                                    <template #icon><ShieldLockOutlineIcon :size="18" /></template>
+                                    <template #icon><ShieldLockOutlineIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                                 <NcButton
                                     variant="secondary"
@@ -1267,8 +1401,8 @@
                                     :title="t('teamhub', 'Reset config to clean defaults — clears any corrupted bits set on this team')"
                                     @click="confirmResetTeamConfig(team)">
                                     <template #icon>
-                                        <NcLoadingIcon v-if="resettingConfigTeamId === team.id" :size="18" />
-                                        <RestoreIcon v-else :size="18" />
+                                        <NcLoadingIcon v-if="resettingConfigTeamId === team.id" :size="ICON_BODY" />
+                                        <RestoreIcon v-else :size="ICON_BODY" />
                                     </template>
                                 </NcButton>
                                 <!-- v4.9.4 — remove the team's OpenProject
@@ -1285,8 +1419,8 @@
                                     :title="t('teamhub', 'Unlink OpenProject project')"
                                     @click="confirmUnlinkOpenProject(team)">
                                     <template #icon>
-                                        <NcLoadingIcon v-if="unlinkingOpenProjectTeamId === team.id" :size="18" />
-                                        <LinkOffIcon v-else :size="18" />
+                                        <NcLoadingIcon v-if="unlinkingOpenProjectTeamId === team.id" :size="ICON_BODY" />
+                                        <LinkOffIcon v-else :size="ICON_BODY" />
                                     </template>
                                 </NcButton>
                                 <NcButton
@@ -1296,8 +1430,8 @@
                                     :title="t('teamhub', 'Delete team')"
                                     @click="confirmDeleteTeamRow(team)">
                                     <template #icon>
-                                        <NcLoadingIcon v-if="deletingTeam === team.id" :size="18" />
-                                        <DeleteIcon v-else :size="18" />
+                                        <NcLoadingIcon v-if="deletingTeam === team.id" :size="ICON_BODY" />
+                                        <DeleteIcon v-else :size="ICON_BODY" />
                                     </template>
                                 </NcButton>
                             </div>
@@ -1363,8 +1497,8 @@
                     :disabled="membershipCheckLoading"
                     @click="runMembershipCheck">
                     <template #icon>
-                        <NcLoadingIcon v-if="membershipCheckLoading" :size="18" />
-                        <WrenchIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="membershipCheckLoading" :size="ICON_BODY" />
+                        <WrenchIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ membershipCheckLoading
                         ? t('teamhub', 'Scanning…')
@@ -1415,8 +1549,8 @@
                                 :disabled="!!membershipRepairing[issue.id + '_nested']"
                                 @click="removeNestedTeam(issue)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_nested']" :size="18" />
-                                    <AccountRemoveIcon v-else :size="18" />
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_nested']" :size="ICON_BODY" />
+                                    <AccountRemoveIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ membershipRepairing[issue.id + '_nested']
                                     ? t('teamhub', 'Removing…')
@@ -1437,8 +1571,8 @@
                                 :disabled="!!membershipRepairing[issue.id + '_dn']"
                                 @click="fixDisplayName(issue)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_dn']" :size="18" />
-                                    <WrenchIcon v-else :size="18" />
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_dn']" :size="ICON_BODY" />
+                                    <WrenchIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ membershipRepairing[issue.id + '_dn']
                                     ? t('teamhub', 'Fixing…')
@@ -1464,8 +1598,8 @@
                                 :disabled="!!membershipRepairing[issue.id + '_noowner']"
                                 @click="assignOwner(issue)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_noowner']" :size="18" />
-                                    <WrenchIcon v-else :size="18" />
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_noowner']" :size="ICON_BODY" />
+                                    <WrenchIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ membershipRepairing[issue.id + '_noowner']
                                     ? t('teamhub', 'Assigning…')
@@ -1486,8 +1620,8 @@
                                 :disabled="!!membershipRepairing[issue.id + '_' + issue.duplicate_uid]"
                                 @click="repairDuplicateMember(issue)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_' + issue.duplicate_uid]" :size="18" />
-                                    <WrenchIcon v-else :size="18" />
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_' + issue.duplicate_uid]" :size="ICON_BODY" />
+                                    <WrenchIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ membershipRepairing[issue.id + '_' + issue.duplicate_uid]
                                     ? t('teamhub', 'Repairing…')
@@ -1508,8 +1642,8 @@
                                 :disabled="!!membershipRepairing[issue.id + '_cfgsingle']"
                                 @click="clearCfgSingle(issue)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_cfgsingle']" :size="18" />
-                                    <WrenchIcon v-else :size="18" />
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_cfgsingle']" :size="ICON_BODY" />
+                                    <WrenchIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ membershipRepairing[issue.id + '_cfgsingle']
                                     ? t('teamhub', 'Repairing…')
@@ -1533,8 +1667,8 @@
                                 :disabled="!!membershipRepairing[issue.id]"
                                 @click="repairMembership(issue.id)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="membershipRepairing[issue.id]" :size="18" />
-                                    <WrenchIcon v-else :size="18" />
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id]" :size="ICON_BODY" />
+                                    <WrenchIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ membershipRepairing[issue.id]
                                     ? t('teamhub', 'Repairing…')
@@ -1560,8 +1694,8 @@
                     :disabled="configCheckLoading"
                     @click="runConfigCheck">
                     <template #icon>
-                        <NcLoadingIcon v-if="configCheckLoading" :size="18" />
-                        <ShieldCheckIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="configCheckLoading" :size="ICON_BODY" />
+                        <ShieldCheckIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ configCheckLoading
                         ? t('teamhub', 'Scanning…')
@@ -1609,8 +1743,8 @@
                             :disabled="resettingConfigTeamId === issue.id"
                             @click="repairConfigIssue(issue)">
                             <template #icon>
-                                <NcLoadingIcon v-if="resettingConfigTeamId === issue.id" :size="18" />
-                                <RestoreIcon v-else :size="18" />
+                                <NcLoadingIcon v-if="resettingConfigTeamId === issue.id" :size="ICON_BODY" />
+                                <RestoreIcon v-else :size="ICON_BODY" />
                             </template>
                             {{ resettingConfigTeamId === issue.id
                                 ? t('teamhub', 'Repairing…')
@@ -1681,15 +1815,15 @@
                     :aria-label="t('teamhub', 'Scan for deleted users')"
                     @click="loadGhostMembers">
                     <template #icon>
-                        <NcLoadingIcon v-if="ghostLoading" :size="18" />
-                        <MagnifyIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="ghostLoading" :size="ICON_BODY" />
+                        <MagnifyIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Scan') }}
                 </NcButton>
             </div>
 
             <div v-if="ghostLoading" class="admin-loading">
-                <NcLoadingIcon :size="24" />
+                <NcLoadingIcon :size="ICON_LARGE" />
                 <span>{{ t('teamhub', 'Scanning team memberships…') }}</span>
             </div>
             <div v-else-if="ghostError" class="admin-error">{{ ghostError }}</div>
@@ -1729,8 +1863,8 @@
                                         :disabled="ghostRemoving[ghost.userId + ':' + team.teamId]"
                                         @click="removeGhostFromTeam(ghost, team)">
                                         <template #icon>
-                                            <NcLoadingIcon v-if="ghostRemoving[ghost.userId + ':' + team.teamId]" :size="16" />
-                                            <AccountRemoveIcon v-else :size="16" />
+                                            <NcLoadingIcon v-if="ghostRemoving[ghost.userId + ':' + team.teamId]" :size="ICON_BODY" />
+                                            <AccountRemoveIcon v-else :size="ICON_BODY" />
                                         </template>
                                         {{ t('teamhub', 'Remove from this team') }}
                                     </NcButton>
@@ -1744,8 +1878,8 @@
                                 :disabled="ghostRemoving[ghost.userId + ':all']"
                                 @click="removeGhostFromAll(ghost)">
                                 <template #icon>
-                                    <NcLoadingIcon v-if="ghostRemoving[ghost.userId + ':all']" :size="16" />
-                                    <DeleteIcon v-else :size="16" />
+                                    <NcLoadingIcon v-if="ghostRemoving[ghost.userId + ':all']" :size="ICON_BODY" />
+                                    <DeleteIcon v-else :size="ICON_BODY" />
                                 </template>
                                 {{ t('teamhub', 'Remove from all teams') }}
                             </NcButton>
@@ -1804,7 +1938,7 @@
                 v-if="!licenseActive"
                 :name="t('teamhub', 'My Work')">
                 <div class="integrity-banner integrity-banner--info">
-                    <InformationOutline :size="18" aria-hidden="true" />
+                    <InformationOutline :size="ICON_BODY" aria-hidden="true" />
                     <span>
                         {{ t('teamhub', 'My Work requires an active TeamHub license. Add or renew a license in the License tab to unlock it.') }}
                     </span>
@@ -1820,6 +1954,19 @@
              is opened rather than on every admin-settings mount; `v-show` on
              the wrapper keeps the panel plumbing identical to every other tab.
              ───────────────────────────────────────────────────────────────── -->
+        <!-- ─────────────────────────────────────────────────────────────────
+             Services tab (v4.10.45) — the service catalog's categories and
+             the service desk / knowledge portal links under it.
+             ───────────────────────────────────────────────────────────────── -->
+        <div
+            v-show="activeTab === 'services'"
+            id="tab-panel-services"
+            role="tabpanel"
+            class="teamhub-admin-panel">
+
+            <ServicesAdminPanel v-if="activeTab === 'services'" />
+        </div>
+
         <div
             v-show="activeTab === 'policy'"
             id="tab-panel-policy"
@@ -1847,7 +1994,7 @@
                 v-if="!complianceUnlocked"
                 :name="t('teamhub', 'Compliance')">
                 <div class="integrity-banner integrity-banner--info">
-                    <InformationOutline :size="18" />
+                    <InformationOutline :size="ICON_BODY" />
                     <span>
                         {{ t('teamhub', 'Compliance tab requires an active TeamHub license. Add or renew a license in the License tab to unlock them.') }}
                     </span>
@@ -1868,7 +2015,7 @@
                      generator, no extra deps. -->
                 <div class="compliance-export">
                     <NcButton variant="secondary" @click="openComplianceReport">
-                        <template #icon><FileDocumentOutlineIcon :size="18" /></template>
+                        <template #icon><FileDocumentOutlineIcon :size="ICON_BODY" /></template>
                         {{ t('teamhub', 'Save compliance report as PDF') }}
                     </NcButton>
                 </div>
@@ -1877,7 +2024,7 @@
                     <!-- Row: Code integrity -->
                     <div class="compliance-row" role="group" :aria-label="t('teamhub', 'Code integrity')">
                         <div v-if="integrity.loading" class="integrity-loading">
-                            <NcLoadingIcon :size="18" />
+                            <NcLoadingIcon :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Verifying code integrity…') }}</span>
                         </div>
                         <div v-else-if="integrity.error" class="admin-save-err">
@@ -1895,10 +2042,10 @@
                                     :aria-label="t('teamhub', 'Code integrity details')"
                                     :title="t('teamhub', 'Code integrity details')">
                                     <template #icon>
-                                        <InformationOutline :size="18" />
+                                        <InformationOutline :size="ICON_BODY" />
                                     </template>
                                     <NcActionText>
-                                        <template #icon><InformationOutline :size="18" /></template>
+                                        <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                         {{ t('teamhub', 'Verifies shipped files against a SHA-256 manifest generated at build time.') }}
                                     </NcActionText>
                                     <NcActionText v-if="complianceControlsByCheck['Code integrity']">
@@ -1946,7 +2093,7 @@
                                         :disabled="integrity.loading"
                                         @click="loadIntegrity">
                                         <template #icon>
-                                            <RefreshIcon :size="18" />
+                                            <RefreshIcon :size="ICON_BODY" />
                                         </template>
                                     </NcButton>
                                 </div>
@@ -1971,10 +2118,10 @@
                                 :aria-label="t('teamhub', 'Telemetry details')"
                                 :title="t('teamhub', 'Telemetry details')">
                                 <template #icon>
-                                    <InformationOutline :size="18" />
+                                    <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ telemetryEnabledDerived
                                         ? t('teamhub', 'Anonymous usage statistics are sent daily. This instance has no active license, so telemetry is enabled.')
                                         : t('teamhub', 'No usage data leaves this instance. An active license disables telemetry automatically.') }}
@@ -2012,20 +2159,20 @@
                                 :aria-label="t('teamhub', 'Allowed invite types details')"
                                 :title="t('teamhub', 'Allowed invite types details')">
                                 <template #icon>
-                                    <InformationOutline :size="18" />
+                                    <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ invitesExternalReach
                                         ? t('teamhub', 'Team admins can invite people from outside this server by email or federated Nextcloud account. Change this on the Team creation tab under Allowed invite types.')
                                         : t('teamhub', 'Invitations are restricted to local Nextcloud accounts and groups. Team admins cannot reach outside this server.') }}
                                 </NcActionText>
                                 <NcActionText v-if="inviteEmail">
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Email invitations: enabled') }}
                                 </NcActionText>
                                 <NcActionText v-if="inviteFederated">
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Federated Nextcloud invitations: enabled') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceControlsByCheck['Allowed invite types']">
@@ -2070,10 +2217,10 @@
                                 :aria-label="t('teamhub', 'Ghost memberships details')"
                                 :title="t('teamhub', 'Ghost memberships details')">
                                 <template #icon>
-                                    <InformationOutline :size="18" />
+                                    <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Deleted Nextcloud users still listed as team members. Clean them up under Maintenance → Deleted users in teams.') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceSummary.report && complianceSummary.report.ghost_memberships.sample_uid">
@@ -2091,7 +2238,7 @@
                                     :disabled="complianceSummary.loading"
                                     @click="loadComplianceSummary">
                                     <template #icon>
-                                        <RefreshIcon :size="18" />
+                                        <RefreshIcon :size="ICON_BODY" />
                                     </template>
                                 </NcButton>
                             </div>
@@ -2131,10 +2278,10 @@
                                 :aria-label="t('teamhub', 'Orphan teams details')"
                                 :title="t('teamhub', 'Orphan teams details')">
                                 <template #icon>
-                                    <InformationOutline :size="18" />
+                                    <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Teams with no live owner. Assign a new owner under Maintenance → All teams to restore governance.') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceSummary.report && complianceSummary.report.orphan_teams.sample_name">
@@ -2200,7 +2347,7 @@
                                 :aria-label="t('teamhub', 'Team profile compliance details')"
                                 :title="t('teamhub', 'Team profile compliance details')">
                                 <template #icon>
-                                    <InformationOutline :size="18" />
+                                    <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <!-- v4.8.15 — the "detected, not prevented"
                                      caveat used to be here and now points at the
@@ -2210,7 +2357,7 @@
                                      this menu is where an admin decides what to
                                      do next. -->
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Teams whose settings no longer match the policy profile they have applied. Check the maintenance tab for the non-compliant teams.') }}
                                 </NcActionText>
                                 <NcActionText v-if="profileCompliance">
@@ -2253,10 +2400,10 @@
                                 :aria-label="t('teamhub', 'Audit log retention details')"
                                 :title="t('teamhub', 'Audit log retention details')">
                                 <template #icon>
-                                    <InformationOutline :size="18" />
+                                    <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="18" /></template>
+                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceControlsByCheck['Audit log retention']">
@@ -2277,7 +2424,7 @@
             <!-- Always-visible info banner: explains hourly cadence -->
             <div class="audit-banner audit-banner--info">
                 <div class="audit-banner__head">
-                    <InformationOutline :size="18" />
+                    <InformationOutline :size="ICON_BODY" />
                     <strong>{{ t('teamhub', 'Audit log updates hourly') }}</strong>
                 </div>
                 <span>{{ t('teamhub', 'External activity (member, file, and share events) is mirrored from Nextcloud once per hour by a background job. New events may take up to an hour to appear here. TeamHub-internal actions (team creation, join requests) are recorded immediately.') }}</span>
@@ -2317,7 +2464,7 @@
                         :disabled="auditRetentionSaving"
                         @input="auditRetentionInput = $event.target.value; onAuditRetentionInput()" />
                     <span class="audit-retention__suffix">{{ t('teamhub', 'days') }}</span>
-                    <NcLoadingIcon v-if="auditRetentionSaving" :size="18" />
+                    <NcLoadingIcon v-if="auditRetentionSaving" :size="ICON_BODY" />
                 </div>
             </div>
 
@@ -2327,28 +2474,24 @@
                     <label class="audit-controls__label" for="audit-team-select">
                         {{ t('teamhub', 'Team') }}
                     </label>
-                    <select
-                        id="audit-team-select"
+                    <NcSelect
+                        input-id="audit-team-select"
+                        label-outside
                         v-model="auditSelectedTeamId"
                         class="audit-controls__team-select"
                         :disabled="auditTeamsLoading"
-                        @change="onAuditTeamChanged">
-                        <option value="">— {{ t('teamhub', 'Select a team') }} —</option>
-                        <option
-                            v-for="t in auditTeams"
-                            :key="t.team_id"
-                            :value="t.team_id">
-                            {{ t.display_name }} ({{ t.event_count }})
-                        </option>
-                    </select>
+                        :options="[{ id: '', label: t('teamhub', 'Select a team') }, ...auditTeams.map(team => ({ id: team.team_id, label: `${team.display_name} (${team.event_count})` }))]"
+                        :reduce="o => o.id"
+                        :clearable="false"
+                        @update:model-value="onAuditTeamChanged" />
                     <NcButton
                         variant="tertiary"
                         :disabled="auditTeamsLoading"
                         :aria-label="t('teamhub', 'Reload teams')"
                         @click="loadAuditTeams">
                         <template #icon>
-                            <NcLoadingIcon v-if="auditTeamsLoading" :size="18" />
-                            <RefreshIcon v-else :size="18" />
+                            <NcLoadingIcon v-if="auditTeamsLoading" :size="ICON_BODY" />
+                            <RefreshIcon v-else :size="ICON_BODY" />
                         </template>
                     </NcButton>
                 </div>
@@ -2359,19 +2502,15 @@
                     <label class="audit-controls__label" for="audit-event-filter">
                         {{ t('teamhub', 'Event types') }}
                     </label>
-                    <select
-                        id="audit-event-filter"
+                    <NcSelect
+                        input-id="audit-event-filter"
+                        label-outside
                         v-model="auditEventTypeFilter"
                         class="audit-controls__filter-select"
-                        @change="resetAndLoadAuditEvents">
-                        <option value="">{{ t('teamhub', 'All events') }}</option>
-                        <option
-                            v-for="ev in auditEventCatalogue"
-                            :key="ev"
-                            :value="ev">
-                            {{ ev }}
-                        </option>
-                    </select>
+                        @update:model-value="resetAndLoadAuditEvents"
+                        :options="[{ id: '', label: t('teamhub', 'All events') }, ...auditEventCatalogue.map(ev => ({ id: ev, label: ev }))]"
+                        :reduce="o => o.id"
+                        :clearable="false" />
                 </div>
 
                 <div v-if="auditSelectedTeamId" class="audit-controls__row">
@@ -2398,8 +2537,8 @@
                         :disabled="auditExporting || !auditSelectedTeamId"
                         @click="exportAuditTeam">
                         <template #icon>
-                            <NcLoadingIcon v-if="auditExporting" :size="18" />
-                            <DownloadIcon v-else :size="18" />
+                            <NcLoadingIcon v-if="auditExporting" :size="ICON_BODY" />
+                            <DownloadIcon v-else :size="ICON_BODY" />
                         </template>
                         {{ auditExporting ? t('teamhub', 'Exporting…') : t('teamhub', 'Download ZIP') }}
                     </NcButton>
@@ -2408,14 +2547,14 @@
 
             <!-- Empty state when no team selected -->
             <div v-if="!auditSelectedTeamId && !auditTeamsLoading" class="audit-empty">
-                <ShieldCheckIcon :size="40" />
+                <ShieldCheckIcon :size="ICON_XL" />
                 <p>{{ t('teamhub', 'Select a team to view its audit log.') }}</p>
             </div>
 
             <!-- Events table -->
             <div v-if="auditSelectedTeamId" class="audit-events">
                 <div v-if="auditEventsLoading" class="audit-events__loading">
-                    <NcLoadingIcon :size="32" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
                 <div v-else-if="auditEventsError" class="admin-save-err">{{ auditEventsError }}</div>
                 <div v-else-if="auditEvents.length === 0" class="audit-empty">
@@ -2536,13 +2675,13 @@
                     <label class="archive-admin__label" for="archive-location">
                         {{ t('teamhub', 'Archive location (Team Folder)') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="archive-location"
                         v-model="archiveSettings.archiveLocation"
-                        type="text"
                         class="archive-admin__input"
                         :disabled="!archiveSettings.archiveBeforeDelete"
-                        :placeholder="t('teamhub', 'Leave empty to use each team owner\'s Files')" />
+                        :placeholder="t('teamhub', 'Leave empty to use each team owner\'s Files')"
+                        label-outside />
                     <p class="archive-admin__help">
                         {{ t('teamhub', 'Paste the internal link of a Team Folder (e.g. /f/150770 from the URL bar). Leave empty to save archives in each team owner\'s Files under "TeamHub Archives".') }}
                     </p>
@@ -2553,14 +2692,15 @@
                     <label class="archive-admin__label" for="archive-max-mb">
                         {{ t('teamhub', 'Maximum archive size (MB)') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="archive-max-mb"
                         v-model.number="archiveSettings.archiveMaxMb"
                         type="number"
                         min="1"
                         max="51200"
                         :disabled="!archiveSettings.archiveBeforeDelete"
-                        class="archive-admin__input archive-admin__input--short" />
+                        class="archive-admin__input archive-admin__input--short"
+                        label-outside />
                     <p class="archive-admin__help">
                         {{ t('teamhub', 'If the estimated archive size exceeds this limit, the archiving is refused. Default: 5120 MB (5 GB).') }}
                     </p>
@@ -2600,8 +2740,8 @@
                         :aria-label="t('teamhub', 'Refresh archived teams list')"
                         @click="loadPendingDeletions">
                         <template #icon>
-                            <NcLoadingIcon v-if="pendingDelsLoading" :size="18" />
-                            <RefreshIcon v-else :size="18" />
+                            <NcLoadingIcon v-if="pendingDelsLoading" :size="ICON_BODY" />
+                            <RefreshIcon v-else :size="ICON_BODY" />
                         </template>
                         {{ t('teamhub', 'Refresh') }}
                     </NcButton>
@@ -2682,7 +2822,7 @@
                                     <code v-if="row.failureReason" class="archive-admin__error-reason">{{ row.failureReason }}</code>
                                     <div class="archive-admin__error-actions">
                                         <NcButton
-                                            variant="primary"
+                                            variant="secondary"
                                             size="small"
                                             :aria-label="t('teamhub', 'Retry archive for team {name}', { name: row.teamName })"
                                             @click="retryArchive(row.id)">
@@ -2720,7 +2860,7 @@
             :name="t('teamhub', 'License')">
 
             <div v-if="license.loading" class="license-loading">
-                <NcLoadingIcon :size="18" /> {{ t('teamhub', 'Loading license status…') }}
+                <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Loading license status…') }}
             </div>
 
             <template v-else-if="license.status">
@@ -2819,12 +2959,12 @@
                              for a commercial price quote -->
                         <NcButton variant="primary" :href="requestQuoteMailto">
                             <template #icon>
-                                <EmailOutlineIcon :size="18" />
+                                <EmailOutlineIcon :size="ICON_BODY" />
                             </template>
                             {{ t('teamhub', 'Request a quote') }}
                         </NcButton>
                         <a
-                            href="https://tldr.host/teamhub/licensing.html"
+                            href="https://teamhub.doekworks.eu/licensing.html"
                             class="license-pitch__link"
                             target="_blank"
                             rel="noopener">
@@ -2893,11 +3033,11 @@
                             :aria-label="t('teamhub', 'Copy UUID')"
                             @click="copyUuid">
                             <template #icon>
-                                <ContentCopyIcon :size="16" />
+                                <ContentCopyIcon :size="ICON_BODY" />
                             </template>
                         </NcButton>
                         <span v-if="license.uuidCopied" class="license-copied">
-                            {{ t('teamhub', 'Copied!') }}
+                            {{ t('teamhub', 'Copied') }}
                         </span>
                     </div>
                     <p class="license-uuid__hint">
@@ -2910,22 +3050,23 @@
                     <label class="license-key-row__label" for="teamhub-license-key">
                         {{ license.status.hasKey ? t('teamhub', 'Replace license key') : t('teamhub', 'Paste license key') }}
                     </label>
-                    <textarea
+                    <NcTextArea
                         id="teamhub-license-key"
                         v-model="license.pendingKey"
                         class="license-key-row__input"
                         rows="4"
                         spellcheck="false"
                         autocomplete="off"
-                        :placeholder="t('teamhub', 'Paste the JWT from your license email here')" />
+                        :placeholder="t('teamhub', 'Paste the JWT from your license email here')"
+                        label-outside />
                     <div class="license-key-row__actions">
                         <NcButton
                             variant="primary"
                             :disabled="!license.pendingKey.trim() || license.saving"
                             @click="saveLicenseKey">
                             <template #icon>
-                                <NcLoadingIcon v-if="license.saving" :size="18" />
-                                <ContentSave v-else :size="18" />
+                                <NcLoadingIcon v-if="license.saving" :size="ICON_BODY" />
+                                <ContentSave v-else :size="ICON_BODY" />
                             </template>
                             {{ license.saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save license key') }}
                         </NcButton>
@@ -2939,7 +3080,7 @@
                      licensing dashboard and reply with the JWT. There is
                      no automated trial endpoint. -->
                 <div class="license-links">
-                    <a href="https://tldr.host/teamhub/licensing.html" target="_blank" rel="noopener">
+                    <a href="https://teamhub.doekworks.eu/licensing.html" target="_blank" rel="noopener">
                         {{ t('teamhub', 'Licensing info') }} →
                     </a>
                     <!-- TRANSLATORS: opens the admin's mail client to request
@@ -2986,8 +3127,8 @@
                     :disabled="deletingTeam === confirmDeleteTeam.id"
                     @click="executeDeleteOrphan">
                     <template #icon>
-                        <NcLoadingIcon v-if="deletingTeam === confirmDeleteTeam.id" :size="18" />
-                        <DeleteIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="deletingTeam === confirmDeleteTeam.id" :size="ICON_BODY" />
+                        <DeleteIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
@@ -3015,7 +3156,7 @@
                     {{ assignPolicyError }}
                 </p>
 
-                <NcLoadingIcon v-if="assignPolicyProfilesLoading" :size="20" />
+                <NcLoadingIcon v-if="assignPolicyProfilesLoading" :size="ICON_BODY" />
 
                 <fieldset v-else class="assign-policy__choices">
                     <legend class="assign-policy__legend">{{ t('teamhub', 'Policy profile') }}</legend>
@@ -3036,7 +3177,7 @@
 
                 <!-- ── The diff ─────────────────────────────────────────── -->
                 <div v-if="assignPolicyPreviewLoading" class="assign-policy__preview">
-                    <NcLoadingIcon :size="20" /> {{ t('teamhub', 'Working out what would change…') }}
+                    <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Working out what would change…') }}
                 </div>
 
                 <div v-else-if="assignPolicyPreview" class="assign-policy__preview">
@@ -3128,8 +3269,8 @@
                     :disabled="!assignPolicyPreview || assignPolicySaving"
                     @click="confirmAssignPolicy">
                     <template #icon>
-                        <NcLoadingIcon v-if="assignPolicySaving" :size="18" />
-                        <ShieldLockOutlineIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="assignPolicySaving" :size="ICON_BODY" />
+                        <ShieldLockOutlineIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Apply the profile') }}
                 </NcButton>
@@ -3219,8 +3360,8 @@
                     :disabled="resettingConfigTeamId === confirmResetConfigTeam.id"
                     @click="executeResetTeamConfig">
                     <template #icon>
-                        <NcLoadingIcon v-if="resettingConfigTeamId === confirmResetConfigTeam.id" :size="18" />
-                        <RestoreIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="resettingConfigTeamId === confirmResetConfigTeam.id" :size="ICON_BODY" />
+                        <RestoreIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Reset config') }}
                 </NcButton>
@@ -3256,8 +3397,8 @@
                     :disabled="unlinkingOpenProjectTeamId === confirmUnlinkOpenProjectTeam.id"
                     @click="executeUnlinkOpenProject">
                     <template #icon>
-                        <NcLoadingIcon v-if="unlinkingOpenProjectTeamId === confirmUnlinkOpenProjectTeam.id" :size="18" />
-                        <LinkOffIcon v-else :size="18" />
+                        <NcLoadingIcon v-if="unlinkingOpenProjectTeamId === confirmUnlinkOpenProjectTeam.id" :size="ICON_BODY" />
+                        <LinkOffIcon v-else :size="ICON_BODY" />
                     </template>
                     <!-- TRANSLATORS: confirm button — remove a team's link to its OpenProject project -->
                     {{ t('teamhub', 'Unlink') }}
@@ -3337,7 +3478,7 @@
                         <template #icon>
                             <NcLoadingIcon
                                 v-if="expiryReqBusy === expiryReqActive.id"
-                                :size="18" />
+                                :size="ICON_BODY" />
                         </template>
                         {{ t('teamhub', 'Approve') }}
                     </NcButton>
@@ -3348,15 +3489,12 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 import axios from '@nextcloud/axios'
 import { todayIso, shiftToday, formatDate as fmtDate, formatDateTime as fmtDateTime } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
-import {
-    NcSettingsSection, NcButton, NcLoadingIcon,
-    NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
-    NcActions, NcActionText,
-} from '@nextcloud/vue'
+import { NcSettingsSection, NcButton, NcLoadingIcon, NcChip, NcNoteCard, NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcActions, NcActionText, NcSelect } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
@@ -3378,6 +3516,7 @@ import RestoreIcon from 'vue-material-design-icons/Restore.vue'
 // state is not carried by colour alone (WCAG 1.4.1).
 import AlertCircleOutlineIcon from 'vue-material-design-icons/AlertCircleOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
+import CheckIcon from 'vue-material-design-icons/Check.vue'
 import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
 import AccountOffIcon from 'vue-material-design-icons/AccountOff.vue'
 import AccountRemoveIcon from 'vue-material-design-icons/AccountRemove.vue'
@@ -3407,15 +3546,25 @@ import PresenceTypesManager     from './PresenceTypesManager.vue'
 import PresenceLocationsManager from './PresenceLocationsManager.vue'
 import PresenceHolidaysManager  from './PresenceHolidaysManager.vue'
 import MyWorkAdminSettings     from './mywork/MyWorkAdminSettings.vue'
+import LifebuoyIcon           from 'vue-material-design-icons/Lifebuoy.vue'
+// v4.10.23 — the service-desk checklist row and its release button. The
+// release is aliased: the method below has that name, and a bare call
+// inside it resolving to the import rather than to `this` reads as a bug.
+import { loadServiceDeskStatus, releaseServiceDesk as deleteServiceDeskClaim } from '../api/serviceTeams.js'
 // v4.6.6 — bulk team import. Its own file (and its own admin/ directory,
 // following the mywork/ precedent) because this file is already ~6 700 lines.
 import TeamImportPanel         from './admin/TeamImportPanel.vue'
+import TeamAdoptionGrid        from './admin/TeamAdoptionGrid.vue'
 import TeamExportPanel         from './admin/TeamExportPanel.vue'
 // v4.8.2 — Track F2a. Templates and classification profiles. Its own file for
 // the same reason the two above are: this one is already ~7 900 lines.
 import PolicyAdminPanel        from './admin/PolicyAdminPanel.vue'
+// v4.10.45 — the service catalog's categories and links.
+import ServicesAdminPanel      from './admin/ServicesAdminPanel.vue'
 // v4.9.6 — Phase 2: the provisioning operations list on the Maintenance tab.
 import ProvisioningAdminPanel  from './admin/ProvisioningAdminPanel.vue'
+// v4.10.7 — the one way a person is drawn in a picker (owner picker, audit filter).
+import PersonRow               from './PersonRow.vue'
 // v4.8.0 — ISO 27001 control mapping for the Compliance tab and its report.
 import { isoControlLabel, buildControlCoverage } from '../constants/isoControls.js'
 // v4.8.15 — the compliance row names the field a team has drifted on. The
@@ -3426,24 +3575,29 @@ import { FIELD, appLabel, fieldLabel, profileDisplayName, templateDisplayName } 
 export default {
     name: 'AdminSettings',
     components: {
-        NcSettingsSection, NcButton, NcLoadingIcon,
+         NcSelect, NcSettingsSection, NcButton, NcLoadingIcon, NcChip, NcNoteCard,
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         NcActions, NcActionText,
         ContentSave, AccountGroup, AccountPlusIcon, SwapHorizontalIcon, MessageTextIcon, PuzzleIcon,
         ChartBarIcon, WrenchIcon, DeleteIcon, AccountEditIcon, ShieldCheckIcon, DownloadIcon, RefreshIcon, RestoreIcon,
-        InformationOutline, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon, AlertCircleOutlineIcon,
+        InformationOutline, CheckIcon, ArchiveIcon, AccountOffIcon, AccountRemoveIcon, MagnifyIcon, AlertCircleOutlineIcon,
         OfficeBuildingIcon,
         KeyIcon, ContentCopyIcon, CloseIcon, LinkVariantIcon, LinkOffIcon,
         AlertOctagonIcon, FileDocumentOutlineIcon,
         PresenceTypesManager, PresenceLocationsManager, PresenceHolidaysManager,
         ClipboardCheckIcon, MyWorkAdminSettings,
-        TeamImportPanel, TeamExportPanel,
+        LifebuoyIcon,
+        TeamImportPanel, TeamExportPanel, PersonRow, TeamAdoptionGrid,
         CalendarClockIcon, CalendarRemoveIcon, EmailOutlineIcon,
-        PolicyAdminPanel, ShieldLockOutlineIcon,
+        PolicyAdminPanel, ShieldLockOutlineIcon, ServicesAdminPanel,
         ProvisioningAdminPanel,
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
+            ICON_XL,
             activeTab: 'creation',
 
             // v3.100.0 — Track F licensing tab state. All under one
@@ -3470,6 +3624,8 @@ export default {
                 decisionsModuleEnabled: false,
                 // v4.9.16 — the OpenProject module's switch (off by default).
                 openProjectModuleEnabled: false,
+                // v4.10.46 — the service teams module's switch (off by default).
+                serviceTeamsModuleEnabled: false,
                 // RoomVox: token is write-only. roomvoxTokenConfigured
                 // reflects whether one is currently stored (returned from
                 // the load endpoint as a boolean); roomvoxApiToken is the
@@ -3512,12 +3668,24 @@ export default {
             inviteCircle: false,
             inviteEmail: false,
             inviteFederated: false,
+            // v4.10.7 — the profile fields under a person's name in every
+            // picker, in order; the list of choices comes from the backend
+            // (PersonSublineService::FIELDS) so the two cannot drift.
+            sublineFields: ['role', 'organisation'],
+            sublineFieldsAvailable: ['role', 'organisation', 'headline', 'manager', 'groups', 'email', 'uid'],
             // Group picker
             selectedGroups: [],
             groupQuery: '',
             groupResults: [],
             groupSearching: false,
             groupSearchTimer: null,
+            // v4.10.23 — which team holds the Nextcloud services, for the
+            // setup-checklist row. Null until the fetch lands and on an
+            // unlicensed instance, where the row is absent rather than
+            // explanatory (Service Teams have no reduced version).
+            serviceDesk: null,
+            serviceDeskReleasing: false,
+            serviceDeskConfirm: false,
             // Team Folders delegation status (loaded from admin settings API)
             gfDelegation: {
                 groupFoldersInstalled:       false,
@@ -3672,6 +3840,9 @@ export default {
                 // kind of disclosure the compliance tab exists to show.
                 'team.exported',
                 'member.joined', 'member.left', 'member.removed', 'member.removed_by_admin', 'member.level_changed',
+                // v4.10.47 — a team moved from a stale Circles copy of a group
+                // to the current one (GroupMirrorSyncService, system action).
+                'member.group_relinked',
                 // v4.7.5 — the message stream. `comment.deleted` has been
                 // written since 4.5.x but was never added here, so it was
                 // logged and un-filterable; the four new ones ship with their
@@ -3737,6 +3908,14 @@ export default {
                 // v4.5.21 — My Work sits next to Integrations because that is
                 // what it configures: which sources feed the personal queue.
                 { id: 'mywork',        label: this.t('teamhub', 'My Work'),       icon: 'ClipboardCheckIcon' },
+                // v4.10.45 — the service catalog's categories and its links
+                // (Justin, 2026-09-25).
+                { id: 'services',      label: this.t('teamhub', 'Services'),      icon: 'LifebuoyIcon'    },
+                // v4.10.23 — the Service desk tab was here. A service team
+                // is created from the Service template and claims the
+                // Nextcloud services on its own Services tab, so there is
+                // no setup flow left to administer; what an administrator
+                // keeps is the checklist row above and its release button.
                 { id: 'statistics',    label: this.t('teamhub', 'Reporting'),     icon: 'ChartBarIcon'    },
                 { id: 'maintenance',   label: this.t('teamhub', 'Maintenance'),   icon: 'WrenchIcon'      },
                 { id: 'audit',         label: this.t('teamhub', 'Compliance'),     icon: 'ShieldCheckIcon' },
@@ -3906,6 +4085,10 @@ export default {
          *   warn — a default is in force that has real consequences
          *   info — worth knowing, not a problem
          */
+        /** v4.10.51 — rows that want a look: the summary chip in the checklist head. */
+        setupAttentionCount() {
+            return this.setupChecklist.filter(row => row.state === 'warn').length
+        },
         setupChecklist() {
             const rows = []
 
@@ -4014,6 +4197,32 @@ export default {
                 })
             }
 
+            // ── The service desk (v4.10.23) ──────────────────────────────
+            // Absent entirely while `serviceDesk` is null — an unlicensed
+            // instance, or a fetch that failed. Service Teams have no
+            // reduced version, so a row explaining a feature this server
+            // cannot have would be an advertisement in a checklist.
+            //
+            // • rather than ⚠ when nobody holds them: an instance with no
+            // service desk is a working instance whose members simply do not
+            // see the request buttons. That is a fact worth knowing, not a
+            // default with consequences.
+            if (this.serviceDesk) {
+                const held = !!this.serviceDesk.holderTeamId
+                rows.push({
+                    id:    'servicedesk',
+                    state: held ? 'ok' : 'info',
+                    glyph: held ? '✓' : '•',
+                    label: this.t('teamhub', 'Nextcloud services'),
+                    value: held
+                        ? this.serviceDesk.holderName
+                        : this.t('teamhub', 'No team answers them'),
+                    hint: held
+                        ? this.n('teamhub', '{n} person can work the queue.', '{n} people can work the queue.', this.serviceDesk.agentCount, { n: this.serviceDesk.agentCount })
+                        : this.t('teamhub', 'Nobody can ask for a new team, a shared folder or external access until a team answers these requests. Create a team from the Service template and switch them on in its Services tab.'),
+                })
+            }
+
             // ── Allowed invite types ─────────────────────────────────────
             // Counted rather than listed: composing "Local users, Groups,
             // Teams" from translated fragments is the concatenation
@@ -4111,6 +4320,15 @@ export default {
                     : (this.form.openProjectModuleEnabled ? this.t('teamhub', 'Enabled') : this.t('teamhub', 'Disabled')),
                 this.licenseActive && this.form.openProjectModuleEnabled,
             ))
+            // v4.10.46 — licence and switch both, exactly like OpenProject.
+            rows.push(preferenceRow(
+                'service_teams',
+                this.t('teamhub', 'Service teams module'),
+                !this.licenseActive
+                    ? this.t('teamhub', 'Needs a license')
+                    : (this.form.serviceTeamsModuleEnabled ? this.t('teamhub', 'Enabled') : this.t('teamhub', 'Disabled')),
+                this.licenseActive && this.form.serviceTeamsModuleEnabled,
+            ))
 
             // ── App integrations (v4.4.13) ───────────────────────────────
             // v4.4.14 — ✓ when set / configured, • when empty (the shipped
@@ -4182,7 +4400,7 @@ export default {
             const uuid = this.license.status?.instanceUuid || ''
             const subject = 'Request trial key'
             const body = `UUID: ${uuid}\n\n(This email was generated by TeamHub. Please reply from the address that should receive the license key.)`
-            return `mailto:teamhub@tldr.host?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+            return `mailto:sales@doekworks.eu?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
         },
 
         /**
@@ -4208,7 +4426,7 @@ export default {
                 lines.push(`Seats in use: ${seats}`)
             }
             lines.push('', '(This email was generated by TeamHub. Please complete the three lines above and send it from the address that should receive the quote.)')
-            return `mailto:teamhub@tldr.host?subject=${encodeURIComponent('Supporter quote')}&body=${encodeURIComponent(lines.join('\n'))}`
+            return `mailto:sales@doekworks.eu?subject=${encodeURIComponent('Supporter quote')}&body=${encodeURIComponent(lines.join('\n'))}`
         },
 
         /**
@@ -4439,6 +4657,16 @@ export default {
         // v4.8.15 — the setup checklist is on the tab that opens first, so its
         // Track F rows cannot wait for the Policy tab to be visited.
         this.loadPolicySummary()
+        // v4.10.23 — same reason: the service-desk row is on that checklist.
+        this.loadServiceDesk()
+        // v4.10.50 — a link to the adoption grid (a notification, a request
+        // in My Work) lands on its tab and scrolls to it.
+        if (window.location.hash === '#team-adoption') {
+            this.activeTab = 'creation'
+            this.$nextTick(() => {
+                document.getElementById('team-adoption')?.scrollIntoView({ block: 'start' })
+            })
+        }
     },
     beforeUnmount() {
         // v4.4.13 — a pending IntraVox autosave must not fire after the
@@ -4450,6 +4678,20 @@ export default {
         clearTimeout(this._auditRetentionSaveTimer)
     },
     methods: {
+        /** v4.10.51 — the checklist's status icon per state. */
+        setupStatusIcon(state) {
+            if (state === 'ok') return 'CheckIcon'
+            if (state === 'warn') return 'AlertCircleOutlineIcon'
+            return 'InformationOutline'
+        },
+        /** The state in words, for screen readers (the icon is decoration). */
+        setupStatusLabel(state) {
+            if (state === 'ok') return this.t('teamhub', 'Done')
+            // TRANSLATORS: status of a setup checklist row — a default with real consequences is in force
+            if (state === 'warn') return this.t('teamhub', 'Worth reviewing')
+            // TRANSLATORS: status of a setup checklist row — worth knowing, not a problem
+            return this.t('teamhub', 'For information')
+        },
         t(app, str, vars) {
             if (window.t) return window.t(app, str, vars)
             if (vars) return str.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`)
@@ -4471,6 +4713,7 @@ export default {
                 this.form.presenceModuleEnabled = !!data.presenceModuleEnabled
                 this.form.decisionsModuleEnabled = !!data.decisionsModuleEnabled
                 this.form.openProjectModuleEnabled = !!data.openProjectModuleEnabled
+                this.form.serviceTeamsModuleEnabled = !!data.serviceTeamsModuleEnabled
                 this.form.roomvoxTokenConfigured = !!data.roomvoxTokenConfigured
                 this.form.onboardingChecklistDismissed = !!data.onboardingChecklistDismissed
                 // v4.6.13 — expiration settings. `expiryDefaultDate` is the
@@ -4494,6 +4737,15 @@ export default {
                 this.inviteCircle    = types.includes('circle')
                 this.inviteEmail     = types.includes('email')
                 this.inviteFederated = types.includes('federated')
+
+                // v4.10.7 — subline fields. An empty string is a real answer
+                // ("show nothing"); only a missing key falls back to the default.
+                if (Array.isArray(data.personSublineFieldsAvailable) && data.personSublineFieldsAvailable.length) {
+                    this.sublineFieldsAvailable = data.personSublineFieldsAvailable
+                }
+                if (typeof data.personSublineFields === 'string') {
+                    this.sublineFields = data.personSublineFields.split(',').map(s => s.trim()).filter(Boolean)
+                }
 
                 this.selectedGroups = Array.isArray(data.createTeamGroups) ? data.createTeamGroups : []
 
@@ -4588,6 +4840,48 @@ export default {
         removeGroup(group) {
             this.selectedGroups = this.selectedGroups.filter(g => g.id !== group.id)
             this.save()
+        },
+
+        // ── The service desk (v4.10.23) ──────────────────────────────────
+
+        /**
+         * Which team holds the Nextcloud services, for the checklist row.
+         *
+         * An unlicensed instance answers 403 `licenseGate`, which leaves
+         * `serviceDesk` null and the row absent: Service Teams have no
+         * reduced version, so a row that describes one an administrator
+         * cannot have would be an advertisement in a checklist.
+         */
+        async loadServiceDesk() {
+            try {
+                this.serviceDesk = await loadServiceDeskStatus()
+            } catch {
+                this.serviceDesk = null
+            }
+        },
+
+        /**
+         * Take the claim back. The only service-team write an administrator
+         * has, and the reason the checklist row exists at all: without it a
+         * bundle claimed by the wrong team could only be released by that
+         * team's own admins.
+         */
+        async releaseServiceDesk() {
+            if (!this.serviceDesk?.holderTeamId) {
+                return
+            }
+            this.serviceDeskReleasing = true
+            try {
+                await deleteServiceDeskClaim(this.serviceDesk.holderTeamId)
+                this.serviceDeskConfirm = false
+                await this.loadServiceDesk()
+            } catch {
+                // The row re-reads either way; a failed release leaves the
+                // holder in place, which is what the row will then say.
+                await this.loadServiceDesk()
+            } finally {
+                this.serviceDeskReleasing = false
+            }
         },
 
         // ── Save ─────────────────────────────────────────────────────────
@@ -4691,6 +4985,44 @@ export default {
             this.save()
         },
 
+        // ── Telling people apart (v4.10.7) ───────────────────────────────
+        // The seven fields PersonSublineService knows. Labels are the words
+        // Nextcloud's own profile page uses for the same fields.
+        sublineFieldLabel(field) {
+            switch (field) {
+            case 'role':         return this.t('teamhub', 'Job title')
+            case 'organisation': return this.t('teamhub', 'Organisation')
+            case 'headline':     return this.t('teamhub', 'Headline')
+            case 'manager':      return this.t('teamhub', 'Manager')
+            case 'groups':       return this.t('teamhub', 'Groups')
+            case 'email':        return this.t('teamhub', 'Email address')
+            case 'uid':          return this.t('teamhub', 'Account name')
+            default:             return field
+            }
+        },
+        sublineFieldHint(field) {
+            switch (field) {
+            case 'role':         return this.t('teamhub', 'From the profile — "Controller", "Team lead"')
+            case 'organisation': return this.t('teamhub', 'From the profile — the company or the department, whichever the profile holds')
+            case 'headline':     return this.t('teamhub', 'From the profile — the one-line headline')
+            case 'manager':      return this.t('teamhub', 'The manager set on the account, by name')
+            case 'groups':       return this.t('teamhub', 'Up to three of the groups the person is in — in many directories these are the departments. Visible to everyone who can search')
+            case 'email':        return this.t('teamhub', 'The account email address')
+            case 'uid':          return this.t('teamhub', 'The account name used to log in')
+            default:             return ''
+            }
+        },
+        // Order is the canonical order of the list, not the order of ticking:
+        // the line reads the same for everyone and the settings panel shows
+        // what that order is.
+        toggleSublineField(field, on) {
+            const next = this.sublineFieldsAvailable.filter(f =>
+                f === field ? on : this.sublineFields.includes(f),
+            )
+            this.sublineFields = next
+            this.save()
+        },
+
         async save() {
             this.saving    = true
             this.saved     = false
@@ -4710,9 +5042,11 @@ export default {
             params.set('createTeamGroup',      groupIds)
             params.set('pinMinLevel',          this.form.pinMinLevel)
             params.set('inviteTypes',          types.join(','))
+            params.set('personSublineFields',  this.sublineFields.join(','))
             params.set('presenceModuleEnabled',  this.form.presenceModuleEnabled ? '1' : '0')
             params.set('decisionsModuleEnabled', this.form.decisionsModuleEnabled ? '1' : '0')
             params.set('openProjectModuleEnabled', this.form.openProjectModuleEnabled ? '1' : '0')
+            params.set('serviceTeamsModuleEnabled', this.form.serviceTeamsModuleEnabled ? '1' : '0')
             params.set('expiryWarningDays',      String(this.form.expiryWarningDays ?? 7))
             // Only send the token if the user actually typed something —
             // an empty buffer means "keep the stored value unchanged" per
@@ -5113,7 +5447,7 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/orphaned-teams/${team.id}`)
                 )
                 this.cancelDeleteOrphan()
-                showSuccess(this.t('teamhub', 'Team deleted successfully'))
+                showSuccess(this.t('teamhub', 'Team deleted'))
                 // Reload current page — it may now have fewer items
                 await this.loadTeams()
             } catch (e) {
@@ -5288,14 +5622,14 @@ export default {
             this.assigningOwner = true
             try {
                 const params = new URLSearchParams()
-                params.set('userId', user.uid)
+                params.set('userId', user.id)
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/admin/maintenance/orphaned-teams/${team.id}/assign-owner`),
                     params.toString(),
                     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
                 )
                 this.cancelAssign()
-                showSuccess(this.t('teamhub', 'Owner assigned successfully'))
+                showSuccess(this.t('teamhub', 'Owner assigned'))
                 // Reload so the owner column reflects the change
                 await this.loadTeams()
             } catch (e) {
@@ -5362,7 +5696,7 @@ export default {
         },
 
         async selectAuditUser(user) {
-            this.audit_selectedUser     = { uid: user.uid, displayName: user.displayName }
+            this.audit_selectedUser     = { uid: user.id, displayName: user.displayName }
             this.audit_userQuery        = ''
             this.audit_userResults      = []
             this.audit_selectedTeamIds  = []
@@ -6048,6 +6382,8 @@ export default {
 <meta charset="utf-8">
 <title>TeamHub compliance report</title>
 <style>
+    /* Standalone print document: none of the app's or Nextcloud's CSS is
+       loaded here, so every value is a literal by design. */
     body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         color: #222;
@@ -6056,7 +6392,7 @@ export default {
     }
     h1 {
         margin: 0 0 4px;
-        font-size: 22px;
+        font-size: 20px;
     }
     .meta {
         color: #666;
@@ -6072,7 +6408,7 @@ export default {
     th, td {
         text-align: left;
         vertical-align: top;
-        padding: 8px 10px;
+        padding: 8px 8px;
         border-bottom: 1px solid #e0e0e0;
     }
     th {
@@ -6091,17 +6427,16 @@ export default {
     .col-control-checks { width: 50%; color: #444; }
     h2 {
         margin: 32px 0 4px;
-        font-size: 17px;
+        font-size: 16px;
     }
     .section-note {
         color: #666;
-        font-size: 12px;
+        font-size: 13px;
         margin: 0 0 12px;
     }
     /* Not a failure state — see the note above the table. Grey, not red. */
     .not-evidenced {
         color: #666;
-        font-style: italic;
     }
     .pill {
         display: inline-block;
@@ -6121,9 +6456,9 @@ export default {
     .footer {
         margin-top: 32px;
         color: #888;
-        font-size: 11px;
+        font-size: 13px;
         border-top: 1px solid #e0e0e0;
-        padding-top: 10px;
+        padding-top: 8px;
     }
     @media print {
         body { margin: 12mm; }
@@ -6686,7 +7021,7 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 16px;
+    padding: 8px 16px;
     font-size: var(--th-font-body);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
@@ -6694,16 +7029,16 @@ export default {
     border: 1px solid var(--color-border);
     border-bottom: none;                      /* baseline is owned by the bar */
     margin-bottom: -1px;                      /* overlap the bar's 1px border  */
-    margin-right: -1px;                       /* collapse the shared side border */
+    margin-inline-end: -1px;                       /* collapse the shared side border */
     cursor: pointer;
-    border-radius: var(--border-radius) var(--border-radius) 0 0;
-    transition: color 0.15s, background 0.15s;
+    border-radius: var(--border-radius-small) var(--border-radius-small) 0 0;
+    transition: color var(--animation-quick), background var(--animation-quick);
     white-space: nowrap;
     position: relative;
 }
 
 .teamhub-admin-tab:first-child {
-    border-top-left-radius: var(--border-radius);
+    border-start-start-radius: var(--border-radius-small);
 }
 
 /* No hover styling on the tab bar at all — hover added a transient z-index/seam
@@ -6725,8 +7060,8 @@ export default {
 .teamhub-admin-tab--active::after {
     content: '';
     position: absolute;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     bottom: -1px;
     height: 1px;
     background: var(--color-primary-element);
@@ -6773,53 +7108,8 @@ export default {
 .admin-group-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 10px;
-}
-
-/* v3.100.14: selected-group chip — full-saturation state per SKILLS.md
-   § "State-coloured backgrounds" (was --color-primary-element-light). */
-.admin-group-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 8px;
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    border: 1px solid var(--color-primary-element);
-    border-radius: var(--border-radius-pill);
-    font-size: 13px;
-    font-weight: 500;
-}
-
-/* Keep the leading group icon inline with the label. The material-design-icon
-   wrapper can render as a block when the library's own icon CSS isn't present,
-   which floats the glyph onto its own line above the chip; pin it to an inline
-   flex box so it always sits beside the text. */
-.admin-group-chip .material-design-icon {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-}
-
-/* v3.100.14: was a text-only × button; now hosts an MDI CloseIcon.
-   font-size no longer sizes the glyph (icon uses the :size prop).
-   inline-flex centres the SVG in the button box. */
-.admin-group-chip__remove {
-    background: none;
-    border: none;
-    cursor: pointer;
-    line-height: 1;
-    color: var(--color-text-maxcontrast);
-    padding: 0 2px;
-    margin-left: 2px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.admin-group-chip__remove:hover {
-    color: var(--color-error-text);
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
 /* ── Group typeahead ─────────────────────────────────────────────────────── */
@@ -6831,16 +7121,16 @@ export default {
 .admin-group-results {
     position: absolute;
     top: calc(100% + 4px);
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     z-index: 100;
     list-style: none;
     padding: 4px 0;
     margin: 0;
     background: var(--color-main-background);
     border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius-large);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    border-radius: var(--border-radius-element);
+    box-shadow: 0 4px 16px var(--color-box-shadow);
     max-height: 220px;
     overflow-y: auto;
 }
@@ -6851,7 +7141,7 @@ export default {
     gap: 8px;
     padding: 8px 12px;
     cursor: pointer;
-    transition: background 0.1s;
+    transition: background var(--animation-quick);
 }
 
 .admin-group-result:hover {
@@ -6871,11 +7161,11 @@ export default {
 }
 
 .admin-group-hint {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     padding: 4px 0;
     margin: 0;
 }
@@ -6906,7 +7196,7 @@ export default {
     display: flex;
     align-items: flex-start;
     gap: 24px;
-    padding: 10px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--color-border);
 }
 .admin-compact-row:last-child {
@@ -6915,7 +7205,7 @@ export default {
 .admin-compact-row__text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     flex: 1 1 auto;
     min-width: 0;
 }
@@ -6978,10 +7268,10 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 .admin-autosave__ok {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 .admin-autosave__err {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 /* ── Pin level select ────────────────────────────────────────────────────── */
@@ -7000,23 +7290,8 @@ export default {
 }
 
 .admin-select {
-    padding: 8px 12px;
-    border-radius: var(--border-radius-large);
-    border: 2px solid var(--color-border-maxcontrast);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: var(--th-font-body);
     min-width: 180px;
     cursor: pointer;
-}
-
-.admin-select:focus {
-    border-color: var(--color-primary-element);
-}
-
-.admin-select:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 /* ── Integrations list ───────────────────────────────────────────────────── */
@@ -7031,7 +7306,7 @@ export default {
     padding: 8px 0;
 }
 
-.admin-integrations-error { color: var(--color-error-text); }
+.admin-integrations-error { color: var(--color-text-error); }
 
 .admin-integrations-list {
     display: flex;
@@ -7041,9 +7316,10 @@ export default {
 }
 
 .admin-integration-row {
-    padding: 12px 14px;
-    border-radius: var(--border-radius-large);
-    background: var(--color-background-dark);
+    padding: var(--th-space-md) var(--th-space-lg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--th-radius-card);
+    background: var(--color-main-background);
 }
 
 .admin-integration-row__body {
@@ -7079,14 +7355,14 @@ export default {
 }
 
 .admin-integration-row__desc {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .admin-integration-row__urls {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     word-break: break-all;
@@ -7094,12 +7370,10 @@ export default {
 
 .admin-integration-row__badge {
     display: inline-block;
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     border-radius: var(--border-radius-pill);
-    padding: 1px 7px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    padding: 1px 8px;
 }
 
 /* v3.100.14: full-saturation category badges per SKILLS.md
@@ -7117,7 +7391,7 @@ export default {
 /* v4.6.2 — .admin-save-row and .admin-save-ok went with the shared Save row.
    .admin-save-err stays: it is still the error style for the integrity panel,
    the audit team/event lists and the license key field. */
-.admin-save-err { font-size: var(--th-font-body); color: var(--color-error-text); }
+.admin-save-err { font-size: var(--th-font-body); color: var(--color-text-error); }
 /* ── Statistics tab ────────────────────────────────────────────── */
 .admin-stat-grid {
     display: grid;
@@ -7127,9 +7401,9 @@ export default {
 }
 
 .admin-stat-card {
-    background: var(--color-background-dark);
+    background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--th-radius-card);
     padding: 16px 20px;
     display: flex;
     flex-direction: column;
@@ -7137,7 +7411,7 @@ export default {
 }
 
 .admin-stat-card__value {
-    font-size: 28px;
+    font-size: var(--th-font-display);
     font-weight: 700;
     line-height: 1.1;
     color: var(--color-main-text);
@@ -7145,7 +7419,7 @@ export default {
 }
 
 .admin-stat-card__label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -7155,12 +7429,12 @@ export default {
     flex-wrap: wrap;
     align-items: baseline;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 8px 16px;
     margin: 8px 0 16px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     background: color-mix(in srgb, var(--color-primary-element) 8%, transparent);
     border: 1px solid color-mix(in srgb, var(--color-primary-element) 30%, transparent);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.4;
 }
 .telemetry-status-note--off {
@@ -7173,7 +7447,7 @@ export default {
     margin-top: 20px;
 }
 .telemetry-group__title {
-    font-size: 14px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
     margin: 0 0 8px;
@@ -7184,9 +7458,9 @@ export default {
     display: grid;
     grid-template-columns: minmax(220px, max-content) 1fr;
     column-gap: 24px;
-    row-gap: 6px;
+    row-gap: 8px;
     margin: 0;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 .telemetry-group__label {
     color: var(--color-text-maxcontrast);
@@ -7206,7 +7480,7 @@ export default {
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 .telemetry-group__inline-list li {
     display: flex;
@@ -7222,7 +7496,6 @@ export default {
 }
 .telemetry-group__empty {
     color: var(--color-text-maxcontrast);
-    font-style: italic;
 }
 
 .admin-telemetry-details {
@@ -7233,9 +7506,10 @@ export default {
 }
 
 .admin-telemetry-preview {
-    background: var(--color-background-dark);
+    /* A code sample: the one place a neutral surface is the convention. */
+    background: var(--color-background-hover);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-element);
     padding: 12px;
     font-size: var(--th-font-meta);
     font-family: monospace;
@@ -7253,25 +7527,25 @@ export default {
     align-items: center;
     gap: 8px;
     padding: 12px 0;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .admin-error {
-    color: var(--color-error-text);
-    font-size: 13px;
+    color: var(--color-text-error);
+    font-size: var(--th-font-meta);
     padding: 8px 0;
 }
 
 .admin-empty {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     padding: 8px 0;
 }
 
 /* ── Maintenance panel padding ───────────────────────────────────── */
 #tab-panel-maintenance {
-    padding: 10px;
+    padding: 8px;
 }
 
 /* ── Header (replaces NcSettingsSection title) ───────────────────── */
@@ -7287,7 +7561,7 @@ export default {
 }
 
 .maint-header__desc {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0;
 }
@@ -7316,11 +7590,11 @@ export default {
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
-    margin-left: auto;
+    margin-inline-start: auto;
 }
 
 .maint-perpage-label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
 }
@@ -7329,10 +7603,10 @@ export default {
 .maint-grid {
     width: 100%;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     overflow: hidden;
     margin-bottom: 12px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .maint-grid__head,
@@ -7358,19 +7632,16 @@ export default {
 }
 
 .maint-grid__head {
-    background: var(--color-background-dark);
-    border-bottom: 2px solid var(--color-border);
-    font-size: var(--th-font-micro);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    border-block-end: 1px solid var(--color-border);
+    font-size: var(--th-font-meta);
+    font-weight: var(--th-font-weight-semibold);
     color: var(--color-text-maxcontrast);
     align-items: center;
 }
 
 .maint-grid__row {
     border-bottom: 1px solid var(--color-border);
-    transition: background 0.1s;
+    transition: background var(--animation-quick);
     align-items: center;
 }
 
@@ -7390,23 +7661,23 @@ export default {
 /* All cells — header and data — share the same padding so columns align */
 .maint-grid__head .maint-grid__cell,
 .maint-grid__row .maint-grid__cell {
-    padding: 10px 12px;
+    padding: 8px 12px;
     overflow: hidden;
 }
 
 .maint-grid__cell--members {
     text-align: center;
-    padding-left: 4px;
-    padding-right: 4px;
+    padding-inline-start: 4px;
+    padding-inline-end: 4px;
 }
 
 .maint-grid__cell--actions {
-    padding: 6px 8px;
+    padding: 8px 8px;
 }
 
 /* ── Expiration column (v4.6.13) ─────────────────────────────────── */
 .maint-grid__cell--expires {
-    padding: 6px 8px;
+    padding: 8px 8px;
 }
 
 .maint-expiry--na {
@@ -7423,58 +7694,24 @@ export default {
     align-items: center;
     gap: 4px;
     max-width: 100%;
-    padding: 4px 6px;
-    border: 1px solid transparent;
-    border-radius: var(--th-radius-control);
-    background: transparent;
-    color: var(--color-main-text);
-    font-size: 13px;
-    text-align: start;
-    cursor: pointer;
-}
-
-.maint-expiry-btn:hover {
-    background: var(--color-background-hover);
-    border-color: var(--color-border);
 }
 
 /* Hover and focus are split so the keyboard ring is never silenced —
    SKILLS.md § Focus visibility standard, "the trap to avoid". */
-.maint-expiry-btn:focus-visible {
-    background: var(--color-background-hover);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
-}
-
-.maint-expiry-btn--none {
-    color: var(--color-text-maxcontrast);
-    font-style: italic;
-}
 
 /* --color-*-text rather than --color-* per the NC design guideline in
    SKILLS.md: the plain token is a background colour and fails contrast as
    foreground text. */
-.maint-expiry-btn--warning {
-    color: var(--color-warning-text, #b45309);
-    font-weight: 600;
-}
-
-.maint-expiry-btn--expired {
-    color: var(--color-error-text, var(--color-error));
-    font-weight: 600;
-}
 
 .maint-expiry-pending {
     display: block;
-    margin-top: 2px;
-    font-size: var(--th-font-micro);
-    color: var(--color-text-maxcontrast);
+    margin-top: 4px;
 }
 
 .maint-expiry-form {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 /* One row under the date field. v4.6.17 — was `flex-wrap: wrap` with three
@@ -7504,7 +7741,7 @@ export default {
     border-radius: var(--th-radius-control);
     background-color: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .maint-date-input:focus {
@@ -7527,13 +7764,15 @@ export default {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin-bottom: 12px;
     padding: 8px 12px;
     border-radius: var(--th-radius-card);
-    background-color: var(--color-background-hover);
-    /* Icon + words carry the state; the tint is not the only signal. */
-    color: var(--color-main-text);
+    /* v4.10.51 — requests wait on the administrator: NC's warning pair
+       (tint + ink), not a grey panel. Icon + words carry the state; the
+       tint is not the only signal. */
+    background-color: var(--color-warning);
+    color: var(--color-warning-text);
 }
 
 .maint-req-banner__text {
@@ -7548,27 +7787,8 @@ export default {
 .maint-expiry-pending--btn {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    margin-top: 2px;
-    padding: 1px 4px;
-    border: none;
-    border-radius: var(--th-radius-chip);
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-    font-size: var(--th-font-micro);
-    cursor: pointer;
-}
-
-.maint-expiry-pending--btn:hover {
-    background-color: var(--color-background-hover);
-    color: var(--color-main-text);
-}
-
-.maint-expiry-pending--btn:focus-visible {
-    background-color: var(--color-background-hover);
-    color: var(--color-main-text);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
+    gap: 4px;
+    margin-top: 4px;
 }
 
 /* Dialog body. Sizes step up from the micro type the popout used — that was
@@ -7576,7 +7796,7 @@ export default {
 .maint-expiry-req__facts {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 6px 16px;
+    gap: 8px 16px;
     margin: 0 0 16px;
     font-size: var(--th-font-body);
 }
@@ -7623,8 +7843,8 @@ export default {
 .maint-team-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 3px;
-    margin: 3px 0 0;
+    gap: 4px;
+    margin: 4px 0 0;
     padding: 0;
     list-style: none;
 }
@@ -7688,11 +7908,11 @@ a.maint-op-link__name:focus-visible {
 .maint-class-chip {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
     font-size: var(--th-font-micro);
     line-height: var(--th-line-height-tight);
     font-weight: var(--th-font-weight-medium);
-    padding: 0 6px;
+    padding: 0 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--th-radius-pill);
     color: var(--color-text-maxcontrast);
@@ -7709,7 +7929,7 @@ a.maint-op-link__name:focus-visible {
     margin: 0;
     cursor: pointer;
     font-family: inherit;
-    text-align: left;
+    text-align: start;
 }
 
 .maint-class-chip--button:hover {
@@ -7726,14 +7946,14 @@ a.maint-op-link__name:focus-visible {
 }
 
 .maint-class-chip--ok {
-    color: var(--color-success-text);
-    border-color: var(--color-success-text);
+    color: var(--color-text-success);
+    border-color: var(--color-text-success);
     background-color: color-mix(in srgb, var(--color-success-text) 8%, transparent);
 }
 
 .maint-class-chip--err {
-    color: var(--color-error-text);
-    border-color: var(--color-error-text);
+    color: var(--color-text-error);
+    border-color: var(--color-text-error);
     background-color: color-mix(in srgb, var(--color-error-text) 8%, transparent);
 }
 
@@ -7762,7 +7982,7 @@ a.maint-op-link__name:focus-visible {
     display: grid;
     grid-template-columns: minmax(160px, 2fr) minmax(80px, 1fr) minmax(80px, 1fr);
     gap: 8px;
-    padding: 6px 0;
+    padding: 8px 0;
     align-items: start;
 }
 
@@ -7782,7 +8002,7 @@ a.maint-op-link__name:focus-visible {
 
 .drift-dialog__note {
     display: block;
-    margin-top: 2px;
+    margin-top: 4px;
     font-size: var(--th-font-micro);
     line-height: var(--th-line-height-body);
     color: var(--color-text-maxcontrast);
@@ -7836,7 +8056,7 @@ a.maint-op-link__name:focus-visible {
 .maint-assign-form {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     padding: 4px 0;
 }
 
@@ -7846,7 +8066,7 @@ a.maint-op-link__name:focus-visible {
     margin: 0;
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
     max-height: 180px;
     overflow-y: auto;
@@ -7857,7 +8077,7 @@ a.maint-op-link__name:focus-visible {
 .admin-owner-result {
     padding: 8px 12px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     border-bottom: 1px solid var(--color-border-dark);
 }
 
@@ -7872,7 +8092,7 @@ a.maint-op-link__name:focus-visible {
 .admin-owner-result__uid {
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
-    margin-left: 4px;
+    margin-inline-start: 4px;
 }
 
 /* ── Pagination ──────────────────────────────────────────────────── */
@@ -7885,26 +8105,26 @@ a.maint-op-link__name:focus-visible {
 }
 
 .maint-page-info {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     padding: 0 8px;
     white-space: nowrap;
 }
 
 .admin-section-hint {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 4px 0 0;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 /* ── Inline label + number field (v4.6.13) ───────────────────────── */
 .admin-inline-field {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 
@@ -7914,23 +8134,6 @@ a.maint-op-link__name:focus-visible {
 
 .admin-number-input {
     width: 96px;
-    min-height: 34px;
-    padding: 0 8px;
-    border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--th-radius-control);
-    background-color: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: var(--th-font-body);
-}
-
-.admin-number-input:focus {
-    /* NC form-field convention — see the note on .maint-date-input. */
-    outline: none;
-    border-color: var(--color-primary-element);
-}
-
-.admin-number-input:focus-visible {
-    box-shadow: 0 0 0 2px var(--color-primary-element);
 }
 
 /* ── Membership integrity ─────────────────────────────────────────── */
@@ -7954,21 +8157,21 @@ a.maint-op-link__name:focus-visible {
 .maint-integrity-summary {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
-    padding: 12px 16px;
-    background: var(--color-background-dark);
+    gap: var(--th-space-xl);
+    padding: var(--th-space-md) var(--th-space-lg);
+    background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--th-radius-card);
     margin-bottom: 16px;
     font-size: var(--th-font-body);
 }
 
 .maint-integrity-summary__item--ok strong {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .maint-integrity-summary__item--bad strong {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .maint-integrity-list {
@@ -7984,15 +8187,15 @@ a.maint-op-link__name:focus-visible {
     gap: 16px;
     padding: 12px 16px;
     border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-warning);
-    border-radius: var(--border-radius);
+    border-inline-start: 3px solid var(--color-warning);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
 }
 
 .maint-integrity-row__info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     min-width: 0;
     flex: 1;
 }
@@ -8031,7 +8234,7 @@ a.maint-op-link__name:focus-visible {
 }
 
 .maint-integrity-claimed .maint-integrity-row {
-    border-left: 3px solid var(--color-border);
+    border-inline-start: 3px solid var(--color-border);
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -8039,38 +8242,37 @@ a.maint-op-link__name:focus-visible {
    ───────────────────────────────────────────────────────────────── */
 
 .audit-banner {
-    border-radius: var(--border-radius);
-    padding: 10px 14px;
-    margin-bottom: 18px;
+    border-radius: var(--border-radius-small);
+    padding: 8px 16px;
+    margin-bottom: 16px;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .audit-banner--warn {
     background: var(--color-warning);
-    color: var(--color-main-background);
+    color: var(--color-warning-text);
 }
 
 .audit-banner--info {
-    background: var(--color-background-hover);
-    border: 1px solid var(--color-border);
-    color: var(--color-main-text);
+    background: var(--color-info);
+    color: var(--color-info-text);
 }
 
 .audit-banner__head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .audit-retention {
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    padding: 14px 16px;
-    margin-bottom: 18px;
-    background: var(--color-background-hover);
+    border-radius: var(--th-radius-card);
+    padding: var(--th-space-lg);
+    margin-bottom: var(--th-space-lg);
+    background: var(--color-main-background);
 }
 
 .audit-retention__label {
@@ -8082,7 +8284,7 @@ a.maint-op-link__name:focus-visible {
 .audit-retention__controls {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .audit-retention__controls .input-field,
@@ -8092,27 +8294,27 @@ a.maint-op-link__name:focus-visible {
 
 .audit-retention__suffix {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
-    padding-right: 6px;
+    font-size: var(--th-font-meta);
+    padding-inline-end: 8px;
 }
 
 .audit-controls {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-bottom: 18px;
+    gap: 8px;
+    margin-bottom: 16px;
 }
 
 .audit-controls__row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 
 .audit-controls__label {
     min-width: 100px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
 }
 
@@ -8120,21 +8322,15 @@ a.maint-op-link__name:focus-visible {
 .audit-controls__filter-select {
     min-width: 280px;
     max-width: 400px;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
 }
 
 .audit-controls__date {
-    padding: 6px 10px;
+    padding: 8px 8px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
     color: var(--color-main-text);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .audit-empty {
@@ -8159,18 +8355,16 @@ a.maint-op-link__name:focus-visible {
 .audit-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .audit-table thead th {
-    text-align: left;
-    padding: 10px 12px;
+    text-align: start;
+    padding: 8px 12px;
     font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
     border-bottom: 1px solid var(--color-border);
-    background: var(--color-background-hover);
 }
 
 .audit-table tbody td {
@@ -8241,11 +8435,11 @@ a.maint-op-link__name:focus-visible {
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .archive-admin__legend {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
     margin-bottom: 8px;
@@ -8262,7 +8456,7 @@ a.maint-op-link__name:focus-visible {
 }
 
 .archive-admin__label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-main-text);
 }
@@ -8270,12 +8464,6 @@ a.maint-op-link__name:focus-visible {
 .archive-admin__input {
     width: 100%;
     max-width: 480px;
-    padding: 8px 12px;
-    border: 1px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: var(--th-font-body);
 }
 
 .archive-admin__input--short {
@@ -8285,7 +8473,7 @@ a.maint-op-link__name:focus-visible {
 .archive-admin__help {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin-top: 2px;
+    margin-top: 4px;
     line-height: 1.4;
 }
 
@@ -8296,13 +8484,13 @@ a.maint-op-link__name:focus-visible {
 }
 
 .archive-admin__ok {
-    font-size: 13px;
-    color: var(--color-success-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-success);
 }
 
 .archive-admin__err {
-    font-size: 13px;
-    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-error);
 }
 
 .archive-admin__toolbar {
@@ -8312,7 +8500,7 @@ a.maint-op-link__name:focus-visible {
 }
 
 .archive-admin__empty {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     padding: 8px 0;
 }
@@ -8320,44 +8508,42 @@ a.maint-op-link__name:focus-visible {
 .archive-admin__table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .archive-admin__table-caption {
-    text-align: left;
+    text-align: start;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     caption-side: top;
 }
 
 .archive-admin__table th {
-    text-align: left;
-    padding: 8px 10px;
+    text-align: start;
+    padding: 8px 8px;
     font-weight: 600;
     border-bottom: 2px solid var(--color-border);
     white-space: nowrap;
 }
 
 .archive-admin__table td {
-    padding: 8px 10px;
+    padding: 8px 8px;
     border-bottom: 1px solid var(--color-border);
     vertical-align: middle;
 }
 
 .archive-admin__row-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
 }
 
 .archive-admin__status {
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-micro);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
 }
 
 /* v3.100.16: status pills use NC theme fill + matching -text token
@@ -8396,26 +8582,26 @@ a.maint-op-link__name:focus-visible {
     flex-direction: column;
     gap: 8px;
     background: var(--color-error);
-    border-left: 4px solid var(--color-error);
-    padding: 14px 16px;
-    font-size: 13px;
+    border-inline-start: 4px solid var(--color-error);
+    padding: 16px 16px;
+    font-size: var(--th-font-meta);
     color: var(--color-error-text);
 }
 
 .archive-admin__error-panel strong {
     font-size: var(--th-font-body);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .archive-admin__error-reason {
     display: block;
     font-family: monospace;
     font-size: var(--th-font-micro);
-    background: rgba(0, 0, 0, 0.06);
-    border-radius: 3px;
-    padding: 6px 8px;
+    background: var(--color-box-shadow);
+    border-radius: var(--border-radius-small);
+    padding: 8px 8px;
     word-break: break-word;
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .archive-admin__error-actions {
@@ -8424,126 +8610,118 @@ a.maint-op-link__name:focus-visible {
     margin-top: 4px;
 }
 
-/* ── Team Folders delegation status ──────────────────────────────────────── */
-.admin-gf-status {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 8px;
+/* ── Team Folders delegation status ──
+   v4.10.51 — rows use the setup checklist's classes; the verdict is an
+   NcNoteCard. Only the spacing is its own. */
+.admin-setup__rows.admin-gf-status {
+    margin-block: var(--th-space-sm);
 }
 
-.admin-gf-status__row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.admin-gf-status__indicator {
-    flex-shrink: 0;
-    font-weight: 700;
-    font-size: var(--th-font-body);
-    width: 20px;
-    text-align: center;
-    margin-top: 1px;
-}
-
-.admin-gf-status__indicator--ok   { color: var(--color-success-text); }
-.admin-gf-status__indicator--warn { color: var(--color-warning-text); }
-
-.admin-gf-status__label {
-    font-weight: 500;
-    color: var(--color-main-text);
-}
-
-.admin-gf-status__hint {
-    color: var(--color-text-maxcontrast);
-    font-size: 13px;
-    width: 100%;
-    padding-left: 28px;
-    margin-top: 2px;
-}
-
-.admin-gf-status__summary {
-    margin-top: 8px;
-    padding: 8px 12px;
-    border-radius: var(--border-radius);
-    font-size: 13px;
-}
-
-.admin-gf-status__summary--ok {
-    background-color: var(--color-success-background);
-    color: var(--color-success-text);
-    border: 1px solid var(--color-success);
-}
-
-.admin-gf-status__summary--warn {
-    background-color: var(--color-warning-background);
-    color: var(--color-warning-text);
-    border: 1px solid var(--color-warning);
-}
-
-/* ── First-run setup checklist (v4.4.4) ──
-   Mirrors .admin-gf-status conventions so the two read as one system: same
-   20px indicator gutter, same 28px hint indent, same --color-*-text tokens
-   per SKILLS.md § NC design guidelines. */
+/* ── First-run setup checklist (v4.4.4; card redesign v4.10.51) ──
+   The app's card: main background, 1px border, the container radius — the
+   same surface as a dashboard widget, not a grey panel. Each row carries a
+   round status icon: a tinted fill with its own ink (NC state pairs), so
+   the state reads at a glance and the label stays the loudest thing. */
 .admin-setup {
-    margin: 0 0 24px;
-    padding: 16px 20px;
+    margin: 0 0 var(--th-space-xl);
+    padding: var(--th-space-lg) var(--th-space-xl);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large, var(--border-radius));
-    background-color: var(--color-background-hover);
+    border-radius: var(--th-radius-card);
+    background-color: var(--color-main-background);
 }
 
 .admin-setup__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--th-space-md);
+}
+
+.admin-setup__heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--th-space-sm);
 }
 
 .admin-setup__title {
     margin: 0;
     font-size: var(--th-font-heading);
-    font-weight: var(--th-font-weight-bold);
+    font-weight: var(--th-font-weight-semibold);
     color: var(--color-main-text);
 }
 
 .admin-setup__intro {
-    margin: 4px 0 14px;
-    font-size: 13px;
+    margin: var(--th-space-xs) 0 var(--th-space-md);
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     max-width: 68ch;
 }
 
 .admin-setup__rows {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
 .admin-setup__row {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
+    gap: var(--th-space-sm);
+    /* v4.10.51 — tight rows (Justin: 5px at most); 4px is the grid step. */
+    padding: var(--th-space-xs) 0;
+}
+
+.admin-setup__row + .admin-setup__row {
+    border-block-start: 1px solid var(--color-border);
+}
+
+/* A round badge: fixed box, never stretched by its content. */
+.admin-setup__status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    /* 24px — NC's small clickable size; a 32px badge filled the whole row. */
+    width: calc(6 * var(--default-grid-baseline));
+    height: calc(6 * var(--default-grid-baseline));
+    border-radius: 50%;
+}
+
+.admin-setup__status--ok {
+    background-color: var(--color-success);
+    color: var(--color-success-text);
+}
+
+.admin-setup__status--warn {
+    background-color: var(--color-warning);
+    color: var(--color-warning-text);
+}
+
+.admin-setup__status--info {
+    background-color: var(--color-background-hover);
+    color: var(--color-text-maxcontrast);
+}
+
+.admin-setup__body {
+    flex: 1 1 auto;
+    min-width: 0;
+    /* A one-line row sits level with the 24px badge; a hint grows downwards. */
+    line-height: calc(6 * var(--default-grid-baseline));
+}
+
+
+.admin-setup__line {
+    display: flex;
     flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--th-space-md);
+    row-gap: var(--th-space-xs);
 }
-
-.admin-setup__indicator {
-    flex-shrink: 0;
-    font-weight: 700;
-    font-size: var(--th-font-body);
-    width: 20px;
-    text-align: center;
-    margin-top: 1px;
-}
-
-.admin-setup__indicator--ok   { color: var(--color-success-text); }
-.admin-setup__indicator--warn { color: var(--color-warning-text); }
-.admin-setup__indicator--info { color: var(--color-text-maxcontrast); }
 
 .admin-setup__label {
-    font-weight: 500;
+    font-weight: var(--th-font-weight-semibold);
     color: var(--color-main-text);
 }
 
@@ -8552,22 +8730,46 @@ a.maint-op-link__name:focus-visible {
 }
 
 .admin-setup__hint {
-    width: 100%;
-    padding-left: 28px;
-    margin-top: 2px;
-    font-size: 13px;
+    margin: 0;
+    line-height: var(--th-line-height-body);
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     max-width: 76ch;
+}
+
+.admin-setup__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
 }
 
 .admin-setup__restore {
     margin: 0 0 16px;
 }
 
+/* v4.10.23 — the release button on the service-desk row, and its confirm. */
+.admin-setup__action {
+    margin-inline-start: auto;
+}
+
+.admin-setup__confirm p {
+    margin: 0 0 8px;
+    line-height: 1.4;
+}
+.admin-setup__confirm-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-block-start: 12px;
+}
+
 /* ── Ghost member cleanup tab ── */
 .ghost-result-summary {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     margin: 0 0 16px;
 }
 
@@ -8576,7 +8778,7 @@ a.maint-op-link__name:focus-visible {
     grid-template-columns: 200px 1fr auto;
     gap: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     overflow: hidden;
 }
 
@@ -8585,11 +8787,10 @@ a.maint-op-link__name:focus-visible {
 }
 
 .ghost-grid__head .ghost-grid__cell {
-    background-color: var(--color-background-dark);
-    font-weight: 600;
-    font-size: 13px;
+    font-weight: var(--th-font-weight-semibold);
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    padding: 10px 14px;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -8602,7 +8803,7 @@ a.maint-op-link__name:focus-visible {
 }
 
 .ghost-grid__cell {
-    padding: 12px 14px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--color-border);
     display: flex;
     align-items: flex-start;
@@ -8617,17 +8818,17 @@ a.maint-op-link__name:focus-visible {
 
 .ghost-uid {
     font-family: var(--font-face-monospace, monospace);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
 }
 
 .ghost-deleted-badge {
     display: inline-block;
     background-color: var(--color-error-background);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-size: var(--th-font-micro);
-    padding: 1px 6px;
-    border-radius: 10px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-container);
     border: 1px solid var(--color-error);
     white-space: nowrap;
     flex-shrink: 0;
@@ -8640,7 +8841,7 @@ a.maint-op-link__name:focus-visible {
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .ghost-team-item {
@@ -8652,7 +8853,7 @@ a.maint-op-link__name:focus-visible {
 }
 
 .ghost-team-name {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     flex: 1;
 }
 
@@ -8662,7 +8863,7 @@ a.maint-op-link__name:focus-visible {
 
 .audit-user-lookup {
     position: relative;
-    margin-bottom: 14px;
+    margin-bottom: 16px;
     max-width: 480px;
 }
 
@@ -8675,16 +8876,16 @@ a.maint-op-link__name:focus-visible {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-    padding: 10px 14px;
-    border-radius: var(--border-radius);
-    background: var(--color-background-hover);
+    padding: var(--th-space-sm) var(--th-space-lg);
+    border-radius: var(--th-radius-card);
+    background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    margin-bottom: 14px;
+    margin-bottom: var(--th-space-lg);
 }
 
 .audit-user-selected__label {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 /* Override the base maint-grid 6-column template (which would otherwise
@@ -8710,13 +8911,13 @@ a.maint-op-link__name:focus-visible {
 .audit-user-grid__desc {
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 .audit-user-grid__role {
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-meta);
     font-weight: 600;
     background: var(--color-background-dark);
@@ -8736,8 +8937,8 @@ a.maint-op-link__name:focus-visible {
 .audit-user-grid__source {
     display: inline-block;
     font-size: var(--th-font-meta);
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     background: var(--color-background-dark);
     color: var(--color-main-text);
 }
@@ -8755,8 +8956,8 @@ a.maint-op-link__name:focus-visible {
 .audit-user-grid__note--warn {
     color: var(--color-warning-text);
     background: var(--color-warning);
-    padding: 2px 8px;
-    border-radius: 12px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-meta);
 }
 
@@ -8764,15 +8965,15 @@ a.maint-op-link__name:focus-visible {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 14px;
-    margin-top: 14px;
+    gap: 16px;
+    margin-top: 16px;
     padding-top: 12px;
     border-top: 1px solid var(--color-border);
 }
 
 .audit-user-actions__summary {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 /* ── v4.3.0 Compliance tab — compact rows ───────────────────────────── */
@@ -8793,13 +8994,13 @@ a.maint-op-link__name:focus-visible {
 .compliance-rows {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 .compliance-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 2px 0;
+    padding: 4px 0;
 }
 .compliance-row__label {
     font-size: var(--th-font-body, 14px);
@@ -8846,16 +9047,16 @@ a.maint-op-link__name:focus-visible {
 .integrity-status-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 .integrity-pill {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 13px;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
+    font-size: var(--th-font-meta);
     font-weight: 600;
 }
 .integrity-pill__dot {
@@ -8902,13 +9103,13 @@ a.maint-op-link__name:focus-visible {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-radius: var(--th-radius-card, 10px);
     font-size: var(--th-font-body);
 }
 .integrity-banner--info {
-    background: var(--color-background-dark);
-    color: var(--color-text-maxcontrast);
+    background: var(--color-info);
+    color: var(--color-info-text);
 }
 .integrity-banner--err {
     background: var(--color-error);
@@ -8916,18 +9117,18 @@ a.maint-op-link__name:focus-visible {
 }
 .integrity-list summary {
     cursor: pointer;
-    padding: 6px 0;
+    padding: 8px 0;
     font-weight: 600;
 }
 .integrity-list summary:focus-visible {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: var(--border-radius-small);
 }
 .integrity-list__trunc {
     color: var(--color-text-maxcontrast);
     font-weight: 400;
-    margin-left: 6px;
+    margin-inline-start: 8px;
 }
 .integrity-list ul {
     list-style: none;
@@ -8940,7 +9141,7 @@ a.maint-op-link__name:focus-visible {
     color: var(--color-main-text);
 }
 .integrity-list li {
-    padding: 2px 0;
+    padding: 4px 0;
     word-break: break-all;
 }
 
@@ -8955,16 +9156,16 @@ a.maint-op-link__name:focus-visible {
 .license-status-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-bottom: 16px;
 }
 .license-pill {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 13px;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
+    font-size: var(--th-font-meta);
     font-weight: 600;
 }
 .license-pill__dot {
@@ -8989,19 +9190,18 @@ a.maint-op-link__name:focus-visible {
     color: var(--color-error-text);
 }
 .license-trial-flag {
-    padding: 2px 8px;
-    border-radius: 10px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     background: var(--color-background-hover);
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
     font-weight: 600;
-    text-transform: uppercase;
     letter-spacing: 0.4px;
 }
 .license-detail {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 6px 16px;
+    gap: 8px 16px;
     margin: 8px 0 20px;
     font-size: var(--th-font-body);
 }
@@ -9013,22 +9213,23 @@ a.maint-op-link__name:focus-visible {
     margin: 0;
 }
 .license-over {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-weight: 600;
 }
 .license-uuid,
 .license-key-row {
-    margin: 16px 0;
-    padding: 12px 14px;
-    background: var(--color-background-hover);
-    border-radius: var(--border-radius);
+    margin: var(--th-space-lg) 0;
+    padding: var(--th-space-md) var(--th-space-lg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--th-radius-card);
+    background: var(--color-main-background);
 }
 .license-uuid__label,
 .license-key-row__label {
     display: block;
     font-weight: 600;
-    margin-bottom: 6px;
-    font-size: 13px;
+    margin-bottom: 8px;
+    font-size: var(--th-font-meta);
 }
 .license-uuid__value {
     display: flex;
@@ -9038,33 +9239,24 @@ a.maint-op-link__name:focus-visible {
 }
 .license-uuid__value code {
     background: var(--color-main-background);
-    padding: 3px 8px;
-    border-radius: 4px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-small);
     font-family: monospace;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     word-break: break-all;
 }
 .license-uuid__hint {
-    margin: 6px 0 0;
+    margin: 8px 0 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 .license-copied {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
     font-size: var(--th-font-meta);
     font-weight: 600;
 }
 .license-key-row__input {
     width: 100%;
-    min-height: 90px;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-family: monospace;
-    font-size: var(--th-font-meta);
-    resize: vertical;
     box-sizing: border-box;
 }
 .license-key-row__actions {
@@ -9091,7 +9283,7 @@ a.maint-op-link__name:focus-visible {
 .license-trial-button {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     color: var(--color-primary-element);
     background: transparent;
     border: 0;
@@ -9129,7 +9321,7 @@ a.maint-op-link__name:focus-visible {
     padding: var(--th-space-md) var(--th-space-lg);
     border: 1px solid var(--color-border);
     border-radius: var(--th-radius-card);
-    background: var(--color-background-hover);
+    background: var(--color-main-background);
 }
 .license-pitch__title {
     margin: 0 0 var(--th-space-sm);
@@ -9182,8 +9374,8 @@ a.maint-op-link__name:focus-visible {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 12px 14px;
-    border-radius: var(--border-radius);
+    padding: 12px 16px;
+    border-radius: var(--border-radius-small);
     margin: 12px 0;
     font-size: var(--th-font-body);
     line-height: 1.4;

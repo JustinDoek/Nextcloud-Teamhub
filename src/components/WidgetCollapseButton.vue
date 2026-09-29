@@ -1,15 +1,18 @@
 <template>
-    <button
-        type="button"
+    <NcButton
         class="teamhub-widget-collapse-btn"
         :aria-label="ariaLabel"
-        @click.stop="$emit('toggle')">
-        <ChevronUp v-if="!collapsed" :size="iconSize" />
-        <ChevronDown v-else :size="iconSize" />
-    </button>
+        @click.stop="$emit('toggle')"
+        variant="tertiary">
+        <template #icon>
+            <ChevronUp v-if="!collapsed" :size="iconSize" />
+            <ChevronDown v-else :size="iconSize" />
+        </template>
+    </NcButton>
 </template>
 
 <script>
+import { NcButton } from '@nextcloud/vue'
 /*
  * WidgetCollapseButton — the chevron button in every home-widget header
  * that toggles the widget's collapsed state.
@@ -36,7 +39,7 @@ import { ICON_BODY } from '../constants/uiTokens.js'
 export default {
     name: 'WidgetCollapseButton',
 
-    components: { ChevronUp, ChevronDown },
+    components: {  NcButton, ChevronUp, ChevronDown },
 
     props: {
         // Whether the widget is currently collapsed. Drives the chevron

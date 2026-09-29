@@ -23,8 +23,10 @@ use Psr\Log\LoggerInterface;
  *   - When a group is added to a team, its existing members aren't pulled
  *     into the Talk room.
  *   - When an NC admin adds/removes a user from a group that is attached to
- *     a team, the Talk room is never updated (no TeamHub event listener for
- *     NC group changes).
+ *     a team, the Talk room is never updated. (Since v4.10.47,
+ *     GroupMembershipChangedListener repairs Circles' copy of the group and
+ *     the resulting Memberships* events reconcile Talk; this job remains the
+ *     net under that.)
  *   - When a group is removed from a team, the legacy reconcile considered
  *     only direct members and could evict users still reachable via another
  *     attached group.

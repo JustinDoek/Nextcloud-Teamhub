@@ -220,13 +220,24 @@ class MyWorkService {
         $counts      = $this->countByCategory($prefiltered, $query);
         $breakdown   = $this->breakdownByCategory($prefiltered, $query);
 
-        // ── Per-source counts for the source tab bar (v4.5.25), on the same
+        // ── Per-source counts for the type filter (v4.5.25), on the same
         //    principle as the category counts above: every filter applies
-        //    EXCEPT the one the control itself sets. A tab bar whose other
-        //    tabs read zero the moment you pick one is not a navigation aid.
-        //    The category filter deliberately still applies — with Action
-        //    required selected, the tabs should say how much of it each
-        //    source is responsible for.
+        //    EXCEPT the one the control itself sets. The category filter
+        //    deliberately still applies — with Action required selected, the
+        //    chips should say how much of it each source is responsible for.
+        //
+        //    **`ignoreProvider: true` cannot do what it looks like it does,
+        //    and the client compensates** (found 2026-09-22, v4.10.18).
+        //    `providerIds` decides which providers are *queried at all* —
+        //    `ProviderRegistry` skips the rest — so on a narrowed request
+        //    `$items` holds no rows for the other sources and there is
+        //    nothing here to un-filter: every other source counts zero. The
+        //    flag is still right for the *unnarrowed* request, which is the
+        //    one the client keeps: `MyWorkView` remembers the last answer
+        //    that carried no `providerIds` and labels the chips from that.
+        //    Making this honest server-side would mean running every
+        //    provider on every narrowed request, which is the cost the
+        //    narrowing exists to avoid.
         $sourceCounts = $this->countByProvider(
             $this->applyFilters($items, $query, ignoreCategory: false, ignoreProvider: true),
         );
@@ -581,7 +592,14 @@ class MyWorkService {
         $upcomingDays  = $this->config->getUpcomingDays();
         $completedDays = $this->config->getCompletedDays();
 
+        // `migrate()` first: a saved filter or a bookmarked URL written before
+        // v4.10.20 still names `team_admin`, and dropping it as invalid would
+        // silently turn "show me only my admin work" into "show me everything".
         $categories = $this->stringList($params['categories'] ?? []);
+        $categories = array_values(array_unique(array_map(
+            static fn (string $c): string => Category::migrate($c),
+            $categories,
+        )));
         $categories = array_values(array_filter($categories, static fn (string $c): bool => Category::isValid($c)));
 
         $priorities = $this->stringList($params['priorities'] ?? []);
@@ -719,21 +737,25 @@ class MyWorkService {
     /**
      * Settle the item's final category and priority.
      *
-     * Order matters and encodes the specification's rules:
-     *  1. an administrator's status→category mapping overrides the provider,
-     *  2. an active item due today becomes TODAY — unless it is already
+     * **The provider's category stands.** Until v4.10.20 an instance-wide
+     * `{provider}.{status}` table was layered over it here; it is gone, and
+     * with it the last way for a configuration value to overrule the one
+     * object that knows whose move it is. A category is not a property of a
+     * source status — the same status is *Action required* for the person who
+     * must act and *Waiting for others* for the person who asked — so a table
+     * keyed on status alone could only ever be right for one of the two
+     * parties. See DESIGN.md §2.143.
+     *
+     * What is still decided here is what the provider cannot know, because it
+     * is a clock question:
+     *  1. an active item due today becomes TODAY — unless it is already
      *     ACTION_REQUIRED, which wins and merely gains a `dueToday` flag. That
      *     is the "avoid duplicates with Action Required" rule, implemented as
      *     precedence rather than as a de-duplication pass,
-     *  3. anything overdue and still actionable is URGENT.
+     *  2. anything overdue and still actionable is URGENT.
      */
     private function finaliseCategory(WorkItem $item, WorkQuery $query): WorkItem {
         $category = $item->category;
-
-        $mapped = $this->config->mapCategory($item->providerId, $item->status);
-        if ($mapped !== null && !in_array($mapped, Category::DERIVED, true)) {
-            $category = $mapped;
-        }
 
         $priority = $item->priority;
         $meta     = [];
@@ -1275,7 +1297,7 @@ class MyWorkService {
      * **Every value of `Category` must have an arm here.** The `default` is not
      * a fallback, it is a bug surfacing: it puts the raw constant on the screen,
      * so a section reads `team_admin` in every language. That is exactly what
-     * happened between v4.5.45 and v4.6.17 — `Category::TEAM_ADMIN` was added,
+     * happened between v4.5.45 and v4.6.17 — a category was added,
      * `constants/myWork.js::categoryLabel()` gained its arm, and this mirror did
      * not. Adding a category means editing both.
      */
@@ -1285,9 +1307,6 @@ class MyWorkService {
             Category::TODAY              => $this->l->t('Today'),
             Category::UPCOMING           => $this->l->t('Upcoming'),
             Category::WAITING_FOR_OTHERS => $this->l->t('Waiting for others'),
-            // TRANSLATORS: My Work section heading — housekeeping the viewer
-            // owes their team as its admin. Same string as the JS mirror.
-            Category::TEAM_ADMIN         => $this->l->t('Team admin'),
             Category::COMPLETED          => $this->l->t('Completed'),
             default                      => $category,
         };
@@ -1466,8 +1485,20 @@ class MyWorkService {
     }
 
     public function invalidateUser(string $userId): void {
+        self::bumpNonce($this->cacheFactory, $userId);
+    }
+
+    /**
+     * v4.10.1 — the same invalidation, callable without this service: a
+     * team-space hand-over changes *another* person's queue (the owner's on
+     * assignment, the administrators' on completion), and the services that
+     * do it cannot inject MyWorkService without closing the
+     * ProviderRegistry → provider → service cycle. One implementation of the
+     * key scheme, in one place.
+     */
+    public static function bumpNonce(ICacheFactory $cacheFactory, string $userId): void {
         try {
-            $cache = $this->cacheFactory->createDistributed(self::CACHE_PREFIX);
+            $cache = $cacheFactory->createDistributed(self::CACHE_PREFIX);
             $cache->set('nonce_' . $userId, (string)microtime(true), 3600);
         } catch (\Throwable) {
             // No distributed cache configured — nothing to invalidate, because
@@ -1590,6 +1621,14 @@ class MyWorkService {
         // hold work in, so it is not listed.
         $allowed = $this->instanceScopedProviderIds($userId);
 
+        // v4.10.4 — the *Teams* group (`TeamAdminWorkProvider`,
+        // `TeamExpiryTeamWorkProvider`) is the same shape one level down:
+        // both narrow to teams where the viewer holds admin level and return
+        // nothing to anybody else, so a member who administers no team was
+        // shown a *Teams* tab and a *Team admin* card at zero (Jaap Tel,
+        // 2026-09-20). Left out of the list for them, like Administration.
+        $teamAdmin = $this->administersAnyTeam();
+
         $out = [];
         foreach ($this->describeProviders() as $p) {
             $id       = (string)($p['id'] ?? '');
@@ -1603,9 +1642,34 @@ class MyWorkService {
                     // Cannot tell — treat as the ordinary provider it presents as.
                 }
             }
-            $p['group'] = SourceGroup::of($id);
+            $group = SourceGroup::of($id);
+            if ($group === SourceGroup::TEAMS && !$teamAdmin) {
+                continue;
+            }
+            $p['group'] = $group;
             $out[] = $p;
         }
         return $out;
+    }
+
+    /**
+     * Does the current user hold admin level (8, or 9 as owner) in at least
+     * one team? `getUserTeams()` carries the level per team — the same
+     * membership boundary `resolveTeams()` trusts — so nothing is re-derived.
+     * Fails closed: a member is not shown a tab a lookup error cannot vouch for.
+     */
+    private function administersAnyTeam(): bool {
+        try {
+            foreach ($this->teamService->getUserTeams() as $team) {
+                if ((int)($team['level'] ?? 0) >= 8) {
+                    return true;
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MyWork] Team-admin check failed; Teams group withheld', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+        return false;
     }
 }

@@ -5,6 +5,7 @@ namespace OCA\TeamHub\BackgroundJob;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
+use OCA\TeamHub\Service\TeamRegistryService;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
 use Psr\Log\LoggerInterface;
@@ -24,6 +25,7 @@ class ResourceDiscoveryJob extends TimedJob {
     public function __construct(
         ITimeFactory                          $time,
         private readonly ResourceDiscoveryService $discoveryService,
+        private readonly TeamRegistryService      $teamRegistry,
         private readonly LoggerInterface          $logger,
     ) {
         parent::__construct($time);
@@ -42,6 +44,20 @@ class ResourceDiscoveryJob extends TimedJob {
             $this->discoveryService->reconcileAllTeams();
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][ResourceDiscoveryJob] reconcileAllTeams threw', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+        }
+
+        // v4.10.6 — the same hourly desired-state pass for the CFG_APP lock
+        // that keeps the Teams page from deleting a TeamHub team. The bit is
+        // shared with Collectives and has no event when it changes (DESIGN
+        // §2.103 — Circles offers no config hook), so a poll is the only way
+        // to notice it gone.
+        try {
+            $this->teamRegistry->relockAll();
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][ResourceDiscoveryJob] relockAll threw', [
                 'error' => $e->getMessage(),
                 'app'   => Application::APP_ID,
             ]);

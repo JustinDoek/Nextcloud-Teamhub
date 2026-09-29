@@ -56,6 +56,7 @@ export function isProjectHealthActive(ctx) {
  * @param {object}  ctx.budgetConfig           { can_view_budget }
  * @param {object}  ctx.timeConfig             { can_view_time }
  * @param {object}  ctx.openProjectConfig      { eligible, linked } (v4.9.3)
+ * @param {object}  ctx.serviceDeskConfig      { isDesk, isAdmin } (v4.10.27), { isServiceTeam, canBuild } (v4.10.34)
  * @param {Array}   ctx.teamWidgets            registered integration widgets
  * @param {object}  ctx.dashboardConfig        { hidden_widgets }
  * @param {object}  [options]
@@ -113,6 +114,24 @@ export function computeActiveWidgetIds(ctx, { applyHidden = true } = {}) {
     if (ctx.openProjectConfig?.eligible && ctx.openProjectConfig?.linked) {
         active.add('widget-openproject')
     }
+
+    // v4.10.27 — the service team's queue and statistics (`/service-teams`).
+    // Exactly when the team is a desk the viewer works: licensed, an active
+    // service team, and a member of it — the rule the queue route applies.
+    if (ctx.serviceDeskConfig?.isDesk) {
+        active.add('widget-service-queue')
+        active.add('widget-service-stats')
+    }
+
+    // v4.10.50 — the grid of teams made outside TeamHub, on the home of the
+    // team that holds the adoption service, for its members. The same rule
+    // the grid's routes apply (TeamAdoptionDecisionService::mayDecide()).
+    if (ctx.serviceDeskConfig?.handlesAdoption) {
+        active.add('widget-team-adoption')
+    }
+
+    // v4.10.44 — `widget-services` (v4.10.34) is retired: the team's own
+    // services and the builder are on the Services tab (src/lib/teamTabs.js).
 
     ;(ctx.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
 

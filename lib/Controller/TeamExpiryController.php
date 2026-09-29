@@ -3,12 +3,14 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
+use OCA\TeamHub\Service\ServiceTeam\ExpiryTeamsService;
 use OCA\TeamHub\Service\TeamExpiryService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 use Psr\Log\LoggerInterface;
 
@@ -41,6 +43,9 @@ class TeamExpiryController extends Controller {
         IRequest                  $request,
         private TeamExpiryService $expiryService,
         private LoggerInterface   $logger,
+        // v4.10.45 — whether a service team answers requests for more time.
+        private ExpiryTeamsService $expiryTeams,
+        private IL10N             $l,
     ) {
         parent::__construct($appName, $request);
     }
@@ -56,7 +61,16 @@ class TeamExpiryController extends Controller {
     #[NoCSRFRequired]
     public function status(string $teamId): JSONResponse {
         try {
-            return new JSONResponse($this->expiryService->getTeamStatus($teamId));
+            $status = $this->expiryService->getTeamStatus($teamId);
+            // v4.10.45 — where a service team offers *Request more time for
+            // a team*, Manage team asks it instead of the administrators;
+            // `serviceRequest` is the workflow already open, if any.
+            $viaService = $this->expiryTeams->isOffered();
+            $open       = $viaService ? $this->expiryTeams->openRequest($teamId) : null;
+            return new JSONResponse($status + [
+                'viaServiceTeam' => $viaService,
+                'serviceRequest' => $open !== null && $open['workflowId'] > 0 ? $open : null,
+            ]);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to load the expiration status', ['teamId' => $teamId]);
         }
@@ -73,6 +87,10 @@ class TeamExpiryController extends Controller {
     public function requestExtension(string $teamId, string $proposedOn = '', string $reason = ''): JSONResponse {
         if (trim($proposedOn) === '') {
             return new JSONResponse(['error' => 'proposedOn is required'], Http::STATUS_BAD_REQUEST);
+        }
+        // v4.10.45 — replaced by the service where a service team offers it.
+        if ($this->expiryTeams->isOffered()) {
+            return new JSONResponse(['error' => $this->l->t('Ask the service team for more time instead.')], Http::STATUS_BAD_REQUEST);
         }
         try {
             return new JSONResponse([

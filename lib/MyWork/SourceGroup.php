@@ -40,7 +40,7 @@ final class SourceGroup {
     public const MEMBERS = [
         self::FILES          => ['approval', 'file_review'],
         self::TEAMS          => ['teamadmin', 'teamexpiry_team'],
-        self::ADMINISTRATION => ['teamexpiry_admin'],
+        self::ADMINISTRATION => ['teamexpiry_admin', 'teamspace_admin'],
     ];
 
     public static function isGroup(string $key): bool {

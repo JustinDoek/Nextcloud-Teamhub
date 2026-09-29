@@ -12,7 +12,7 @@ use Psr\Log\LoggerInterface;
 
 class FeedbackService {
 
-    private const RECIPIENT = 'teamhub@tldr.host';
+    private const RECIPIENT = 'sales@doekworks.eu';
     private const RECIPIENT_NAME = 'TeamHub Feedback';
 
     public function __construct(

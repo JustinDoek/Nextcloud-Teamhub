@@ -13,14 +13,16 @@
             <!-- Drawer chrome: present only while the rail is a drawer, which
                  is the mobile-drawer carve-out in SKILLS.md § "NcButton is the
                  default". -->
-            <button
-                type="button"
+            <NcButton
                 class="feed-rail__close"
                 :aria-label="t('teamhub', 'Close')"
                 :title="t('teamhub', 'Close')"
-                @click="$emit('close')">
-                <Close :size="ICON_TOOLBAR" aria-hidden="true" />
-            </button>
+                @click="$emit('close')"
+                variant="tertiary">
+                <template #icon>
+                    <Close :size="ICON_TOOLBAR" aria-hidden="true" />
+                </template>
+            </NcButton>
         </div>
 
         <!-- ── SHOW ─────────────────────────────────────────────────────── -->
@@ -210,7 +212,7 @@
         <!-- Confirmation is a live region: the button label doesn't change, so
              a screen-reader user would otherwise get no feedback at all. -->
         <p class="feed-rail__saved" aria-live="polite">
-            <span v-if="savedAt">{{ t('teamhub', 'Saved as your default.') }}</span>
+            <span v-if="savedAt">{{ t('teamhub', 'Saved as the default.') }}</span>
         </p>
     </aside>
 </template>
@@ -353,8 +355,8 @@ export default {
     flex: 0 0 260px;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--th-radius-card, var(--border-radius-large));
-    padding: 14px 16px;
+    border-radius: var(--th-radius-card, var(--border-radius-element));
+    padding: 16px 16px;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -376,7 +378,7 @@ export default {
         // Below Nextcloud's own header, which sits at z-index 2000 and would
         // otherwise crop the top of the drawer.
         top: var(--header-height, 50px);
-        right: 0;
+        inset-inline-end: 0;
         bottom: 0;
         z-index: 1001; // above the scrim
         flex: 0 0 auto;
@@ -384,9 +386,9 @@ export default {
         max-height: none;
         border-radius: 0;
         border-width: 0 0 0 1px;
-        box-shadow: -4px 0 16px rgba(0, 0, 0, 0.18);
+        box-shadow: -4px 0 16px var(--color-box-shadow);
         transform: translateX(100%);
-        transition: transform 200ms ease-out;
+        transition: transform var(--animation-quick) ease-out;
         // Off-canvas is not just invisible: without this the switches stay in
         // the tab order and keyboard focus walks into a closed drawer.
         visibility: hidden;
@@ -422,31 +424,16 @@ export default {
         justify-content: center;
         flex: 0 0 auto;
         box-sizing: border-box;
-        margin-left: auto;
+        margin-inline-start: auto;
         width: 32px;
-        height: 32px;
         // Six locks: NC's global button rule sets both min-width and
         // min-height to 44px, and per spec min-* beats an unqualified
         // width/height (SKILLS.md § UI shapes).
-        min-width: 32px;
-        min-height: 32px;
         max-width: 32px;
-        max-height: 32px;
-        padding: 0;
-        border: none;
-        border-radius: var(--th-radius-control, var(--border-radius));
-        background: none;
-        color: var(--color-main-text);
-        cursor: pointer;
 
         &:hover { background: var(--color-background-hover); }
         // Split from :hover — grouping them silences the keyboard focus ring
         // (SKILLS.md § Focus visibility standard).
-        &:focus-visible {
-            background: var(--color-background-hover);
-            outline: 2px solid var(--color-primary-element);
-            outline-offset: 2px;
-        }
     }
 }
 
@@ -470,26 +457,23 @@ export default {
     font-size: var(--th-font-micro, 11px);
     font-weight: var(--th-font-weight-semibold, 600);
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin: 0 0 2px;
+    margin: 0 0 4px;
 }
 
 .feed-rail__hint {
-    margin: 2px 0 0;
+    margin: 4px 0 0;
     font-size: var(--th-font-micro, 11px);
     line-height: var(--th-line-height-body, 1.4);
     color: var(--color-text-maxcontrast);
 }
 
-
 .feed-rail__picklist {
     list-style: none;
-    margin: 2px 0 0 12px;
+    margin: 4px 0 0 12px;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     // A user in thirty teams must not push Save off the bottom of the rail.
     max-height: 220px;
     overflow-y: auto;
@@ -498,22 +482,22 @@ export default {
 .feed-rail__dates {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    margin: 6px 0 0 12px;
+    gap: 8px;
+    margin: 8px 0 0 12px;
 }
 
 .feed-rail__date {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     font-size: var(--th-font-micro, 11px);
     color: var(--color-text-maxcontrast);
 
     input {
         font-size: var(--th-font-meta, 12px);
-        padding: 4px 6px;
+        padding: 4px 8px;
         border: 1px solid var(--color-border-dark);
-        border-radius: var(--th-radius-control, var(--border-radius));
+        border-radius: var(--th-radius-control, var(--border-radius-small));
         background: var(--color-main-background);
         color: var(--color-main-text);
 
@@ -542,7 +526,7 @@ export default {
     margin: 0;
     min-height: 1em; // reserves the line so the rail doesn't jump on save
     font-size: var(--th-font-micro, 11px);
-    color: var(--color-success-text);
+    color: var(--color-text-success);
     text-align: center;
 }
 </style>

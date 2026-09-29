@@ -12,6 +12,11 @@ import {
     buildDashboardWidgetCatalog,
     orderTabDescriptors,
 } from '../lib/teamTabs.js'
+// v4.10.15 — WorkflowHub: the viewer's workflow instances, as a namespaced
+// module (the first module split of this store; My Work's own state stays
+// where it is).
+import serviceTeams from './serviceTeams.js'
+import workflows from './workflows.js'
 
 // Vue.use(Vuex) removed — Vuex 4 uses app.use(store) in the entrypoint
 
@@ -31,6 +36,7 @@ async function migrateLegacyImageToTeams(teamId, legacyUrl) {
 }
 
 export default createStore({
+    modules: { workflows, serviceTeams },
     state: {
         teams: [],
         // v4.7.3 — personal sidebar grouping. `null` means "not fetched yet",
@@ -78,7 +84,7 @@ export default createStore({
         messageSettings: { manageMinLevel: 'admin', postMinLevel: 'member', linkMinLevel: 'admin', commentMinLevel: 'member', commentsEnabled: {}, allowPublicMessages: false }, // per-team message settings
         comments: {},          // { messageId: [comments] }
         members: [],
-        allEffectiveMembers: [],   // flat [{userId, displayName, email?, phone?, ncStatus?}] of ALL members including indirect (via groups/teams) — used by the MembersWidget and for @mention autocomplete
+        allEffectiveMembers: [],   // flat [{userId, displayName, subline, email?, phone?, ncStatus?}] of ALL members including indirect (via groups/teams) — used by the MembersWidget and for @mention autocomplete
         allEffectiveMembersTalkAvailable: false, // per-request fact: is Talk (spreed) enabled for the current user — drives whether the chat icon shows in the members widget rows
         allEffectiveMembersMailAvailable: false, // per-request fact: can the CURRENT user compose in NC Mail (app enabled + an account configured) — decides whether a member's email icon opens Mail or hands off to the OS mailto: handler
         memberships: [],           // flat list of {type: 'group'|'circle', displayName, memberCount}
@@ -201,6 +207,12 @@ export default createStore({
         // on); when it is false the backend already reports `eligible` and
         // `linked` false, so every widget hides without asking.
         openProjectConfig: { moduleAvailable: false, available: false, eligible: false, linked: false, stale: false, project: null },
+        // v4.10.27 — is the team on screen a service desk the viewer works,
+        // and do they administer it. From the layout bundle; gates the queue
+        // and statistics widgets (src/lib/activeWidgets.js).
+        // v4.10.34 — `isServiceTeam` (a Service-template team, desk or not
+        // yet) and `canBuild` (a team admin of it) gate the Services widget.
+        serviceDeskConfig: { isDesk: false, isAdmin: false, isServiceTeam: false, canBuild: false, handlesAdoption: false },
         // v4.9.6 — the team's provisioning state from the layout bundle: null
         // for a team that was never provisioned, else { id, status, complete,
         // currentStep, openSteps, createdBy, updatedAt }. The team page's
@@ -745,6 +757,19 @@ export default createStore({
         RESET_OPENPROJECT_TEAM_CONFIG(state) {
             state.openProjectConfig = { ...state.openProjectConfig, eligible: false, linked: false, stale: false, project: null }
         },
+        // v4.10.27 — per team, cleared on a switch so the previous team's
+        // desk widgets never render under the next team's name.
+        SET_SERVICE_DESK_CONFIG(state, config) {
+            state.serviceDeskConfig = {
+                isDesk: !!config?.isDesk,
+                isAdmin: !!config?.isAdmin,
+                isServiceTeam: !!config?.isServiceTeam,
+                canBuild: !!config?.canBuild,
+                // v4.10.50 — this team holds the adoption service: the grid of
+                // teams made outside TeamHub is a widget on its home.
+                handlesAdoption: !!config?.handlesAdoption,
+            }
+        },
         // v4.9.6 — per team; cleared on a switch like the OpenProject facts.
         SET_PROVISIONING(state, summary) { state.provisioning = summary && typeof summary === 'object' ? summary : null },
         SET_JUST_CREATED_ADVANCED_PROJECT(state, teamId) { state.justCreatedAdvancedProjectTeamId = teamId },
@@ -766,9 +791,17 @@ export default createStore({
          * highlight, and a bare id would not change, so the watcher would never
          * fire the second time.
          */
-        SET_MESSAGE_TARGET(state, messageId) {
-            state.messageTarget = messageId
-                ? { messageId: Number(messageId), nonce: Date.now() }
+        SET_MESSAGE_TARGET(state, target) {
+            // v4.10.4 — takes a bare id OR `{ messageId, nonce }`. Since 4.8.7
+            // both callers (App.vue's deep link and the What's-new feed) passed
+            // the object, and `Number({…})` is NaN, so the watcher's
+            // `target?.messageId` was never truthy: every `?team=…&message=…`
+            // link — the comment-notification bell of GitHub #95 included —
+            // landed on the stream without loading, scrolling to or
+            // highlighting the message. Seen on the instance 2026-09-20.
+            const id = Number(target !== null && typeof target === 'object' ? target.messageId : target)
+            state.messageTarget = Number.isInteger(id) && id > 0
+                ? { messageId: id, nonce: Date.now() }
                 : null
         },
         SET_DECISIONS_PRESELECT_STATUS(state, val) { state.decisionsPreselectStatus = val },
@@ -1092,6 +1125,7 @@ export default createStore({
             commit('SET_MESSAGE_SETTINGS', { manageMinLevel: 'admin', postMinLevel: 'member', linkMinLevel: 'admin', commentMinLevel: 'member', commentsEnabled: {}, allowPublicMessages: false })
             commit('RESET_COLLECTIVES_TEAM_CONFIG')
             commit('RESET_OPENPROJECT_TEAM_CONFIG')
+            commit('SET_SERVICE_DESK_CONFIG', null)
             commit('SET_MEMBERS', [])
             commit('SET_ALL_EFFECTIVE_MEMBERS', [])
             commit('SET_RESOURCES', {})
@@ -1198,6 +1232,9 @@ export default createStore({
             if (data.openProjectConfig) {
                 commit('SET_OPENPROJECT_CONFIG', data.openProjectConfig)
             }
+            // v4.10.27 — service desk facts; absent from an older backend,
+            // which reads as "not a desk".
+            commit('SET_SERVICE_DESK_CONFIG', data.serviceDeskConfig ?? null)
             // Provisioning (v4.9.6) — the incomplete-workspace fact rides along too;
             // null is a real value (never provisioned) and is set as such.
             commit('SET_PROVISIONING', data.provisioning ?? null)

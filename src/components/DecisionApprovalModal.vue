@@ -7,20 +7,21 @@
         <div class="th-approval-modal">
             <h3 class="th-approval-modal__title">{{ decision.question || t('teamhub', 'Untitled') }}</h3>
             <p class="th-approval-modal__hint">
-                {{ t('teamhub', 'Briefly explain your decision — this becomes part of the audit trail.') }}
+                {{ t('teamhub', 'Briefly explain the decision — this becomes part of the audit trail.') }}
             </p>
             <div class="th-approval-modal__field">
                 <label class="th-approval-modal__label">
                     {{ t('teamhub', 'Reason') }} <span class="th-approval-modal__required">*</span>
                 </label>
-                <textarea
+                <NcTextArea
                     ref="reasonInput"
                     v-model="reason"
                     class="th-approval-modal__textarea"
-                    :placeholder="t('teamhub', 'Your rationale…')"
+                    :placeholder="t('teamhub', 'Rationale')"
                     rows="3"
                     maxlength="500"
-                    :aria-label="t('teamhub', 'Approval reason')" />
+                    :aria-label="t('teamhub', 'Approval reason')"
+                    label-outside />
                 <span class="th-approval-modal__counter">{{ reason.length }} / 500</span>
             </div>
             <div class="th-approval-modal__actions">
@@ -29,7 +30,7 @@
                     :disabled="!reason.trim() || saving"
                     class="th-approval-modal__btn--approve"
                     @click="submit('approve')">
-                    <template #icon><CheckCircleIcon :size="16" /></template>
+                    <template #icon><CheckCircleIcon :size="ICON_BODY" /></template>
                     {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Approve') }}
                 </NcButton>
                 <NcButton
@@ -37,7 +38,7 @@
                     :disabled="!reason.trim() || saving"
                     class="th-approval-modal__btn--deny"
                     @click="submit('deny')">
-                    <template #icon><CloseCircleIcon :size="16" /></template>
+                    <template #icon><CloseCircleIcon :size="ICON_BODY" /></template>
                     {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Deny') }}
                 </NcButton>
                 <!-- v3.74.10 — Schedule approver meeting. Shown only when the
@@ -48,7 +49,7 @@
                     :disabled="saving"
                     :title="t('teamhub', 'Open the meeting wizard pre-filled with the other approvers in this category so you can discuss the proposal together before deciding.')"
                     @click="$emit('schedule-meeting', decision)">
-                    <template #icon><CalendarPlusIcon :size="16" /></template>
+                    <template #icon><CalendarPlusIcon :size="ICON_BODY" /></template>
                     <!-- TRANSLATORS: short button label; hover-tooltip explains the action -->
                     {{ t('teamhub', 'Schedule meeting') }}
                 </NcButton>
@@ -62,14 +63,15 @@
 
 <script>
 import { translate as t }  from '@nextcloud/l10n'
-import { NcModal, NcButton } from '@nextcloud/vue'
+import { NcModal, NcButton, NcTextArea } from '@nextcloud/vue'
 import CheckCircleIcon from 'vue-material-design-icons/CheckCircle.vue'
 import CloseCircleIcon from 'vue-material-design-icons/CloseCircle.vue'
 import CalendarPlusIcon from 'vue-material-design-icons/CalendarPlus.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 export default {
     name: 'DecisionApprovalModal',
-    components: { NcModal, NcButton, CheckCircleIcon, CloseCircleIcon, CalendarPlusIcon },
+    components: {  NcTextArea, NcModal, NcButton, CheckCircleIcon, CloseCircleIcon, CalendarPlusIcon },
 
     props: {
         open:     { type: Boolean, default: false },
@@ -83,8 +85,9 @@ export default {
     emits: ['close', 'approve', 'deny', 'schedule-meeting'],
 
     data() {
-        return { reason: '' }
+        return { ICON_BODY, reason: '' }
     },
+
 
     watch: {
         open(v) {
@@ -110,7 +113,7 @@ export default {
 .th-approval-modal__title { margin: 0; font-size: var(--th-font-heading); font-weight: 700; color: var(--color-main-text); }
 .th-approval-modal__hint { margin: 0; font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 .th-approval-modal__field { display: flex; flex-direction: column; gap: 4px; }
-.th-approval-modal__label { font-size: 13px; font-weight: 600; color: var(--color-main-text); }
+.th-approval-modal__label { font-size: var(--th-font-meta); font-weight: 600; color: var(--color-main-text); }
 .th-approval-modal__required { color: var(--color-error); }
 /* v3.100.17: expanded from the condensed single-line rule (gui.md § 13)
    so each property lives on its own line, and added an explicit
@@ -120,23 +123,8 @@ export default {
    pass that maps 13px to a token needs to update both together. */
 .th-approval-modal__textarea {
     width: 100%;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
-    resize: vertical;
-    outline: none;
 }
-.th-approval-modal__textarea:focus {
-    border-color: var(--color-primary-element);
-}
-.th-approval-modal__textarea:focus-visible {
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px var(--color-primary-element);
-}
-.th-approval-modal__counter { font-size: var(--th-font-micro); color: var(--color-text-maxcontrast); text-align: right; }
+.th-approval-modal__counter { font-size: var(--th-font-micro); color: var(--color-text-maxcontrast); text-align: end; }
 .th-approval-modal__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 /* v3.100.16: local override of --color-primary-element so NcButton's
    primary styling picks up success (approve) / error (deny) fills.

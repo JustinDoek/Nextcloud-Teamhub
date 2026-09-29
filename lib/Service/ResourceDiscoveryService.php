@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Service;
 
+use OCA\TeamHub\Db\WorkflowInstanceMapper;
+use OCA\TeamHub\Workflow\Definition\QuotaRequestDefinition;
+use OCA\TeamHub\Workflow\WorkflowStatus;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\TeamAppResourceMapper;
 use OCA\TeamHub\Db\TeamAppResource;
@@ -43,6 +46,12 @@ class ResourceDiscoveryService {
         private readonly LoggerInterface       $logger,
         private readonly GroupFolderService    $groupFolderService,
         private readonly CollectivesService    $collectivesService,
+        // v4.10.2 — the team's open quota request rides the files row. Since
+        // v4.10.29 it is a workflow on the engine (a Nextcloud service), read
+        // from its instance table directly: the engine itself would pull the
+        // service-team graph into this class, and all this needs is "is one
+        // open, and at which step".
+        private readonly WorkflowInstanceMapper $workflowInstances,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -1418,7 +1427,7 @@ class ResourceDiscoveryService {
      * Includes a resolved displayName for the resource (human-readable).
      */
     private function serializeRow(TeamAppResource $row): array {
-        return [
+        $out = [
             'id'           => $row->getId(),
             'teamId'       => $row->getTeamId(),
             'appId'        => $row->getAppId(),
@@ -1435,6 +1444,40 @@ class ResourceDiscoveryService {
             'createdAt'    => $row->getCreatedAt(),
             'updatedAt'    => $row->getUpdatedAt(),
         ];
+
+        // v4.10.1 — a group folder that is the team's Nextcloud 35 team space
+        // says so, with its quota, so Manage team can label it. Absent (not
+        // false) on 33/34, where the question does not exist.
+        if ($row->getAppId() === 'files' && str_starts_with($row->getResourceId(), 'gf:')) {
+            $teamSpaces = $this->groupFolderService->teamSpaces();
+            if ($teamSpaces->isAvailable()) {
+                $space = $teamSpaces->getTeamSpace($row->getTeamId());
+                $isSpace = $space !== null && $space['id'] === (int)substr($row->getResourceId(), 3);
+                $out['isTeamSpace'] = $isSpace;
+                $out['quota']       = $isSpace ? $space['quota'] : null;
+                // v4.10.2 — the open quota request, so Manage team can show
+                // "requested" instead of offering it twice. v4.10.29: the
+                // engine's open instance; `pending` while the service team
+                // has it, `answered` once it waits for the requester to close.
+                if ($isSpace) {
+                    $open = $this->workflowInstances->findOpenForDefinitionAndTeam(
+                        QuotaRequestDefinition::KEY,
+                        $row->getTeamId(),
+                        WorkflowStatus::OPEN,
+                    );
+                    $out['quotaRequest'] = $open !== []
+                        ? [
+                            'workflowId'     => (int)$open[0]->getId(),
+                            'status'         => $open[0]->getCurrentStep() === QuotaRequestDefinition::STEP_CONFIRM ? 'answered' : 'pending',
+                            'requestedBytes' => (int)($open[0]->getData()['requestedBytes'] ?? 0),
+                            'requestedAt'    => $open[0]->getStartedAt(),
+                        ]
+                        : null;
+                }
+            }
+        }
+
+        return $out;
     }
 
     /**

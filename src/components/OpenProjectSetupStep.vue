@@ -489,7 +489,7 @@ export default {
 .op-setup__error {
     margin: 0;
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .op-setup__chosen {
@@ -498,7 +498,7 @@ export default {
     gap: var(--th-space-xxs);
     margin: 0;
     font-size: var(--th-font-meta);
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .op-setup__modes {

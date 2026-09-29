@@ -32,14 +32,15 @@
             <div class="th-swimlanes__add">
                 <h3 class="th-swimlanes__section-title">{{ t('teamhub', 'Add a workstream') }}</h3>
                 <div class="th-swimlanes__add-row">
-                    <input
+                    <NcTextField
                         v-model="newLaneTitle"
-                        type="text"
                         maxlength="255"
                         class="th-swimlanes__input"
                         :placeholder="t('teamhub', 'e.g. Design')"
                         :disabled="saving"
-                        @keydown.enter.prevent="submitLane">
+                        @keydown.enter.prevent="submitLane"
+                        label-outside
+                        :aria-label="t('teamhub', 'Workstream name')" />
                     <NcButton
                         variant="primary"
                         :disabled="saving || !newLaneTitle.trim()"
@@ -65,7 +66,7 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcDialog, NcButton } from '@nextcloud/vue'
+import { NcDialog, NcButton, NcTextField } from '@nextcloud/vue'
 import { mapState } from 'vuex'
 
 /**
@@ -84,7 +85,7 @@ import { mapState } from 'vuex'
 export default {
     name: 'ProjectSwimlanesModal',
 
-    components: { NcDialog, NcButton },
+    components: {  NcTextField, NcDialog, NcButton },
 
     props: {
         open: { type: Boolean, default: false },
@@ -184,23 +185,21 @@ export default {
 .th-swimlanes__intro {
     margin: 0;
     color: var(--color-main-text);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
 }
 
 .th-swimlanes__loading,
 .th-swimlanes__empty {
-    padding: 6px 0;
+    padding: 8px 0;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .th-swimlanes__section-title {
-    margin: 0 0 6px;
+    margin: 0 0 8px;
     font-size: var(--th-font-meta);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--color-text-maxcontrast);
 }
 
@@ -218,10 +217,10 @@ export default {
 .th-swimlanes__row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 6px 10px;
+    gap: 8px;
+    padding: 8px 8px;
     background: var(--color-background-hover);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 
 .th-swimlanes__order {
@@ -238,7 +237,7 @@ export default {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-main-text);
 }
 
@@ -250,25 +249,14 @@ export default {
 
 .th-swimlanes__input {
     flex: 1 1 auto;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
-}
-
-.th-swimlanes__input:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
 }
 
 .th-swimlanes__error {
-    margin: 6px 0 0;
-    padding: 6px 10px;
+    margin: 8px 0 0;
+    padding: 8px 8px;
     background: var(--color-error);
     color: var(--color-error-text);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-meta);
 }
 

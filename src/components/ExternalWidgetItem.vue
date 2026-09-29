@@ -6,14 +6,14 @@
         class="teamhub-widget-item teamhub-external-widget">
         <!-- Icon: use the registered MDI icon name when set, otherwise fall back to Widgets -->
         <template #icon>
-            <component :is="resolvedIcon" :size="20" />
+            <component :is="resolvedIcon" :size="ICON_BODY" />
         </template>
 
         <template #default>
             <div class="teamhub-external-widget__body">
                 <!-- Loading state shown while iframe is initialising -->
                 <div v-if="loading" class="teamhub-external-widget__loading">
-                    <NcLoadingIcon :size="24" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
 
                 <iframe
@@ -38,6 +38,7 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { NcAppNavigationItem, NcLoadingIcon } from '@nextcloud/vue'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 // Fallback icon used when the registered icon name is empty or not resolvable.
 import WidgetsIcon from 'vue-material-design-icons/Widgets.vue'
@@ -68,6 +69,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             loading: true,
             loadError: false,
         }
@@ -152,15 +155,15 @@ export default {
     /* Compact default height — external apps should be designed for this. */
     height: 200px;
     border: none;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
     display: block;
 }
 
 /* v3.100.16: NC theme token (was --th-color-error hex). */
 .teamhub-external-widget__error {
-    font-size: 13px;
-    color: var(--color-error-text);
+    font-size: var(--th-font-meta);
+    color: var(--color-text-error);
     padding: 8px 0;
     margin: 0;
 }

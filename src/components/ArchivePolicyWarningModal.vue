@@ -11,7 +11,7 @@
 
             <template v-else-if="policy && policy.dataLossWarning">
                 <div class="th-arch-policy__alert" role="alert">
-                    <AlertOctagon :size="32" aria-hidden="true" />
+                    <AlertOctagon :size="ICON_LARGE" aria-hidden="true" />
                     <div class="th-arch-policy__alert-body">
                         <h3>{{ t('teamhub', 'All project data will be lost.') }}</h3>
                         <p>
@@ -63,6 +63,7 @@ import axios from '@nextcloud/axios'
 import { NcDialog, NcButton } from '@nextcloud/vue'
 import AlertOctagon from 'vue-material-design-icons/AlertOctagon.vue'
 import { mapState } from 'vuex'
+import { ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
  * ArchivePolicyWarningModal (v3.99.0).
@@ -87,6 +88,7 @@ export default {
 
     data() {
         return {
+            ICON_LARGE,
             loading: false,
             policy: null,
             errorMessage: '',
@@ -144,13 +146,13 @@ export default {
 .th-arch-policy {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
     padding: 8px 4px 4px;
     min-width: 380px;
 }
 .th-arch-policy__loading {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 .th-arch-policy__alert {
     display: flex;
@@ -158,16 +160,16 @@ export default {
     padding: 12px;
     background: var(--color-error);
     color: var(--color-error-text);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 .th-arch-policy__alert h3 {
     margin: 0 0 8px;
-    font-size: 15px;
+    font-size: var(--th-font-body);
     font-weight: 700;
 }
 .th-arch-policy__alert p {
     margin: 0 0 8px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
 }
 .th-arch-policy__alert p:last-child {
@@ -177,8 +179,8 @@ export default {
     margin: 0;
     padding: 12px;
     background: var(--color-background-hover);
-    border-radius: var(--border-radius);
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    font-size: var(--th-font-meta);
     line-height: 1.5;
     color: var(--color-main-text);
 }
@@ -186,8 +188,8 @@ export default {
     padding: 8px 12px;
     background: var(--color-error);
     color: var(--color-error-text);
-    border-radius: var(--border-radius);
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    font-size: var(--th-font-meta);
 }
 .th-arch-policy__footer {
     display: flex;

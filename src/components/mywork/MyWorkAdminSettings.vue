@@ -1,7 +1,7 @@
 <template>
 	<div class="mywork-admin">
 		<div v-if="loading" class="mywork-admin__loading">
-			<NcLoadingIcon :size="32" />
+			<NcLoadingIcon :size="ICON_LARGE" />
 		</div>
 
 		<template v-else>
@@ -172,13 +172,15 @@
 					     the due date". -->
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Action required starts this many days before the due date') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.actionRequiredDays"
 							type="number"
 							class="mywork-admin__input"
 							:min="bounds.actionRequiredDays.min"
 							:max="bounds.actionRequiredDays.max"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Action required starts this many days before the due date')" />
 						<span class="mywork-admin__hint">
 							{{ t('teamhub', 'Overdue items are always Action required. Set this to 0 if only overdue work should count as actionable.') }}
 						</span>
@@ -186,35 +188,41 @@
 
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Upcoming covers the next (days)') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.upcomingDays"
 							type="number"
 							class="mywork-admin__input"
 							:min="bounds.upcomingDays.min"
 							:max="bounds.upcomingDays.max"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Upcoming covers the next (days)')" />
 					</label>
 
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Completed keeps items for (days)') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.completedDays"
 							type="number"
 							class="mywork-admin__input"
 							:min="bounds.completedDays.min"
 							:max="bounds.completedDays.max"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Completed keeps items for (days)')" />
 					</label>
 
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Treat a pending approval as expired after (days)') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.approvalStaleDays"
 							type="number"
 							class="mywork-admin__input"
 							min="1"
 							max="365"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Treat a pending approval as expired after (days)')" />
 						<span class="mywork-admin__hint">
 							{{ t('teamhub', 'The Nextcloud Approval app has no expiry of its own. This is a TeamHub display rule and it never changes anything in the source app.') }}
 						</span>
@@ -222,13 +230,15 @@
 
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Warn this many days beforehand') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.approvalWarnDays"
 							type="number"
 							class="mywork-admin__input"
 							min="1"
 							:max="Math.max(1, config.approvalStaleDays - 1)"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Warn this many days beforehand')" />
 					</label>
 				</section>
 
@@ -237,13 +247,15 @@
 
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Cache results for (seconds)') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.cacheTtl"
 							type="number"
 							class="mywork-admin__input"
 							:min="bounds.cacheTtl.min"
 							:max="bounds.cacheTtl.max"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Cache results for (seconds)')" />
 						<span class="mywork-admin__hint">
 							{{ t('teamhub', 'Zero disables caching. Acting on an item always clears that member’s cache immediately, so a short lifetime is safe.') }}
 						</span>
@@ -251,14 +263,16 @@
 
 					<label class="mywork-admin__field">
 						<span class="mywork-admin__label">{{ t('teamhub', 'Total time budget for all sources (milliseconds)') }}</span>
-						<input
+						<NcTextField
 							v-model.number="config.budgetMs"
 							type="number"
 							class="mywork-admin__input"
 							:min="bounds.budgetMs.min"
 							:max="bounds.budgetMs.max"
 							:step="500"
-							@change="save">
+							@change="save"
+							label-outside
+							:aria-label="t('teamhub', 'Total time budget for all sources (milliseconds)')" />
 						<span class="mywork-admin__hint">
 							{{ t('teamhub', 'Sources run in order until the budget is spent; any that have not run yet are reported as timed out rather than being started.') }}
 						</span>
@@ -266,99 +280,6 @@
 				</section>
 			</div>
 
-			<!-- ── Category mapping ───────────────────────────────────────
-			     A table (v4.9.19): one row per (source, status) with the
-			     category in its own column, so the eye runs down the statuses
-			     instead of reading each pair as a sentence. -->
-			<section class="mywork-admin__section">
-				<h3 class="mywork-admin__heading">{{ t('teamhub', 'Category mapping') }}</h3>
-				<p class="mywork-admin__hint">
-					{{ t('teamhub', 'Each source reports its own status for an item. These rules decide which My Work category that status lands in. Leave them alone unless your organisation reads one of these statuses differently.') }}
-				</p>
-
-				<table class="mywork-admin__map">
-					<thead>
-						<tr>
-							<th scope="col">{{ t('teamhub', 'Source') }}</th>
-							<th scope="col">{{ t('teamhub', 'Status') }}</th>
-							<th scope="col">{{ t('teamhub', 'Category') }}</th>
-						</tr>
-					</thead>
-					<tbody>
-						<tr
-							v-for="row in mappingRows"
-							:key="row.key"
-							class="mywork-admin__map-row">
-							<td class="mywork-admin__map-source">{{ row.providerName }}</td>
-							<td><code>{{ row.status }}</code></td>
-							<td>
-								<!-- The flex wrapper is a span, not the cell: a
-								     `display: flex` td stops being a table cell
-								     to assistive technology. -->
-								<span class="mywork-admin__map-category">
-									<select
-										class="mywork-admin__input mywork-admin__select"
-										:aria-label="t('teamhub', 'Category for {status} from {source}', { status: row.status, source: row.providerName })"
-										:value="config.categoryMap[row.key] || row.default"
-										@change="setMapping(row.key, $event.target.value)">
-										<option v-for="c in categories" :key="c" :value="c">
-											{{ categoryLabel(c) }}
-										</option>
-									</select>
-									<NcButton
-										v-if="isOverridden(row)"
-										variant="tertiary"
-										size="small"
-										:aria-label="t('teamhub', 'Reset {status} to its default category', { status: row.status })"
-										@click="resetMapping(row)">
-										{{ t('teamhub', 'Reset') }}
-									</NcButton>
-								</span>
-							</td>
-						</tr>
-					</tbody>
-				</table>
-			</section>
-
-			<!-- ── Talk threading ─────────────────────────────────────────
-			     Not a My Work setting, and last on the page because of it.
-			     It is here for the same reason the server puts it on this
-			     endpoint: this is the one admin-gated status surface that
-			     exists, and the fact it carries is the one that settles
-			     whether a proposal shared with a whole team opens a Talk
-			     thread. `startProposalThread()` has now been written against
-			     an assumed `ChatManager::sendMessage()` three times; the
-			     signature below is what the instance actually declares.
-
-			     The server has returned this since v4.5.45 with nothing
-			     rendering it — a diagnostic nobody can reach is not a
-			     diagnostic.
-
-			     Keys print verbatim rather than translated: they are API
-			     identifiers, and a localised paraphrase of
-			     `sendMessageSignature` would be harder to act on, not
-			     easier.
-
-			     TRANSLATORS: "Talk threading" is the heading of a diagnostic
-			     panel. "Talk" is the Nextcloud chat app and stays untranslated;
-			     "threading" means replies grouped into conversation threads —
-			     nothing to do with CPU threads or sewing. -->
-			<section v-if="talkThreadingRows.length" class="mywork-admin__section">
-				<details class="mywork-admin__diag mywork-admin__diag--talk">
-					<summary class="mywork-admin__diag-summary">
-						{{ t('teamhub', 'Talk threading') }}
-					</summary>
-					<dl class="mywork-admin__diag-list">
-						<div
-							v-for="row in talkThreadingRows"
-							:key="row.key"
-							class="mywork-admin__diag-row">
-							<dt><code>{{ row.key }}</code></dt>
-							<dd><code>{{ row.value }}</code></dd>
-						</div>
-					</dl>
-				</details>
-			</section>
 		</template>
 	</div>
 </template>
@@ -367,12 +288,12 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon } from '@nextcloud/vue'
+import { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, NcTextField } from '@nextcloud/vue'
 import RefreshIcon from 'vue-material-design-icons/Refresh.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 
-import { CATEGORY_ORDER, actionLabel, categoryLabel, formatAbsolute } from '../../constants/myWork.js'
-import { ICON_BODY } from '../../constants/uiTokens.js'
+import { actionLabel, formatAbsolute } from '../../constants/myWork.js'
+import { ICON_BODY, ICON_LARGE } from '../../constants/uiTokens.js'
 
 /**
  * Admin settings panel for My Work (v4.5.21).
@@ -390,10 +311,11 @@ import { ICON_BODY } from '../../constants/uiTokens.js'
  */
 export default {
 	name: 'MyWorkAdminSettings',
-	components: { ChevronRightIcon, NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, RefreshIcon },
+	components: {   NcTextField, ChevronRightIcon, NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, RefreshIcon },
 
 	data() {
 		return {
+			ICON_LARGE,
 			ICON_BODY,
 			loading: true,
 			saving: false,
@@ -410,7 +332,6 @@ export default {
 			// one admin-gated status surface that already exists, and the
 			// server has been reporting it since v4.5.45 with nothing on
 			// screen to read it — see the comment on the endpoint.
-			talkThreading: null,
 			config: {
 				upcomingDays: 7,
 				actionRequiredDays: 2,
@@ -419,9 +340,7 @@ export default {
 				budgetMs: 4000,
 				approvalStaleDays: 14,
 				approvalWarnDays: 3,
-				categoryMap: {},
 			},
-			defaultCategoryMap: {},
 			bounds: {
 				upcomingDays: { min: 1, max: 90 },
 				actionRequiredDays: { min: 0, max: 30 },
@@ -429,7 +348,6 @@ export default {
 				cacheTtl: { min: 0, max: 900 },
 				budgetMs: { min: 500, max: 30000 },
 			},
-			categories: CATEGORY_ORDER,
 			_savedTimer: null,
 		}
 	},
@@ -440,46 +358,6 @@ export default {
 			return this.providers.find(p => p.id === this.selectedId) || this.providers[0] || null
 		},
 
-		/**
-		 * One row per (provider, source status) pair the providers declare, so
-		 * a future provider's statuses appear here with no code change.
-		 */
-		mappingRows() {
-			const rows = []
-			this.providers.forEach(provider => {
-				(provider.capabilities?.statuses || []).forEach(status => {
-					const key = `${provider.id}.${status}`
-					rows.push({
-						key,
-						status,
-						providerId: provider.id,
-						providerName: provider.name,
-						default: this.defaultCategoryMap[key] || 'upcoming',
-					})
-				})
-			})
-			return rows
-		},
-
-		/**
-		 * The Talk-threading diagnostic as printable rows.
-		 *
-		 * Stringified here rather than in the template so `false` renders as
-		 * "false" instead of disappearing — which matters, because "no thread
-		 * title placement was found" is the whole answer this block exists to
-		 * give, and a blank row would read as a broken panel.
-		 */
-		talkThreadingRows() {
-			const d = this.talkThreading
-			if (!d) return []
-			return Object.keys(d).map(key => {
-				const v = d[key]
-				if (Array.isArray(v)) {
-					return { key, value: v.length ? v.join('\n') : '—' }
-				}
-				return { key, value: v === '' || v === null ? '—' : String(v) }
-			})
-		},
 	},
 
 	mounted() {
@@ -496,7 +374,6 @@ export default {
 	methods: {
 		t,
 		actionLabel,
-		categoryLabel,
 		formatAbsolute,
 
 		async reload() {
@@ -517,16 +394,13 @@ export default {
 					budgetMs: cfg.budgetMs ?? 4000,
 					approvalStaleDays: cfg.approvalStaleDays ?? 14,
 					approvalWarnDays: cfg.approvalWarnDays ?? 3,
-					categoryMap: { ...(cfg.categoryMap || {}) },
 				}
-				this.defaultCategoryMap = cfg.defaultCategoryMap || {}
 				if (cfg.bounds) {
 					this.bounds = cfg.bounds
 				}
 
 				this.providers = statusResp.data?.providers || []
 				this.restrictable = statusResp.data?.actions || []
-				this.talkThreading = statusResp.data?.talkThreading || null
 
 				// A source that disappeared between reloads (an app uninstalled)
 				// must not leave the pane pointing at nothing.
@@ -544,23 +418,6 @@ export default {
 		restrictableActions(provider) {
 			const capable = provider.capabilities?.actions || []
 			return this.restrictable.filter(a => capable.includes(a))
-		},
-
-		isOverridden(row) {
-			const current = this.config.categoryMap[row.key]
-			return !!current && current !== row.default
-		},
-
-		setMapping(key, value) {
-			this.config.categoryMap = { ...this.config.categoryMap, [key]: value }
-			this.save()
-		},
-
-		resetMapping(row) {
-			const next = { ...this.config.categoryMap }
-			delete next[row.key]
-			this.config.categoryMap = next
-			this.save()
 		},
 
 		async setProviderEnabled(provider, enabled) {
@@ -616,7 +473,6 @@ export default {
 					budgetMs: data.budgetMs,
 					approvalStaleDays: data.approvalStaleDays,
 					approvalWarnDays: data.approvalWarnDays,
-					categoryMap: { ...(data.categoryMap || {}) },
 				}
 				this.flashSaved()
 			} catch (e) {
@@ -704,12 +560,12 @@ export default {
 .mywork-admin__list {
 	display: flex;
 	flex-direction: column;
-	gap: var(--th-space-xxs, 2px);
+	gap: var(--th-space-xxs, 4px);
 	margin: 0;
 	padding: var(--th-space-xs, 4px);
 	list-style: none;
 	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-card, var(--border-radius-large));
+	border-radius: var(--th-radius-card, var(--border-radius-element));
 }
 
 .mywork-admin__row {
@@ -736,7 +592,7 @@ export default {
 	margin: 0;
 	padding: 0 var(--th-space-sm, 8px) 0 var(--th-space-md, 12px);
 	border: none;
-	border-radius: var(--th-radius-control, var(--border-radius));
+	border-radius: var(--th-radius-control, var(--border-radius-small));
 	background-color: transparent;
 	color: var(--color-main-text);
 	font-size: var(--th-font-body, 14px);
@@ -798,7 +654,7 @@ export default {
 	min-width: 0;
 	padding: var(--th-space-md, 12px) var(--th-space-lg, 16px);
 	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-card, var(--border-radius-large));
+	border-radius: var(--th-radius-card, var(--border-radius-element));
 	background-color: var(--color-main-background);
 }
 
@@ -842,7 +698,7 @@ export default {
 .mywork-admin__reason {
 	margin: 0;
 	font-size: var(--th-font-meta, 12px);
-	color: var(--color-warning-text, var(--color-warning));
+	color: var(--color-warning-text);
 }
 
 .mywork-admin__facts {
@@ -866,7 +722,7 @@ export default {
 }
 
 .mywork-admin__fact-error {
-	color: var(--color-error-text, var(--color-error));
+	color: var(--color-text-error);
 	word-break: break-word;
 }
 
@@ -903,7 +759,7 @@ export default {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;
-	gap: var(--th-space-xxs, 2px) var(--th-space-md, 12px);
+	gap: var(--th-space-xxs, 4px) var(--th-space-md, 12px);
 	padding: var(--th-space-xs, 4px) 0;
 }
 
@@ -923,13 +779,13 @@ export default {
 .mywork-admin__input {
 	width: 110px;
 	max-width: 110px;
-	text-align: right;
+	text-align: end;
 	padding: var(--th-space-xs, 4px) var(--th-space-sm, 8px);
 	font-size: var(--th-font-body, 14px);
 	color: var(--color-main-text);
 	background: var(--color-main-background);
 	border: 1px solid var(--color-border-dark, var(--color-border));
-	border-radius: var(--th-radius-control, var(--border-radius));
+	border-radius: var(--th-radius-control, var(--border-radius-small));
 	outline: none;
 
 	&:focus {
@@ -941,81 +797,13 @@ export default {
 	}
 }
 
-/* ── Category mapping ─────────────────────────────────────────────── */
-
-.mywork-admin__map {
-	width: 100%;
-	max-width: 620px;
-	border-collapse: collapse;
-	font-size: var(--th-font-meta, 12px);
-
-	th {
-		padding: var(--th-space-xs, 4px) var(--th-space-sm, 8px);
-		text-align: start;
-		font-weight: var(--th-font-weight-semibold, 600);
-		color: var(--color-text-maxcontrast);
-		border-bottom: 1px solid var(--color-border);
-	}
-
-	td {
-		padding: var(--th-space-xxs, 2px) var(--th-space-sm, 8px);
-		vertical-align: middle;
-	}
-
-	code {
-		font-size: var(--th-font-micro, 11px);
-		color: var(--color-text-maxcontrast);
-	}
-}
-
-.mywork-admin__map-source {
-	font-weight: var(--th-font-weight-semibold, 600);
-	white-space: nowrap;
-}
-
-.mywork-admin__map-category {
-	display: inline-flex;
-	align-items: center;
-	gap: var(--th-space-xs, 4px);
-}
-
-/* The category select is a select, not a number field — it needs room for
-   its longest option ("Waiting for others"). */
-.mywork-admin__select {
-	width: auto;
-	max-width: 220px;
-	text-align: start;
-}
-
 /* ── Diagnostics (pane rows and the Talk threading disclosure) ────── */
-
-.mywork-admin__diag {
-	border-top: 1px solid var(--color-border);
-	padding-top: var(--th-space-sm, 8px);
-}
-
-.mywork-admin__diag-summary {
-	cursor: pointer;
-	font-size: var(--th-font-meta, 12px);
-	font-weight: var(--th-font-weight-semibold, 600);
-	color: var(--color-primary-element);
-
-	&:focus-visible {
-		outline: 2px solid var(--color-primary-element);
-		outline-offset: 2px;
-		border-radius: var(--th-radius-control, var(--border-radius));
-	}
-}
 
 .mywork-admin__diag-list {
 	margin: 0;
 	display: flex;
 	flex-direction: column;
 	gap: var(--th-space-xs, 4px);
-}
-
-.mywork-admin__diag > .mywork-admin__diag-list {
-	margin-top: var(--th-space-sm, 8px);
 }
 
 .mywork-admin__diag-row {
@@ -1033,24 +821,12 @@ export default {
 	}
 }
 
-/* The threading rows print method signatures and a list of them, so the
-   newlines the computed joins on have to survive. `pre-line` rather than
-   `pre`: it keeps the line breaks without also preserving the indentation
-   the template's own markup would otherwise contribute. */
-.mywork-admin__diag--talk {
-	.mywork-admin__diag-row {
-		grid-template-columns: 210px minmax(0, 1fr);
-
-		dd code { white-space: pre-line; }
-	}
-}
-
 .mywork-admin__saved {
-	color: var(--color-success-text, var(--color-success));
+	color: var(--color-text-success);
 }
 
 .mywork-admin__error {
-	color: var(--color-error-text, var(--color-error));
+	color: var(--color-text-error);
 }
 
 /* ── Narrow: the pane drops under the list ─────────────────────────── */

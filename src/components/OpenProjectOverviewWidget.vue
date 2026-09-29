@@ -23,7 +23,7 @@
             role="status"
             :title="error.message"
             :name="t('teamhub', 'OpenProject connection lost')"
-            :description="t('teamhub', 'Contact your administrator.')">
+            :description="t('teamhub', 'Contact an administrator.')">
             <template #icon>
                 <LanDisconnect :size="ICON_HERO" />
             </template>
@@ -595,11 +595,11 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm) var(--th-space-xs);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-left: var(--th-accent-border) solid transparent;
+    border-inline-start: var(--th-accent-border) solid transparent;
 }
 
-.th-op-tile--warn  { border-left-color: var(--color-warning); }
-.th-op-tile--alert { border-left-color: var(--color-error); }
+.th-op-tile--warn  { border-inline-start-color: var(--color-warning); }
+.th-op-tile--alert { border-inline-start-color: var(--color-error); }
 
 .th-op-tile__value {
     font-size: var(--th-font-heading-lg);
@@ -620,11 +620,11 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-left: var(--th-accent-border) solid var(--color-success);
+    border-inline-start: var(--th-accent-border) solid var(--color-success);
 }
 
 .th-op__milestone--overdue {
-    border-left-color: var(--color-error);
+    border-inline-start-color: var(--color-error);
 }
 
 /* v4.9.7 — the attention strip: the same block shape as the milestone,
@@ -637,14 +637,12 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-left: var(--th-accent-border) solid var(--color-primary-element);
+    border-inline-start: var(--th-accent-border) solid var(--color-primary-element);
 }
 
 .th-op__attention-title {
     font-size: var(--th-font-micro);
     font-weight: var(--th-font-weight-semibold);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--color-text-maxcontrast);
 }
 
@@ -665,7 +663,7 @@ a.th-op__name:focus-visible {
 }
 
 .th-op__attention-row--alert {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .th-op__attention-row--warn {
@@ -687,7 +685,6 @@ a.th-op__name:focus-visible {
 .th-op__milestone-label {
     font-size: var(--th-font-micro);
     font-weight: var(--th-font-weight-semibold);
-    text-transform: uppercase;
     color: var(--color-text-maxcontrast);
 }
 

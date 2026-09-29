@@ -1,9 +1,9 @@
 <template>
     <div class="browse-teams-view">
         <div class="browse-teams-header">
-            <h2>{{ t('teamhub', 'Browse Teams') }}</h2>
+            <h2>{{ t('teamhub', 'Browse teams') }}</h2>
             <p class="browse-teams-subtitle">
-                {{ t('teamhub', 'Discover and join teams in your organization') }}
+                {{ t('teamhub', 'Discover and join teams in the organization') }}
             </p>
         </div>
 
@@ -25,24 +25,24 @@
                     :variant="viewMode === 'grid' ? 'primary' : 'tertiary'"
                     :aria-label="t('teamhub', 'Grid view')"
                     @click="viewMode = 'grid'">
-                    <template #icon><ViewGrid :size="20" /></template>
+                    <template #icon><ViewGrid :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     :variant="viewMode === 'list' ? 'primary' : 'tertiary'"
                     :aria-label="t('teamhub', 'List view')"
                     @click="viewMode = 'list'">
-                    <template #icon><ViewList :size="20" /></template>
+                    <template #icon><ViewList :size="ICON_BODY" /></template>
                 </NcButton>
             </div>
         </div>
 
         <div v-if="loading" class="browse-teams-loading">
-            <NcLoadingIcon :size="64" />
+            <NcLoadingIcon :size="ICON_HERO" />
             <p>{{ t('teamhub', 'Loading teams...') }}</p>
         </div>
 
         <div v-else-if="filteredTeams.length === 0" class="browse-teams-empty">
-            <AccountGroup :size="64" />
+            <AccountGroup :size="ICON_HERO" />
             <h3>{{ t('teamhub', searchQuery ? 'No teams match your search' : 'No teams found') }}</h3>
             <p>{{ searchQuery ? t('teamhub', 'Try a different search term') : t('teamhub', 'There are no teams available to join') }}</p>
         </div>
@@ -58,7 +58,7 @@
                             :src="team.image_url"
                             :alt="team.name"
                             class="team-card__icon team-card__icon--image" />
-                        <AccountGroup v-else :size="48" class="team-card__icon" />
+                        <AccountGroup v-else :size="ICON_XL" class="team-card__icon" />
                     </div>
                     <div class="team-card__info">
                         <div class="team-card__name-row">
@@ -105,7 +105,7 @@
                             :disabled="actionInProgress[team.id]"
                             @click="openTeam(team)">
                             <template #icon>
-                                <OpenInApp :size="20" />
+                                <OpenInApp :size="ICON_BODY" />
                             </template>
                             {{
                                 // TRANSLATORS: button label to open this team and view its content
@@ -117,8 +117,8 @@
                             :disabled="actionInProgress[team.id]"
                             @click="leaveTeam(team)">
                             <template #icon>
-                                <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
-                                <ExitToApp v-else :size="20" />
+                                <NcLoadingIcon v-if="actionInProgress[team.id]" :size="ICON_BODY" />
+                                <ExitToApp v-else :size="ICON_BODY" />
                             </template>
                             {{
                                 // TRANSLATORS: button label to leave (depart from) a team the user is currently a member of
@@ -134,7 +134,7 @@
                             :disabled="actionInProgress[team.id]"
                             @click="openTeam(team)">
                             <template #icon>
-                                <OpenInApp :size="20" />
+                                <OpenInApp :size="ICON_BODY" />
                             </template>
                             {{ t('teamhub', 'Open') }}
                         </NcButton>
@@ -142,7 +142,7 @@
                             class="team-card__indirect-label"
                             :title="t('teamhub', 'You were added to this team through a group or another team. Ask your administrator to remove you.')">
                             <NcButton variant="tertiary" :disabled="true">
-                                <template #icon><ExitToApp :size="20" /></template>
+                                <template #icon><ExitToApp :size="ICON_BODY" /></template>
                                 {{
                                     // TRANSLATORS: disabled button label; user cannot leave because they were added via a group
                                     t('teamhub', 'Leave')
@@ -159,8 +159,8 @@
                         :disabled="actionInProgress[team.id]"
                         @click="joinTeam(team)">
                         <template #icon>
-                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
-                            <Plus v-else :size="20" />
+                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="ICON_BODY" />
+                            <Plus v-else :size="ICON_BODY" />
                         </template>
                         {{
                             // TRANSLATORS: button label to join (become a member of) a team
@@ -175,10 +175,10 @@
                         :disabled="actionInProgress[team.id]"
                         @click="requestAccess(team)">
                         <template #icon>
-                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="20" />
-                            <AccountQuestion v-else :size="20" />
+                            <NcLoadingIcon v-if="actionInProgress[team.id]" :size="ICON_BODY" />
+                            <AccountQuestion v-else :size="ICON_BODY" />
                         </template>
-                        {{ t('teamhub', 'Request Access') }}
+                        {{ t('teamhub', 'Request access') }}
                     </NcButton>
 
                     <!-- v4.6.17 — invite-only team, visible but not joinable.
@@ -212,6 +212,7 @@ import OpenInApp       from 'vue-material-design-icons/OpenInApp.vue'
 import Plus            from 'vue-material-design-icons/Plus.vue'
 import ViewGrid        from 'vue-material-design-icons/ViewGrid.vue'
 import ViewList        from 'vue-material-design-icons/ViewList.vue'
+import { ICON_BODY, ICON_HERO, ICON_XL } from '../constants/uiTokens.js'
 
 export default {
     name: 'BrowseTeamsView',
@@ -229,6 +230,9 @@ export default {
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_HERO,
+            ICON_XL,
             loading: false,
             teams: [],
             searchQuery: '',
@@ -392,7 +396,7 @@ export default {
 }
 
 .browse-teams-header h2 {
-    font-size: 28px;
+    font-size: var(--th-font-display);
     font-weight: 600;
     margin: 0 0 8px 0;
 }
@@ -448,15 +452,15 @@ export default {
 .team-card {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: var(--border-radius-element);
     padding: 24px;
     display: flex;
     flex-direction: column;
-    transition: box-shadow 0.2s ease;
+    transition: box-shadow var(--animation-quick) ease;
 }
 
 .team-card:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px var(--color-box-shadow);
 }
 
 .team-card__header {
@@ -488,7 +492,7 @@ export default {
 .team-card__icon--image {
     width: 64px;
     height: 64px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     object-fit: cover;
     border: 1px solid var(--color-border);
 }
@@ -507,7 +511,7 @@ export default {
 }
 
 .team-card__name {
-    font-size: 18px;
+    font-size: var(--th-font-heading);
     font-weight: 600;
     margin: 0;
 }
@@ -518,7 +522,7 @@ export default {
 .team-card__type-badge {
     font-size: var(--th-font-micro);
     font-weight: 600;
-    padding: 2px 8px;
+    padding: 4px 8px;
     border-radius: var(--border-radius-pill);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
@@ -532,7 +536,7 @@ export default {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    margin: 0 0 6px;
+    margin: 0 0 8px;
     padding: 0;
     list-style: none;
 }
@@ -569,7 +573,6 @@ export default {
 }
 
 .team-card__description--empty {
-    font-style: italic;
 }
 
 /* Actions: right-aligned, never pushed around by header height */
@@ -584,7 +587,7 @@ export default {
 .team-card__indirect-label {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     cursor: default;
 }
 /* Invite-only teams have no action, so this sits where the buttons would and
@@ -593,7 +596,6 @@ export default {
     align-self: center;
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
-    font-style: italic;
 }
 
 /* v3.100.14: full-saturation warning badge per SKILLS.md
@@ -601,7 +603,7 @@ export default {
 .team-card__via-badge {
     font-size: var(--th-font-micro);
     font-weight: 600;
-    padding: 2px 7px;
+    padding: 4px 8px;
     border-radius: var(--border-radius-pill);
     background: var(--color-warning);
     color: var(--color-warning-text);
@@ -628,6 +630,6 @@ export default {
 
 .browse-teams-list--list .team-card__actions {
     flex-shrink: 0;
-    margin-left: 20px;
+    margin-inline-start: 20px;
 }
 </style>

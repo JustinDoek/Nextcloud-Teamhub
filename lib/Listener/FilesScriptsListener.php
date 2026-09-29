@@ -35,13 +35,19 @@ use Psr\Log\LoggerInterface;
  * see FILE-REVIEW-PLAN.md §4.1. If the strings come out English, this call is
  * the first place to look, not the entry.
  *
- * ## Styles
+ * ## No styles — on purpose (v4.10.11)
  *
- * Two stylesheets, matching `templates/main.php`: `vite-index.chunk` is the
- * shared Nextcloud-component CSS every entry imports, and
- * `vite-filesactions.chunk` is this entry's own. CSS is extracted per entry
- * rather than inlined — see the header comment in `vite.config.mjs` for why
- * that is not optional in a multi-entry build.
+ * Until 4.10.11 this listener also added `vite-index.chunk` (285 KB of shared
+ * NC-component CSS) and `vite-filesactions.chunk`, and the entry itself pulled
+ * the app's 2.5 MB vendor chunk — on every Files page load, including the one
+ * inside TeamHub's own Files tab, for a menu entry most loads never open. The
+ * entry that loads here is now a stub with no imports (`src/filesactions.js`)
+ * that waits for the Files app to load and the page to go idle before it
+ * imports the registration stage, and the dialog only on a click; Vite's
+ * preload helper fetches each stage's chunk **and its CSS** itself, resolving
+ * both through `OC.filePath()`. Adding a stylesheet here again would put the
+ * weight back on every page for nothing — the Files page must stay as light
+ * as if TeamHub were not installed.
  *
  * @template-implements IEventListener<Event>
  */
@@ -60,8 +66,6 @@ class FilesScriptsListener implements IEventListener {
             }
 
             Util::addTranslations(Application::APP_ID);
-            Util::addStyle(Application::APP_ID, 'vite-index.chunk');
-            Util::addStyle(Application::APP_ID, 'vite-filesactions.chunk');
             Util::addScript(Application::APP_ID, 'filesactions');
         } catch (\Throwable $e) {
             // A failure here would break somebody's Files page for a feature

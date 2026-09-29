@@ -75,15 +75,18 @@
                 <div class="th-cpr__line" :style="{ paddingInlineStart: indentFor(row.depth) }">
                     <!-- Twisty and row are separate controls on purpose: one
                          opens the page, the other only reveals its children. -->
-                    <button
+                    <NcButton
                         v-if="row.hasChildren"
                         class="th-cpr__twisty"
                         :aria-expanded="row.expanded ? 'true' : 'false'"
                         :aria-label="expandLabel(row)"
-                        @click="toggle(row.page.id)">
-                        <ChevronDown v-if="row.expanded" :size="iconInline" aria-hidden="true" />
-                        <ChevronRight v-else :size="iconInline" aria-hidden="true" />
-                    </button>
+                        @click="toggle(row.page.id)"
+                        variant="tertiary">
+                        <template #icon>
+                            <ChevronDown v-if="row.expanded" :size="iconInline" aria-hidden="true" />
+                            <ChevronRight v-else :size="iconInline" aria-hidden="true" />
+                        </template>
+                    </NcButton>
                     <span v-else class="th-cpr__twisty th-cpr__twisty--empty" aria-hidden="true" />
 
                     <!-- Raw <button>: same card-row carve-out as the header. -->
@@ -444,13 +447,13 @@ export default {
 .th-cpr__head {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 6px 4px 6px 8px;
+    gap: 4px;
+    padding: 8px 4px 8px 8px;
     border-block-end: 1px solid var(--color-border);
 }
 
 .th-cpr__filter {
-    padding: 6px 8px;
+    padding: 8px 8px;
 }
 
 .th-cpr__list {
@@ -464,7 +467,7 @@ export default {
 .th-cpr__line {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     min-width: 0;
 }
 
@@ -480,43 +483,20 @@ export default {
     flex: 0 0 auto;
     box-sizing: border-box;
     width: 20px;
-    height: 20px;
-    min-width: 20px;
-    min-height: 20px;
     max-width: 20px;
-    max-height: 20px;
-    padding: 0;
-    border: none;
-    border-radius: var(--th-radius-control);
-    background-color: transparent;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-}
-
-.th-cpr__twisty:hover {
-    background-color: var(--color-background-hover);
 }
 
 /* Split from :hover on purpose — grouping them under one selector is what
    silences the keyboard focus ring (SKILLS.md § Focus visibility standard). */
-.th-cpr__twisty:focus-visible {
-    background-color: var(--color-background-hover);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: -2px;
-}
-
-.th-cpr__twisty--empty {
-    cursor: default;
-}
 
 .th-cpr__row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
-    padding: 5px 8px;
+    padding: 4px 8px;
     border: none;
     border-radius: var(--th-radius-control);
     background-color: transparent;
@@ -572,7 +552,7 @@ export default {
 }
 
 .th-cpr__state--error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .th-cpr__state--note {

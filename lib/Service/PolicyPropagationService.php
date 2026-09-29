@@ -293,80 +293,12 @@ class PolicyPropagationService {
                 continue;
             }
 
-            $has = $presence[$teamId] ?? [];
-
-            $toAdd = array_values(array_diff($wanted, $has));
-            // Only what TeamHub put there, and only what the template no longer
-            // wants. Everything else on the team stays.
-            $toRemove = array_values(array_intersect(
-                array_diff($has, $wanted),
-                $created[$teamId] ?? [],
-            ));
-
-            $added   = [];
-            $removed = [];
-            $manual  = [];
-            $errors  = [];
-
             try {
-                foreach ($toAdd as $appId) {
-                    if ($this->addApp($teamId, $teamName, $appId, $actorUid)) {
-                        $added[] = $appId;
-                    } else {
-                        $manual[] = $appId;
-                    }
-                }
-
-                foreach ($toRemove as $appId) {
-                    if (!in_array($appId, self::DESTRUCTIVE_ON_REMOVE, true)) {
-                        // The team folder. Reported, never deleted — see the
-                        // constant's docblock.
-                        $manual[] = $appId;
-                        continue;
-                    }
-                    if ($this->removeApp($teamId, $appId, $actorUid)) {
-                        $removed[] = $appId;
-                    } else {
-                        $errors[] = $appId;
-                    }
-                }
-
-                // The stored toggle follows the resource rather than standing in
-                // for it. Written after the resource work so a failed delete
-                // does not leave the team reading as "off" with the resource
-                // still live — the presence reader treats an explicit off as
-                // authoritative, and that would hide a resource nobody could
-                // find again.
-                $rows = [];
-                foreach ($added as $appId) {
-                    $rows[] = ['app_id' => $appId, 'enabled' => true, 'config' => null];
-                }
-                foreach ($removed as $appId) {
-                    $rows[] = ['app_id' => $appId, 'enabled' => false, 'config' => null];
-                }
-                if ($rows !== []) {
-                    $this->teamService->updateTeamApps($teamId, $rows);
-                }
-
-                // Feature modules, **after** the `teamhub_team_apps` write and
-                // deliberately not folded into `$rows`: they are not apps and a
-                // `presence` row in that table would be a fifth answer to
-                // "which apps does this team have", which is the thing v4.8.27
-                // spent a whole version removing. Switches rather than
-                // resources, so both directions apply without the origin bound
-                // the resource half needs — nothing is created or destroyed.
-                [$modulesOn, $modulesOff] = $this->syncFeatureModules($teamId, $wantedModules);
-
-                $applied[] = [
-                    'teamId'   => $teamId,
-                    'teamName' => $teamName,
-                    'added'    => array_merge($added, $modulesOn),
-                    'removed'  => array_merge($removed, $modulesOff),
-                    // Named so the report can say a team still needs a hand,
-                    // rather than reporting success and leaving a gap.
-                    'manual'   => $manual,
-                    'errors'   => $errors,
-                ];
+                $result = $this->applyTemplateResolved(
+                    $teamId, $teamName, $wanted, $wantedModules,
+                    $presence[$teamId] ?? [], $created[$teamId] ?? [], $actorUid,
+                );
+                $applied[] = ['teamId' => $teamId, 'teamName' => $teamName] + $result;
             } catch (\Throwable $e) {
                 $this->logger->warning('[TeamHub][PolicyPropagationService] template rollout failed for one team', [
                     'teamId'      => $teamId,
@@ -395,6 +327,130 @@ class PolicyPropagationService {
             'applied'  => $applied,
             'failed'   => $failed,
             'overflow' => $overflow,
+        ];
+    }
+
+    /**
+     * Bring one team's apps and feature modules in line with a template,
+     * with no administrator gate (v4.10.50).
+     *
+     * The body of {@see propagateTemplate()} for a single team, for the one
+     * caller that has already decided and is not an administrator request:
+     * accepting a team made outside TeamHub (`TeamAdoptionService`), where
+     * the chosen template's apps are added the same way a rollout adds them.
+     * Runs as whoever the session holds — the adoption job opens it as the
+     * team's owner, because resources are created in the session user's
+     * name.
+     *
+     * @return array{added: list<string>, removed: list<string>, manual: list<string>, errors: list<string>}
+     * @throws NotFoundException when the template does not exist
+     */
+    public function applyTemplateToTeam(string $teamId, string $templateKey, string $actorUid): array {
+        $template = $this->policyService->getTemplateRow($templateKey);
+        if ($template === null) {
+            throw new NotFoundException('No such template.');
+        }
+        $wanted = TeamApps::observableList(array_merge(
+            $template['apps'] ?? [],
+            $template['modules'] ?? [],
+        ));
+        $wantedModules = TeamApps::featureModules($template['modules'] ?? []);
+        $presence = $this->appPresenceMapper->presenceForTeams([$teamId]);
+        $created  = $this->appPresenceMapper->teamHubCreatedForTeams([$teamId]);
+        $names    = $this->observationMapper->circlesByTeam([$teamId]);
+
+        return $this->applyTemplateResolved(
+            $teamId, (string)($names[$teamId]['name'] ?? $teamId), $wanted, $wantedModules,
+            $presence[$teamId] ?? [], $created[$teamId] ?? [], $actorUid,
+        );
+    }
+
+    /**
+     * The per-team work of a template rollout, with everything read.
+     *
+     * @param list<string> $wanted        apps and modules the template wants, observable form
+     * @param list<string> $wantedModules the feature modules among them
+     * @param list<string> $has           what the team has now
+     * @param list<string> $teamHubMade   what TeamHub created on the team
+     * @return array{added: list<string>, removed: list<string>, manual: list<string>, errors: list<string>}
+     */
+    private function applyTemplateResolved(
+        string $teamId,
+        string $teamName,
+        array $wanted,
+        array $wantedModules,
+        array $has,
+        array $teamHubMade,
+        string $actorUid,
+    ): array {
+        $toAdd = array_values(array_diff($wanted, $has));
+        // Only what TeamHub put there, and only what the template no longer
+        // wants. Everything else on the team stays.
+        $toRemove = array_values(array_intersect(
+            array_diff($has, $wanted),
+            $teamHubMade,
+        ));
+
+        $added   = [];
+        $removed = [];
+        $manual  = [];
+        $errors  = [];
+
+        foreach ($toAdd as $appId) {
+            if ($this->addApp($teamId, $teamName, $appId, $actorUid)) {
+                $added[] = $appId;
+            } else {
+                $manual[] = $appId;
+            }
+        }
+
+        foreach ($toRemove as $appId) {
+            if (!in_array($appId, self::DESTRUCTIVE_ON_REMOVE, true)) {
+                // The team folder. Reported, never deleted — see the
+                // constant's docblock.
+                $manual[] = $appId;
+                continue;
+            }
+            if ($this->removeApp($teamId, $appId, $actorUid)) {
+                $removed[] = $appId;
+            } else {
+                $errors[] = $appId;
+            }
+        }
+
+        // The stored toggle follows the resource rather than standing in
+        // for it. Written after the resource work so a failed delete
+        // does not leave the team reading as "off" with the resource
+        // still live — the presence reader treats an explicit off as
+        // authoritative, and that would hide a resource nobody could
+        // find again.
+        $rows = [];
+        foreach ($added as $appId) {
+            $rows[] = ['app_id' => $appId, 'enabled' => true, 'config' => null];
+        }
+        foreach ($removed as $appId) {
+            $rows[] = ['app_id' => $appId, 'enabled' => false, 'config' => null];
+        }
+        if ($rows !== []) {
+            $this->teamService->updateTeamApps($teamId, $rows);
+        }
+
+        // Feature modules, **after** the `teamhub_team_apps` write and
+        // deliberately not folded into `$rows`: they are not apps and a
+        // `presence` row in that table would be a fifth answer to
+        // "which apps does this team have", which is the thing v4.8.27
+        // spent a whole version removing. Switches rather than
+        // resources, so both directions apply without the origin bound
+        // the resource half needs — nothing is created or destroyed.
+        [$modulesOn, $modulesOff] = $this->syncFeatureModules($teamId, $wantedModules);
+
+        return [
+            'added'   => array_merge($added, $modulesOn),
+            'removed' => array_merge($removed, $modulesOff),
+            // Named so the report can say a team still needs a hand,
+            // rather than reporting success and leaving a gap.
+            'manual'  => $manual,
+            'errors'  => $errors,
         ];
     }
 

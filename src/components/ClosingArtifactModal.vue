@@ -131,7 +131,7 @@ export default {
 .th-closing__success {
     margin: 0;
     color: var(--color-main-text);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
 }
 .th-closing__success {
@@ -139,24 +139,24 @@ export default {
 }
 .th-closing__list {
     margin: 0;
-    padding-left: 18px;
+    padding-inline-start: 16px;
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
     line-height: 1.5;
 }
 .th-closing__error {
-    padding: 6px 10px;
+    padding: 8px 8px;
     background: var(--color-error);
     color: var(--color-error-text);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-meta);
     margin: 0;
 }
 .th-closing__path {
     margin: 0;
-    padding: 6px 10px;
+    padding: 8px 8px;
     background: var(--color-background-hover);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-meta);
     word-break: break-all;
 }

@@ -23,7 +23,7 @@
             {{ searchError.message }}
         </div>
         <div v-else-if="results.length === 0" class="op-picker__state">
-            {{ query ? t('teamhub', 'No projects match your search.') : t('teamhub', 'No projects available to you in OpenProject.') }}
+            {{ query ? t('teamhub', 'No projects match the search.') : t('teamhub', 'No projects available to you in OpenProject.') }}
         </div>
         <ul v-else class="op-picker__list" role="listbox" :aria-label="t('teamhub', 'OpenProject projects')">
             <li v-for="p in results" :key="p.id" role="presentation">
@@ -208,7 +208,7 @@ export default {
 }
 
 .op-picker__state--error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .op-picker__list {

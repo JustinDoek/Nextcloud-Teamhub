@@ -101,14 +101,21 @@ class DecisionSearchProvider implements IProvider {
             $subline .= ' · ' . $teamName;
         }
 
-        $resourceUrl = $this->urlGenerator->linkToRoute('teamhub.page.index')
-            . '#/team/' . urlencode($row['team_id'] ?? '');
+        // v4.10.4 — the `?team=…&decision=…` deep link App.vue consumes (the
+        // same shape DecisionService writes into approver-meeting descriptions);
+        // the `#/team/` hash used until now landed on the welcome screen.
+        // Icon class: css/search.css via UnifiedSearchStyleListener.
+        $resourceUrl = $this->urlGenerator->linkToRoute('teamhub.page.index', [
+            'team'     => (string)($row['team_id'] ?? ''),
+            'decision' => (string)($row['id'] ?? ''),
+        ]);
 
         return new SearchResultEntry(
             '',
             $question,
             $subline,
-            $resourceUrl
+            $resourceUrl,
+            'icon-teamhub',
         );
     }
 }

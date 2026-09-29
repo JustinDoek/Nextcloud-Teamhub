@@ -30,7 +30,7 @@
                 </button>
             </div>
             <p v-if="showModeTabs && !canBulkCreate" class="ctv__hint ctv__modes-reason">
-                <LockOutline :size="14" aria-hidden="true" />
+                <LockOutline :size="ICON_INLINE" aria-hidden="true" />
                 {{ bulkUnavailableReason }}
             </p>
 
@@ -90,10 +90,10 @@
                             @click="!type.locked && (form.teamType = type.id)"
                             @keydown.enter.prevent="!type.locked && (form.teamType = type.id)"
                             @keydown.space.prevent="!type.locked && (form.teamType = type.id)">
-                            <component :is="type.icon" :size="32" class="ctv__type-icon" />
+                            <component :is="type.icon" :size="ICON_LARGE" class="ctv__type-icon" />
                             <span class="ctv__type-name">
                                 {{ type.label }}
-                                <LockOutline v-if="type.locked" :size="14" class="ctv__mode-lock" />
+                                <LockOutline v-if="type.locked" :size="ICON_INLINE" class="ctv__mode-lock" />
                             </span>
                             <span class="ctv__type-desc">{{ type.description }}</span>
                         </div>
@@ -101,6 +101,53 @@
                     <!-- v4.9.3 — why the OpenProject card is locked, in the
                          words the capability check chose. -->
                     <span v-if="openProjectLockedReason" class="ctv__hint">{{ openProjectLockedReason }}</span>
+                </div>
+
+                <!-- ── Nextcloud Services (v4.10.23) ─────────────────────
+                     One checkbox, on the Service template only, for the one
+                     bundle of built-in workflows the instance has. At most
+                     one team holds it: when another does, the box is
+                     disabled and says whose — the same answer the server
+                     gives the request, so the two cannot disagree.
+
+                     Skipping it here is normal, not a half-finished setup:
+                     a team admin can tick it later on Manage team →
+                     Services. -->
+                <div v-if="form.teamType === 'service' && serviceClaim" class="ctv__field">
+                    <label class="ctv__label">{{ t('teamhub', 'Nextcloud services') }}</label>
+                    <NcCheckboxRadioSwitch
+                        :model-value="form.claimServices"
+                        :disabled="serviceClaim.claimed"
+                        @update:model-value="v => form.claimServices = v">
+                        {{ t('teamhub', 'This team answers the Nextcloud services') }}
+                    </NcCheckboxRadioSwitch>
+                    <div class="ctv__services-note">
+                        <span v-if="serviceClaim.claimed" class="ctv__hint">
+                            {{ t('teamhub', '{team} already answers the Nextcloud services. Only one team can.', { team: serviceClaim.holderName }) }}
+                        </span>
+                        <span v-else class="ctv__hint">
+                            {{ t('teamhub', 'Requests from the whole organisation arrive in this team\'s queue. Every member works the queue; team admins can reassign.') }}
+                        </span>
+                        <!-- Round icon button, /ui-standards § six locks. -->
+                        <NcButton
+                            variant="tertiary"
+                            :aria-label="t('teamhub', 'Which workflows come with the Nextcloud services')"
+                            :title="t('teamhub', 'Which workflows come with the Nextcloud services')"
+                            @click="servicesHelpOpen = !servicesHelpOpen">
+                            <template #icon><HelpCircleOutline :size="ICON_BODY" /></template>
+                        </NcButton>
+                    </div>
+                    <div v-if="servicesHelpOpen" class="ctv__services-help">
+                        <p class="ctv__services-help-intro">
+                            {{ t('teamhub', 'A team that answers the Nextcloud services handles these requests:') }}
+                        </p>
+                        <ul class="ctv__services-list">
+                            <li v-for="service in serviceClaim.availableServices" :key="service.serviceKey">
+                                <strong>{{ service.label }}</strong>
+                                <span>{{ service.description }}</span>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
 
                 <!-- ── Policy (v4.8.5) ────────────────────────────────────
@@ -113,18 +160,17 @@
                      afterwards is still a Nextcloud administrator's job. -->
                 <div v-if="policyProfiles.length" class="ctv__field">
                     <label class="ctv__label" for="ctv-policy">{{ t('teamhub', 'Policy') }}</label>
-                    <select
-                        id="ctv-policy"
+                    <NcSelect
+                        input-id="ctv-policy"
+                        label-outside
                         v-model="form.profileKey"
                         class="ctv__select"
                         :class="{ 'ctv__select--error': !!policyError }"
-                        required
-                        @change="policyTouched = true; policyError = ''">
-                        <option value="" disabled>{{ t('teamhub', 'Choose a policy…') }}</option>
-                        <option v-for="p in policyProfiles" :key="p.profileKey" :value="p.profileKey">
-                            {{ p.label }}
-                        </option>
-                    </select>
+                        @update:model-value="policyTouched = true; policyError = ''"
+                        :options="[...policyProfiles.map(p => ({ id: p.profileKey, label: p.label }))]"
+                        :reduce="o => o.id"
+                        :clearable="false"
+                        :placeholder="t('teamhub', 'Choose a policy…')" />
                     <span v-if="policyError" class="ctv__error">{{ policyError }}</span>
 
                     <!-- v4.8.7 — the administrator's own words about this
@@ -160,7 +206,7 @@
                             @keydown.space.prevent="!m.locked && (form.projectMode = m.id)">
                             <span class="ctv__mode-name">
                                 {{ m.label }}
-                                <LockOutline v-if="m.locked" :size="14" class="ctv__mode-lock" />
+                                <LockOutline v-if="m.locked" :size="ICON_INLINE" class="ctv__mode-lock" />
                             </span>
                             <span class="ctv__mode-desc">{{ m.description }}</span>
                         </div>
@@ -195,7 +241,7 @@
                             :aria-label="t('teamhub', 'Clear the expiration date')"
                             :title="t('teamhub', 'Clear the expiration date')"
                             @click="form.expiresOn = ''">
-                            <template #icon><Close :size="20" /></template>
+                            <template #icon><Close :size="ICON_BODY" /></template>
                         </NcButton>
                     </div>
                 </div>
@@ -226,16 +272,28 @@
                                 :key="(user.type || 'user') + ':' + user.id"
                                 class="ctv__user-result"
                                 @click="addMember(user)">
-                                <div v-if="user.type === 'group'" class="ctv__group-avatar">
-                                    <AccountGroup :size="20" />
-                                </div>
-                                <NcAvatar v-else :user="user.id" :display-name="user.displayName" :size="32" :show-user-status="false" />
-                                <div class="ctv__user-info">
-                                    <span class="ctv__user-name">{{ user.displayName }}</span>
-                                    <span class="ctv__user-id">{{ user.type === 'group' ? t('teamhub', 'Group') : user.id }}</span>
-                                </div>
+                                <!-- v4.10.7 — the shared person row, with the
+                                     subline that says which colleague this is. -->
+                                <PersonRow
+                                    :id="user.id"
+                                    :display-name="user.displayName"
+                                    :type="user.type || 'user'"
+                                    :subline="user.subline" />
                             </div>
                         </div>
+                    </div>
+                    <!-- Nobody matched on the server. Same two sentences as
+                         InviteMemberModal: SSO accounts (user_oidc, user_saml)
+                         are created on first login, so a colleague who has
+                         never signed in cannot be found yet. -->
+                    <div v-if="memberSearchEmpty" class="ctv__search-empty" role="status">
+                        <p class="ctv__search-empty-headline">
+                            {{ t('teamhub', 'No users or groups found') }}
+                        </p>
+                        <!-- TRANSLATORS: hint shown when a user-search returns zero results — explains that SSO-provisioned users (Microsoft Entra, SAML, OIDC) only appear after their first Nextcloud login -->
+                        <p class="ctv__hint">
+                            {{ t('teamhub', 'If this colleague was just added via single sign-on (Microsoft Entra, SAML, or OIDC), they need to sign in to Nextcloud once before they can be added to a team.') }}
+                        </p>
                     </div>
                     <!-- v4.8.7 — members carry a role. A list rather than the
                          old chip row: a chip is the wrong shape once each one
@@ -246,37 +304,36 @@
                             :key="(m.type || 'user') + ':' + m.id"
                             class="ctv__member">
                             <div v-if="m.type === 'group'" class="ctv__group-avatar ctv__group-avatar--small">
-                                <AccountGroup :size="16" aria-hidden="true" />
+                                <AccountGroup :size="ICON_BODY" aria-hidden="true" />
                             </div>
-                            <NcAvatar v-else :user="m.id" :display-name="m.displayName" :size="24" :show-user-status="false" />
+                            <NcAvatar v-else :user="m.id" :display-name="m.displayName" :size="24" :hide-status="true" />
 
                             <span class="ctv__member-name">{{ m.displayName }}</span>
 
                             <label class="ctv__sr" :for="'ctv-role-' + (m.type || 'user') + '-' + m.id">
                                 {{ t('teamhub', 'Role for {name}', { name: m.displayName }) }}
                             </label>
-                            <select
-                                :id="'ctv-role-' + (m.type || 'user') + '-' + m.id"
-                                :value="m.level || 1"
+                            <NcSelect
+                                :input-id="'ctv-role-' + (m.type || 'user') + '-' + m.id"
+                                label-outside
+                                :model-value="m.level || 1"
                                 class="ctv__select ctv__select--role"
-                                @change="setMemberLevel(m, Number($event.target.value))">
-                                <option :value="1">{{ t('teamhub', 'Member') }}</option>
-                                <option :value="4">{{ t('teamhub', 'Moderator') }}</option>
-                                <option :value="8">{{ t('teamhub', 'Team admin') }}</option>
-                                <!-- A group cannot act, so it cannot own.
-                                     Greyed rather than hidden, with the reason
-                                     below, per the rule on the profile editor. -->
-                                <option :value="9" :disabled="m.type === 'group'">
-                                    {{ t('teamhub', 'Team owner') }}
-                                </option>
-                            </select>
+                                @update:model-value="setMemberLevel(m, Number($event))"
+                                :options="[{ id: 1, label: t('teamhub', 'Member') }, { id: 4, label: t('teamhub', 'Moderator') }, { id: 8, label: t('teamhub', 'Team admin') }, { id: 9, label: t('teamhub', 'Team owner') }]"
+                                :reduce="o => o.id"
+                                :clearable="false" />
 
-                            <button class="ctv__chip-remove"
+                            <NcButton
+                                class="ctv__chip-remove"
                                 :aria-label="t('teamhub', 'Remove {name}', { name: m.displayName })"
                                 :title="t('teamhub', 'Remove {name}', { name: m.displayName })"
-                                @click="removeMember(m.id, m.type)">
-                                <Close :size="14" aria-hidden="true" />
-                            </button>
+                                @click="removeMember(m.id, m.type)"
+                                variant="tertiary"
+                                size="small">
+                                <template #icon>
+                                    <Close :size="ICON_INLINE" aria-hidden="true" />
+                                </template>
+                            </NcButton>
                         </li>
                     </ul>
 
@@ -289,7 +346,7 @@
                          teams to a policy is not a member of them. Adding
                          yourself to the list is how you stay. -->
                     <p v-if="appointedOwner" class="ctv__policy-note">
-                        <AccountArrowRight :size="16" aria-hidden="true" />
+                        <AccountArrowRight :size="ICON_BODY" aria-hidden="true" />
                         {{ creatorStaysOnTeam
                             ? t('teamhub', '{name} becomes the owner at the end. You stay on the team, because you added yourself to the list.', { name: appointedOwner.displayName })
                             : t('teamhub', '{name} becomes the owner at the end and you leave the team. Add yourself to the list above if you want to stay on it.', { name: appointedOwner.displayName }) }}
@@ -313,7 +370,7 @@
             <!-- ── v4.9.6 — OpenProject Workspace: the project ── -->
             <div v-if="currentStepKey === 'openproject'" class="ctv__section">
                 <div v-if="provisioningLoading" class="ctv__progress-task">
-                    <NcLoadingIcon :size="20" />
+                    <NcLoadingIcon :size="ICON_BODY" />
                     <span class="ctv__progress-label">{{ t('teamhub', 'Asking OpenProject what is available to you') }}</span>
                 </div>
                 <p v-else-if="provisioningOptionsError" class="ctv__error" role="alert">{{ provisioningOptionsError }}</p>
@@ -345,7 +402,7 @@
                     @rollback="rollbackProvisioning" />
                 <div v-if="provisioningState && !provisioningActive" class="ctv__done-actions">
                     <NcButton v-if="provisioningState.status === 'attention' && provisioningState.teamId" variant="primary" @click="finishWorkspace">
-                        <template #icon><ArrowRight :size="20" /></template>
+                        <template #icon><ArrowRight :size="ICON_BODY" /></template>
                         {{ t('teamhub', 'Open the workspace anyway') }}
                     </NcButton>
                     <NcButton v-if="provisioningState.status === 'rolled_back' || (provisioningState.status === 'failed' && !provisioningState.teamId)" variant="secondary" @click="backToReview">
@@ -357,9 +414,9 @@
             <!-- ── STEP 3: Progress ── -->
             <div v-if="currentStepKey === 'progress' && !isWorkspace && !creationDone" class="ctv__progress">
                 <div v-for="(task, i) in progressTasks" :key="i" class="ctv__progress-task">
-                    <NcLoadingIcon v-if="task.status === 'running'" :size="20" />
-                    <CheckCircle v-else-if="task.status === 'done'" :size="20" class="ctv__progress-done" />
-                    <AlertCircle v-else-if="task.status === 'error'" :size="20" class="ctv__progress-error" />
+                    <NcLoadingIcon v-if="task.status === 'running'" :size="ICON_BODY" />
+                    <CheckCircle v-else-if="task.status === 'done'" :size="ICON_BODY" class="ctv__progress-done" />
+                    <AlertCircle v-else-if="task.status === 'error'" :size="ICON_BODY" class="ctv__progress-error" />
                     <span v-else class="ctv__progress-dot" />
                     <span :class="['ctv__progress-label', { 'ctv__progress-label--dim': task.status === 'waiting' }]">
                         {{ task.label }}
@@ -377,7 +434,7 @@
                  members needs people before anything else is useful. -->
             <div v-else-if="currentStepKey === 'progress' && creationDone" class="ctv__done">
                 <div class="ctv__done-head">
-                    <CheckCircle :size="40" class="ctv__done-icon" aria-hidden="true" />
+                    <CheckCircle :size="ICON_XL" class="ctv__done-icon" aria-hidden="true" />
                     <!-- TRANSLATORS: success heading after a team is created.
                          {team} is the team's own name as typed by the user
                          (e.g. "Marketing"), not the word "team". -->
@@ -390,17 +447,24 @@
                      the reader must not miss. Shown at the top of the success
                      screen, because everything below it says "ready". -->
                 <p v-if="roleResult?.owner?.status === 'failed'" class="ctv__done-warn">
-                    <AlertCircle :size="18" aria-hidden="true" />
+                    <AlertCircle :size="ICON_BODY" aria-hidden="true" />
                     {{ t('teamhub', 'The team was created, but ownership could not be transferred. You are still the owner — you can hand over from Manage team.') }}
+                </p>
+                <!-- v4.10.23 — the box was ticked and the claim did not
+                     land. The team exists, so "ready" is true; what is not
+                     true is that it answers anything. -->
+                <p v-if="serviceClaimError" class="ctv__done-warn">
+                    <AlertCircle :size="ICON_BODY" aria-hidden="true" />
+                    {{ serviceClaimError }}
                 </p>
                 <!-- v4.9.6 — a workspace that finished with something to look at
                      is usable but not done; the team page keeps saying so. -->
                 <p v-else-if="isWorkspace && provisioningState?.status === 'attention'" class="ctv__done-warn">
-                    <AlertCircle :size="18" aria-hidden="true" />
+                    <AlertCircle :size="ICON_BODY" aria-hidden="true" />
                     {{ t('teamhub', 'The workspace is usable, but part of the setup needs attention. The team page shows what, and lets you retry.') }}
                 </p>
                 <p v-else-if="roleResult?.owner?.status === 'transferred'" class="ctv__done-note">
-                    <AccountArrowRight :size="18" aria-hidden="true" />
+                    <AccountArrowRight :size="ICON_BODY" aria-hidden="true" />
                     {{ creatorLeftTeam
                         ? t('teamhub', '{name} is now the owner and you have left the team.', { name: appointedOwnerName })
                         : t('teamhub', '{name} is now the owner of this team.', { name: appointedOwnerName }) }}
@@ -423,7 +487,7 @@
                     </p>
                     <div class="ctv__done-actions">
                         <NcButton variant="primary" @click="$emit('cancel')">
-                            <template #icon><Check :size="20" /></template>
+                            <template #icon><Check :size="ICON_BODY" /></template>
                             {{ t('teamhub', 'Done') }}
                         </NcButton>
                     </div>
@@ -435,17 +499,17 @@
                         <NcButton
                             :variant="noMembersInvited ? 'primary' : 'secondary'"
                             @click="finish('invite')">
-                            <template #icon><AccountPlus :size="20" /></template>
+                            <template #icon><AccountPlus :size="ICON_BODY" /></template>
                             {{ noMembersInvited ? t('teamhub', 'Invite people') : t('teamhub', 'Invite more people') }}
                         </NcButton>
                         <NcButton variant="secondary" @click="finish('manage')">
-                            <template #icon><CogOutline :size="20" /></template>
+                            <template #icon><CogOutline :size="ICON_BODY" /></template>
                             {{ t('teamhub', 'Review team apps') }}
                         </NcButton>
                         <NcButton
                             :variant="noMembersInvited ? 'secondary' : 'primary'"
                             @click="finish(null)">
-                            <template #icon><ArrowRight :size="20" /></template>
+                            <template #icon><ArrowRight :size="ICON_BODY" /></template>
                             {{ t('teamhub', 'Open team') }}
                         </NcButton>
                     </div>
@@ -477,7 +541,7 @@
                     {{ t('teamhub', 'Next') }}
                 </NcButton>
                 <NcButton v-if="currentStepKey === lastFormStepKey" variant="primary" @click="submit">
-                    <template #icon><Check :size="20" /></template>
+                    <template #icon><Check :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Create team') }}
                 </NcButton>
             </div>
@@ -489,12 +553,13 @@
 import { translate as t } from '@nextcloud/l10n'
 import { shiftToday } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 // v4.8.10 — to tell whether the creator named themselves as a member, which
 // decides whether they stay on the team after handing it over.
 import { getCurrentUser } from '@nextcloud/auth'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import { NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch } from '@nextcloud/vue'
+import { NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch, NcSelect } from '@nextcloud/vue'
 import Check from 'vue-material-design-icons/Check.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
@@ -510,6 +575,7 @@ import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
 // v4.8.9 — the bulk-create table, mounted from the "Multiple teams" tab.
 import BulkCreateTeams from './BulkCreateTeams.vue'
+import PersonRow from './PersonRow.vue'
 import OfficeBuildingOutline from 'vue-material-design-icons/OfficeBuildingOutline.vue'
 import Gavel from 'vue-material-design-icons/Gavel.vue'
 import AccountClock from 'vue-material-design-icons/AccountClock.vue'
@@ -535,6 +601,10 @@ import {
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import CogOutline from 'vue-material-design-icons/CogOutline.vue'
 import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
+// v4.10.23 — the Service template card and its Nextcloud Services claim.
+import LifebuoyIcon from 'vue-material-design-icons/Lifebuoy.vue'
+import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
+import { claimTeamServices, loadClaimStatus } from '../api/serviceTeams.js'
 
 // Canonical Circles config bit values — see src/constants/circlesConfig.js
 import {
@@ -564,22 +634,29 @@ const CONFIG_FIELD_KEYS = {
 export default {
     name: 'CreateTeamView',
     components: {
-        NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
+         NcSelect, NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
         Check, Close, CheckCircle, AlertCircle,
         Chat, Folder, Calendar, CardText, Briefcase, AccountMultiple, AccountGroup, AccountArrowRight, OfficeBuildingOutline,
         Gavel, AccountClock, TimelineClockOutline, FileDocumentOutline, BookOpenOutline, LockOutline,
         BriefcaseCheckOutline, OpenProjectProjectPicker,
         AccountPlus, CogOutline, ArrowRight,
-        BulkCreateTeams,
+        LifebuoyIcon, HelpCircleOutline,
+        BulkCreateTeams, PersonRow,
         OpenProjectSetupStep, ProvisioningRolePreview, ProvisioningReviewStep, ProvisioningProgress,
     },
     emits: ['created', 'cancel'],
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
+            ICON_XL,
             step: 1,
             nameError: '',
             memberSearch: '',
             userResults: [],
+            // True only when the server answered the current query with nobody.
+            memberSearchEmpty: false,
             searchTimer: null,
             progressTasks: [],
             intravoxAvailable: false,
@@ -635,6 +712,18 @@ export default {
             // until loaded; the OpenProject card is locked while it says the
             // integration cannot be used by this person.
             openProjectCaps: null,
+            // v4.10.23 — { available, claimed, holderName, availableServices }
+            // from GET /service-teams/claim-status. Null until it lands and on
+            // failure: the Service card renders meanwhile (a card that
+            // disappears a second later is worse than one that is briefly
+            // there) but the checkbox does not, so nothing can be ticked
+            // before the instance has said whether it is free.
+            serviceClaim: null,
+            // The ? panel under the checkbox, listing what the bundle carries.
+            servicesHelpOpen: false,
+            // Set when the claim posted after creation failed — shown on the
+            // success screen, because the team itself was created.
+            serviceClaimError: '',
             // The sentence under the project picker: a missing pick at
             // step 1, or (v4.9.4) the reason the create call refused the
             // project — the wizard comes back here with no team made.
@@ -669,6 +758,11 @@ export default {
                 // 'advanced' = guided PMC lifecycle (default, "force into project mode");
                 // 'basic' = the historical cosmetic project preset, still recorded.
                 projectMode: 'advanced',
+                // v4.10.23 — only meaningful when teamType==='service'. Off by
+                // default: claiming the instance's service bundle is a
+                // deliberate act, never what happens because somebody picked a
+                // template.
+                claimServices: false,
                 // v4.9.3 — the OpenProject project summary picked for the
                 // OpenProject template ({ id, identifier, name, … }), or null.
                 // Since v4.9.6 the OpenProject template runs the workspace
@@ -849,6 +943,22 @@ export default {
             // explained (the Presence and Decisions rule). Locked-with-reason
             // below is for the module being on and *this creator* unable to
             // use it yet.
+            // v4.10.23 — the Service desk. Absent, not locked, while the
+            // instance has no licence: Service Teams have no reduced
+            // version, so a card that explains what a licence would buy is
+            // the wrong shape here (the OpenProject card's rule, and
+            // CLAUDE.md § Permissions). `null` while the status fetch is in
+            // flight is "not yet known" rather than "off", so the row of
+            // cards does not reflow when the answer lands.
+            if (this.serviceClaim === null || this.serviceClaim.available) {
+                types.push({
+                    id: 'service',
+                    label: t('teamhub', 'Service team'),
+                    description: t('teamhub', 'Answers requests from the organisation'),
+                    icon: 'LifebuoyIcon',
+                    accent: 'service',
+                })
+            }
             if (!this.openProjectModuleOff) {
                 // v4.9.3 — a project whose engine is OpenProject. Locked, with
                 // the reason, when the creator cannot use the integration:
@@ -1354,6 +1464,7 @@ export default {
         await this.loadLicenseEntitlements()
         await this.loadBulkEntitlement()
         await this.loadOpenProjectCapabilities()
+        await this.loadServiceClaim()
     },
     methods: {
         t,
@@ -1427,6 +1538,24 @@ export default {
                 this.templates = data.templates || []
             } catch (e) {
                 this.templates = []
+            }
+        },
+
+        /**
+         * v4.10.23 — is the Nextcloud services bundle available here, and is
+         * it free?
+         *
+         * A failure leaves `serviceClaim` null, which keeps the Service card
+         * and hides the checkbox: the team can still be created from the
+         * template and its admins can claim from Manage team → Services
+         * afterwards. Refusing to show a template because one status call
+         * failed would be the worse failure.
+         */
+        async loadServiceClaim() {
+            try {
+                this.serviceClaim = await loadClaimStatus()
+            } catch (e) {
+                this.serviceClaim = null
             }
         },
 
@@ -1644,7 +1773,7 @@ export default {
             // that is not installed cannot be provisioned, and the person should
             // hear it before typing the members in.
             if (this.currentStepKey === 'openproject' && (this.provisioningOptions?.missingRequired || []).length) {
-                this.openProjectError = t('teamhub', 'A required application is not installed. Ask your administrator.')
+                this.openProjectError = t('teamhub', 'A required application is not installed. Ask an administrator.')
                 return
             }
             if (this.currentStepKey === 'members' && this.isWorkspace && !this.rolesReady) {
@@ -1801,17 +1930,24 @@ export default {
 
         onMemberSearch() {
             clearTimeout(this.searchTimer)
+            this.memberSearchEmpty = false
             if (this.memberSearch.length < 2) { this.userResults = []; return }
             this.searchTimer = setTimeout(async () => {
+                const query = this.memberSearch
                 try {
                     const { data } = await axios.get(
                         generateUrl('/apps/teamhub/api/v1/users/search'),
-                        { params: { q: this.memberSearch } }
+                        { params: { q: query } }
                     )
+                    // A slower answer to an older query must not overwrite a newer one.
+                    if (query !== this.memberSearch) return
                     const added = new Set(this.form.members.map(m => (m.type || 'user') + ':' + m.id))
+                    // Empty means the server found nobody — not that everyone
+                    // found is already on the list.
+                    this.memberSearchEmpty = (data || []).length === 0
                     this.userResults = (data || [])
                         .filter(u => !added.has((u.type || 'user') + ':' + u.id))
-                        .map(u => ({ id: u.id, displayName: u.displayName || u.id, type: u.type || 'user' }))
+                        .map(u => ({ id: u.id, displayName: u.displayName || u.id, type: u.type || 'user', subline: u.subline || '' }))
                 } catch { this.userResults = [] }
             }, 300)
         },
@@ -2123,6 +2259,28 @@ export default {
                     )
                 } catch { /* non-fatal */ }
 
+                // 8c. Nextcloud Services (v4.10.23) — after the type call,
+                // because the claim route refuses a team that is not a
+                // Service-template team and the type is what makes it one.
+                //
+                // Before the handover below, while the creator still holds
+                // level 9: claiming is a team admin's act, and after
+                // `assignOwner()` the creator is a moderator.
+                //
+                // NOT fire-and-forget. A failure here is reported on the
+                // success screen: the team exists either way, but somebody
+                // who ticked the box has to learn that the desk did not
+                // become the desk — silently dropping that would leave an
+                // organisation waiting for requests that never arrive.
+                if (this.form.teamType === 'service' && this.form.claimServices) {
+                    try {
+                        await claimTeamServices(team.id)
+                    } catch (e) {
+                        this.serviceClaimError = e?.response?.data?.error
+                            || t('teamhub', 'The team was created, but it could not be set to answer the Nextcloud services. A team admin can try again in Manage team → Services.')
+                    }
+                }
+
                 // (8b, the separate OpenProject link step of v4.9.3, is gone:
                 // the link is part of step 1 since v4.9.4.)
 
@@ -2392,9 +2550,9 @@ export default {
 .ctv__header { margin-bottom: 32px; }
 
 .ctv__title {
-    font-size: 26px;
+    font-size: var(--th-font-display);
     font-weight: 700;
-    margin: 0 0 6px;
+    margin: 0 0 8px;
 }
 
 .ctv__subtitle {
@@ -2420,10 +2578,10 @@ export default {
 .ctv__step {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     white-space: nowrap;
     opacity: 0.4;
-    transition: opacity 0.2s;
+    transition: opacity var(--animation-quick);
 }
 
 .ctv__step--active, .ctv__step--done { opacity: 1; }
@@ -2436,7 +2594,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -2477,21 +2635,46 @@ export default {
 .ctv__field { display: flex; flex-direction: column; gap: 8px; }
 
 .ctv__label { font-size: var(--th-font-body); font-weight: 600; }
-.ctv__hint { font-size: 13px; color: var(--color-text-maxcontrast); margin: 0 0 4px; }
+.ctv__hint { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); margin: 0 0 4px; }
+
+/* v4.10.23 — Nextcloud Services: the sentence and its ? button on one row,
+   the panel it opens underneath. */
+.ctv__services-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+}
+.ctv__services-note .ctv__hint { flex: 1; }
+
+.ctv__services-help {
+    margin-block-start: 4px;
+    padding: 12px;
+    border-radius: var(--border-radius-container);
+    background: var(--color-background-hover);
+}
+.ctv__services-help-intro {
+    margin: 0 0 8px;
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+.ctv__services-list {
+    margin: 0;
+    padding-inline-start: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ctv__services-list li {
+    display: flex;
+    flex-direction: column;
+    font-size: var(--th-font-meta);
+}
+.ctv__services-list strong { font-size: var(--th-font-body); font-weight: 600; }
+.ctv__services-list span { color: var(--color-text-maxcontrast); line-height: 1.4; }
 
 /* v4.8.4 — classification */
 .ctv__select {
     max-width: 320px;
-    border-radius: var(--th-radius-control);
-}
-
-.ctv__select:focus {
-    outline: none;
-    border-color: var(--color-primary-element);
-}
-
-.ctv__select:focus-visible {
-    box-shadow: 0 0 0 2px var(--color-primary-element);
 }
 
 /* v4.8.9 — One team / Multiple teams. Raw <button> with role="tab": a tab bar
@@ -2512,7 +2695,7 @@ export default {
 .ctv__modes-reason {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     max-width: 70ch;
     margin: -8px 0 16px;
 }
@@ -2521,7 +2704,7 @@ export default {
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
-    padding: 8px 14px;
+    padding: 8px 16px;
     font-size: var(--th-font-body);
     color: var(--color-text-maxcontrast);
     cursor: pointer;
@@ -2623,18 +2806,18 @@ export default {
 }
 
 .ctv__select--error {
-    border-color: var(--color-error-text);
+    border-color: var(--color-text-error);
 }
 
 .ctv__error {
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .ctv__policy-note {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 4px 0 8px;
@@ -2700,10 +2883,10 @@ export default {
        transient hover token, and the resting border isn't a state signal
        anyway; the icon accent below carries the type/state cue). */
     border: 2px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
     text-align: center;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
 
 /* Icon accent — one consistent colour across all three template-type cards.
@@ -2742,11 +2925,11 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 14px 16px;
+    padding: 16px 16px;
     border: 2px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
 
 .ctv__mode:hover { border-color: var(--color-primary-element); background: var(--color-background-hover); }
@@ -2802,7 +2985,7 @@ export default {
 .ctv__mode-lock {
     display: inline-flex;
     align-items: center;
-    margin-left: 6px;
+    margin-inline-start: 8px;
     vertical-align: -2px;
     color: var(--color-text-maxcontrast);
 }
@@ -2813,13 +2996,13 @@ export default {
 .ctv__user-results {
     position: absolute;
     top: 100%;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     z-index: 200;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    border-radius: var(--border-radius-small);
+    box-shadow: 0 4px 16px var(--color-box-shadow);
     max-height: 240px;
     overflow-y: auto;
 }
@@ -2828,11 +3011,19 @@ export default {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 16px;
+    padding: 8px 16px;
     cursor: pointer;
 }
 
 .ctv__user-result:hover { background: var(--color-background-hover); }
+
+.ctv__search-empty { margin-block-start: var(--th-space-sm); }
+
+.ctv__search-empty-headline {
+    margin: 0 0 var(--th-space-xs);
+    font-size: var(--th-font-meta);
+    font-weight: var(--th-font-weight-semibold);
+}
 
 .ctv__group-avatar {
     width: 32px;
@@ -2855,33 +3046,22 @@ export default {
     height: 24px;
 }
 
-.ctv__user-info { display: flex; flex-direction: column; }
-.ctv__user-name { font-size: var(--th-font-body); font-weight: 500; }
-.ctv__user-id { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
-
 .ctv__chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .ctv__chip {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 10px 4px 6px;
+    padding: 4px 8px 4px 8px;
     background: var(--color-background-dark);
     border-radius: var(--border-radius-pill);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .ctv__chip-remove {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0;
     display: flex;
     align-items: center;
-    color: var(--color-text-maxcontrast);
 }
-
-.ctv__chip-remove:hover { color: var(--color-error-text); }
 
 /* App options */
 .ctv__apps { display: flex; flex-direction: column; gap: 10px; }
@@ -2889,12 +3069,12 @@ export default {
 .ctv__app {
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 14px 16px;
+    gap: 16px;
+    padding: 16px 16px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background var(--animation-quick), border-color var(--animation-quick);
 }
 
 .ctv__app:hover { background: var(--color-background-hover); }
@@ -2946,13 +3126,13 @@ export default {
 .ctv__app-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .ctv__app-header {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 16px;
     cursor: pointer;
     flex: 1;
     min-width: 0;
@@ -2970,7 +3150,7 @@ export default {
 }
 
 .ctv__app-picker {
-    margin-left: 56px;
+    margin-inline-start: 56px;
     margin-top: 8px;
     margin-bottom: 4px;
     max-width: 360px;
@@ -2980,7 +3160,7 @@ export default {
 .ctv__progress {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
     padding: 32px 0;
 }
 
@@ -2994,12 +3174,12 @@ export default {
 .ctv__progress-task {
     display: flex;
     align-items: center;
-    gap: 14px;
-    font-size: 15px;
+    gap: 16px;
+    font-size: var(--th-font-body);
 }
 
-.ctv__progress-done { color: var(--color-success-text); }
-.ctv__progress-error { color: var(--color-error-text); }
+.ctv__progress-done { color: var(--color-text-success); }
+.ctv__progress-error { color: var(--color-text-error); }
 .ctv__progress-dot {
     width: 20px;
     height: 20px;
@@ -3020,10 +3200,10 @@ export default {
 .ctv__done-head {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 16px;
 }
 
-.ctv__done-icon { color: var(--color-success-text); }
+.ctv__done-icon { color: var(--color-text-success); }
 
 .ctv__done-title {
     margin: 0;
@@ -3036,7 +3216,7 @@ export default {
 }
 
 .ctv__done-summary {
-    margin: 18px 0 0;
+    margin: 16px 0 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
@@ -3044,12 +3224,12 @@ export default {
 .ctv__done-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     margin-top: 8px;
 }
 
 .ctv__done-chip {
-    padding: 3px 10px;
+    padding: 4px 8px;
     border-radius: var(--th-radius-pill);
     background: var(--color-background-dark);
     color: var(--color-main-text);
@@ -3058,7 +3238,7 @@ export default {
 }
 
 .ctv__done-next-label {
-    margin: 28px 0 10px;
+    margin: 28px 0 8px;
     font-size: var(--th-font-meta);
     font-weight: var(--th-font-weight-semibold);
     color: var(--color-main-text);
@@ -3067,7 +3247,7 @@ export default {
 .ctv__done-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
 }
 
 .ctv__done-hint {
@@ -3103,16 +3283,14 @@ export default {
 .ctv__settings-group {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .ctv__settings-group-label {
     font-size: var(--th-font-meta);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--color-text-maxcontrast);
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     display: block;
 }
 
@@ -3120,10 +3298,10 @@ export default {
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    padding: 10px 12px;
-    border-radius: var(--border-radius-large);
+    padding: 8px 12px;
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    transition: background 0.12s;
+    transition: background var(--animation-quick);
 }
 
 .ctv__setting:hover { background: var(--color-background-hover); }
@@ -3135,9 +3313,8 @@ export default {
 .ctv__app-hint {
     font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
-    font-style: italic;
     display: block;
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 /* Team modules */
@@ -3147,11 +3324,11 @@ export default {
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    padding: 12px 14px;
+    padding: 12px 16px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background var(--animation-quick), border-color var(--animation-quick);
 }
 
 .ctv__module:hover { background: var(--color-background-hover); }
@@ -3175,7 +3352,7 @@ export default {
 .ctv__module-check {
     width: 16px;
     height: 16px;
-    margin-top: 2px;
+    margin-top: 4px;
     accent-color: var(--color-primary-element);
     flex-shrink: 0;
     cursor: inherit;
@@ -3190,7 +3367,6 @@ export default {
 .ctv__module-unavailable {
     font-size: var(--th-font-micro);
     color: var(--color-warning-text);
-    font-style: italic;
-    margin-top: 2px;
+    margin-top: 4px;
 }
 </style>

@@ -25,8 +25,8 @@ use Psr\Log\LoggerInterface;
  *   No licence installed .................. reports
  *   Malformed / unreadable licence JWT .... reports (treated as unlicensed)
  *   Active licence or trial ............... never reports
- *   Expired, within the 30-day grace ...... never reports
- *   Expired beyond grace .................. reports again
+ *   Paid, expired < 14 days ago (grace) ... never reports
+ *   Expired beyond grace, trial expired ... reports again
  *
  * A paying or trialling customer is already known, so there is nothing to
  * learn by counting them; the report exists to size the free-tier footprint.

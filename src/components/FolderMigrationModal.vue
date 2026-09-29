@@ -9,7 +9,7 @@
         <!-- ── Screen 1: Intro (choose manual or auto) ── -->
         <div v-if="screen === 'intro'" class="fmm-screen">
             <div class="fmm-info-block">
-                <FolderIcon :size="32" class="fmm-icon" aria-hidden="true" />
+                <FolderIcon :size="ICON_LARGE" class="fmm-icon" aria-hidden="true" />
                 <h3 class="fmm-heading">{{ t('teamhub', 'A team folder is now connected to this team') }}</h3>
             </div>
             <p class="fmm-body">
@@ -42,7 +42,7 @@
         <!-- ── Screen 2: Auto preflight + confirmation ── -->
         <div v-else-if="screen === 'auto-preflight'" class="fmm-screen">
             <div v-if="loadingPreflight" class="fmm-loading" role="status">
-                <NcLoadingIcon :size="32" />
+                <NcLoadingIcon :size="ICON_LARGE" />
                 <span>{{ t('teamhub', 'Checking available space…') }}</span>
             </div>
             <template v-else>
@@ -66,7 +66,7 @@
                 </table>
 
                 <p v-if="!preflight.canAutoMigrate" class="fmm-warning-text">
-                    {{ t('teamhub', 'There is not enough space in the team folder for an automatic migration. Please migrate manually: move the files yourself, then return here to connect the team folder.') }}
+                    {{ t('teamhub', 'There is not enough space in the team folder for an automatic migration. Migrate manually: move the files yourself, then return here to connect the team folder.') }}
                 </p>
                 <p v-else class="fmm-body">
                     {{ t('teamhub', 'TeamHub will copy all files from the shared folder into the team folder. If the team folder already has files, they will first be moved to a backup folder called "team_files_backup". The shared folder will remain intact but the team will no longer have access to it.') }}
@@ -95,15 +95,15 @@
 
         <!-- ── Screen 3: Migration in progress ── -->
         <div v-else-if="screen === 'migrating'" class="fmm-screen fmm-screen--centered" role="status">
-            <NcLoadingIcon :size="48" />
+            <NcLoadingIcon :size="ICON_XL" />
             <p class="fmm-body fmm-body--loading">
-                {{ t('teamhub', 'Migrating files… This may take a moment. Please do not close this window.') }}
+                {{ t('teamhub', 'Migrating files. This may take a moment; keep this window open.') }}
             </p>
         </div>
 
         <!-- ── Screen 4: Success ── -->
         <div v-else-if="screen === 'success'" class="fmm-screen fmm-screen--centered">
-            <CheckCircleIcon :size="48" class="fmm-icon fmm-icon--success" aria-hidden="true" />
+            <CheckCircleIcon :size="ICON_XL" class="fmm-icon fmm-icon--success" aria-hidden="true" />
             <h3 class="fmm-heading">{{ t('teamhub', 'Migration complete') }}</h3>
             <p v-if="resultMode === 'auto'" class="fmm-body">
                 {{ t('teamhub', 'Files have been moved into the team folder. The shared folder is no longer connected to the team.') }}
@@ -112,7 +112,7 @@
                 {{ t('teamhub', 'The team folder is now the team\'s primary folder. Please move your files from the shared folder into the team folder manually.') }}
             </p>
             <div class="fmm-actions fmm-actions--centered">
-                <NcButton variant="primary" @click="$emit('done')">
+                <NcButton variant="secondary" @click="$emit('done')">
                     {{ t('teamhub', 'Done') }}
                 </NcButton>
             </div>
@@ -121,7 +121,7 @@
         <!-- ── Screen 5: Auto-migration partial failure ── -->
         <div v-else-if="screen === 'partial-failure'" class="fmm-screen">
             <div class="fmm-warning-block">
-                <AlertIcon :size="32" class="fmm-icon fmm-icon--warn" aria-hidden="true" />
+                <AlertIcon :size="ICON_LARGE" class="fmm-icon fmm-icon--warn" aria-hidden="true" />
                 <h3 class="fmm-heading">{{ t('teamhub', 'Automatic migration did not complete') }}</h3>
             </div>
             <p class="fmm-body">
@@ -131,8 +131,8 @@
                 {{ t('teamhub', 'The team folder is now connected as the team\'s primary folder. The shared folder is no longer connected to the team, but the owner can still access it and move the files manually.') }}
             </p>
             <div class="fmm-actions fmm-actions--centered">
-                <NcButton variant="primary" @click="$emit('done')">
-                    {{ t('teamhub', 'OK') }}
+                <NcButton variant="secondary" @click="$emit('done')">
+                    {{ t('teamhub', 'Close') }}
                 </NcButton>
             </div>
         </div>
@@ -149,6 +149,7 @@ import { NcButton, NcDialog, NcLoadingIcon } from '@nextcloud/vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import CheckCircleIcon from 'vue-material-design-icons/CheckCircle.vue'
 import AlertIcon from 'vue-material-design-icons/Alert.vue'
+import { ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 
 export default {
     name: 'FolderMigrationModal',
@@ -174,6 +175,8 @@ export default {
 
     data() {
         return {
+            ICON_LARGE,
+            ICON_XL,
             screen:          'intro',  // intro | auto-preflight | migrating | success | partial-failure
             loadingPreflight: false,
             migrating:        false,
@@ -281,7 +284,7 @@ export default {
 }
 
 .fmm-icon--success {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .fmm-icon--warn {
@@ -325,9 +328,9 @@ export default {
 
 .fmm-space-table th,
 .fmm-space-table td {
-    padding: 6px 8px;
+    padding: 8px 8px;
     border-bottom: 1px solid var(--color-border);
-    text-align: left;
+    text-align: start;
 }
 
 .fmm-space-table th {
@@ -336,7 +339,7 @@ export default {
     width: 55%;
 }
 
-.fmm-ok  { color: var(--color-success-text); font-weight: 600; }
+.fmm-ok  { color: var(--color-text-success); font-weight: 600; }
 .fmm-warn { color: var(--color-warning-text); font-weight: 600; }
 
 /* v3.100.14: full-saturation warning banner per SKILLS.md
@@ -344,8 +347,8 @@ export default {
 .fmm-warning-text {
     background: var(--color-warning);
     border: 1px solid var(--color-warning);
-    border-radius: var(--border-radius);
-    padding: 10px 14px;
+    border-radius: var(--border-radius-small);
+    padding: 8px 16px;
     color: var(--color-warning-text);
     margin: 0;
     font-size: 0.9rem;

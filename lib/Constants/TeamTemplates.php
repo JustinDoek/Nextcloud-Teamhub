@@ -63,7 +63,14 @@ final class TeamTemplates {
     // v4.9.3 — 'openproject': a project whose engine is OpenProject rather
     // than TeamHub's own project module. Seeded by Version000409004; the
     // wizard requires an OpenProject project to be picked at creation.
-    public const TEMPLATES = ['collaboration', 'project', 'department', 'openproject'];
+    // v4.10.23 — 'service': a team that answers requests from the rest of
+    // the organisation. It became a template the moment a service team
+    // stopped being something an administrator declared about a team that
+    // already existed (DESIGN §2.146). The template provisions the team;
+    // holding *Nextcloud Services* is a separate, instance-wide claim its
+    // admins make in the wizard or on the Services tab, so a Service team
+    // that holds nothing is a perfectly ordinary state.
+    public const TEMPLATES = ['collaboration', 'project', 'department', 'openproject', 'service'];
 
     /** App resource keys a template may provision. */
     public const APPS = ['talk', 'files', 'calendar', 'deck'];
@@ -101,6 +108,18 @@ final class TeamTemplates {
             'apps'    => ['talk' => true, 'files' => true, 'calendar' => true,  'deck' => false],
             'config'  => ['open' => false, 'invite' => true,  'request' => false, 'visible' => false, 'protected' => false],
             'modules' => ['decisions' => true, 'presence' => false, 'timeline' => false, 'messages' => true, 'pages' => true, 'wiki' => false],
+        ],
+        // v4.10.23 — a service desk. Talk and Files, because a desk confers
+        // and keeps the documents a request produces; no Calendar and no
+        // Deck, because the work a desk does is the queue and a second board
+        // beside it is the duplication the queue exists to remove. Presence
+        // is on: who is on the desk today is the one thing a queue's members
+        // ask about each other. Visible, so the rest of the organisation can
+        // find the team whose services it is using.
+        'service' => [
+            'apps'    => ['talk' => true, 'files' => true, 'calendar' => false, 'deck' => false],
+            'config'  => ['open' => false, 'invite' => true,  'request' => false, 'visible' => true,  'protected' => false],
+            'modules' => ['decisions' => false, 'presence' => true, 'timeline' => false, 'messages' => true, 'pages' => true, 'wiki' => false],
         ],
     ];
 

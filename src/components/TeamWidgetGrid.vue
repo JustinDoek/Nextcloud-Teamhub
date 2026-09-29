@@ -12,26 +12,26 @@
              focus / circular sizing behaviour. The custom
              .teamhub-layout-default-btn CSS block was retired. -->
         <div v-if="editMode && !isMobile && !isTablet" class="teamhub-edit-banner">
-            <ViewDashboardEdit :size="16" />
+            <ViewDashboardEdit :size="ICON_BODY" />
             <span class="teamhub-edit-banner-text">{{ t('teamhub', 'Drag widgets to rearrange. Use the resize icon in the bottom-right corner of each widget to resize.') }}</span>
             <!-- Default layout actions — always shown in edit mode so they are always discoverable -->
             <div class="teamhub-edit-banner-actions">
                 <NcButton
                     variant="tertiary"
-                    :title="t('teamhub', 'Save as my default layout for all teams')"
-                    :aria-label="t('teamhub', 'Save as my default layout for all teams')"
+                    :title="t('teamhub', 'Save as the default layout for all teams')"
+                    :aria-label="t('teamhub', 'Save as the default layout for all teams')"
                     @click="$emit('set-as-default')">
                     <template #icon>
-                        <ContentSaveAll :size="16" />
+                        <ContentSaveAll :size="ICON_BODY" />
                     </template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
-                    :title="t('teamhub', 'Reset to my default layout')"
-                    :aria-label="t('teamhub', 'Reset to my default layout')"
+                    :title="t('teamhub', 'Reset to the default layout')"
+                    :aria-label="t('teamhub', 'Reset to the default layout')"
                     @click="$emit('reset-to-default')">
                     <template #icon>
-                        <Restore :size="16" />
+                        <Restore :size="ICON_BODY" />
                     </template>
                 </NcButton>
             </div>
@@ -74,28 +74,31 @@
                         @keydown.down.prevent="moveWidget('msgstream', 'down')"
                         @keydown.left.prevent="moveWidget('msgstream', 'left')"
                         @keydown.right.prevent="moveWidget('msgstream', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Message stream') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <MessageOutline :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Messages') }}</h2>
+                        <MessageOutline :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team messages') }}</h2>
                         <!-- v4.0.0 — Post-message action moved out of the
                              stream's first row and into the widget header so
                              it matches File Center / Decisions header icons.
                              Only rendered for users who meet the team's
                              post-role minimum (canPost getter). -->
-                        <button
+                        <NcButton
                             v-if="canPost"
                             class="teamhub-widget-header-btn"
                             :aria-label="t('teamhub', 'Post message')"
                             :title="t('teamhub', 'Post message')"
-                            @click="openMessagePostForm">
-                            <PlusIcon :size="18" aria-hidden="true" />
-                        </button>
+                            @click="openMessagePostForm"
+                            variant="tertiary">
+                            <template #icon>
+                                <PlusIcon :size="ICON_BODY" aria-hidden="true" />
+                            </template>
+                        </NcButton>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('msgstream')"
-                            :widget-name="t('teamhub', 'Team Messages')"
+                            :widget-name="t('teamhub', 'Team messages')"
                             @toggle="toggleCollapse('msgstream')" />
                     </div>
                     <MessageStream
@@ -122,19 +125,19 @@
                         @keydown.down.prevent="moveWidget('widget-teaminfo', 'down')"
                         @keydown.left.prevent="moveWidget('widget-teaminfo', 'left')"
                         @keydown.right.prevent="moveWidget('widget-teaminfo', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Team info') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <InformationOutline :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Info') }}</h2>
+                        <InformationOutline :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team info') }}</h2>
                         <!-- Actions (Manage team / Copy link / Invite / Leave)
                              moved to the sidebar team-item 3-dot menu so the
                              Team info widget can be hidden by the owner without
                              stranding them. -->
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-teaminfo')"
-                            :widget-name="t('teamhub', 'Team Info')"
+                            :widget-name="t('teamhub', 'Team info')"
                             @toggle="toggleCollapse('widget-teaminfo')" />
                     </div>
 
@@ -144,19 +147,21 @@
                         class="teamhub-resource-warning"
                         role="alert"
                         aria-live="polite">
-                        <AlertCircle :size="15" class="teamhub-resource-warning__icon" aria-hidden="true" />
+                        <AlertCircle :size="ICON_INLINE" class="teamhub-resource-warning__icon" aria-hidden="true" />
                         <span class="teamhub-resource-warning__text">
                             <!-- TRANSLATORS: N is the number of connected resources that need review -->
                             {{ n('teamhub', '%n resource needs review.', '%n resources need review.', resourceWarningTotal, { n: resourceWarningTotal }) }}
                         </span>
-                        <button
-                            type="button"
+                        <NcButton
                             class="teamhub-resource-warning__link"
                             :aria-label="t('teamhub', 'Open modules & integrations to review resources')"
                             :title="t('teamhub', 'Open modules & integrations to review resources')"
-                            @click="openSettingsAtRisk">
-                            <ChevronRightIcon :size="16" aria-hidden="true" />
-                        </button>
+                            @click="openSettingsAtRisk"
+                            variant="tertiary">
+                            <template #icon>
+                                <ChevronRightIcon :size="ICON_BODY" aria-hidden="true" />
+                            </template>
+                        </NcButton>
                     </div>
 
                     <!-- v4.6.13 — expiration strip. Same shape as the resource
@@ -173,7 +178,7 @@
                         :class="{ 'teamhub-resource-warning--expired': teamExpiry.expired }"
                         role="status"
                         aria-live="polite">
-                        <AlertCircle :size="15" class="teamhub-resource-warning__icon" aria-hidden="true" />
+                        <AlertCircle :size="ICON_INLINE" class="teamhub-resource-warning__icon" aria-hidden="true" />
                         <span class="teamhub-resource-warning__text">
                             <template v-if="teamExpiry.expired">
                                 {{ t('teamhub', 'This team passed its expiration date on {date}.', { date: teamExpiry.expiresOn }) }}
@@ -187,14 +192,16 @@
                                      { n: teamExpiry.daysRemaining }) }}
                             </template>
                         </span>
-                        <button
-                            type="button"
+                        <NcButton
                             class="teamhub-resource-warning__link"
                             :aria-label="t('teamhub', 'Open team maintenance to request an extension')"
                             :title="t('teamhub', 'Open team maintenance to request an extension')"
-                            @click="openMaintenanceForExpiry">
-                            <ChevronRightIcon :size="16" aria-hidden="true" />
-                        </button>
+                            @click="openMaintenanceForExpiry"
+                            variant="tertiary">
+                            <template #icon>
+                                <ChevronRightIcon :size="ICON_BODY" aria-hidden="true" />
+                            </template>
+                        </NcButton>
                     </div>
 
                     <!-- v4.9.6 — a workspace whose provisioning is not finished says
@@ -233,8 +240,8 @@
                                     v-if="teamOwner.userId"
                                     :user="teamOwner.userId"
                                     :display-name="teamOwner.displayName"
-                                    :show-user-status="false"
-                                    :size="22" />
+                                    :hide-status="true"
+                                    :size="24" />
                                 <span class="teamhub-owner-name">{{ teamOwner.displayName }}</span>
                             </div>
                         </div>
@@ -258,20 +265,23 @@
                         @keydown.down.prevent="moveWidget('widget-members', 'down')"
                         @keydown.left.prevent="moveWidget('widget-members', 'left')"
                         @keydown.right.prevent="moveWidget('widget-members', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Members') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <AccountGroup :size="25" />
+                        <AccountGroup :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Members') }} ({{ effectiveMemberCount }})</h2>
-                        <button
+                        <NcButton
                             v-if="isTeamModerator && !editMode"
                             class="teamhub-widget-invite-btn"
                             :aria-label="t('teamhub', 'Invite members')"
                             :title="t('teamhub', 'Invite members')"
-                            @click.stop="$emit('invite')">
-                            <AccountPlus :size="18" />
-                        </button>
+                            @click.stop="$emit('invite')"
+                            variant="tertiary">
+                            <template #icon>
+                                <AccountPlus :size="ICON_BODY" />
+                            </template>
+                        </NcButton>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-members')"
                             :widget-name="t('teamhub', 'Members')"
@@ -299,25 +309,25 @@
                         @keydown.down.prevent="moveWidget('widget-calendar', 'down')"
                         @keydown.left.prevent="moveWidget('widget-calendar', 'left')"
                         @keydown.right.prevent="moveWidget('widget-calendar', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Upcoming events') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <Calendar :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Events') }}</h2>
+                        <Calendar :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming events') }}</h2>
                         <NcActions class="teamhub-widget-actions">
                             <NcActionButton @click="$emit('add-event')">
-                                <template #icon><CalendarPlus :size="20" /></template>
+                                <template #icon><CalendarPlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
                             <NcActionButton @click="$emit('add-meeting')">
-                                <template #icon><AccountGroup :size="20" /></template>
-                                {{ t('teamhub', 'Add Meeting') }}
+                                <template #icon><AccountGroup :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Add meeting') }}
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-calendar')"
-                            :widget-name="t('teamhub', 'Upcoming Events')"
+                            :widget-name="t('teamhub', 'Upcoming events')"
                             @toggle="toggleCollapse('widget-calendar')" />
                     </div>
                     <div v-show="!isCollapsed('widget-calendar')" class="teamhub-widget-content">
@@ -342,31 +352,31 @@
                         @keydown.down.prevent="moveWidget('widget-deck', 'down')"
                         @keydown.left.prevent="moveWidget('widget-deck', 'left')"
                         @keydown.right.prevent="moveWidget('widget-deck', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Upcoming tasks') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <CardText :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming Tasks') }}</h2>
+                        <CardText :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming tasks') }}</h2>
                         <NcActions class="teamhub-widget-actions">
                             <NcActionButton v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
-                                <template #icon><CheckboxMarkedOutline :size="20" /></template>
+                                <template #icon><CheckboxMarkedOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Deck task') }}
                             </NcActionButton>
                             <NcActionButton v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
-                                <template #icon><ClipboardPlusOutline :size="20" /></template>
+                                <template #icon><ClipboardPlusOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
                             <!-- v4.9.15 — only when OpenProject grants "add work
                                  packages" to this viewer (hidden, not disabled). -->
                             <NcActionButton v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
-                                <template #icon><BriefcaseOutline :size="20" /></template>
+                                <template #icon><BriefcaseOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create work package') }}
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-deck')"
-                            :widget-name="t('teamhub', 'Upcoming Tasks')"
+                            :widget-name="t('teamhub', 'Upcoming tasks')"
                             @toggle="toggleCollapse('widget-deck')" />
                     </div>
                     <div v-show="!isCollapsed('widget-deck')" class="teamhub-widget-content">
@@ -391,15 +401,15 @@
                         @keydown.down.prevent="moveWidget('widget-activity', 'down')"
                         @keydown.left.prevent="moveWidget('widget-activity', 'left')"
                         @keydown.right.prevent="moveWidget('widget-activity', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Team activity') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <ClockOutline :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team Activity') }}</h2>
+                        <ClockOutline :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team activity') }}</h2>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-activity')"
-                            :widget-name="t('teamhub', 'Team Activity')"
+                            :widget-name="t('teamhub', 'Team activity')"
                             @toggle="toggleCollapse('widget-activity')" />
                     </div>
                     <div v-show="!isCollapsed('widget-activity')" class="teamhub-widget-content">
@@ -427,11 +437,11 @@
                         @keydown.down.prevent="moveWidget('widget-pages', 'down')"
                         @keydown.left.prevent="moveWidget('widget-pages', 'left')"
                         @keydown.right.prevent="moveWidget('widget-pages', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Pages') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <FileDocumentOutline :size="25" />
+                        <FileDocumentOutline :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Pages') }}</h2>
                         <!-- Actions menu (v4.3.9). Intranet actions
                              (Create/Delete page) show when the Intranet
@@ -443,18 +453,18 @@
                              full editor there. -->
                         <NcActions v-if="isTeamModerator && !editMode && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-widget-actions">
                             <NcActionButton v-if="resources.intravox" @click="$emit('create-page')">
-                                <template #icon><FilePlus :size="20" /></template>
+                                <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
                             <NcActionButton
                                 v-if="resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="$emit('delete-page')">
-                                <template #icon><TrashCan :size="20" /></template>
+                                <template #icon><TrashCan :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Delete Intranet page') }}
                             </NcActionButton>
                             <NcActionButton v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
-                                <template #icon><FilePlus :size="20" /></template>
+                                <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Collectives page') }}
                             </NcActionButton>
                         </NcActions>
@@ -489,12 +499,12 @@
                         @keydown.down.prevent="moveWidget('widget-files-center', 'down')"
                         @keydown.left.prevent="moveWidget('widget-files-center', 'left')"
                         @keydown.right.prevent="moveWidget('widget-files-center', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Files') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <Folder :size="25" />
-                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'File Center') }}</h2>
+                        <Folder :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'File center') }}</h2>
                         <!-- v4.6.25 — was an <a target="_blank"> to /apps/files,
                              which left TeamHub for a new browser tab. Every
                              other file affordance in this app opens in the
@@ -502,16 +512,19 @@
                              "create a file somewhere else". Raw <button> per
                              SKILLS' widget-header carve-out, matching the
                              Decisions header button directly below. -->
-                        <button
+                        <NcButton
                             v-if="resources.files && resources.files.path"
                             class="teamhub-widget-header-btn"
                             :aria-label="t('teamhub', 'Open team folder in Files')"
-                            @click="openTeamFolder">
-                            <PlusIcon :size="18" aria-hidden="true" />
-                        </button>
+                            @click="openTeamFolder"
+                            variant="tertiary">
+                            <template #icon>
+                                <PlusIcon :size="ICON_BODY" aria-hidden="true" />
+                            </template>
+                        </NcButton>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-files-center')"
-                            :widget-name="t('teamhub', 'File Center')"
+                            :widget-name="t('teamhub', 'File center')"
                             @toggle="toggleCollapse('widget-files-center')" />
                     </div>
                     <div v-show="!isCollapsed('widget-files-center')" class="teamhub-widget-content teamhub-widget-content--notoppad">
@@ -536,18 +549,21 @@
                         @keydown.down.prevent="moveWidget('widget-decisions', 'down')"
                         @keydown.left.prevent="moveWidget('widget-decisions', 'left')"
                         @keydown.right.prevent="moveWidget('widget-decisions', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Decisions') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <GavelIcon :size="25" />
+                        <GavelIcon :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Decisions') }}</h2>
-                        <button
+                        <NcButton
                             class="teamhub-widget-header-btn"
                             :aria-label="t('teamhub', 'Propose new decision')"
-                            @click="$emit('propose-decision')">
-                            <PlusIcon :size="18" aria-hidden="true" />
-                        </button>
+                            @click="$emit('propose-decision')"
+                            variant="tertiary">
+                            <template #icon>
+                                <PlusIcon :size="ICON_BODY" aria-hidden="true" />
+                            </template>
+                        </NcButton>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-decisions')"
                             :widget-name="t('teamhub', 'Decisions')"
@@ -577,11 +593,11 @@
                         @keydown.down.prevent="moveWidget('widget-project-health', 'down')"
                         @keydown.left.prevent="moveWidget('widget-project-health', 'left')"
                         @keydown.right.prevent="moveWidget('widget-project-health', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Project health') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <ViewDashboard :size="25" />
+                        <ViewDashboard :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Project health') }}</h2>
                         <WidgetCollapseButton
                             :collapsed="isCollapsed('widget-project-health')"
@@ -616,11 +632,11 @@
                         @keydown.down.prevent="moveWidget('widget-openproject', 'down')"
                         @keydown.left.prevent="moveWidget('widget-openproject', 'left')"
                         @keydown.right.prevent="moveWidget('widget-openproject', 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ t('teamhub', 'Project info') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
-                        <BriefcaseOutline :size="25" />
+                        <BriefcaseOutline :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Project info') }}</h2>
                         <NcActions class="teamhub-widget-actions">
                             <NcActionLink
@@ -629,7 +645,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><OpenInNew :size="20" /></template>
+                                <template #icon><OpenInNew :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Open project') }}
                             </NcActionLink>
                             <NcActionLink
@@ -638,7 +654,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><FormatListChecks :size="20" /></template>
+                                <template #icon><FormatListChecks :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Work packages') }}
                             </NcActionLink>
                             <NcActionLink
@@ -647,7 +663,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><PlusBoxOutline :size="20" /></template>
+                                <template #icon><PlusBoxOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'New work package') }}
                             </NcActionLink>
                             <NcActionLink
@@ -656,11 +672,11 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><FolderOutline :size="20" /></template>
+                                <template #icon><FolderOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Project files') }}
                             </NcActionLink>
                             <NcActionButton @click="refreshOpenProject">
-                                <template #icon><Refresh :size="20" /></template>
+                                <template #icon><Refresh :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Refresh project data') }}
                             </NcActionButton>
                         </NcActions>
@@ -674,6 +690,110 @@
                     </div>
                 </div>
             </grid-item>
+
+            <!-- v4.10.27 — the service team's queue and statistics
+                 (`/service-teams`). Gated on serviceDeskConfig.isDesk
+                 (src/lib/activeWidgets.js): a desk the viewer works. The
+                 raw <button> in the tablet header below is the documented
+                 tablet-collapse-row carve-out, like its siblings. -->
+            <grid-item
+                v-if="showServiceDeskWidgets && getGridItem('widget-service-queue')"
+                v-bind="getGridItem('widget-service-queue')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Service requests') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-service-queue', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-service-queue', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-service-queue', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-service-queue', 'right')">
+                        <DragVariant :size="ICON_BODY" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Service requests') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <LifebuoyIcon :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Service requests') }}</h2>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-service-queue')"
+                            :widget-name="t('teamhub', 'Service requests')"
+                            @toggle="toggleCollapse('widget-service-queue')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-service-queue')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <ServiceQueueWidget />
+                    </div>
+                </div>
+            </grid-item>
+
+            <grid-item
+                v-if="showServiceDeskWidgets && getGridItem('widget-service-stats')"
+                v-bind="getGridItem('widget-service-stats')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Statistics') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-service-stats', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-service-stats', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-service-stats', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-service-stats', 'right')">
+                        <DragVariant :size="ICON_BODY" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Statistics') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <ChartBoxOutline :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Statistics') }}</h2>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-service-stats')"
+                            :widget-name="t('teamhub', 'Statistics')"
+                            @toggle="toggleCollapse('widget-service-stats')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-service-stats')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <ServiceStatsWidget />
+                    </div>
+                </div>
+            </grid-item>
+
+            <!-- v4.10.50 — teams made outside TeamHub, on the team that holds
+                 the adoption service (the grid Admin → TeamHub also shows). -->
+            <grid-item
+                v-if="showAdoptionWidget && getGridItem('widget-team-adoption')"
+                v-bind="getGridItem('widget-team-adoption')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Teams made outside TeamHub') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-team-adoption', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-team-adoption', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-team-adoption', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-team-adoption', 'right')">
+                        <DragVariant :size="ICON_BODY" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Teams made outside TeamHub') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <AccountMultipleCheckOutline :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Teams made outside TeamHub') }}</h2>
+                        <WidgetCollapseButton
+                            :collapsed="isCollapsed('widget-team-adoption')"
+                            :widget-name="t('teamhub', 'Teams made outside TeamHub')"
+                            @toggle="toggleCollapse('widget-team-adoption')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-team-adoption')" class="teamhub-widget-content">
+                        <TeamAdoptionGrid compact />
+                    </div>
+                </div>
+            </grid-item>
+
 
             <!-- External integration widgets -->
             <grid-item
@@ -692,7 +812,7 @@
                         @keydown.down.prevent="moveWidget('widget-int-' + widget.registry_id, 'down')"
                         @keydown.left.prevent="moveWidget('widget-int-' + widget.registry_id, 'left')"
                         @keydown.right.prevent="moveWidget('widget-int-' + widget.registry_id, 'right')">
-                        <DragVariant :size="16" />
+                        <DragVariant :size="ICON_BODY" />
                         <span aria-hidden="true">{{ widget.title || t('teamhub', 'Widget') }}</span>
                     </div>
                     <div class="teamhub-widget-header">
@@ -702,7 +822,7 @@
                             :alt="widget.app_id"
                             class="teamhub-widget-app-icon"
                             @error="onAppIconError($event)" />
-                        <Puzzle v-else :size="25" />
+                        <Puzzle v-else :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ widget.title }}</h2>
                         <NcActions
                             v-if="widgetDynamicActions[widget.registry_id] && widgetDynamicActions[widget.registry_id].length"
@@ -714,7 +834,7 @@
                                 <template #icon>
                                     <component
                                         :is="resolveWidgetActionIcon(action.icon)"
-                                        :size="20" />
+                                        :size="ICON_BODY" />
                                 </template>
                                 {{ action.label }}
                             </NcActionButton>
@@ -762,10 +882,10 @@
                 <!-- Team info -->
                 <div v-if="getGridItem('widget-teaminfo')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-teaminfo')">
-                            <InformationOutline :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-teaminfo'))" @click="toggleCollapse('widget-teaminfo')">
+                            <InformationOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Team info') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-teaminfo') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-teaminfo') }" />
                         </button>
                         <!-- Actions moved to the sidebar team-item 3-dot menu.
                              See the desktop grid variant above for the note. -->
@@ -781,20 +901,22 @@
                 <!-- Members -->
                 <div v-if="getGridItem('widget-members')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-members')">
-                            <AccountGroup :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-members'))" @click="toggleCollapse('widget-members')">
+                            <AccountGroup :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Members') }} ({{ effectiveMemberCount }})</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-members') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-members') }" />
                         </button>
-                        <button
+                        <NcButton
                             v-if="isTeamModerator"
-                            type="button"
                             class="teamhub-tablet-widget__action-icon"
                             :aria-label="t('teamhub', 'Invite members')"
                             :title="t('teamhub', 'Invite members')"
-                            @click="$emit('invite')">
-                            <AccountPlus :size="18" />
-                        </button>
+                            @click="$emit('invite')"
+                            variant="tertiary">
+                            <template #icon>
+                                <AccountPlus :size="ICON_BODY" />
+                            </template>
+                        </NcButton>
                     </div>
                     <div v-if="!isCollapsed('widget-members')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
                         <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
@@ -804,19 +926,19 @@
                 <!-- Calendar -->
                 <div v-if="getGridItem('widget-calendar') && resources.calendar && resources.calendar.length > 0" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-calendar')">
-                            <Calendar :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-calendar'))" @click="toggleCollapse('widget-calendar')">
+                            <Calendar :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Upcoming events') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-calendar') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-calendar') }" />
                         </button>
                         <NcActions class="teamhub-tablet-widget__actions">
                             <NcActionButton @click="$emit('add-event')">
-                                <template #icon><CalendarPlus :size="20" /></template>
+                                <template #icon><CalendarPlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
                             <NcActionButton @click="$emit('add-meeting')">
-                                <template #icon><AccountGroup :size="20" /></template>
-                                {{ t('teamhub', 'Add Meeting') }}
+                                <template #icon><AccountGroup :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Add meeting') }}
                             </NcActionButton>
                         </NcActions>
                     </div>
@@ -828,24 +950,24 @@
                 <!-- Tasks / Deck -->
                 <div v-if="getGridItem('widget-deck') && showTasksWidget" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-deck')">
-                            <CardText :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-deck'))" @click="toggleCollapse('widget-deck')">
+                            <CardText :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Upcoming tasks') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-deck') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-deck') }" />
                         </button>
                         <NcActions class="teamhub-tablet-widget__actions">
                             <NcActionButton v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
-                                <template #icon><CheckboxMarkedOutline :size="20" /></template>
+                                <template #icon><CheckboxMarkedOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Deck task') }}
                             </NcActionButton>
                             <NcActionButton v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
-                                <template #icon><ClipboardPlusOutline :size="20" /></template>
+                                <template #icon><ClipboardPlusOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
                             <!-- v4.9.15 — only when OpenProject grants "add work
                                  packages" to this viewer (hidden, not disabled). -->
                             <NcActionButton v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
-                                <template #icon><BriefcaseOutline :size="20" /></template>
+                                <template #icon><BriefcaseOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create work package') }}
                             </NcActionButton>
                         </NcActions>
@@ -858,10 +980,10 @@
                 <!-- Activity — no actions -->
                 <div v-if="getGridItem('widget-activity')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-activity')">
-                            <ClockOutline :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-activity'))" @click="toggleCollapse('widget-activity')">
+                            <ClockOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Team activity') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-activity') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-activity') }" />
                         </button>
                     </div>
                     <div v-if="!isCollapsed('widget-activity')" class="teamhub-tablet-widget__body">
@@ -872,26 +994,26 @@
                 <!-- Pages (Intranet + Wiki) — tablet (v4.3.7 unified) -->
                 <div v-if="getGridItem('widget-pages') && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-pages')">
-                            <FileDocumentOutline :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-pages'))" @click="toggleCollapse('widget-pages')">
+                            <FileDocumentOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Pages') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-pages') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-pages') }" />
                         </button>
                         <!-- Actions menu (v4.3.9) — same shape as desktop grid. -->
                         <NcActions v-if="isTeamModerator && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget__actions">
                             <NcActionButton v-if="resources.intravox" @click="$emit('create-page')">
-                                <template #icon><FilePlus :size="20" /></template>
+                                <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
                             <NcActionButton
                                 v-if="resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="pagesData.teamPage && $emit('delete-page')">
-                                <template #icon><TrashCan :size="20" /></template>
+                                <template #icon><TrashCan :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Delete Intranet page') }}
                             </NcActionButton>
                             <NcActionButton v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
-                                <template #icon><FilePlus :size="20" /></template>
+                                <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Collectives page') }}
                             </NcActionButton>
                         </NcActions>
@@ -907,10 +1029,10 @@
                 <!-- Files Center — tabbed widget -->
                 <div v-if="getGridItem('widget-files-center') && resources.files" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-files-center')">
-                            <Folder :size="18" />
-                            <span>{{ t('teamhub', 'File Center') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-center') }" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-files-center'))" @click="toggleCollapse('widget-files-center')">
+                            <Folder :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'File center') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-center') }" />
                         </button>
                     </div>
                     <div v-if="!isCollapsed('widget-files-center')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
@@ -921,10 +1043,10 @@
                 <!-- Decisions widget — tablet layout -->
                 <div v-if="showDecisionsWidget && getGridItem('widget-decisions')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-decisions')">
-                            <GavelIcon :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-decisions'))" @click="toggleCollapse('widget-decisions')">
+                            <GavelIcon :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Decisions') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-decisions') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-decisions') }" />
                         </button>
                     </div>
                     <div v-if="!isCollapsed('widget-decisions')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
@@ -932,13 +1054,57 @@
                     </div>
                 </div>
 
+                <!-- v4.10.27 — service queue and statistics, tablet layout.
+                     Raw <button>: the tablet collapse-row carve-out. -->
+                <div v-if="showServiceDeskWidgets && getGridItem('widget-service-queue')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-service-queue'))" @click="toggleCollapse('widget-service-queue')">
+                            <LifebuoyIcon :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'Service requests') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-service-queue') }" />
+                        </button>
+                    </div>
+                    <div v-if="!isCollapsed('widget-service-queue')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <ServiceQueueWidget />
+                    </div>
+                </div>
+
+                <div v-if="showServiceDeskWidgets && getGridItem('widget-service-stats')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-service-stats'))" @click="toggleCollapse('widget-service-stats')">
+                            <ChartBoxOutline :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'Statistics') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-service-stats') }" />
+                        </button>
+                    </div>
+                    <div v-if="!isCollapsed('widget-service-stats')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <ServiceStatsWidget />
+                    </div>
+                </div>
+
+                <!-- v4.10.50 — teams made outside TeamHub, tablet layout. -->
+                <div v-if="showAdoptionWidget && getGridItem('widget-team-adoption')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <!-- Raw button: tablet collapse row header (ui-standards carve-out). -->
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-team-adoption'))" @click="toggleCollapse('widget-team-adoption')">
+                            <AccountMultipleCheckOutline :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'Teams made outside TeamHub') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-team-adoption') }" />
+                        </button>
+                    </div>
+                    <div v-if="!isCollapsed('widget-team-adoption')" class="teamhub-tablet-widget__body">
+                        <TeamAdoptionGrid compact />
+                    </div>
+                </div>
+
+
                 <!-- Project Health widget — tablet layout (v3.97.0) -->
                 <div v-if="showProjectHealthWidget && getGridItem('widget-project-health')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-project-health')">
-                            <ViewDashboard :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-project-health'))" @click="toggleCollapse('widget-project-health')">
+                            <ViewDashboard :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Project health') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-project-health') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-project-health') }" />
                         </button>
                     </div>
                     <div v-if="!isCollapsed('widget-project-health')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
@@ -950,10 +1116,10 @@
                      links as the desktop header, from the same event. -->
                 <div v-if="showOpenProjectWidgets && getGridItem('widget-openproject')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-openproject')">
-                            <BriefcaseOutline :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-openproject'))" @click="toggleCollapse('widget-openproject')">
+                            <BriefcaseOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Project info') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-openproject') }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-openproject') }" />
                         </button>
                         <NcActions class="teamhub-tablet-widget__actions">
                             <NcActionLink
@@ -962,7 +1128,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><OpenInNew :size="20" /></template>
+                                <template #icon><OpenInNew :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Open project') }}
                             </NcActionLink>
                             <NcActionLink
@@ -971,7 +1137,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><FormatListChecks :size="20" /></template>
+                                <template #icon><FormatListChecks :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Work packages') }}
                             </NcActionLink>
                             <NcActionLink
@@ -980,7 +1146,7 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><PlusBoxOutline :size="20" /></template>
+                                <template #icon><PlusBoxOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'New work package') }}
                             </NcActionLink>
                             <NcActionLink
@@ -989,11 +1155,11 @@
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 :title="t('teamhub', 'Opens in OpenProject')">
-                                <template #icon><FolderOutline :size="20" /></template>
+                                <template #icon><FolderOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Project files') }}
                             </NcActionLink>
                             <NcActionButton @click="refreshOpenProject">
-                                <template #icon><Refresh :size="20" /></template>
+                                <template #icon><Refresh :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Refresh project data') }}
                             </NcActionButton>
                         </NcActions>
@@ -1009,10 +1175,10 @@
                     :key="'tablet-int-' + ext.registry_id"
                     class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" @click="toggleCollapse('widget-int-' + ext.registry_id)">
-                            <Puzzle :size="18" />
+                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-int-' + ext.registry_id))" @click="toggleCollapse('widget-int-' + ext.registry_id)">
+                            <Puzzle :size="ICON_BODY" />
                             <span>{{ ext.title || t('teamhub', 'Widget') }}</span>
-                            <ChevronDown :size="16" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-int-' + ext.registry_id) }" />
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-int-' + ext.registry_id) }" />
                         </button>
                     </div>
                     <div v-if="!isCollapsed('widget-int-' + ext.registry_id)" class="teamhub-tablet-widget__body">
@@ -1070,6 +1236,13 @@ import { mapState, mapGetters, mapMutations } from 'vuex'
 import { NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import { computeActiveWidgetIds, isProjectHealthActive } from '../lib/activeWidgets.js'
+import ServiceQueueWidget from './ServiceQueueWidget.vue'
+import ServiceStatsWidget from './ServiceStatsWidget.vue'
+import TeamAdoptionGrid from './admin/TeamAdoptionGrid.vue'
+import AccountMultipleCheckOutline from 'vue-material-design-icons/AccountMultipleCheckOutline.vue'
+import LifebuoyIcon from 'vue-material-design-icons/Lifebuoy.vue'
+import ChartBoxOutline from 'vue-material-design-icons/ChartBoxOutline.vue'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
  * v4.6.1 — any saved y at or above this is a leftover parking position from
@@ -1159,6 +1332,9 @@ export default {
 
     components: {
         NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton,
+        // v4.10.27 — the service team's queue and statistics.
+        ServiceQueueWidget, ServiceStatsWidget, LifebuoyIcon, ChartBoxOutline,
+        TeamAdoptionGrid, AccountMultipleCheckOutline,
         GridLayout, GridItem,
         MessageOutline, Folder, Calendar, CalendarPlus, CardText,
         CheckboxMarkedOutline, InformationOutline, AccountGroup,
@@ -1216,6 +1392,9 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
             // v4.9.5 — the links the Project info widget currently has, as
             // it reports them (`actions` event); the header menu renders
             // exactly these. All null until the widget's first payload.
@@ -1265,6 +1444,8 @@ export default {
             'openProjectConfig',
             // v4.9.6 — is this workspace's provisioning finished; the banner reads it.
             'provisioning',
+            // v4.10.27 — the service desk facts; gate for the queue and statistics.
+            'serviceDeskConfig',
         ]),
         ...mapGetters(['currentTeam', 'canPost']),
 
@@ -1325,6 +1506,18 @@ export default {
         showOpenProjectWidgets() {
             return !!(this.openProjectConfig?.eligible && this.openProjectConfig?.linked)
         },
+
+        /** v4.10.27 — a service desk the viewer works; see activeWidgets.js. */
+        showServiceDeskWidgets() {
+            return !!this.serviceDeskConfig?.isDesk
+        },
+
+        /** v4.10.50 — this team holds the adoption service; see activeWidgets.js. */
+        showAdoptionWidget() {
+            return !!this.serviceDeskConfig?.handlesAdoption
+        },
+
+        /** v4.10.34 — any Service-template team, desk or not yet; see activeWidgets.js. */
 
         /**
          * The set of widget IDs that are currently active (their v-if would be
@@ -1977,8 +2170,8 @@ export default {
     margin-bottom: 8px;
     background: var(--color-background-info, var(--color-background-hover));
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    font-size: var(--th-font-meta);
     color: var(--color-main-text);
 }
 
@@ -2007,7 +2200,7 @@ export default {
     height: 100%;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     overflow: hidden;
     box-sizing: border-box;
 }
@@ -2015,8 +2208,8 @@ export default {
 .teamhub-widget-drag-handle {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
+    gap: 8px;
+    padding: 4px 8px;
     background: var(--color-background-hover);
     border-bottom: 1px solid var(--color-border);
     cursor: grab;
@@ -2038,7 +2231,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 8px 8px;
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
 }
@@ -2053,7 +2246,7 @@ export default {
     margin: 0;
     padding: 0;
     font-weight: 600;
-    font-size: 18px;
+    font-size: var(--th-font-heading);
     color: var(--color-primary-element);
     flex: 1;
     white-space: nowrap;
@@ -2061,7 +2254,7 @@ export default {
     text-overflow: ellipsis;
 }
 
-.teamhub-widget-actions { margin-left: auto; flex-shrink: 0; }
+.teamhub-widget-actions { margin-inline-start: auto; flex-shrink: 0; }
 
 .teamhub-widget-app-icon {
     width: 25px;
@@ -2076,24 +2269,15 @@ export default {
     align-items: center;
     justify-content: center;
     width: 24px;
-    height: 24px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--color-primary-element);
-    cursor: pointer;
-    border-radius: var(--border-radius);
     opacity: 0.8;
-    transition: opacity 0.15s, background 0.15s;
     flex-shrink: 0;
 }
 
-.teamhub-widget-invite-btn { margin-right: 2px; }
+.teamhub-widget-invite-btn { margin-inline-end: 2px; }
 
 .teamhub-widget-collapse-btn:hover,
 .teamhub-widget-invite-btn:hover {
     opacity: 1;
-    background: rgba(255, 255, 255, 0.15);
 }
 
 .teamhub-widget-content {
@@ -2114,26 +2298,14 @@ export default {
     align-items: center;
     justify-content: center;
     width: 28px;
-    height: 28px;
-    border-radius: var(--border-radius);
-    color: var(--color-text-maxcontrast);
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-    margin-left: auto;
+    margin-inline-start: auto;
     flex-shrink: 0;
-    text-decoration: none;
-}
-.teamhub-widget-header-btn:hover {
-    background: var(--color-background-hover);
-    color: var(--color-primary-element);
 }
 
 .teamhub-team-description {
     padding: 8px 0 4px;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     margin: 0;
 }
 
@@ -2141,17 +2313,17 @@ export default {
 .teamhub-team-labels {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     margin-top: 8px;
-    padding: 2px 0;
+    padding: 4px 0;
 }
 
 .teamhub-team-label {
     display: inline-flex;
     align-items: center;
     height: 22px;
-    padding: 0 10px;
-    border-radius: 11px;
+    padding: 0 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-micro);
     font-weight: 500;
     line-height: 1;
@@ -2192,9 +2364,7 @@ export default {
     display: block;
     font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
     margin-bottom: 4px;
-    letter-spacing: 0.04em;
 }
 
 .teamhub-team-owner { margin-top: 12px; }
@@ -2205,7 +2375,7 @@ export default {
     gap: 8px;
 }
 
-.teamhub-owner-name { font-size: 13px; color: var(--color-main-text); }
+.teamhub-owner-name { font-size: var(--th-font-meta); color: var(--color-main-text); }
 
 /* Resource warning strip — directly under widget header, matches DeckWidget
    unassigned pattern.
@@ -2219,11 +2389,11 @@ export default {
 .teamhub-resource-warning {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 7px 14px;
+    gap: 8px;
+    padding: 8px 16px;
     background: var(--color-warning);
     border-bottom: 1px solid var(--color-warning-text);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-warning-text);
     line-height: 1.3;
 }
@@ -2240,43 +2410,30 @@ export default {
     color: var(--color-error-text);
 }
 .teamhub-resource-warning--expired .teamhub-resource-warning__icon,
-.teamhub-resource-warning--expired .teamhub-resource-warning__link {
-    color: var(--color-error-text);
-}
 .teamhub-resource-warning__text {
     flex: 1;
     min-width: 0;
 }
 .teamhub-resource-warning__link {
-    background: none;
-    border: none;
-    padding: 0;
     margin: 0;
     display: flex;
     align-items: center;
-    color: var(--color-warning-text);
-    cursor: pointer;
     opacity: 0.75;
     flex-shrink: 0;
 }
 .teamhub-resource-warning__link:hover { opacity: 1; }
-.teamhub-resource-warning__link:focus-visible {
-    outline: 2px solid var(--color-warning);
-    outline-offset: 2px;
-    border-radius: 2px;
-}
 
 .teamhub-teaminfo-body {
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    padding-top: 10px;
+    padding-top: 8px;
 }
 
 .teamhub-teaminfo-logo {
     width: 56px;
     height: 56px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     object-fit: cover;
     border: 1px solid var(--color-border);
     flex-shrink: 0;
@@ -2297,15 +2454,15 @@ export default {
     width: 28px;
     height: 28px;
     bottom: 4px;
-    right: 4px;
-    left: auto;
+    inset-inline-end: 4px;
+    inset-inline-start: auto;
     background-image: none;
     border: none;
     background: transparent;
     cursor: se-resize;
     z-index: 10;
-    border-radius: var(--border-radius);
-    transition: background 0.15s;
+    border-radius: var(--border-radius-small);
+    transition: background var(--animation-quick);
 }
 
 .teamhub-home-view--editing :deep(.vgl-item__resizer:hover) {
@@ -2324,7 +2481,7 @@ export default {
     background-position: center;
     background-size: 16px 16px;
     opacity: 0.55;
-    transition: opacity 0.15s;
+    transition: opacity var(--animation-quick);
     pointer-events: none;
 }
 
@@ -2337,7 +2494,7 @@ export default {
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
     border: 2px dashed var(--color-primary-element);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     opacity: 0.4;
 }
 
@@ -2365,7 +2522,7 @@ export default {
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    border-right: 1px solid var(--color-border);
+    border-inline-end: 1px solid var(--color-border);
 }
 
 .teamhub-tablet-widgets {
@@ -2392,7 +2549,7 @@ export default {
 
 .teamhub-tablet-widget {
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     flex-shrink: 0;
     overflow: hidden;
     background: var(--color-main-background);
@@ -2411,17 +2568,17 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
-    font-size: 13px;
+    padding: 8px 16px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     cursor: pointer;
     user-select: none;
     background: transparent;
     border: none;
-    text-align: left;
+    text-align: start;
     color: var(--color-main-text);
     min-width: 0;
-    transition: background 0.12s ease;
+    transition: background var(--animation-quick) ease;
 }
 
 .teamhub-tablet-widget__collapse:hover {
@@ -2443,37 +2600,21 @@ export default {
 /* NcActions sits flush to the right of the header */
 .teamhub-tablet-widget__actions {
     flex-shrink: 0;
-    margin-right: 4px;
+    margin-inline-end: 4px;
 }
 
 /* Single icon-button action (e.g. members invite) — matches NcActions visual weight */
 .teamhub-tablet-widget__action-icon {
     flex-shrink: 0;
     width: 36px;
-    height: 36px;
-    margin-right: 4px;
-    border: none;
-    border-radius: var(--border-radius);
-    background: transparent;
-    color: var(--color-main-text);
+    margin-inline-end: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    transition: background 0.12s ease;
-}
-
-.teamhub-tablet-widget__action-icon:hover {
-    background: var(--color-background-hover);
-}
-
-.teamhub-tablet-widget__action-icon:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: -2px;
 }
 
 .teamhub-tablet-widget__chevron {
-    transition: transform 0.15s ease;
+    transition: transform var(--animation-quick) ease;
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
 }
@@ -2494,7 +2635,7 @@ export default {
 /* ─── Tablet inline widget content ────────────────────────── */
 
 .teamhub-tablet-teaminfo {
-    padding: 0 14px 8px;
+    padding: 0 16px 8px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -2503,13 +2644,13 @@ export default {
 .teamhub-tablet-teaminfo__logo {
     width: 40px;
     height: 40px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     object-fit: cover;
 }
 
 .teamhub-tablet-teaminfo__description {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
     color: var(--color-text-maxcontrast);
 }

@@ -681,18 +681,24 @@ class ResourceService {
                         ]);
                         if ($gfAvailable) {
                             try {
-                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — calling createGroupFolder', [
+                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — calling createTeamFolder', [
                                     'teamId' => $teamId, 'mountPoint' => $resourceName, 'app_id' => Application::APP_ID,
                                 ]);
-                                $folderId = $this->groupFolderService->createGroupFolder($resourceName);
-                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — group folder created', [
-                                    'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
+                                // v4.10.1 — on Nextcloud 35 this is the team's
+                                // space (via ITeamFolderProvider); on 33/34 a
+                                // group folder with the circle assigned. The
+                                // version split lives in GroupFolderService.
+                                $created  = $this->groupFolderService->createTeamFolder($teamId, $resourceName);
+                                $folderId = $created['folder_id'];
+                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — team folder ready', [
+                                    'teamId' => $teamId, 'folderId' => $folderId,
+                                    'teamSpace' => $created['team_space'], 'app_id' => Application::APP_ID,
                                 ]);
-                                $this->groupFolderService->assignCircleToFolder($folderId, $teamId);
-                                $this->logger->debug('[TeamHub][ResourceService] createTeamResources — circle assigned to group folder', [
-                                    'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
-                                ]);
-                                $result = ['folder_id' => $folderId, 'folder_type' => 'group'];
+                                $result = [
+                                    'folder_id'   => $folderId,
+                                    'folder_type' => 'group',
+                                    'team_space'  => $created['team_space'],
+                                ];
                                 $results['files'] = $result;
                                 $this->upsertResourceRow(
                                     $teamId, 'files', 'gf:' . $folderId, 'teamhub_create', $uid
@@ -834,15 +840,26 @@ class ResourceService {
                 // resourceId from the picker is either 'gf:{folderId}' (group folder)
                 // or an integer string (legacy shared folder file_source).
                 if (is_string($resourceId) && str_starts_with((string)$resourceId, 'gf:')) {
-                    $folderId = (int) substr((string)$resourceId, 3);
+                    $folderId  = (int) substr((string)$resourceId, 3);
+                    $teamSpace = false;
                     try {
                         // assignCircleToFolder may throw if already assigned — treat as success.
-                        $this->groupFolderService->assignCircleToFolder($folderId, $teamId);
+                        // v4.10.1 — on Nextcloud 35 it also links the folder as
+                        // the team's space when the provider allows it, and
+                        // returns whether it did.
+                        $teamSpace = $this->groupFolderService->assignCircleToFolder($folderId, $teamId);
                     } catch (\Throwable $e) {
+                        // v4.10.1 — one refusal is final: the folder is another
+                        // team's space. Connecting it would leave a row the
+                        // team cannot open (DESIGN.md §2.133).
+                        if (str_contains($e->getMessage(), 'team space of another team')) {
+                            return ['success' => false, 'error' => $e->getMessage()];
+                        }
                         $this->logger->debug('[TeamHub][ResourceService] assignCircleToFolder — may already be assigned', [
                             'teamId' => $teamId, 'folderId' => $folderId,
                             'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
                         ]);
+                        $teamSpace = $this->groupFolderService->teamSpaces()->isTeamSpaceOf($teamId, $folderId);
                     }
                     // Always upsert the resource row so the team has an active files resource.
                     $this->upsertResourceRow($teamId, 'files', 'gf:' . $folderId, 'teamhub_connect', $uid);
@@ -852,7 +869,7 @@ class ResourceService {
                     // one does. Leaving it out would report the team as missing
                     // a tag that no path ever applies.
                     $this->applyGovernedClassification($teamId);
-                    $result = ['success' => true, 'folder_id' => $folderId, 'folder_type' => 'group'];
+                    $result = ['success' => true, 'folder_id' => $folderId, 'folder_type' => 'group', 'team_space' => $teamSpace];
                 } else {
                     $result = $this->filesService->connectExistingFolder($teamId, (int)$resourceId, $uid);
                     if (!empty($result['success'])) {
@@ -869,9 +886,13 @@ class ResourceService {
                 return $result;
 
             case 'deck':
-                $result = $this->deckService->connectExistingBoard($teamId, $resourceId, $uid);
+                // v4.10.8 (client report) — the id arrives as a string from the
+                // route and DeckService::connectExistingBoard() is typed `int`;
+                // under strict_types that was a TypeError on every connect of
+                // an existing board. Same cast the talk and calendar cases have.
+                $result = $this->deckService->connectExistingBoard($teamId, (int)$resourceId, $uid);
                 if (!empty($result['success'])) {
-                    $this->upsertResourceRow($teamId, 'deck', (string) $resourceId, 'teamhub_connect', $uid);
+                    $this->upsertResourceRow($teamId, 'deck', (string)(int)$resourceId, 'teamhub_connect', $uid);
                 }
                 return $result;
 
@@ -894,6 +915,9 @@ class ResourceService {
             // and doesn't need this.
             'collectives'            => $this->appManager->isInstalled('collectives'),
             'groupfolders'           => $this->groupFolderService->isGroupFoldersAvailable(),
+            // v4.10.1 — Nextcloud 35 with Team folders: a new team folder is
+            // a team space, and Manage team labels it as one.
+            'teamSpaces'             => $this->groupFolderService->teamSpaces()->isAvailable(),
             'intravoxParentPath'     => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',
             'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1',
@@ -1037,7 +1061,7 @@ class ResourceService {
                     if (str_starts_with($firstId, 'gf:')) {
                         $folderId = (int) substr($firstId, 3);
                         try {
-                            $this->groupFolderService->deleteGroupFolder($folderId);
+                            $this->groupFolderService->deleteGroupFolder($folderId, $teamId);
                             $result = ['deleted' => true, 'detail' => "Group folder {$folderId} deleted"];
                         } catch (\Throwable $e) {
                             $result = ['deleted' => false, 'detail' => $e->getMessage()];
@@ -1332,7 +1356,9 @@ class ResourceService {
                 'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
             ]);
             try {
-                $this->groupFolderService->deleteGroupFolder($folderId);
+                // v4.10.1 — the team goes along: its own space is removed
+                // through the provider, another team's space is refused.
+                $this->groupFolderService->deleteGroupFolder($folderId, $teamId);
                 return ['deleted' => true, 'detail' => "Group folder {$folderId} deleted"];
             } catch (\Throwable $e) {
                 $this->logger->warning('[TeamHub][ResourceService] deleteFilesResource group folder failed', [

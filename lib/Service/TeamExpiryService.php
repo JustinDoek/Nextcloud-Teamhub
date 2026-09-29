@@ -465,6 +465,49 @@ class TeamExpiryService {
     }
 
     /**
+     * Push a team's expiry back because its service team granted a request
+     * for more time (v4.10.45, `TeamExpiryRequestDefinition`).
+     *
+     * **Trusts its caller**, like `setAtCreation()`: the one caller is the
+     * definition's `onStepCompleted()`, which the workflow engine runs after
+     * it has checked that `$actorUid` may act on the service team's step.
+     * Holding the Nextcloud services is an administrator's delegation to
+     * that team, as it is for the quota request (DESIGN §2.148).
+     *
+     * Only ever later: a date that is no later than the current one is
+     * refused, so a grant never shortens a team's life. An open ledger
+     * request is closed as superseded, as `setExpiry()` does.
+     *
+     * @throws ValidationException
+     */
+    public function extendByServiceTeam(string $teamId, string $untilOn, string $actorUid): void {
+        $now = time();
+        if (!$this->isEligible($teamId)) {
+            throw new ValidationException('Only Collaboration and Project teams can have an expiration date.');
+        }
+        $existing = $this->expiryMapper->findByTeam($teamId);
+        if ($existing === null) {
+            throw new ValidationException('This team has no expiration date, so there is nothing to extend.');
+        }
+        $until = $this->parseDate($untilOn, $now);
+        if ($until <= $existing['expiresAt']) {
+            throw new ValidationException('The requested date must be later than the current expiration date.');
+        }
+        $this->expiryMapper->upsert($teamId, $until, $existing['setBy'], $existing['setAt'], $actorUid, $now);
+        $this->audit($teamId, 'team.expiry_extended', $actorUid, [
+            'from' => $this->formatDate($existing['expiresAt']),
+            'to'   => $this->formatDate($until),
+            'via'  => 'service_team',
+        ]);
+        $this->supersedeOpenRequests($teamId, $actorUid, $now);
+    }
+
+    /** Whether the team has a ledger extension request waiting (v4.10.45). */
+    public function hasPendingRequest(string $teamId): bool {
+        return $this->requestMapper->findPendingByTeam($teamId) !== null;
+    }
+
+    /**
      * Approve an open extension request. NC-admin gated.
      *
      * `$grantedOn` lets the admin grant a different date than the one asked

@@ -60,7 +60,7 @@
                     variant="error"
                     @click="confirm">
                     <template v-if="loading" #icon>
-                        <NcLoadingIcon :size="20" />
+                        <NcLoadingIcon :size="ICON_BODY" />
                     </template>
                     {{ loading ? t('teamhub', 'Archiving…') : t('teamhub', 'Archive and delete') }}
                 </NcButton>
@@ -75,6 +75,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcModal, NcButton, NcLoadingIcon } from '@nextcloud/vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 export default {
     name: 'ArchiveTeamModal',
@@ -105,6 +106,7 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
             loading: false,
             error: null,
         }
@@ -176,7 +178,7 @@ export default {
 }
 
 .archive-modal__title {
-    font-size: 18px;
+    font-size: var(--th-font-heading);
     font-weight: 500;
     margin: 0;
 }
@@ -187,20 +189,20 @@ export default {
 }
 
 .archive-modal__lead--danger {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-weight: 500;
 }
 
 .archive-modal__detail {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .archive-modal__notice {
     background: var(--color-background-dark);
-    border-radius: var(--border-radius);
-    padding: 10px 14px;
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    padding: 8px 16px;
+    font-size: var(--th-font-meta);
     display: flex;
     gap: 8px;
     align-items: flex-start;
@@ -214,9 +216,9 @@ export default {
     background: var(--color-warning);
     border: 1px solid var(--color-warning);
     color: var(--color-warning-text);
-    border-radius: var(--border-radius);
-    padding: 10px 14px;
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    padding: 8px 16px;
+    font-size: var(--th-font-meta);
     line-height: 1.4;
 }
 
@@ -224,9 +226,9 @@ export default {
     background: var(--color-error);
     border: 2px solid var(--color-error);
     color: var(--color-error-text);
-    border-radius: var(--border-radius);
-    padding: 10px 14px;
-    font-size: 13px;
+    border-radius: var(--border-radius-small);
+    padding: 8px 16px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
 }
 

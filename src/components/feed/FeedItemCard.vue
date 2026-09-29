@@ -41,14 +41,14 @@
                          app rather than as a boundary. The name still shows:
                          knowing which team published it is the point of a
                          public message. -->
-                    <button
+                    <NcButton
                         v-if="canOpenTeam"
-                        type="button"
                         class="feed-card__team-btn"
                         :title="t('teamhub', 'Open {team}', { team: teamName })"
-                        @click="$emit('open-team', item)">
+                        @click="$emit('open-team', item)"
+                        variant="tertiary">
                         {{ teamName }}
-                    </button>
+                    </NcButton>
                     <span v-else class="feed-card__team-name">{{ teamName }}</span>
                     <template v-if="item.room_name">
                         <span class="feed-card__sep" aria-hidden="true">·</span>
@@ -59,14 +59,14 @@
                          the author as OpenProject names them. -->
                     <template v-if="isOpenProject && openProjectName">
                         <span class="feed-card__sep" aria-hidden="true">·</span>
-                        <button
+                        <NcButton
                             v-if="openProjectUrl"
-                            type="button"
                             class="feed-card__team-btn"
                             :title="t('teamhub', 'Open project {project} in OpenProject (new tab)', { project: openProjectName })"
-                            @click="openExternal(openProjectUrl)">
+                            @click="openExternal(openProjectUrl)"
+                            variant="tertiary">
                             {{ openProjectName }}
-                        </button>
+                        </NcButton>
                         <span v-else>{{ openProjectName }}</span>
                     </template>
                     <template v-if="isOpenProject && item.actor_name">
@@ -88,9 +88,9 @@
                             :title="t('teamhub', 'Open this news item in OpenProject')">
                             {{ t('teamhub', 'OpenProject') }}
                         </a>
-                        <span v-else class="th-widget__pill th-widget__pill--outline feed-card__origin-pill">
+                        <NcChip no-close variant="tertiary" class="feed-card__origin-pill" v-else>
                             {{ t('teamhub', 'OpenProject') }}
-                        </span>
+                        </NcChip>
                     </template>
                 </div>
 
@@ -158,8 +158,8 @@
                     v-if="!isOpenProject"
                     :user="item.author_id"
                     :display-name="authorName"
-                    :size="AVATAR_SIZE"
-                    :show-user-status="false"
+                    :size="AVATAR_MD"
+                    :hide-status="true"
                     :disable-menu="true"
                     class="feed-card__avatar" />
 
@@ -209,7 +209,7 @@ import { formatDate, formatTime, formatDateTime, todayIso, shiftIsoDate, fromDat
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { renderMarkdown } from '../../lib/messageMarkdown.js'
-import { NcActions, NcActionButton, NcAvatar, NcButton } from '@nextcloud/vue'
+import { NcActions, NcActionButton, NcAvatar, NcButton, NcChip } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import At from 'vue-material-design-icons/At.vue'
 import Check from 'vue-material-design-icons/Check.vue'
@@ -225,11 +225,10 @@ import Poll from 'vue-material-design-icons/Poll.vue'
 // v4.9.7 — OpenProject news rows: the source glyph.
 import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 import FeedItemThread from './FeedItemThread.vue'
-import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR } from '../../constants/uiTokens.js'
+import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, AVATAR_MD } from '../../constants/uiTokens.js'
 import { feedItemKind, feedKindLabel, feedKindTone } from '../../constants/feed.js'
 
 /** Author avatar on the card. One step up from the thread's 24px. */
-const AVATAR_SIZE = 28
 
 /**
  * Glyph per kind. Talk threads and Talk polls share the cyan tone but not the
@@ -251,7 +250,7 @@ const KIND_ICONS = {
 export default {
     name: 'FeedItemCard',
     components: {
-        NcActions,
+         NcChip, NcActions,
         NcActionButton,
         NcAvatar,
         NcButton,
@@ -284,7 +283,7 @@ export default {
             ICON_INLINE,
             ICON_BODY,
             ICON_TOOLBAR,
-            AVATAR_SIZE,
+            AVATAR_MD,
         }
     },
 
@@ -648,7 +647,7 @@ export default {
                 })
             } catch (e) {
                 this.voteError = e?.response?.data?.error
-                    || t('teamhub', 'Could not record your vote.')
+                    || t('teamhub', 'Could not record the vote.')
             } finally {
                 this.voting = false
             }
@@ -661,8 +660,8 @@ export default {
 .feed-card {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--th-radius-card, var(--border-radius-large));
-    padding: 12px 14px;
+    border-radius: var(--th-radius-card, var(--border-radius-element));
+    padding: 12px 16px;
 }
 
 .feed-card__main {
@@ -715,7 +714,7 @@ export default {
 .feed-card__badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 4px 8px;
     border-radius: var(--th-radius-pill, 999px);
     font-size: var(--th-font-micro, 11px);
     font-weight: var(--th-font-weight-semibold, 600);
@@ -802,7 +801,6 @@ export default {
 }
 
 .feed-card__subtitle--rich :deep(em) {
-    font-style: italic;
 }
 
 .feed-card__subtitle--rich :deep(strong) {
@@ -812,7 +810,7 @@ export default {
 .feed-card__subtitle--rich :deep(h1),
 .feed-card__subtitle--rich :deep(h2),
 .feed-card__subtitle--rich :deep(h3) {
-    margin: 0 0 2px;
+    margin: 0 0 4px;
     font-size: var(--th-font-meta, 12px);
     font-weight: var(--th-font-weight-semibold, 600);
     color: var(--color-main-text);
@@ -821,7 +819,7 @@ export default {
 /* Code can arrive arbitrarily wide; the card must not scroll sideways. */
 .feed-card__subtitle--rich :deep(pre) {
     margin: 0 0 4px;
-    padding: 4px 6px;
+    padding: 4px 8px;
     overflow-x: auto;
     background: var(--color-background-dark);
     border-radius: var(--th-radius-chip, 10px);
@@ -868,38 +866,17 @@ export default {
 /* v4.9.9 — the Source pill of a mirrored news item, in the OpenProject
    ink the news card's glyph uses, so the two rows read as one source. */
 .feed-card__origin-pill {
-    color: var(--th-feed-openproject-ink);
+    color: var(--color-main-text);
     text-decoration: none;
 
     &:hover,
     &:focus-visible {
-        background: var(--th-feed-openproject-soft);
+        background: var(--color-background-hover);
     }
 
     &:focus-visible {
         outline: 2px solid var(--color-primary-element);
         outline-offset: 2px;
-    }
-}
-
-.feed-card__team-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    color: inherit;
-    font-size: inherit;
-    font-weight: var(--th-font-weight-semibold, 600);
-
-    &:hover {
-        text-decoration: underline;
-        color: var(--color-primary-element);
-    }
-
-    &:focus-visible {
-        outline: 2px solid var(--color-primary-element);
-        outline-offset: 2px;
-        border-radius: 2px;
     }
 }
 
@@ -927,14 +904,12 @@ export default {
 .feed-card__pill {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 4px 8px;
     border-radius: var(--th-radius-pill, 999px);
     font-size: var(--th-font-micro, 11px);
     font-weight: var(--th-font-weight-bold, 700);
     line-height: 1.2;
     white-space: nowrap;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
 }
 
 .feed-card__pill--neutral {
@@ -946,7 +921,7 @@ export default {
 // them wherever a status colour carries text.
 .feed-card__pill--success {
     background: var(--color-success-hover, var(--color-background-dark));
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .feed-card__pill--warning {
@@ -956,7 +931,7 @@ export default {
 
 .feed-card__pill--urgent {
     background: var(--color-error-hover, var(--color-background-dark));
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .feed-card__time {
@@ -995,12 +970,12 @@ export default {
     width: 100%;
     background: none;
     border: none;
-    padding: 2px 4px;
+    padding: 4px 4px;
     margin: 0;
-    text-align: left;
+    text-align: start;
     font-size: var(--th-font-body, 14px);
     color: inherit;
-    border-radius: var(--th-radius-control, var(--border-radius));
+    border-radius: var(--th-radius-control, var(--border-radius-small));
 }
 
 // Raw <button> for a votable option: a full-width card row with its own
@@ -1043,7 +1018,7 @@ export default {
 }
 
 .feed-card__poll-check {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
     flex: 0 0 auto;
 }
 
@@ -1057,20 +1032,20 @@ export default {
 .feed-card__poll-bar {
     height: 6px;
     background: var(--color-background-dark);
-    border-radius: 3px;
+    border-radius: var(--border-radius-small);
     overflow: hidden;
 }
 
 .feed-card__poll-fill {
     height: 100%;
     background: var(--th-feed-tone-ink);
-    border-radius: 3px;
-    transition: width 200ms ease-out;
+    border-radius: var(--border-radius-small);
+    transition: width var(--animation-quick) ease-out;
 }
 
 .feed-card__error {
-    margin: 6px 0 0;
-    color: var(--color-error-text);
+    margin: 8px 0 0;
+    color: var(--color-text-error);
     font-size: var(--th-font-meta, 12px);
 }
 
@@ -1078,14 +1053,17 @@ export default {
 // One pair of local variables per card, so every tinted element inside reads
 // the same two values and adding a kind means adding one block here, not
 // touching five selectors.
-.feed-card--message  { --th-feed-tone-soft: var(--th-feed-message-soft);  --th-feed-tone-ink: var(--th-feed-message-ink); }
-.feed-card--question { --th-feed-tone-soft: var(--th-feed-question-soft); --th-feed-tone-ink: var(--th-feed-question-ink); }
-.feed-card--poll     { --th-feed-tone-soft: var(--th-feed-poll-soft);     --th-feed-tone-ink: var(--th-feed-poll-ink); }
-.feed-card--decision { --th-feed-tone-soft: var(--th-feed-decision-soft); --th-feed-tone-ink: var(--th-feed-decision-ink); }
-.feed-card--public   { --th-feed-tone-soft: var(--th-feed-public-soft);   --th-feed-tone-ink: var(--th-feed-public-ink); }
-.feed-card--talk     { --th-feed-tone-soft: var(--th-feed-talk-soft);     --th-feed-tone-ink: var(--th-feed-talk-ink); }
-.feed-card--system   { --th-feed-tone-soft: var(--th-feed-system-soft);   --th-feed-tone-ink: var(--th-feed-system-ink); }
-.feed-card--openproject { --th-feed-tone-soft: var(--th-feed-openproject-soft); --th-feed-tone-ink: var(--th-feed-openproject-ink); }
+/* v4.10.10: every tone is an NC fill + ink pair (the pairs NcChip and
+   NcNoteCard use), so the feed follows the theme. Two kinds may share a
+   pair — colour only groups; the icon and the badge word identify. */
+.feed-card--message  { --th-feed-tone-soft: var(--color-info);                  --th-feed-tone-ink: var(--color-info-text); }
+.feed-card--question { --th-feed-tone-soft: var(--color-warning);               --th-feed-tone-ink: var(--color-warning-text); }
+.feed-card--poll     { --th-feed-tone-soft: var(--color-primary-element-light); --th-feed-tone-ink: var(--color-primary-element-light-text); }
+.feed-card--decision { --th-feed-tone-soft: var(--color-primary-element);       --th-feed-tone-ink: var(--color-primary-element-text); }
+.feed-card--public   { --th-feed-tone-soft: var(--color-success);               --th-feed-tone-ink: var(--color-success-text); }
+.feed-card--talk     { --th-feed-tone-soft: var(--color-info);                  --th-feed-tone-ink: var(--color-info-text); }
+.feed-card--system   { --th-feed-tone-soft: var(--color-background-dark);       --th-feed-tone-ink: var(--color-main-text); }
+.feed-card--openproject { --th-feed-tone-soft: var(--color-background-darker);  --th-feed-tone-ink: var(--color-main-text); }
 
 @media (max-width: 700px) {
     .feed-card__main {
@@ -1095,7 +1073,7 @@ export default {
     .feed-card__aside {
         width: 100%;
         justify-content: flex-start;
-        padding-left: 44px; // lines up under the body, past the glyph chip
+        padding-inline-start: 44px; // lines up under the body, past the glyph chip
     }
 }
 </style>

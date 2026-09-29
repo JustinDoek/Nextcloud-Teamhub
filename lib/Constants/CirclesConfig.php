@@ -14,13 +14,16 @@ namespace OCA\TeamHub\Constants;
  * **DO NOT INVENT NEW VALUES.** The numeric values are dictated by Circles.
  *
  * **DO NOT TOUCH SYSTEM-FLAGS** (CFG_SINGLE, CFG_SYSTEM, CFG_NO_OWNER,
- * CFG_HIDDEN, CFG_BACKEND, CFG_ROOT, CFG_APP, CFG_LOCAL, CFG_MOUNTPOINT)
+ * CFG_HIDDEN, CFG_BACKEND, CFG_ROOT, CFG_LOCAL, CFG_MOUNTPOINT)
  * on user-created teams (source=16). These bits are managed internally by
  * Circles and toggling them on a regular team corrupts its state — for
  * example, CFG_SINGLE marks a circle as a personal user-identity circle,
  * causing Contacts to hide it and the Circles API to refuse edits.
  *
  * The bits TeamHub exposes in the UI are MANAGED_BITS below — only those.
+ * CFG_APP is the one other bit TeamHub writes, and only through
+ * `TeamRegistryService` (v4.10.6): it is the lock that keeps the Teams page
+ * from deleting a TeamHub team.
  */
 final class CirclesConfig {
     /** Personal user-identity circle (system-managed). DO NOT SET on teams. */
@@ -82,11 +85,19 @@ final class CirclesConfig {
     public const CFG_MOUNTPOINT = 65536;
 
     /**
-     * Circle is claimed by a Nextcloud app.
+     * Circle is claimed by a Nextcloud app. Circles' `CircleDestroy::verify()`
+     * refuses to destroy a circle carrying it; `CircleConfig::verify()`
+     * re-applies its current value on every non-super-session config write.
      *
      * v4.5.37 — the old note here read "DO NOT SET on user teams", which was
-     * only ever half true: TeamHub must not set it, but other apps legitimately
-     * do, on teams that are otherwise perfectly ordinary. See APP_OWNED_BITS.
+     * only ever half true: other apps legitimately set it on teams that are
+     * otherwise perfectly ordinary. See APP_OWNED_BITS.
+     *
+     * v4.10.6 — TeamHub sets it too, on every team it creates, and clears it
+     * right before its own destroy: this is what makes a TeamHub team
+     * undeletable from Nextcloud's Teams page. `TeamRegistryService` is the
+     * only writer; the bit is shared with Collectives, which sets and clears
+     * it for a team's collective on the same circle.
      */
     public const CFG_APP = 131072;
 
@@ -188,16 +199,17 @@ final class CirclesConfig {
     // third stale comment found in this subsystem, so: verified by arithmetic.)
 
     /**
-     * Bits that mark a circle as claimed by another Nextcloud app.
+     * Bits that mark a circle as claimed by a Nextcloud app.
      *
-     * Not corruption and not ours to clear. Reported by the integrity check as
-     * information — an admin seeing an app-claimed team should know why, and
-     * "which app" is a question only the claiming app can answer — but never
-     * counted as an issue and never touched by reset or repair.
+     * Not corruption. Reported by the integrity check as information — for a
+     * circle *outside* the team registry, since v4.10.6 every registered team
+     * carries the bit as TeamHub's own lock — but never counted as an issue
+     * and never touched by reset or repair.
      *
-     * Known setter: Collectives, via `CircleHelper::flagCircleAsAppManaged`
-     * when a collective binds to the circle. Talk and Deck do not flag the
-     * circles they attach to; they hold ACL rows instead.
+     * Known setters: TeamHub (`TeamRegistryService`, v4.10.6) and Collectives,
+     * via `CircleHelper::flagCircleAsAppManaged` when a collective binds to
+     * the circle. Talk and Deck do not flag the circles they attach to; they
+     * hold ACL rows instead.
      */
     public const APP_OWNED_BITS = self::CFG_APP; // = 131072
 

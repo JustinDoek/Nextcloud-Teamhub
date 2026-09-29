@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Search;
 
+use OCA\TeamHub\Db\TeamRegistryMapper;
 use OCP\IDBConnection;
 use OCP\IURLGenerator;
 use OCP\IUser;
@@ -28,8 +29,9 @@ use OCP\Search\SearchResultEntry;
 class TeamSearchProvider implements IProvider {
 
     public function __construct(
-        private IDBConnection  $db,
-        private IURLGenerator  $urlGenerator,
+        private IDBConnection      $db,
+        private IURLGenerator      $urlGenerator,
+        private TeamRegistryMapper $registry,
     ) {}
 
     public function getId(): string {
@@ -78,6 +80,11 @@ class TeamSearchProvider implements IProvider {
                     $qb->expr()->eq('m.status',     $qb->createNamedParameter('Member')),
                 ),
             );
+
+        // v4.10.6 — TeamHub teams only, the gate every member-facing reader
+        // shares (TeamService::getUserTeams). A circle from another app is not
+        // a search result, member or not.
+        $this->registry->joinRegistered($qb, 'c');
 
         if ($userSingleId !== null) {
             $qb->leftJoin(
@@ -194,14 +201,20 @@ class TeamSearchProvider implements IProvider {
             ? mb_substr($description, 0, 139) . '…'
             : $description;
 
-        $resourceUrl = $this->urlGenerator->linkToRoute('teamhub.page.index')
-            . '#/team/' . urlencode((string)$row['unique_id']);
+        // v4.10.4 — `?team=` is the deep link App.vue consumes (consumeDeepLink);
+        // the `#/team/` hash these results carried until now landed on the
+        // welcome screen. The icon class is defined in css/search.css, loaded on
+        // every page by UnifiedSearchStyleListener — the Talk/Deck pattern.
+        $resourceUrl = $this->urlGenerator->linkToRoute('teamhub.page.index', [
+            'team' => (string)$row['unique_id'],
+        ]);
 
         return new SearchResultEntry(
             '',
             $name,
             $subline,
             $resourceUrl,
+            'icon-teamhub',
         );
     }
 }

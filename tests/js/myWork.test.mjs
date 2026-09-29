@@ -112,6 +112,20 @@ test('OpenProject rows have their own glyphs and type labels', () => {
     assert.equal(resourceTypeLabel('openproject_milestone'), 'Milestone')
 })
 
+test('team-space rows (v4.10.1) have their own glyphs, type labels and statuses', () => {
+    assert.equal(RESOURCE_TYPE_ICONS.team_space_shared_folder, 'FolderAccountOutline')
+    assert.equal(RESOURCE_TYPE_ICONS.team_space_report, 'ArchiveCheckOutline')
+    assert.equal(RESOURCE_TYPE_ICONS.team_space_conflict, 'AlertCircleOutline')
+    assert.equal(PROVIDER_ICONS.teamspace_admin, 'FolderAccountOutline')
+    assert.equal(resourceTypeLabel('team_space_shared_folder'), 'Shared folder to move')
+    assert.equal(resourceTypeLabel('team_space_report'), 'Team space report')
+    assert.equal(resourceTypeLabel('team_space_conflict'), 'Folder conflict')
+    assert.equal(statusLabel('shared_folder'), 'Still on a shared folder')
+    assert.equal(statusLabel('shares_removed'), 'Shares removed')
+    assert.equal(statusLabel('duplicate_removed'), 'Duplicate removed')
+    assert.equal(statusLabel('conflict'), 'Folder conflict')
+})
+
 // ── Provider warnings ─────────────────────────────────────────────────
 
 test('provider warnings become one notice each, with the source named', () => {
@@ -151,9 +165,11 @@ test('the three groups name their members and nothing else', () => {
     assert.deepEqual(SOURCE_GROUP_MEMBERS, {
         files: ['approval', 'file_review'],
         teams: ['teamadmin', 'teamexpiry_team'],
-        administration: ['teamexpiry_admin'],
+        // v4.10.1 — team spaces (Nextcloud 35) joined Administration.
+        administration: ['teamexpiry_admin', 'teamspace_admin'],
     })
     assert.equal(sourceGroupOf('approval'), 'files')
+    assert.equal(sourceGroupOf('teamspace_admin'), 'administration')
     assert.equal(sourceGroupOf('file_review'), 'files')
     assert.equal(sourceGroupOf('teamexpiry_admin'), 'administration')
     assert.equal(sourceGroupOf('deck'), null, 'Deck stays a single tab')

@@ -190,6 +190,6 @@ export default {
 
 .prov-review__warnings {
     margin: 0;
-    padding-left: var(--th-space-lg);
+    padding-inline-start: var(--th-space-lg);
 }
 </style>

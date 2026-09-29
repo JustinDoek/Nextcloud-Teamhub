@@ -7,6 +7,8 @@ use OCA\TeamHub\Listener\AppDisabledListener;
 use OCA\TeamHub\Listener\CalendarObjectDeletedListener;
 use OCA\TeamHub\Listener\CircleMembershipChangedListener;
 use OCA\TeamHub\Listener\FilesScriptsListener;
+use OCA\TeamHub\Listener\GroupMembershipChangedListener;
+use OCA\TeamHub\Listener\UnifiedSearchStyleListener;
 use OCA\TeamHub\Listener\UserStatusListener;
 use OCA\TeamHub\Listener\UserDeletedListener;
 use OCA\TeamHub\Notification\Notifier;
@@ -24,16 +26,30 @@ use OCA\TeamHub\MyWork\Provider\OpenProjectWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryTeamWorkProvider;
+use OCA\TeamHub\MyWork\Provider\TeamSpaceAdminWorkProvider;
 use OCA\TeamHub\MyWork\ProviderRegistry;
+use OCA\TeamHub\Workflow\Definition\QuotaRequestDefinition;
+use OCA\TeamHub\Constants\ServiceCatalogue;
+use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
+use OCA\TeamHub\Workflow\Definition\ServiceRequestDefinition;
+use OCA\TeamHub\Workflow\Definition\TeamAdoptionDefinition;
+use OCA\TeamHub\Workflow\Definition\TeamExpiryRequestDefinition;
+use OCA\TeamHub\Workflow\Definition\TeamRequestDefinition;
+use OCA\TeamHub\Workflow\Definition\TeamServiceDefinition;
+use OCA\TeamHub\Db\TeamServiceMapper;
+use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
 use OCA\TeamHub\Search\TeamSearchProvider;
+use OCA\TeamHub\Teams\TeamHubResourceProvider;
 use OCA\TeamHub\Service\MyWorkConfigService;
 use OCA\TeamHub\Service\Suggestion\MeetingSuggestionService;
 use OCA\TeamHub\Service\Suggestion\PersonalAndTeamBusyProvider;
 use OCA\TeamHub\Service\Suggestion\TeamCalendarBusyProvider;
 use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCP\IContainer;
+use OCP\Group\Events\UserAddedEvent;
+use OCP\Group\Events\UserRemovedEvent;
 use OCP\User\Events\UserChangedEvent;
 use OCP\User\Events\BeforeUserDeletedEvent;
 
@@ -102,6 +118,12 @@ class Application extends App implements IBootstrap {
             }
         }
 
+        // v4.10.47 — a user joining or leaving a Nextcloud group attached to a
+        // team: queue a cron-side sync of Circles' copy of the group, which
+        // also moves a team off a stale copy. See GroupMirrorSyncService.
+        $context->registerEventListener(UserAddedEvent::class, GroupMembershipChangedListener::class);
+        $context->registerEventListener(UserRemovedEvent::class, GroupMembershipChangedListener::class);
+
         // v4.8.18 — the "Request review" entry in a file's ⋯ menu. String
         // class name behind a class_exists guard, matching the DAV and Circles
         // wiring above: the Files app is a hard dependency in practice but not
@@ -121,6 +143,20 @@ class Application extends App implements IBootstrap {
         $context->registerSearchProvider(TeamSearchProvider::class);
         $context->registerSearchProvider(MessageSearchProvider::class);
         $context->registerSearchProvider(DecisionSearchProvider::class);
+        // v4.10.4 — the results' icon class lives in css/search.css, which has
+        // to be on every page the search can open on (Talk's pattern).
+        $context->registerEventListener(
+            \OCP\AppFramework\Http\Events\BeforeTemplateRenderedEvent::class,
+            UnifiedSearchStyleListener::class,
+        );
+
+        // v4.10.1 — Tell Nextcloud what TeamHub has for a team: its home.
+        // Nextcloud's own Teams page, the team popover in the contacts menu
+        // and the Teams dashboard widget list a team's resources by asking
+        // every registered provider (`GET /teams/{id}/resources`); Talk, Deck,
+        // Calendar, Collectives and Team folders answer, and now TeamHub
+        // does too. The API is `@since 29`, so this is the same on 33–35.
+        $context->registerTeamResourceProvider(TeamHubResourceProvider::class);
 
         // MeetingSuggestionService is the STAGE-1 scorer. It picks half-days
         // based on PRESENCE only (which team members are at-the-office /
@@ -194,7 +230,8 @@ class Application extends App implements IBootstrap {
                 // v4.5.45 — team-administration housekeeping, currently
                 // resources awaiting an admin's accept/ignore. The first
                 // provider whose items are not the viewer's own work but
-                // their team's; it owns Category::TEAM_ADMIN.
+                // their team's. Its rows are Action required like any other
+                // task since v4.10.20, when Category::TEAM_ADMIN was retired.
                 TeamAdminWorkProvider::class,
                 // v4.6.13 — team expiration dates, in two halves. The team one
                 // is an ordinary team-scoped provider. The admin one is the
@@ -216,6 +253,13 @@ class Application extends App implements IBootstrap {
                 // teams are linked to. Read as the viewer through the official
                 // integration app; OPEN is a hand-off to OpenProject.
                 OpenProjectWorkProvider::class,
+                // v4.10.1 — Nextcloud 35 team spaces, for Nextcloud
+                // administrators: the teams still on a shared folder (with
+                // the procedure on the row), the reports of what the daily
+                // reconcile pass removed, and the folder conflicts a person
+                // has to settle. Instance-scoped like the expiry admin
+                // provider; unavailable — no tab — on 33/34.
+                TeamSpaceAdminWorkProvider::class,
             ];
 
             foreach ($builtIn as $providerClass) {
@@ -227,6 +271,112 @@ class Application extends App implements IBootstrap {
                         ['provider' => $providerClass, 'exception' => $e, 'app' => self::APP_ID],
                     );
                 }
+            }
+
+            return $registry;
+        });
+
+        // ── WorkflowHub definition registry (v4.10.13) ───────────────────
+        //
+        // The built-in workflow definitions, the same shape as the provider
+        // registry above: one line per definition class, each constructed
+        // in its own try/catch so a definition that cannot be built does
+        // not take the engine down. A definition is validated on
+        // registration (steps, keys, version), so a malformed one fails
+        // here, at boot, rather than at the first create().
+        $context->registerService(WorkflowDefinitionRegistry::class, function (IContainer $c): WorkflowDefinitionRegistry {
+            $registry = new WorkflowDefinitionRegistry();
+
+            $builtIn = [
+                // v4.10.13 — the quota request's shape on the engine; since
+                // v4.10.29 the seventh Nextcloud service, answered by the desk
+                // that holds the bundle, and the only quota request there is
+                // (the ledger version is imported and gone).
+                QuotaRequestDefinition::class,
+                // v4.10.14 — the reference workflow: a member asks for a new
+                // team; owner/moderator approves; the service team that
+                // holds the Nextcloud services creates it; the requester
+                // confirms. v4.10.23 made it the sixth service of the
+                // bundle, so it is licensed and dark until a desk holds it.
+                TeamRequestDefinition::class,
+                // v4.10.45 — more time before a team's expiration date: the
+                // bundle's service that replaced *Request a team
+                // modification*; granting sets the date.
+                TeamExpiryRequestDefinition::class,
+                // v4.10.50 — accept or decline a team made outside TeamHub:
+                // the eighth service of the bundle, started by TeamHub's own
+                // sweep rather than by a person (IWorkflowSystemStarted).
+                TeamAdoptionDefinition::class,
+            ];
+
+            foreach ($builtIn as $definitionClass) {
+                try {
+                    $registry->register($c->get($definitionClass));
+                } catch (\Throwable $e) {
+                    $c->get(\Psr\Log\LoggerInterface::class)->error(
+                        '[TeamHub][Workflow] Definition could not be registered',
+                        ['definition' => $definitionClass, 'exception' => $e, 'app' => self::APP_ID],
+                    );
+                }
+            }
+
+            // v4.10.20 — the service catalogue: one ServiceRequestDefinition
+            // per service, constructed by hand because they differ only in
+            // the service key and the container cannot tell them apart. The
+            // services with a definition class of their own (request a new
+            // team, the quota request) are registered above, so they are
+            // skipped here rather than given a second definition that asks
+            // the same question.
+            // v4.10.45 — a retired service stays registered, dark, so the
+            // requests made on it keep their title and can be finished.
+            foreach (array_merge(ServiceCatalogue::SERVICES, ServiceCatalogue::RETIRED) as $serviceKey) {
+                if (ServiceCatalogue::hasOwnDefinition($serviceKey)) {
+                    continue;
+                }
+                try {
+                    $registry->register(new ServiceRequestDefinition(
+                        $c->get(ServiceTeamService::class),
+                        $serviceKey,
+                    ));
+                } catch (\Throwable $e) {
+                    $c->get(\Psr\Log\LoggerInterface::class)->error(
+                        '[TeamHub][Workflow] Service definition could not be registered',
+                        ['service' => $serviceKey, 'exception' => $e, 'app' => self::APP_ID],
+                    );
+                }
+            }
+
+            // v4.10.31 — the services service teams built themselves
+            // (`docs/service-builder.md`): one TeamServiceDefinition per row
+            // that was ever published, built from its published document.
+            // An unpublished one stays registered but dark, so the requests
+            // made on it keep their title and steps. One indexed query, run
+            // only when something asks for the registry. Guarded as a whole
+            // too: during an upgrade the table may not exist yet.
+            try {
+                $serviceTeams = $c->get(ServiceTeamService::class);
+                foreach ($c->get(TeamServiceMapper::class)->findEverPublished() as $row) {
+                    try {
+                        $registry->register(new TeamServiceDefinition(
+                            $serviceTeams,
+                            (int)$row->getId(),
+                            $row->getTeamId(),
+                            $row->getPubVersion(),
+                            $row->isListed(),
+                            $row->publishedDocument(),
+                        ));
+                    } catch (\Throwable $e) {
+                        $c->get(\Psr\Log\LoggerInterface::class)->error(
+                            '[TeamHub][Workflow] Team service could not be registered',
+                            ['service' => (int)$row->getId(), 'exception' => $e, 'app' => self::APP_ID],
+                        );
+                    }
+                }
+            } catch (\Throwable $e) {
+                $c->get(\Psr\Log\LoggerInterface::class)->warning(
+                    '[TeamHub][Workflow] Team services could not be read',
+                    ['exception' => $e, 'app' => self::APP_ID],
+                );
             }
 
             return $registry;

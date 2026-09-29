@@ -25,7 +25,7 @@
 
             <!-- Active widget header (everything except message stream gets a title) -->
             <div v-if="activeWidget !== 'msgstream'" class="teamhub-mobile-widget-header">
-                <component :is="activeWidgetMeta.icon" :size="22" />
+                <component :is="activeWidgetMeta.icon" :size="ICON_BODY" />
                 <h2 class="teamhub-mobile-widget-title">{{ activeWidgetMeta.title }}</h2>
             </div>
 
@@ -62,8 +62,8 @@
                                 v-if="teamOwner.userId"
                                 :user="teamOwner.userId"
                                 :display-name="teamOwner.displayName"
-                                :show-user-status="false"
-                                :size="26" />
+                                :hide-status="true"
+                                :size="32" />
                             <span>{{ teamOwner.displayName }}</span>
                         </div>
                     </div>
@@ -119,6 +119,18 @@
                 <OpenProjectOverviewWidget ref="openProjectWidget" @actions="openProjectActions = $event" />
             </div>
 
+            <!-- v4.10.27 — the service team's queue and statistics on mobile. -->
+            <div v-if="activeWidget === 'widget-service-queue'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <ServiceQueueWidget />
+            </div>
+            <div v-if="activeWidget === 'widget-service-stats'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <ServiceStatsWidget />
+            </div>
+            <!-- v4.10.50 — teams made outside TeamHub on mobile. -->
+            <div v-if="activeWidget === 'widget-team-adoption'" class="teamhub-mobile-canvas-body">
+                <TeamAdoptionGrid compact />
+            </div>
+
             <!-- ─── External integration widgets ──────────────────── -->
             <template v-for="ext in teamWidgets">
                 <div
@@ -158,7 +170,7 @@
             :aria-expanded="currentActions.length > 1 ? String(actionsMenuOpen) : null"
             :title="fabTitle"
             @click="onFabClick">
-            <Plus :size="28" />
+            <Plus :size="ICON_LARGE" />
         </button>
 
         <!-- Backdrop + sheet for the multi-action menu -->
@@ -182,7 +194,7 @@
                 :disabled="!!action.disabled"
                 :title="action.disabled && action.disabledTitle ? action.disabledTitle : ''"
                 @click="onSheetItemClick(action)">
-                <component :is="action.icon" :size="20" />
+                <component :is="action.icon" :size="ICON_BODY" />
                 <span class="teamhub-mobile-fab-sheet__label">{{ action.label }}</span>
             </button>
         </div>
@@ -210,7 +222,7 @@
                     aria-hidden="true"
                     class="teamhub-mobile-icon-bar__app-icon"
                     @error="onIconError($event)" />
-                <component :is="item.icon" v-else :size="22" />
+                <component :is="item.icon" v-else :size="ICON_BODY" />
                 <span class="teamhub-mobile-icon-bar__label">{{ item.shortTitle || item.title }}</span>
             </button>
         </nav>
@@ -222,6 +234,7 @@ import { mapState, mapGetters } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { NcAvatar, NcButton } from '@nextcloud/vue'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -265,6 +278,12 @@ import FormatListChecks          from 'vue-material-design-icons/FormatListCheck
 import PlusBoxOutline            from 'vue-material-design-icons/PlusBoxOutline.vue'
 import FolderOutline             from 'vue-material-design-icons/FolderOutline.vue'
 import Refresh                   from 'vue-material-design-icons/Refresh.vue'
+import LifebuoyIcon              from 'vue-material-design-icons/Lifebuoy.vue'
+import ChartBoxOutline           from 'vue-material-design-icons/ChartBoxOutline.vue'
+import ServiceQueueWidget        from './ServiceQueueWidget.vue'
+import ServiceStatsWidget        from './ServiceStatsWidget.vue'
+import TeamAdoptionGrid          from './admin/TeamAdoptionGrid.vue'
+import AccountMultipleCheckOutline from 'vue-material-design-icons/AccountMultipleCheckOutline.vue'
 
 export default {
     name: 'MobileWidgetView',
@@ -279,12 +298,15 @@ export default {
         FileDocumentOutline, FilePlus, Folder, LocationExit, Plus, Puzzle,
         TrashCan, VideoIcon, ViewDashboard, BriefcaseOutline,
         OpenInNew, FormatListChecks, PlusBoxOutline, FolderOutline, Refresh,
+        LifebuoyIcon, ChartBoxOutline,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
         IntravoxWidget, IntegrationWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
         ProjectHealthWidget,
         OpenProjectOverviewWidget,
+        ServiceQueueWidget, ServiceStatsWidget,
+        TeamAdoptionGrid, AccountMultipleCheckOutline,
     },
 
     props: {
@@ -310,6 +332,8 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             activeWidget: 'msgstream',
             // Open/closed state for the multi-action FAB sheet. Reset to
             // false whenever the active widget changes (a stale-open menu
@@ -343,6 +367,8 @@ export default {
             'budgetConfig', 'timeConfig', 'project',
             // v4.9.3 — same gate as TeamWidgetGrid for the OpenProject widgets.
             'openProjectConfig',
+            // v4.10.27 — same gate as TeamWidgetGrid for the service desk widgets.
+            'serviceDeskConfig',
         ]),
         ...mapGetters(['currentTeam']),
 
@@ -431,7 +457,7 @@ export default {
             if (this.resources.files) {
                 list.push({
                     key: 'widget-files-center',
-                    title: t('teamhub', 'File Center'),
+                    title: t('teamhub', 'File center'),
                     shortTitle: t('teamhub', 'Files'),
                     icon: 'Folder',
                 })
@@ -472,6 +498,40 @@ export default {
                     icon: 'BriefcaseOutline',
                 })
             }
+
+            // v4.10.27 — the service team's queue and statistics. Same gate
+            // as TeamWidgetGrid (src/lib/activeWidgets.js).
+            if (this.serviceDeskConfig?.isDesk) {
+                list.push({
+                    key: 'widget-service-queue',
+                    // TRANSLATORS: mobile navigation label for a service team's request queue widget
+                    title: t('teamhub', 'Service requests'),
+                    shortTitle: t('teamhub', 'Requests'),
+                    icon: 'LifebuoyIcon',
+                })
+                list.push({
+                    key: 'widget-service-stats',
+                    // TRANSLATORS: mobile navigation label for a service team's request statistics widget
+                    title: t('teamhub', 'Statistics'),
+                    shortTitle: t('teamhub', 'Statistics'),
+                    icon: 'ChartBoxOutline',
+                })
+            }
+
+            // v4.10.50 — same gate as TeamWidgetGrid (src/lib/activeWidgets.js).
+            if (this.serviceDeskConfig?.handlesAdoption) {
+                list.push({
+                    key: 'widget-team-adoption',
+                    // TRANSLATORS: mobile navigation label for the grid where teams made outside TeamHub are accepted or declined
+                    title: t('teamhub', 'Teams made outside TeamHub'),
+                    // TRANSLATORS: short mobile navigation label for the grid of teams made outside TeamHub
+                    shortTitle: t('teamhub', 'New teams'),
+                    icon: 'AccountMultipleCheckOutline',
+                })
+            }
+
+            // v4.10.44 — the retired Services widget (v4.10.34) is the
+            // Services tab now.
 
             // External integration widgets — registry-driven
             ;(this.teamWidgets || []).forEach(w => {
@@ -587,7 +647,7 @@ export default {
                         },
                         {
                             key: 'add-meeting',
-                            label: t('teamhub', 'Add Meeting'),
+                            label: t('teamhub', 'Add meeting'),
                             icon: 'AccountGroup',
                             handler: () => this.$emit('add-meeting'),
                         },
@@ -884,7 +944,7 @@ export default {
     z-index: 5;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 12px 16px;
     background: var(--color-main-background);
     border-bottom: 1px solid var(--color-border);
@@ -917,13 +977,13 @@ export default {
 .teamhub-mobile-teaminfo {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 16px;
 }
 
 .teamhub-mobile-teaminfo__logo {
     width: 64px;
     height: 64px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     object-fit: cover;
     align-self: flex-start;
 }
@@ -938,12 +998,12 @@ export default {
 .teamhub-mobile-teaminfo__labels {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
 }
 
 .teamhub-mobile-team-label {
     font-size: var(--th-font-meta);
-    padding: 3px 8px;
+    padding: 4px 8px;
     border-radius: var(--border-radius-pill, 999px);
     background: var(--color-background-dark);
     color: var(--color-main-text);
@@ -955,14 +1015,12 @@ export default {
 .teamhub-mobile-teaminfo__owner {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .teamhub-mobile-teaminfo__owner-label {
     font-size: var(--th-font-micro);
-    text-transform: uppercase;
     color: var(--color-text-maxcontrast);
-    letter-spacing: 0.05em;
 }
 
 .teamhub-mobile-teaminfo__owner-row {
@@ -986,7 +1044,7 @@ export default {
     position: absolute;
     /* Sit above the icon bar (~64px tall) with breathing room */
     bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-    right: 16px;
+    inset-inline-end: 16px;
     width: 56px;
     height: 56px;
     border-radius: 50%;
@@ -996,15 +1054,15 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 4px 12px var(--color-box-shadow);
     cursor: pointer;
     z-index: 11;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition: transform var(--animation-quick) ease, box-shadow var(--animation-quick) ease;
 }
 
 .teamhub-mobile-fab:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 6px 14px var(--color-box-shadow);
 }
 
 .teamhub-mobile-fab--active {
@@ -1019,7 +1077,7 @@ export default {
 .teamhub-mobile-fab:disabled {
     opacity: 0.55;
     cursor: not-allowed;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 2px 6px var(--color-box-shadow);
 }
 
 .teamhub-mobile-fab:focus-visible {
@@ -1032,7 +1090,7 @@ export default {
 .teamhub-mobile-fab-backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.18);
+    background: var(--color-box-shadow);
     z-index: 9;
     /* Don't block scrolling underneath when sheet is open — the only goal
        is to capture the dismiss tap. */
@@ -1045,20 +1103,20 @@ export default {
        72 + 56 + 8 = 136px (+ safe-area) above the bottom edge so it doesn't
        overlap the FAB itself. */
     bottom: calc(140px + env(safe-area-inset-bottom, 0px));
-    right: 16px;
+    inset-inline-end: 16px;
     min-width: 200px;
     max-width: calc(100vw - 32px);
     background: var(--color-main-background);
-    border-radius: var(--border-radius-large);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    border-radius: var(--border-radius-element);
+    box-shadow: 0 8px 24px var(--color-box-shadow);
     border: 1px solid var(--color-border);
-    padding: 6px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     z-index: 12;
     /* Slide-up entrance animation */
-    animation: teamhub-mobile-sheet-in 0.15s ease-out;
+    animation: teamhub-mobile-sheet-in var(--animation-quick) ease-out;
 }
 
 @keyframes teamhub-mobile-sheet-in {
@@ -1076,15 +1134,15 @@ export default {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
+    padding: 8px 12px;
     background: transparent;
     border: none;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     color: var(--color-main-text);
-    text-align: left;
+    text-align: start;
     font-size: var(--th-font-body);
     cursor: pointer;
-    transition: background 0.12s ease;
+    transition: background var(--animation-quick) ease;
 }
 
 .teamhub-mobile-fab-sheet__item:hover:not(:disabled) {
@@ -1128,14 +1186,14 @@ export default {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
+    gap: 4px;
     min-width: 64px;
-    padding: 8px 10px;
+    padding: 8px 8px;
     background: transparent;
     border: none;
     color: var(--color-text-maxcontrast);
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color var(--animation-quick) ease, background var(--animation-quick) ease;
 }
 
 .teamhub-mobile-icon-bar__item--active {

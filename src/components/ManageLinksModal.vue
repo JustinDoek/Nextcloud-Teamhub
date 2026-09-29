@@ -1,6 +1,6 @@
 <template>
     <NcModal
-        :name="t('teamhub', 'Manage Team Links')"
+        :name="t('teamhub', 'Manage team links')"
         @close="$emit('close')">
         <div class="links-modal">
             <!-- Existing links -->
@@ -8,8 +8,8 @@
                 <h3>{{ t('teamhub', 'Current links') }}</h3>
                 <ul class="links-list">
                     <li v-for="link in webLinks" :key="link.id" class="links-list__item">
-                        <Web v-if="isNcRelativeUrl(link.url)" :size="16" />
-                        <LinkVariant v-else :size="16" />
+                        <Web v-if="isNcRelativeUrl(link.url)" :size="ICON_BODY" />
+                        <LinkVariant v-else :size="ICON_BODY" />
                         <div class="links-list__info">
                             <span class="links-list__title">{{ link.title }}</span>
                             <!-- NC-relative links: show path with iframe badge, no clickable href -->
@@ -23,7 +23,7 @@
                             variant="tertiary"
                             :aria-label="t('teamhub', 'Delete link')"
                             @click="remove(link.id)">
-                            <template #icon><Delete :size="18" /></template>
+                            <template #icon><Delete :size="ICON_BODY" /></template>
                         </NcButton>
                     </li>
                 </ul>
@@ -32,8 +32,8 @@
             <NcEmptyContent
                 v-else
                 :name="t('teamhub', 'No links yet')"
-                :description="t('teamhub', 'Add your first link below')">
-                <template #icon><LinkVariant :size="48" /></template>
+                :description="t('teamhub', 'Add the first link below')">
+                <template #icon><LinkVariant :size="ICON_XL" /></template>
             </NcEmptyContent>
 
             <!-- Add link form -->
@@ -57,10 +57,10 @@
                     :disabled="!newTitle.trim() || !!urlError || !newUrl.trim() || saving"
                     @click="save">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="20" />
-                        <Plus v-else :size="20" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <Plus v-else :size="ICON_BODY" />
                     </template>
-                    {{ t('teamhub', 'Save Link') }}
+                    {{ t('teamhub', 'Save link') }}
                 </NcButton>
             </div>
         </div>
@@ -68,16 +68,11 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_XL } from '../constants/uiTokens.js'
 import { mapState, mapActions } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { showSuccess, showError } from '@nextcloud/dialogs'
-import {
-    NcModal,
-    NcButton,
-    NcTextField,
-    NcEmptyContent,
-    NcLoadingIcon,
-} from '@nextcloud/vue'
+import { NcModal, NcButton, NcTextField, NcEmptyContent, NcLoadingIcon } from '@nextcloud/vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
@@ -89,6 +84,8 @@ export default {
     emits: ['close'],
     data() {
         return {
+            ICON_BODY,
+            ICON_XL,
             newTitle: '',
             newUrl: '',
             urlError: '',
@@ -170,7 +167,7 @@ export default {
 .links-modal h3 {
     font-size: var(--th-font-body);
     font-weight: 600;
-    margin: 0 0 10px;
+    margin: 0 0 8px;
 }
 
 .links-list {
@@ -179,15 +176,15 @@ export default {
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .links-list__item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 8px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     border: 1px solid var(--color-border);
 }
 
@@ -196,10 +193,10 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
-.links-list__title { font-size: 13px; font-weight: 500; }
+.links-list__title { font-size: var(--th-font-meta); font-weight: 500; }
 
 .links-list__url {
     font-size: var(--th-font-micro);
@@ -212,15 +209,15 @@ export default {
 .links-list__url--nc {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .links-list__nc-badge {
     display: inline-block;
-    padding: 1px 6px;
-    font-size: 10px;
+    padding: 1px 8px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
-    border-radius: 10px;
+    border-radius: var(--border-radius-container);
     background: var(--color-primary-light);
     color: var(--color-primary-element);
     flex-shrink: 0;
@@ -231,7 +228,7 @@ export default {
 .links-modal__fields {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     margin-bottom: 12px;
 }
 </style>

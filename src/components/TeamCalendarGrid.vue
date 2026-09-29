@@ -4,13 +4,13 @@
             <!-- 32 is off the icon scale deliberately: it matches AppEmbed's
                  own error/loading state icons, which this replaces in the
                  viewport, rather than the in-content scale. -->
-            <AlertCircleOutline :size="32" aria-hidden="true" />
+            <AlertCircleOutline :size="ICON_LARGE" aria-hidden="true" />
             <strong>{{ t('teamhub', 'Could not load the calendar') }}</strong>
             <span>{{ error }}</span>
         </div>
 
         <div v-else-if="noCalendar" class="th-calgrid__state">
-            <CalendarIcon :size="32" aria-hidden="true" />
+            <CalendarIcon :size="ICON_LARGE" aria-hidden="true" />
             <strong>{{ t('teamhub', 'No calendar for this team') }}</strong>
             <span>{{ t('teamhub', 'Add a calendar in Manage team → Modules & integrations to see it here.') }}</span>
         </div>
@@ -168,7 +168,7 @@ import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
 import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
 import RepeatIcon from 'vue-material-design-icons/Repeat.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
-import { ICON_INLINE, ICON_BODY, ICON_NAV } from '../constants/uiTokens.js'
+import { ICON_INLINE, ICON_BODY, ICON_NAV, ICON_LARGE } from '../constants/uiTokens.js'
 
 export default {
     name: 'TeamCalendarGrid',
@@ -207,6 +207,7 @@ export default {
 
     data() {
         return {
+            ICON_LARGE,
             events: [],
             loading: false,
             error: '',
@@ -615,7 +616,7 @@ export default {
 
 .th-calgrid :deep(.fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion) {
     display: inline-block;
-    padding: 2px 6px;
+    padding: 4px 8px;
     border-radius: var(--th-radius-control);
     background-color: var(--color-primary-element);
     color: var(--color-primary-element-text);
@@ -626,7 +627,7 @@ export default {
     background-color: var(--color-primary-element);
     color: var(--color-primary-element-text);
     border-radius: var(--th-radius-pill);
-    padding: 0 7px;
+    padding: 0 8px;
     font-weight: var(--th-font-weight-bold);
 }
 
@@ -702,7 +703,7 @@ export default {
    rules only handle shape and the text that sits on it. */
 .th-calgrid :deep(.fc-event) {
     border-radius: var(--th-radius-chip);
-    padding: 0 3px;
+    padding: 0 4px;
     font-size: var(--th-font-meta);
     cursor: pointer;
 }
@@ -790,8 +791,8 @@ export default {
 .th-calgrid__notice {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 8px;
+    margin-bottom: 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
@@ -847,7 +848,7 @@ export default {
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 .th-calgrid__detail-row {
@@ -860,7 +861,7 @@ export default {
 .th-calgrid__detail-row dt {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
@@ -883,7 +884,7 @@ export default {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
 }
 
 .th-calgrid__attendees li {
@@ -908,7 +909,7 @@ export default {
 @media (max-width: 500px) {
     .th-calgrid__detail-row {
         grid-template-columns: 1fr;
-        gap: 2px;
+        gap: 4px;
     }
 }
 </style>

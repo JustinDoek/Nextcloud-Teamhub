@@ -130,15 +130,10 @@
 			<!-- Progress. The percentage is also written out in the label so the
 			     bar is never the only way to read it (WCAG 1.4.1). -->
 			<div v-if="stage === 'running'" class="team-import__progress">
-				<div
+				<NcProgressBar
 					class="team-import__progress-track"
-					role="progressbar"
-					:aria-valuenow="progressPercent"
-					aria-valuemin="0"
-					aria-valuemax="100"
-					:aria-label="t('teamhub', 'Import progress')">
-					<div class="team-import__progress-fill" :style="{ width: progressPercent + '%' }"></div>
-				</div>
+					:value="progressPercent"
+					:aria-label="t('teamhub', 'Import progress')" />
 				<span class="team-import__progress-label">
 					{{ t('teamhub', '{done} of {total} rows processed', { done: processedRows, total: totalRows }) }}
 				</span>
@@ -258,7 +253,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatDateTime } from '../../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcButton, NcEmptyContent, NcLoadingIcon, NcModal } from '@nextcloud/vue'
+import { NcButton, NcEmptyContent, NcLoadingIcon, NcModal, NcProgressBar } from '@nextcloud/vue'
 import DownloadIcon from 'vue-material-design-icons/Download.vue'
 import FileTableOutlineIcon from 'vue-material-design-icons/FileTableOutline.vue'
 
@@ -286,7 +281,7 @@ import { ICON_BODY, ICON_HERO } from '../../constants/uiTokens.js'
  */
 export default {
 	name: 'TeamImportPanel',
-	components: { NcButton, NcEmptyContent, NcLoadingIcon, NcModal, DownloadIcon, FileTableOutlineIcon },
+	components: { NcButton, NcEmptyContent, NcLoadingIcon, NcModal, NcProgressBar, DownloadIcon, FileTableOutlineIcon },
 
 	data() {
 		return {
@@ -747,7 +742,7 @@ export default {
 .team-import {
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	gap: 16px;
 	max-width: 980px;
 }
 
@@ -767,11 +762,11 @@ export default {
 	font-size: var(--th-font-meta, 12px);
 }
 
-.team-import__status-err { color: var(--color-error-text, var(--color-error)); }
-.team-import__status-ok  { color: var(--color-success-text, var(--color-success)); }
+.team-import__status-err { color: var(--color-text-error); }
+.team-import__status-ok  { color: var(--color-text-success); }
 
 .team-import__heading {
-	margin: 6px 0 0;
+	margin: 8px 0 0;
 	font-size: var(--th-font-heading, 16px);
 	font-weight: var(--th-font-weight-bold, 700);
 }
@@ -787,7 +782,7 @@ export default {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
-	gap: 10px;
+	gap: 8px;
 }
 
 .team-import__file-label {
@@ -811,7 +806,7 @@ export default {
 .team-import__table-wrap {
 	overflow-x: auto;
 	border: 1px solid var(--color-border);
-	border-radius: var(--th-radius-card, var(--border-radius-large));
+	border-radius: var(--th-radius-card, var(--border-radius-element));
 }
 
 .team-import__table {
@@ -854,27 +849,17 @@ export default {
 .team-import__sep { color: var(--color-text-maxcontrast); }
 
 .team-import__count--skipped { color: var(--color-text-maxcontrast); }
-.team-import__count--error   { color: var(--color-error-text, var(--color-error)); }
-.team-import__count--created { color: var(--color-success-text, var(--color-success)); }
+.team-import__count--error   { color: var(--color-text-error); }
+.team-import__count--created { color: var(--color-text-success); }
 
 .team-import__progress {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 }
 
 .team-import__progress-track {
 	flex: 1 1 auto;
-	height: 8px;
-	background: var(--color-background-dark);
-	border-radius: var(--th-radius-pill, 999px);
-	overflow: hidden;
-}
-
-.team-import__progress-fill {
-	height: 100%;
-	background: var(--color-primary-element);
-	transition: width 0.2s ease;
 }
 
 .team-import__progress-label {
@@ -887,7 +872,7 @@ export default {
    carries the meaning (WCAG 1.4.1). */
 .team-import__pill {
 	display: inline-block;
-	padding: 1px 10px;
+	padding: 1px 8px;
 	border: 1px solid var(--color-border);
 	border-radius: var(--th-radius-pill, 999px);
 	font-size: var(--th-font-micro, 11px);
@@ -895,8 +880,8 @@ export default {
 	white-space: nowrap;
 }
 
-.team-import__pill--ok      { color: var(--color-success-text, var(--color-success)); }
-.team-import__pill--err     { color: var(--color-error-text, var(--color-error)); }
+.team-import__pill--ok      { color: var(--color-text-success); }
+.team-import__pill--err     { color: var(--color-text-error); }
 .team-import__pill--warn    { color: var(--color-text-maxcontrast); }
 .team-import__pill--neutral { color: var(--color-main-text); }
 

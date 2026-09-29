@@ -1,7 +1,7 @@
 <template>
     <div class="comments-section" :class="{ 'comments-section--solved': questionSolved }">
         <div v-if="loading" class="comments-section__loading">
-            <NcLoadingIcon :size="20" />
+            <NcLoadingIcon :size="ICON_BODY" />
         </div>
 
         <div v-else>
@@ -18,19 +18,19 @@
                         'comment--solved': messageType === 'question' && c.id === solvedCommentId,
                         'comment--decided-answer': isDecisionAnswer(c),
                     }">
-                    <NcAvatar :user="c.author_id" :display-name="c.author_display_name || c.author_id" :size="28" />
+                    <NcAvatar :user="c.author_id" :display-name="c.author_display_name || c.author_id" :size="32" />
                     <div class="comment__content">
                         <div class="comment__header">
                             <span class="comment__author">{{ c.author_display_name || c.author_id }}</span>
                             <span class="comment__date">{{ formatDate(c.created_at) }}</span>
                             <!-- Solved badge for the answer -->
                             <span v-if="messageType === 'question' && c.id === solvedCommentId" class="comment__solved-badge">
-                                <CheckCircle :size="14" />
+                                <CheckCircle :size="ICON_INLINE" />
                                 {{ t('teamhub', 'Answer') }}
                             </span>
                             <!-- Decision-answer badge -->
                             <span v-if="isDecisionAnswer(c)" class="comment__decision-answer-badge">
-                                <GavelIcon :size="14" />
+                                <GavelIcon :size="ICON_INLINE" />
                                 {{ t('teamhub', 'Final proposal') }}
                             </span>
                             <!-- Mark as solved button (only visible to question author) -->
@@ -39,7 +39,7 @@
                                 variant="tertiary"
                                 :aria-label="t('teamhub', 'Mark as answer')"
                                 @click="$emit('mark-solved', c.id)">
-                                <template #icon><CheckCircle :size="14" /></template>
+                                <template #icon><CheckCircle :size="ICON_INLINE" /></template>
                             </NcButton>
                             <!-- Finalize-decision gavel (Session H — proposer + own comment + status='open' only) -->
                             <NcButton
@@ -48,7 +48,7 @@
                                 :aria-label="t('teamhub', 'Finalize this decision with this comment')"
                                 :title="t('teamhub', 'Finalize with this comment')"
                                 @click="$emit('mark-decision-best', c.id)">
-                                <template #icon><GavelIcon :size="14" /></template>
+                                <template #icon><GavelIcon :size="ICON_INLINE" /></template>
                             </NcButton>
                             <!-- Edit button (own comments only, hidden when locked) -->
                             <NcButton
@@ -56,7 +56,7 @@
                                 variant="tertiary"
                                 :aria-label="t('teamhub', 'Edit comment')"
                                 @click="startEditComment(c)">
-                                <template #icon><Pencil :size="14" /></template>
+                                <template #icon><Pencil :size="ICON_INLINE" /></template>
                             </NcButton>
                             <!-- Delete button — author or team admin, hidden during edit and when locked -->
                             <NcButton
@@ -64,17 +64,19 @@
                                 variant="tertiary"
                                 :aria-label="t('teamhub', 'Delete comment')"
                                 @click="askDeleteComment(c)">
-                                <template #icon><Delete :size="14" /></template>
+                                <template #icon><Delete :size="ICON_INLINE" /></template>
                             </NcButton>
                         </div>
 
                         <!-- Edit mode -->
                         <div v-if="editingCommentId === c.id" class="comment__edit">
-                            <textarea
+                            <NcTextArea
                                 v-model="editCommentText"
                                 class="comment__edit-input"
                                 rows="3"
-                                @keydown.ctrl.enter="saveCommentEdit(c)" />
+                                @keydown.ctrl.enter="saveCommentEdit(c)"
+                                label-outside
+                                :aria-label="t('teamhub', 'Edit comment')" />
                             <div class="comment__edit-actions">
                                 <NcButton variant="primary" :disabled="savingComment" @click="saveCommentEdit(c)">
                                     {{ t('teamhub', 'Save') }}
@@ -103,14 +105,14 @@
                 <NcButton
                     variant="tertiary"
                     @click="$emit('unmark-solved')">
-                    <template #icon><Close :size="16" /></template>
+                    <template #icon><Close :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Unmark as solved') }}
                 </NcButton>
             </div>
 
             <!-- Add comment (greyed out if question is solved) -->
             <div class="comments-section__add" :class="{ 'comments-section__add--disabled': commentsReadOnly }">
-                <NcAvatar :user="currentUser" :display-name="currentUserDisplayName" :size="28" />
+                <NcAvatar :user="currentUser" :display-name="currentUserDisplayName" :size="32" />
                 <div class="comments-section__input">
                     <NcRichContenteditable
                         ref="commentEditor"
@@ -128,7 +130,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyMarkdown('**', '**')">
-                            <template #icon><FormatBold :size="14" /></template>
+                            <template #icon><FormatBold :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -137,7 +139,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyMarkdown('*', '*')">
-                            <template #icon><FormatItalic :size="14" /></template>
+                            <template #icon><FormatItalic :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -146,7 +148,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyMarkdown('`', '`')">
-                            <template #icon><CodeTags :size="14" /></template>
+                            <template #icon><CodeTags :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -155,7 +157,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyMarkdown('```\n', '\n```')">
-                            <template #icon><CodeBraces :size="14" /></template>
+                            <template #icon><CodeBraces :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -164,7 +166,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyMarkdown('## ', '')">
-                            <template #icon><FormatHeader2 :size="14" /></template>
+                            <template #icon><FormatHeader2 :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -173,7 +175,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyList(false)">
-                            <template #icon><FormatListBulleted :size="14" /></template>
+                            <template #icon><FormatListBulleted :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -182,7 +184,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyList(true)">
-                            <template #icon><FormatListNumbered :size="14" /></template>
+                            <template #icon><FormatListNumbered :size="ICON_INLINE" /></template>
                         </NcButton>
                         <NcButton
                             variant="tertiary"
@@ -191,7 +193,7 @@
                             :disabled="commentsReadOnly"
                             @mousedown.prevent
                             @click="applyLink">
-                            <template #icon><LinkVariant :size="14" /></template>
+                            <template #icon><LinkVariant :size="ICON_INLINE" /></template>
                         </NcButton>
                     </div>
                     <NcButton
@@ -220,7 +222,7 @@
                 </NcButton>
                 <NcButton variant="error" :disabled="deletingComment" @click="executeDeleteComment">
                     <template v-if="deletingComment" #icon>
-                        <NcLoadingIcon :size="18" />
+                        <NcLoadingIcon :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Delete') }}
                 </NcButton>
@@ -230,6 +232,7 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 import { mapGetters } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { formatDateTime } from '../lib/localDate.js'
@@ -239,7 +242,7 @@ import {
 } from '../lib/markdownToolbar.js'
 import { getCurrentUser } from '@nextcloud/auth'
 import { showError } from '@nextcloud/dialogs'
-import { NcAvatar, NcLoadingIcon, NcButton, NcRichContenteditable, NcDialog } from '@nextcloud/vue'
+import { NcAvatar, NcLoadingIcon, NcButton, NcRichContenteditable, NcDialog, NcTextArea } from '@nextcloud/vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
@@ -307,7 +310,7 @@ function renderMarkdown(text) {
 export default {
     name: 'CommentsSection',
     components: { 
-        NcAvatar, 
+         NcTextArea, NcAvatar, 
         NcLoadingIcon, 
         NcButton, 
         NcRichContenteditable,
@@ -351,6 +354,8 @@ export default {
     emits: ['mark-solved', 'unmark-solved', 'mark-decision-best'],
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
             newComment: '',
             loading: false,
             editingCommentId: null,
@@ -719,7 +724,7 @@ export default {
     margin-top: 12px;
     padding: 12px;
     background: var(--color-background-dark);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 /* v3.100.14: full "solved" state is already carried by the individual
@@ -740,7 +745,7 @@ export default {
 
 .comments-section__empty { 
     color: var(--color-text-maxcontrast); 
-    font-size: 13px; 
+    font-size: var(--th-font-meta); 
     padding: 4px 0 8px; 
 }
 
@@ -753,11 +758,11 @@ export default {
 
 .comment { 
     display: flex; 
-    gap: 10px; 
+    gap: 8px; 
     align-items: flex-start; 
     padding: 8px;
-    border-radius: 6px;
-    transition: background 0.2s;
+    border-radius: var(--border-radius-element);
+    transition: background var(--animation-quick);
 }
 
 .comment--solved {
@@ -778,7 +783,7 @@ export default {
 .comment--decided-answer {
     background: var(--color-success);
     border: 2px solid var(--color-success);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     padding: 8px;
     color: var(--color-success-text);
 }
@@ -790,8 +795,8 @@ export default {
     gap: 4px;
     font-size: var(--th-font-micro);
     font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 10px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     background: var(--color-success);
     border: 1px solid var(--color-success);
     color: var(--color-success-text);
@@ -811,7 +816,7 @@ export default {
 
 .comment__author { 
     font-weight: 600; 
-    font-size: 13px; 
+    font-size: var(--th-font-meta); 
 }
 
 .comment__date { 
@@ -825,15 +830,15 @@ export default {
     gap: 4px;
     font-size: var(--th-font-micro);
     font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 10px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     background: var(--color-main-background);
-    color: var(--color-success-text);
-    margin-left: auto;
+    color: var(--color-text-success);
+    margin-inline-start: auto;
 }
 
 .comment__body {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
     word-break: break-word;
 }
@@ -849,14 +854,13 @@ export default {
 
 .comment__body :deep(code) {
     background: var(--color-background-dark);
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: 4px 4px;
+    border-radius: var(--border-radius-small);
 }
 
 /* NC's global styles reset font-style/list-style on these tags — restore them
    so markdown italics and bullet lists render as users expect. */
 .comment__body :deep(em) {
-    font-style: italic;
 }
 
 .comment__body :deep(strong) {
@@ -865,8 +869,8 @@ export default {
 
 .comment__body :deep(ul),
 .comment__body :deep(ol) {
-    margin: 6px 0;
-    padding-left: 24px;
+    margin: 8px 0;
+    padding-inline-start: 24px;
 }
 
 .comment__body :deep(ul) {
@@ -878,7 +882,7 @@ export default {
 }
 
 .comment__body :deep(li) {
-    margin: 2px 0;
+    margin: 4px 0;
 }
 
 .comment--solved .comment__body :deep(code) {
@@ -894,9 +898,9 @@ export default {
 
 .comments-section__add { 
     display: flex; 
-    gap: 10px; 
+    gap: 8px; 
     align-items: flex-start; 
-    padding-top: 10px; 
+    padding-top: 8px; 
     border-top: 1px solid var(--color-border-dark); 
 }
 
@@ -915,42 +919,25 @@ export default {
 .comment__edit {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     margin-top: 4px;
 }
 
 .comment__edit-input {
     width: 100%;
-    padding: 6px 8px;
-    border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
-    font-family: inherit;
     box-sizing: border-box;
-    resize: vertical;
-}
-
-.comment__edit-input:focus {
-    border-color: var(--color-primary-element);
-}
-
-.comment__edit-input:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 .comment__edit-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
 }
 
 /* Markdown formatting toolbar below the comment input */
 .comments-section__md-toolbar {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     flex-wrap: wrap;
 }
 </style>

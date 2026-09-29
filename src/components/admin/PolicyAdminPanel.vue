@@ -97,7 +97,7 @@
 								<template v-else>{{ t('teamhub', 'Disabled') }}</template>
 							</td>
 							<td class="th-policy__row-actions">
-								<NcButton type="tertiary" @click="openEditTemplate(tpl)">
+								<NcButton variant="tertiary" @click="openEditTemplate(tpl)">
 									{{ t('teamhub', 'Edit') }}
 								</NcButton>
 							</td>
@@ -115,7 +115,7 @@
 					     is a per-template setting, edited in the template
 					     above; the creator can pick a different one. -->
 
-					<NcButton type="primary" @click="openNewProfile">
+					<NcButton variant="primary" @click="openNewProfile">
 						{{ t('teamhub', 'New profile') }}
 					</NcButton>
 				</div>
@@ -152,11 +152,11 @@
 							<td>{{ n('teamhub', '%n setting', '%n settings', p.fieldCount, { n: p.fieldCount }) }}</td>
 							<td>{{ p.teams }}</td>
 							<td class="th-policy__row-actions">
-								<NcButton type="tertiary" @click="openEditProfile(p.profileKey)">
+								<NcButton variant="tertiary" @click="openEditProfile(p.profileKey)">
 									{{ t('teamhub', 'Edit') }}
 								</NcButton>
 								<NcButton
-									type="tertiary"
+									variant="tertiary"
 									:disabled="p.teams > 0"
 									@click="confirmDelete(p)">
 									{{ t('teamhub', 'Delete') }}
@@ -219,13 +219,14 @@
 
 				<div class="th-policy__field">
 					<label class="th-policy__label" :for="sortInputId">{{ t('teamhub', 'Order') }}</label>
-					<input
+					<NcTextField
 						:id="sortInputId"
 						v-model.number="profileEditor.sortIndex"
 						type="number"
 						min="0"
 						max="32000"
-						class="th-policy__number">
+						class="th-policy__number"
+						label-outside />
 					<span class="th-policy__hint">{{ t('teamhub', 'Lower numbers are less sensitive and appear first.') }}</span>
 				</div>
 
@@ -317,12 +318,13 @@
 							class="th-policy__grid-body">
 							<template v-if="f.type === 'int'">
 								<label class="th-policy__label" :for="'thp-int-' + f.fieldKey">{{ t('teamhub', 'Value') }}</label>
-								<input
+								<NcTextField
 									:id="'thp-int-' + f.fieldKey"
 									v-model.number="draftValues[f.fieldKey]"
 									type="number"
 									min="0"
-									class="th-policy__number">
+									class="th-policy__number"
+									label-outside />
 							</template>
 
 							<!-- The tag picker. `label`/`track-by` copied from the
@@ -363,10 +365,10 @@
 				</div>
 
 				<div class="th-policy__modal-actions">
-					<NcButton type="tertiary" @click="closeProfileEditor">
+					<NcButton variant="tertiary" @click="closeProfileEditor">
 						{{ t('teamhub', 'Cancel') }}
 					</NcButton>
-					<NcButton type="primary" :disabled="saving" @click="saveProfile">
+					<NcButton variant="primary" :disabled="saving" @click="saveProfile">
 						{{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
 					</NcButton>
 				</div>
@@ -428,15 +430,14 @@
 				     the preselection, not a lock. -->
 				<div class="th-policy__field">
 					<label class="th-policy__label" for="thp-tpl-default">{{ t('teamhub', 'Default policy') }}</label>
-					<select
-						id="thp-tpl-default"
+					<NcSelect
+						input-id="thp-tpl-default"
+						label-outside
 						v-model="templateEditor.defaultProfileKey"
-						class="th-policy__select">
-						<option value="">{{ t('teamhub', 'None') }}</option>
-						<option v-for="p in profiles" :key="p.profileKey" :value="p.profileKey">
-							{{ profileName(p.profileKey, p.label) }}
-						</option>
-					</select>
+						class="th-policy__select"
+						:options="[{ id: '', label: t('teamhub', 'None') }, ...profiles.map(p => ({ id: p.profileKey, label: profileName(p.profileKey, p.label) }))]"
+						:reduce="o => o.id"
+						:clearable="false" />
 					<span class="th-policy__hint">
 						{{ t('teamhub', 'Preselected when someone creates this kind of team. They can choose a different policy.') }}
 					</span>
@@ -452,13 +453,14 @@
 					<label class="th-policy__label" for="thp-expiry-days">
 						{{ t('teamhub', 'Default expiration period (days)') }}
 					</label>
-					<input
+					<NcTextField
 						id="thp-expiry-days"
 						v-model.number="templateEditor.expiryDefaultDays"
 						type="number"
 						min="0"
 						max="3650"
-						class="th-policy__number">
+						class="th-policy__number"
+						label-outside />
 					<span class="th-policy__hint">
 						{{ t('teamhub', 'The date the picker opens on when someone creates this kind of team. 0 leaves it on the standard six months.') }}
 					</span>
@@ -475,10 +477,10 @@
 					:template-key="templateEditor.templateKey" />
 
 				<div class="th-policy__modal-actions">
-					<NcButton type="tertiary" @click="templateEditor = null">
+					<NcButton variant="tertiary" @click="templateEditor = null">
 						{{ t('teamhub', 'Cancel') }}
 					</NcButton>
-					<NcButton type="primary" :disabled="saving" @click="saveTemplate">
+					<NcButton variant="primary" :disabled="saving" @click="saveTemplate">
 						{{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
 					</NcButton>
 				</div>
@@ -497,10 +499,10 @@
 					{{ t('teamhub', '"{name}" will be removed. No team is using it, so nothing else changes.', { name: profileName(pendingDelete.profileKey, pendingDelete.label) }) }}
 				</p>
 				<div class="th-policy__modal-actions">
-					<NcButton type="tertiary" @click="pendingDelete = null">
+					<NcButton variant="tertiary" @click="pendingDelete = null">
 						{{ t('teamhub', 'Cancel') }}
 					</NcButton>
-					<NcButton type="error" :disabled="saving" @click="doDelete">
+					<NcButton variant="error" :disabled="saving" @click="doDelete">
 						{{ t('teamhub', 'Delete') }}
 					</NcButton>
 				</div>
@@ -564,19 +566,19 @@
 					</div>
 
 					<div class="th-policy__modal-actions">
-						<NcButton type="tertiary" :disabled="rolloutRunning" @click="rollout = null">
+						<NcButton variant="tertiary" :disabled="rolloutRunning" @click="rollout = null">
 							{{ t('teamhub', 'Not now') }}
 						</NcButton>
 						<NcButton
 							v-if="rollout.plan.drifted.length"
-							type="secondary"
+							variant="secondary"
 							:disabled="rolloutRunning"
 							:title="t('teamhub', 'Overwrites the teams that were changed since, as well as the ones that still match.')"
 							@click="runRollout(rolloutAllIds())">
 							{{ n('teamhub', 'Apply to all {n} team', 'Apply to all {n} teams', rollout.plan.total, { n: rollout.plan.total }) }}
 						</NcButton>
 						<NcButton
-							type="primary"
+							variant="primary"
 							:disabled="rolloutRunning || !rollout.plan.eligible.length"
 							@click="runRollout(rollout.plan.eligible.map(row => row.teamId))">
 							{{ n('teamhub', 'Apply to {n} team', 'Apply to {n} teams', rollout.plan.eligible.length, { n: rollout.plan.eligible.length }) }}
@@ -631,7 +633,7 @@
 					</p>
 
 					<div class="th-policy__modal-actions">
-						<NcButton type="primary" @click="rollout = null">
+						<NcButton variant="secondary" @click="rollout = null">
 							{{ t('teamhub', 'Close') }}
 						</NcButton>
 					</div>
@@ -1499,7 +1501,7 @@ export default {
 }
 
 .th-policy__notice {
-	color: var(--color-success-text);
+	color: var(--color-text-success);
 	font-size: var(--th-font-body);
 }
 
@@ -1507,12 +1509,12 @@ export default {
 .th-policy__warn {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	font-size: var(--th-font-body);
 }
 
 .th-policy__error {
-	color: var(--color-error-text);
+	color: var(--color-text-error);
 }
 
 .th-policy__warn {
@@ -1536,7 +1538,7 @@ export default {
 .th-policy__h3 {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
 	font-size: var(--th-font-heading);
 	font-weight: var(--th-font-weight-semibold);
 	margin: 0;
@@ -1576,7 +1578,7 @@ export default {
 /* The per-team note sits after the name, so it reads as a clause rather than
    as a second list item. */
 .th-policy__rollout-list .th-policy__hint {
-	margin-inline-start: 6px;
+	margin-inline-start: 8px;
 }
 
 /* v4.8.27b — the report grid. Three columns: a status mark narrow enough to
@@ -1596,7 +1598,7 @@ export default {
 	grid-template-columns: 28px minmax(140px, 1fr) minmax(180px, 2fr);
 	gap: 8px;
 	align-items: baseline;
-	padding: 6px 10px;
+	padding: 8px 8px;
 }
 
 .th-policy__report-head {
@@ -1634,17 +1636,17 @@ export default {
 }
 
 .th-policy__report-row--ok .th-policy__report-mark {
-	color: var(--color-success-text, var(--color-success));
+	color: var(--color-text-success);
 }
 
 .th-policy__report-row--partial .th-policy__report-mark {
 	/* NC ships no --color-text-warning; the local fallback is the one the
 	   HANDOFF note records for .th-time. */
-	color: var(--color-warning-text, #b45309);
+	color: var(--color-warning-text);
 }
 
 .th-policy__report-row--fail .th-policy__report-mark {
-	color: var(--color-error-text, var(--color-error));
+	color: var(--color-text-error);
 }
 
 /* Visible to a screen reader, not on screen — the mark column's heading. */
@@ -1792,22 +1794,14 @@ export default {
 .th-policy__number,
 .th-policy__select {
 	max-width: 240px;
-	border-radius: var(--th-radius-control);
 }
 
 /* NC's own field pattern: no outline, a border-colour change on focus.
    Not grouped with :hover — grouping is what silences a keyboard focus
    ring, and six of those were fixed in v3.101.0. */
 .th-policy__number:focus,
-.th-policy__select:focus {
-	outline: none;
-	border-color: var(--color-primary-element);
-}
 
 .th-policy__number:focus-visible,
-.th-policy__select:focus-visible {
-	box-shadow: 0 0 0 2px var(--color-primary-element);
-}
 
 /* ── The settings grid (v4.8.17) ────────────────────────────────────────────
    Nine settings against three states is a table. Laid out as stacked blocks it
@@ -1827,16 +1821,14 @@ export default {
 	display: grid;
 	grid-template-columns: minmax(180px, 1.7fr) repeat(3, minmax(84px, 0.55fr));
 	align-items: center;
-	gap: 2px 8px;
+	gap: 4px 8px;
 }
 
 .th-policy__grid-head {
 	font-size: var(--th-font-micro);
 	font-weight: var(--th-font-weight-semibold);
 	color: var(--color-text-maxcontrast);
-	text-transform: uppercase;
-	letter-spacing: 0.02em;
-	padding-bottom: 6px;
+	padding-bottom: 8px;
 	border-bottom: 1px solid var(--color-border);
 	position: sticky;
 	top: 0;
@@ -1854,7 +1846,7 @@ export default {
    short stacked list. A ledger is exactly what a nine-row grid is, and without
    the rules the eye loses which radio belongs to which setting halfway across. */
 .th-policy__grid-row {
-	padding: 5px 0;
+	padding: 4px 0;
 	border-bottom: 1px solid var(--color-border);
 }
 
@@ -1924,8 +1916,8 @@ export default {
 .th-policy__grid-body {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding: 4px 0 2px;
+	gap: 8px;
+	padding: 4px 0 4px;
 }
 
 /* The column headings carry the words, so each radio's own label is hidden from
@@ -1965,8 +1957,8 @@ export default {
 
 	.th-policy__grid-row {
 		grid-template-columns: 1fr;
-		gap: 2px;
-		padding: 10px 0;
+		gap: 4px;
+		padding: 8px 0;
 	}
 
 	.th-policy__grid-cell,
@@ -2019,8 +2011,8 @@ export default {
 }
 
 .th-policy__tag--enforced {
-	border-color: var(--color-success-text);
-	color: var(--color-success-text);
+	border-color: var(--color-text-success);
+	color: var(--color-text-success);
 }
 
 .th-policy__tag--asserted {

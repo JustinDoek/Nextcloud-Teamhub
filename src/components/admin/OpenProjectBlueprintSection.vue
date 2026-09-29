@@ -70,10 +70,15 @@
 						<td>{{ roleLabel(key) }}</td>
 						<td>
 							<label class="bp-section__sr" :for="'bp-role-' + key">{{ t('teamhub', 'OpenProject role for {role}', { role: roleLabel(key) }) }}</label>
-							<select :id="'bp-role-' + key" class="bp-section__select" :value="bp.roles.mapping[key] || ''" @change="setRole(key, $event.target.value)">
-								<option value="">{{ t('teamhub', 'No OpenProject access') }}</option>
-								<option v-for="r in roleChoices(key)" :key="r" :value="r">{{ r }}</option>
-							</select>
+							<NcSelect
+ :input-id="'bp-role-' + key"
+ label-outside
+ class="bp-section__select"
+ :model-value="bp.roles.mapping[key] || ''"
+ @update:model-value="setRole(key, $event)"
+ :options="[{ id: '', label: t('teamhub', 'No OpenProject access') }, ...roleChoices(key).map(r => ({ id: r, label: r }))]"
+ :reduce="o => o.id"
+ :clearable="false" />
 						</td>
 					</tr>
 				</tbody>
@@ -81,12 +86,14 @@
 
 			<div class="bp-section__field">
 				<label class="bp-section__label" for="bp-folder">{{ t('teamhub', 'Project files') }}</label>
-				<select id="bp-folder" v-model="bp.folder.behavior" class="bp-section__select">
-					<option value="both">{{ t('teamhub', 'Team folder, and link the OpenProject project folder') }}</option>
-					<option value="teamhub">{{ t('teamhub', 'Team folder only') }}</option>
-					<option value="openproject">{{ t('teamhub', 'Link the OpenProject project folder only') }}</option>
-					<option value="none">{{ t('teamhub', 'No folder') }}</option>
-				</select>
+				<NcSelect
+ input-id="bp-folder"
+ label-outside
+ v-model="bp.folder.behavior"
+ class="bp-section__select"
+ :options="[{ id: 'both', label: t('teamhub', 'Team folder, and link the OpenProject project folder') }, { id: 'teamhub', label: t('teamhub', 'Team folder only') }, { id: 'openproject', label: t('teamhub', 'Link the OpenProject project folder only') }, { id: 'none', label: t('teamhub', 'No folder') }]"
+ :reduce="o => o.id"
+ :clearable="false" />
 				<span class="bp-section__hint">
 					{{ t('teamhub', 'The project folder OpenProject manages is OpenProject\'s: linked, never created or changed by TeamHub. The team folder is the team\'s.') }}
 				</span>
@@ -105,7 +112,7 @@
 			</div>
 
 			<div class="bp-section__actions">
-				<NcButton v-if="stored" type="tertiary" :disabled="busy" @click="reset">
+				<NcButton v-if="stored" variant="tertiary" :disabled="busy" @click="reset">
 					{{ t('teamhub', 'Reset to shipped') }}
 				</NcButton>
 			</div>
@@ -118,7 +125,7 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon } from '@nextcloud/vue'
+import { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, NcSelect } from '@nextcloud/vue'
 import { ICON_NAV } from '../../constants/uiTokens.js'
 import { classifyError } from '../../lib/openProject.js'
 import { roleLabel } from '../../lib/provisioning.js'
@@ -137,7 +144,7 @@ import { roleLabel } from '../../lib/provisioning.js'
 export default {
 	name: 'OpenProjectBlueprintSection',
 
-	components: { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon },
+	components: {  NcSelect, NcButton, NcCheckboxRadioSwitch, NcLoadingIcon },
 
 	props: {
 		templateKey: { type: String, required: true },
@@ -356,7 +363,7 @@ export default {
 }
 
 .bp-section__list {
-	padding-left: var(--th-space-lg);
+	padding-inline-start: var(--th-space-lg);
 }
 
 .bp-section__state {
@@ -368,7 +375,7 @@ export default {
 .bp-section__error {
 	margin: 0;
 	font-size: var(--th-font-meta);
-	color: var(--color-error-text);
+	color: var(--color-text-error);
 }
 
 .bp-section__label {
@@ -405,24 +412,6 @@ export default {
 	gap: var(--th-space-xs);
 }
 
-.bp-section__select {
-	min-height: 34px;
-	padding: 0 var(--th-space-sm);
-	border: 2px solid var(--color-border-dark);
-	border-radius: var(--th-radius-control);
-	background: var(--color-main-background);
-	color: var(--color-main-text);
-	outline: none;
-}
-
-.bp-section__select:focus {
-	border-color: var(--color-primary-element);
-}
-
-.bp-section__select:focus-visible {
-	box-shadow: 0 0 0 2px var(--color-primary-element-light);
-}
-
 .bp-section__checks {
 	display: flex;
 	flex-wrap: wrap;
@@ -430,7 +419,7 @@ export default {
 }
 
 .bp-section__key {
-	margin-left: var(--th-space-xs);
+	margin-inline-start: var(--th-space-xs);
 	font-size: var(--th-font-micro);
 	color: var(--color-text-maxcontrast);
 }

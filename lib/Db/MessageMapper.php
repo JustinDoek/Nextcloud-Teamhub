@@ -768,6 +768,12 @@ class MessageMapper {
                     )
                 )
             )
+            // v4.10.4 — a decision's message row is not a stream post: the
+            // stream hides it, the Decisions tab shows it, and
+            // DecisionSearchProvider already returns the decision itself. A
+            // row here would be a duplicate whose `?message=` link scrolls to
+            // nothing (seen on the instance, 2026-09-20).
+            ->andWhere($qb->expr()->neq('m.message_type', $qb->createNamedParameter('decision')))
             ->orderBy('m.created_at', 'DESC')
             ->setMaxResults($limit)
             ->setFirstResult($offset);

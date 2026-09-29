@@ -37,9 +37,6 @@ class MyWorkAdminController extends Controller {
         private MyWorkConfigService $configService,
         private MyWorkService $myWorkService,
         private ProviderRegistry $registry,
-        // v4.5.45 — for the Talk threading diagnostic on getStatus(). See the
-        // comment there for why it lives on this endpoint.
-        private \OCA\TeamHub\Service\TalkService $talkService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -65,7 +62,7 @@ class MyWorkAdminController extends Controller {
     /**
      * PUT /api/v1/admin/mywork/config
      * Body: any subset of { upcomingDays, completedDays, cacheTtl, budgetMs,
-     *                       approvalStaleDays, approvalWarnDays, categoryMap }
+     *                       approvalStaleDays, approvalWarnDays }
      *
      * Out-of-range numbers are clamped rather than rejected — the bounds are
      * published on the GET so the UI can constrain its inputs, and an admin who
@@ -103,15 +100,6 @@ class MyWorkAdminController extends Controller {
                 'actions'   => array_values(array_diff(
                     ActionType::ALL, ActionType::NATIVE, ActionType::NAVIGATION,
                 )),
-                // v4.5.45 — what TeamHub can see of this Talk's thread API.
-                //
-                // Nothing to do with My Work; it is here because this is the
-                // one admin-gated status endpoint that already exists, and a
-                // diagnostic nobody can reach is not a diagnostic. Decision
-                // proposals shared with the whole team try to open a thread,
-                // and TeamHub was written against an API it could not test —
-                // this reports the real method signatures on the instance.
-                'talkThreading' => $this->talkService->getThreadingDiagnostics(),
             ]);
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][MyWorkAdmin] getStatus failed', [

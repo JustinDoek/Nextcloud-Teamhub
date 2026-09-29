@@ -501,7 +501,7 @@ export default {
 }
 
 .op-panel__error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .op-panel__drift {

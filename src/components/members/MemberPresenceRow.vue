@@ -5,7 +5,7 @@
             <NcAvatar
                 :user="member.userId"
                 :display-name="member.displayName"
-                :show-user-status="false"
+                :hide-status="true"
                 :disable-menu="false"
                 :size="32" />
         </div>
@@ -107,7 +107,7 @@ export default {
 .th-presence-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--color-border);
     min-width: 0;
@@ -126,7 +126,7 @@ export default {
 }
 
 .th-presence-row__name {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-main-text);
     white-space: nowrap;
@@ -147,8 +147,8 @@ export default {
     justify-content: center;
     min-width: 56px;
     height: 24px;
-    padding: 0 10px;
-    border-radius: var(--border-radius);
+    padding: 0 8px;
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-micro);
     font-weight: 600;
     line-height: 1;
@@ -164,6 +164,5 @@ export default {
     color: var(--color-text-maxcontrast);
     border-color: var(--color-border);
     font-weight: 500;
-    font-style: italic;
 }
 </style>

@@ -1,14 +1,14 @@
 <template>
     <div class="my-presence-panel">
         <div class="my-presence-panel__header">
-            <h2 class="my-presence-panel__title">{{ t('teamhub', 'My Presence') }}</h2>
+            <h2 class="my-presence-panel__title">{{ t('teamhub', 'My presence') }}</h2>
             <p class="my-presence-panel__desc">
                 {{ t('teamhub', 'Set your typical weekly presence below. Changes take effect after you click Save. Use the calendar to override individual dates.') }}
             </p>
         </div>
 
         <div v-if="loading" class="my-presence-loading">
-            <NcLoadingIcon :size="28" />
+            <NcLoadingIcon :size="ICON_LARGE" />
         </div>
         <div v-else-if="loadError" class="my-presence-error" role="alert">
             {{ loadError }}
@@ -19,7 +19,7 @@
             <section class="my-presence-section">
                 <h3 class="my-presence-section__title">{{ t('teamhub', 'Weekly template') }}</h3>
                 <p class="my-presence-section__desc">
-                    {{ t('teamhub', 'Your default schedule. Click a cell to change it, then click Save.') }}
+                    {{ t('teamhub', 'Default schedule. Click a cell to change it, then click Save.') }}
                 </p>
 
                 <div class="presence-grid" role="grid" :aria-label="t('teamhub', 'Week presence template')">
@@ -77,8 +77,8 @@
                         :disabled="!hasDirty || savingTemplate"
                         @click="saveTemplate">
                         <template #icon>
-                            <NcLoadingIcon v-if="savingTemplate" :size="16" />
-                            <ContentSaveIcon v-else :size="16" />
+                            <NcLoadingIcon v-if="savingTemplate" :size="ICON_BODY" />
+                            <ContentSaveIcon v-else :size="ICON_BODY" />
                         </template>
                         {{ t('teamhub', 'Save') }}
                     </NcButton>
@@ -116,7 +116,7 @@
                     {{ t('teamhub', 'Click a date cell to override your schedule for that day. Holidays (striped) cannot be changed.') }}
                 </p>
                 <div v-if="loadingSlots" class="my-presence-loading">
-                    <NcLoadingIcon :size="22" />
+                    <NcLoadingIcon :size="ICON_BODY" />
                 </div>
                 <PresenceCalendarView
                     v-else
@@ -146,22 +146,22 @@
                         @keydown.space.prevent="selectType(type.id)">
                         <span class="presence-picker-item__swatch" :style="{ background: type.color }" aria-hidden="true"></span>
                         <span class="presence-picker-item__label">{{ type.label }}</span>
-                        <CheckIcon v-if="picker.currentTypeId === type.id" :size="16" class="presence-picker-item__check" />
+                        <CheckIcon v-if="picker.currentTypeId === type.id" :size="ICON_BODY" class="presence-picker-item__check" />
                     </li>
 
                     <li v-if="selectedTypeRequiresLocation" class="presence-picker-location" role="presentation">
                         <label class="presence-picker-location__label">{{ t('teamhub', 'Location (optional)') }}</label>
-                        <select v-model.number="picker.roomId" class="presence-picker-location__select" :aria-label="t('teamhub', 'Select a room')">
-                            <option :value="null">{{ t('teamhub', '— No specific room —') }}</option>
-                            <template v-for="building in locationTree">
-                                <optgroup
-                                    v-for="floor in building.floors"
-                                    :key="'f'+floor.id"
-                                    :label="building.name + ' — ' + floor.name">
-                                    <option v-for="room in floor.rooms" :key="room.id" :value="room.id">{{ room.name }}</option>
-                                </optgroup>
-                            </template>
-                        </select>
+                        <!-- v4.10.10: NcSelect (design guide § Dropdown). NcSelect has no
+                             option groups, so the building and floor are part of each
+                             room's label instead. -->
+                        <NcSelect
+                            v-model="picker.roomId"
+                            class="presence-picker-location__select"
+                            :aria-label-combobox="t('teamhub', 'Select a room')"
+                            label-outside
+                            :options="roomOptions"
+                            :reduce="o => o.id"
+                            :clearable="false" />
                     </li>
 
                     <li
@@ -194,17 +194,20 @@ import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { todayIso, toIsoDate, formatIsoDate } from '../lib/localDate.js'
-import { NcButton, NcLoadingIcon, NcDialog } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcDialog, NcSelect } from '@nextcloud/vue'
 import CheckIcon            from 'vue-material-design-icons/Check.vue'
 import ContentSaveIcon      from 'vue-material-design-icons/ContentSave.vue'
 import PresenceCell         from './PresenceCell.vue'
 import PresenceCalendarView from './PresenceCalendarView.vue'
+import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 export default {
     name: 'MyPresencePanel',
-    components: { NcButton, NcLoadingIcon, NcDialog, CheckIcon, ContentSaveIcon, PresenceCell, PresenceCalendarView },
+    components: { NcButton, NcLoadingIcon, NcDialog, NcSelect, CheckIcon, ContentSaveIcon, PresenceCell, PresenceCalendarView },
     data() {
         return {
+            ICON_BODY,
+            ICON_LARGE,
             loading: true,
             loadingSlots: true,
             loadError: null,
@@ -226,6 +229,18 @@ export default {
         }
     },
     computed: {
+        /** Flat room list for the picker: "Building — Floor — Room", with a "no room" entry first. */
+        roomOptions() {
+            const out = [{ id: null, label: t('teamhub', '— No specific room —') }]
+            for (const building of this.locationTree) {
+                for (const floor of building.floors || []) {
+                    for (const room of floor.rooms || []) {
+                        out.push({ id: room.id, label: `${building.name} — ${floor.name} — ${room.name}` })
+                    }
+                }
+            }
+            return out
+        },
         days() {
             const labels = [
                 t('teamhub', 'Mon'), t('teamhub', 'Tue'), t('teamhub', 'Wed'),
@@ -487,33 +502,33 @@ export default {
 <style scoped>
 .my-presence-panel { max-width: 900px; }
 .my-presence-panel__title { font-size: var(--th-font-heading-lg); font-weight: 600; margin: 0 0 6px; }
-.my-presence-panel__desc { font-size: 13px; color: var(--color-text-maxcontrast); margin: 0 0 24px; }
+.my-presence-panel__desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); margin: 0 0 24px; }
 
 .my-presence-loading { display: flex; justify-content: center; padding: 40px; }
-.my-presence-error { padding: 12px 16px; background: var(--color-error-background, var(--color-background-hover)); color: var(--color-error-text); border-radius: var(--border-radius); }
+.my-presence-error { padding: 12px 16px; background: var(--color-error-background, var(--color-background-hover)); color: var(--color-text-error); border-radius: var(--border-radius-small); }
 
 .my-presence-section { margin-bottom: 36px; }
 .my-presence-section__title { font-size: var(--th-font-heading); font-weight: 600; margin: 0 0 4px; }
-.my-presence-section__desc { font-size: 13px; color: var(--color-text-maxcontrast); margin: 0 0 16px; }
+.my-presence-section__desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); margin: 0 0 16px; }
 .my-presence-section--legend { margin-bottom: 24px; }
 
 .presence-grid { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; margin-bottom: 12px; }
 .presence-grid__header,
 .presence-grid__row { display: grid; grid-template-columns: 80px repeat(7, 1fr); gap: 4px; min-width: 520px; }
-.presence-grid__day-label { text-align: center; font-size: 13px; font-weight: 500; color: var(--color-text-maxcontrast); padding: 4px 2px; }
+.presence-grid__day-label { text-align: center; font-size: var(--th-font-meta); font-weight: 500; color: var(--color-text-maxcontrast); padding: 4px 2px; }
 .presence-grid__half-label { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); display: flex; align-items: center; }
 .presence-grid__cell { min-width: 60px; }
 
 .presence-grid__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.presence-grid__unsaved-hint { font-size: var(--th-font-meta); color: var(--color-warning-text, var(--color-text-maxcontrast)); }
+.presence-grid__unsaved-hint { font-size: var(--th-font-meta); color: var(--color-warning-text); }
 
 .presence-legend__list { display: flex; flex-wrap: wrap; gap: 12px; }
-.presence-legend__item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.presence-legend__item { display: flex; align-items: center; gap: 6px; font-size: var(--th-font-meta); }
 .presence-legend__swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 .presence-legend__swatch--empty { border: 2px dashed var(--color-border-dark); background: transparent; }
 
 .presence-picker-list { list-style: none; margin: 0; padding: 4px 0; }
-.presence-picker-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--border-radius); cursor: pointer; user-select: none; }
+.presence-picker-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--border-radius-small); cursor: pointer; user-select: none; }
 .presence-picker-item:hover { background: var(--color-background-hover); }
 /* v3.100.14 WCAG 2.4.7: previously grouped with :hover and set outline: none,
    which silenced the keyboard focus ring entirely. Give focus its own ring. */
@@ -530,5 +545,5 @@ export default {
 .presence-picker-item__check { color: var(--color-primary); }
 .presence-picker-location { padding: 12px 12px 4px; display: flex; flex-direction: column; gap: 6px; }
 .presence-picker-location__label { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
-.presence-picker-location__select { padding: 6px 10px; border-radius: var(--border-radius); border: 1px solid var(--color-border-dark); background: var(--color-main-background); color: var(--color-main-text); width: 100%; }
+.presence-picker-location__select { width: 100%; }
 </style>

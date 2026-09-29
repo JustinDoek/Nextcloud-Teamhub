@@ -12,14 +12,20 @@
 
                 <!-- List view: back + filters -->
                 <template v-else-if="view === 'list'">
-                    <button class="th-dv__back-chip" :aria-label="t('teamhub', 'Back to categories')" @click="goToLanding">
-                        <ChevronLeftIcon :size="15" aria-hidden="true" />
+                    <NcButton
+                        class="th-dv__back-chip"
+                        :aria-label="t('teamhub', 'Back to categories')"
+                        @click="goToLanding"
+                        variant="tertiary">
+                        <template #icon>
+                            <ChevronLeftIcon :size="ICON_INLINE" aria-hidden="true" />
+                        </template>
                         {{ t('teamhub', 'Categories') }}
-                    </button>
+                    </NcButton>
                     <span v-if="activeCategory" class="th-dv__breadcrumb-sep" aria-hidden="true">/</span>
                     <span class="th-dv__breadcrumb-cat">
                         <template v-if="activeCategory">
-                            <component v-if="activeCategory.icon" :is="categoryIconComponent(activeCategory.icon)" :size="16" class="th-dv__breadcrumb-icon" aria-hidden="true" />
+                            <component v-if="activeCategory.icon" :is="categoryIconComponent(activeCategory.icon)" :size="ICON_BODY" class="th-dv__breadcrumb-icon" aria-hidden="true" />
                             {{ activeCategory.name }}
                         </template>
                         <template v-else>{{ t('teamhub', 'All decisions') }}</template>
@@ -40,7 +46,7 @@
                                 ? t('teamhub', 'Filters ({n} active)', { n: activeFilterCount })
                                 : t('teamhub', 'Filters')"
                             @click="mobileFiltersOpen = !mobileFiltersOpen">
-                            <FilterVariantIcon :size="15" aria-hidden="true" />
+                            <FilterVariantIcon :size="ICON_INLINE" aria-hidden="true" />
                             <span class="th-dv__filters-toggle-label">{{ t('teamhub', 'Filters') }}</span>
                             <span
                                 v-if="activeFilterCount > 0"
@@ -57,49 +63,58 @@
                             :class="{ 'th-dv__filters-panel--open': mobileFiltersOpen }">
                             <!-- Status chips -->
                             <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by status')">
-                                <button
+                                <NcButton
                                     v-for="chip in statusChips"
                                     :key="chip.value || 'all'"
                                     class="th-dv__chip"
                                     :class="{ 'th-dv__chip--active': filterStatus === chip.value }"
-                                    :aria-pressed="filterStatus === chip.value"
-                                    @click="setStatusFilter(chip.value)">
+                                    @click="setStatusFilter(chip.value)"
+                                    :pressed="filterStatus === chip.value"
+                                    variant="tertiary">
                                     {{ chip.label }}
-                                </button>
+                                </NcButton>
                             </div>
 
                             <!-- Impact chips -->
                             <div class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by impact')">
-                                <button
+                                <NcButton
                                     v-for="chip in impactChips"
                                     :key="chip.value || 'all-impact'"
                                     class="th-dv__chip"
                                     :class="{ 'th-dv__chip--active': filterImpact === chip.value }"
-                                    :aria-pressed="filterImpact === chip.value"
-                                    @click="setImpactFilter(chip.value)">
+                                    @click="setImpactFilter(chip.value)"
+                                    :pressed="filterImpact === chip.value"
+                                    variant="tertiary">
                                     {{ chip.label }}
-                                </button>
+                                </NcButton>
                             </div>
 
                             <!-- Level chips (only when level feature is on) -->
                             <div v-if="decisionsLevelEnabled" class="th-dv__chips" role="group" :aria-label="t('teamhub', 'Filter by level')">
-                                <button
+                                <NcButton
                                     v-for="chip in levelChips"
                                     :key="chip.value || 'all-level'"
                                     class="th-dv__chip"
                                     :class="{ 'th-dv__chip--active': filterLevel === chip.value }"
-                                    :aria-pressed="filterLevel === chip.value"
-                                    @click="setLevelFilter(chip.value)">
+                                    @click="setLevelFilter(chip.value)"
+                                    :pressed="filterLevel === chip.value"
+                                    variant="tertiary">
                                     {{ chip.label }}
-                                </button>
+                                </NcButton>
                             </div>
 
                             <!-- Sort -->
-                            <button class="th-dv__sort-btn" :aria-label="sortLabel" @click="toggleSort">
-                                <SortAscendingIcon v-if="sort === 'created'" :size="15" aria-hidden="true" />
-                                <SortDescendingIcon v-else :size="15" aria-hidden="true" />
+                            <NcButton
+                                class="th-dv__sort-btn"
+                                :aria-label="sortLabel"
+                                @click="toggleSort"
+                                variant="tertiary">
+                                <template #icon>
+                                    <SortAscendingIcon v-if="sort === 'created'" :size="ICON_INLINE" aria-hidden="true" />
+                                    <SortDescendingIcon v-else :size="ICON_INLINE" aria-hidden="true" />
+                                </template>
                                 {{ sortLabel }}
-                            </button>
+                            </NcButton>
                         </div>
                     </template>
                 </template>
@@ -107,7 +122,7 @@
                 <div class="th-dv__toolbar-spacer" />
 
                 <NcButton variant="primary" class="th-dv__propose-btn" @click="$emit('propose-decision')">
-                    <template #icon><PlusIcon :size="18" /></template>
+                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Propose decision') }}
                 </NcButton>
             </div>
@@ -123,20 +138,21 @@
                     <!-- Search bar — searches DECISIONS across all categories.
                          Empty: show category grid. Typed: show matching decision cards inline. -->
                     <div class="th-dv__landing-search-wrap">
-                        <MagnifyIcon :size="16" class="th-dv__landing-search-icon" aria-hidden="true" />
-                        <input
+                        <MagnifyIcon :size="ICON_BODY" class="th-dv__landing-search-icon" aria-hidden="true" />
+                        <NcTextField
                             v-model="searchQuery"
                             type="search"
                             class="th-dv__landing-search"
                             :placeholder="t('teamhub', 'Search decisions…')"
                             :aria-label="t('teamhub', 'Search decisions')"
-                            @input="onSearchInput">
+                            @input="onSearchInput"
+                            label-outside />
                     </div>
 
                     <!-- SEARCH MODE — when there's a query -->
                     <template v-if="searchQuery.trim()">
                         <div v-if="searchLoading" class="th-dv__state">
-                            <NcLoadingIcon :size="32" />
+                            <NcLoadingIcon :size="ICON_LARGE" />
                         </div>
                         <p v-else-if="!searchResults.length" class="th-dv__landing-no-results">
                             {{ t('teamhub', 'No decisions match "{q}"', { q: searchQuery }) }}
@@ -163,7 +179,7 @@
                                         </span>
                                     </span>
                                     <span class="th-dv__status-pill" :class="`th-dv__status-pill--${d.status}`">{{ statusLabel(d.status) }}</span>
-                                    <ChevronRightIcon :size="16" class="th-dv__card-chevron" aria-hidden="true" />
+                                    <ChevronRightIcon :size="ICON_BODY" class="th-dv__card-chevron" aria-hidden="true" />
                                 </button>
                             </li>
                         </ul>
@@ -174,16 +190,16 @@
                         <!-- All decisions shortcut -->
                         <button class="th-dv__landing-showall" :aria-label="t('teamhub', 'Show all decisions')" @click="openAllDecisions">
                             <span class="th-dv__landing-showall-icon" aria-hidden="true">
-                                <FormatListBulletedIcon :size="18" />
+                                <FormatListBulletedIcon :size="ICON_BODY" />
                             </span>
                             <span class="th-dv__landing-showall-label">{{ t('teamhub', 'All decisions') }}</span>
                             <span class="th-dv__landing-showall-sub">{{ t('teamhub', 'Browse across all categories') }}</span>
-                            <ChevronRightIcon :size="16" class="th-dv__landing-showall-chevron" aria-hidden="true" />
+                            <ChevronRightIcon :size="ICON_BODY" class="th-dv__landing-showall-chevron" aria-hidden="true" />
                         </button>
 
                         <!-- Loading -->
                         <div v-if="categoriesLoading" class="th-dv__state">
-                            <NcLoadingIcon :size="32" />
+                            <NcLoadingIcon :size="ICON_LARGE" />
                         </div>
 
                         <!-- No categories -->
@@ -192,7 +208,7 @@
                             :name="t('teamhub', 'No categories yet')"
                             :description="t('teamhub', 'A team admin can add categories under Manage team → Decisions.')"
                             class="th-dv__state">
-                            <template #icon><FolderOutlineIcon :size="48" /></template>
+                            <template #icon><FolderOutlineIcon :size="ICON_XL" /></template>
                         </NcEmptyContent>
 
                         <!-- 2-column category grid -->
@@ -206,13 +222,13 @@
                                     :aria-label="t('teamhub', 'Open {name} decisions', { name: cat.name })"
                                     @click="openCategory(cat)">
                                     <span class="th-dv__cat-card-icon" aria-hidden="true">
-                                        <component :is="categoryIconComponent(cat.icon)" :size="22" />
+                                        <component :is="categoryIconComponent(cat.icon)" :size="ICON_BODY" />
                                     </span>
                                     <span class="th-dv__cat-card-body">
                                         <span class="th-dv__cat-card-name">{{ cat.name }}</span>
                                         <span v-if="cat.description" class="th-dv__cat-card-desc">{{ cat.description }}</span>
                                     </span>
-                                    <ChevronRightIcon :size="15" class="th-dv__cat-card-chevron" aria-hidden="true" />
+                                    <ChevronRightIcon :size="ICON_INLINE" class="th-dv__cat-card-chevron" aria-hidden="true" />
                                 </button>
                             </li>
                         </ul>
@@ -223,11 +239,11 @@
             <!-- ════ LIST VIEW ════ -->
             <template v-else-if="view === 'list'">
                 <div v-if="loading && !grouped.length" class="th-dv__state">
-                    <NcLoadingIcon :size="36" />
+                    <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
                 <div v-else-if="error" class="th-dv__state th-dv__state--error" role="alert">
-                    <AlertCircleOutlineIcon :size="28" aria-hidden="true" />
-                    <p>{{ t('teamhub', 'Could not load decisions. Please try again.') }}</p>
+                    <AlertCircleOutlineIcon :size="ICON_LARGE" aria-hidden="true" />
+                    <p>{{ t('teamhub', 'Could not load decisions. Try again.') }}</p>
                     <NcButton variant="secondary" @click="loadPage(null)">{{ t('teamhub', 'Retry') }}</NcButton>
                 </div>
                 <NcEmptyContent
@@ -235,7 +251,7 @@
                     :name="emptyTitle"
                     :description="emptyDescription"
                     class="th-dv__state">
-                    <template #icon><GavelIcon :size="56" /></template>
+                    <template #icon><GavelIcon :size="ICON_XL" /></template>
                 </NcEmptyContent>
                 <div v-else class="th-dv__sections">
                     <section
@@ -244,7 +260,7 @@
                         class="th-dv__section"
                         :aria-label="group.category">
                         <div v-if="!activeCategory" class="th-dv__section-header">
-                            <TagIcon :size="14" aria-hidden="true" />
+                            <TagIcon :size="ICON_INLINE" aria-hidden="true" />
                             <span class="th-dv__section-title">{{ group.category }}</span>
                             <span class="th-dv__section-count" :aria-label="n('teamhub', '{n} decision', '{n} decisions', group.items.length, { n: group.items.length })">
                                 {{ group.items.length }}
@@ -273,7 +289,7 @@
                                         </span>
                                     </span>
                                     <span class="th-dv__status-pill" :class="`th-dv__status-pill--${d.status}`">{{ statusLabel(d.status) }}</span>
-                                    <ChevronRightIcon :size="16" class="th-dv__card-chevron" aria-hidden="true" />
+                                    <ChevronRightIcon :size="ICON_BODY" class="th-dv__card-chevron" aria-hidden="true" />
                                 </button>
                             </li>
                         </ul>
@@ -292,13 +308,16 @@
 
                     <!-- Detail header -->
                     <div class="th-dv__detail-header">
-                        <button
+                        <NcButton
                             class="th-dv__detail-back"
                             :aria-label="t('teamhub', 'Back to decisions list')"
-                            @click="selected = null">
-                            <ChevronLeftIcon :size="18" aria-hidden="true" />
+                            @click="selected = null"
+                            variant="tertiary">
+                            <template #icon>
+                                <ChevronLeftIcon :size="ICON_BODY" aria-hidden="true" />
+                            </template>
                             {{ t('teamhub', 'Back') }}
-                        </button>
+                        </NcButton>
 
                         <!-- Right-side controls: status + share + close -->
                         <div class="th-dv__detail-header-right">
@@ -307,20 +326,26 @@
                                 :class="`th-dv__status-pill--${selected.status}`">
                                 {{ statusLabel(selected.status) }}
                             </span>
-                            <button
+                            <NcButton
                                 class="th-dv__detail-share"
                                 :aria-label="t('teamhub', 'Copy link to this decision')"
                                 :title="t('teamhub', 'Copy link')"
-                                @click="copyDecisionLink(selected)">
-                                <LinkVariantIcon :size="16" />
-                            </button>
-                            <button
+                                @click="copyDecisionLink(selected)"
+                                variant="tertiary">
+                                <template #icon>
+                                    <LinkVariantIcon :size="ICON_BODY" />
+                                </template>
+                            </NcButton>
+                            <NcButton
                                 class="th-dv__detail-close"
                                 :aria-label="t('teamhub', 'Close detail')"
                                 :title="t('teamhub', 'Close')"
-                                @click="selected = null">
-                                <CloseIcon :size="18" />
-                            </button>
+                                @click="selected = null"
+                                variant="tertiary">
+                                <template #icon>
+                                    <CloseIcon :size="ICON_BODY" />
+                                </template>
+                            </NcButton>
                         </div>
                     </div>
 
@@ -351,7 +376,7 @@
                             <dt>{{ t('teamhub', 'Milestone') }}</dt>
                             <dd>
                                 <span class="th-dv__milestone-chip">
-                                    <FlagOutlineIcon :size="12" aria-hidden="true" />
+                                    <FlagOutlineIcon :size="ICON_INLINE" aria-hidden="true" />
                                     <span>{{ selected.milestoneLabel }}</span>
                                     <span v-if="selected.milestoneDate" class="th-dv__milestone-date">— {{ selected.milestoneDate }}</span>
                                 </span>
@@ -364,8 +389,8 @@
                                     <NcAvatar
                                         :user="selected.proposedBy"
                                         :display-name="memberDisplayName(selected.proposedBy)"
-                                        :show-user-status="false"
-                                        :size="20" />
+                                        :hide-status="true"
+                                        :size="24" />
                                     <span class="th-dv__user-name">{{ memberDisplayName(selected.proposedBy) }}</span>
                                 </span>
                             </dd>
@@ -385,8 +410,8 @@
                                     <NcAvatar
                                         :user="selected.resolvedBy"
                                         :display-name="memberDisplayName(selected.resolvedBy)"
-                                        :show-user-status="false"
-                                        :size="20" />
+                                        :hide-status="true"
+                                        :size="24" />
                                     <span class="th-dv__user-name">{{ memberDisplayName(selected.resolvedBy) }}</span>
                                 </span>
                             </dd>
@@ -407,7 +432,7 @@
                     <!-- Final proposal block -->
                     <div v-if="(selected.status === 'approved' || selected.status === 'finalized' || selected.status === 'decided') && selected.selectedAnswer" class="th-dv__detail-answer">
                         <span class="th-dv__detail-answer-label">
-                            <CheckCircleIcon :size="15" aria-hidden="true" />
+                            <CheckCircleIcon :size="ICON_INLINE" aria-hidden="true" />
                             {{ t('teamhub', 'Final proposal') }}
                         </span>
                         <!-- v3.75.5 — render the proposal body as markdown
@@ -442,22 +467,24 @@
 
                         <!-- Proposer's original source URL — opens in the
                              read-only iframe viewer. -->
-                        <button
+                        <NcButton
                             v-if="selected.sourceType === 'url' && selected.sourceRef"
-                            type="button"
                             class="th-dv__detail-source-link th-dv__detail-source-link--button"
                             :title="t('teamhub', 'Open {url} in read-only viewer', { url: selected.sourceRef })"
-                            @click="openSourceUrl(selected.sourceRef)">
-                            <OpenInNewIcon :size="14" aria-hidden="true" />
+                            @click="openSourceUrl(selected.sourceRef)"
+                            variant="tertiary">
+                            <template #icon>
+                                <OpenInNewIcon :size="ICON_INLINE" aria-hidden="true" />
+                            </template>
                             <span class="th-dv__detail-source-link-text">{{ selected.sourceRef }}</span>
-                        </button>
+                        </NcButton>
                         <span
                             v-else-if="selected.sourceRef && selected.sourceType !== 'document'"
                             class="th-dv__detail-source-text">{{ selected.sourceRef }}</span>
 
                         <!-- Source files list — proposal .md + attachments copied at finalize. -->
                         <div v-if="sourcesLoading" class="th-dv__detail-source-loading">
-                            <NcLoadingIcon :size="16" />
+                            <NcLoadingIcon :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Loading source files…') }}</span>
                         </div>
                         <ul
@@ -473,8 +500,8 @@
                                     class="th-dv__link-row"
                                     :title="t('teamhub', 'Open {name} in read-only viewer', { name: f.name })"
                                     @click="openSourceFile(f)">
-                                    <CheckCircleIcon v-if="f.is_proposal" :size="16" class="th-dv__link-icon th-dv__link-icon--proposal" aria-hidden="true" />
-                                    <FileDocumentOutlineIcon v-else :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <CheckCircleIcon v-if="f.is_proposal" :size="ICON_BODY" class="th-dv__link-icon th-dv__link-icon--proposal" aria-hidden="true" />
+                                    <FileDocumentOutlineIcon v-else :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ f.name }}</span>
                                     <span v-if="f.is_proposal" class="th-dv__link-pill th-dv__link-pill--proposal">
                                         {{ t('teamhub', 'Final proposal') }}
@@ -497,7 +524,7 @@
                          others would be a button that 404s (SKILLS.md
                          § Permissions: hide what the role cannot do). -->
                     <div v-if="isMyOpenProposal" class="th-dv__drafting">
-                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Your proposal') }}</span>
+                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Proposal') }}</span>
 
                     <!-- v4.5.46 — two columns: the proposal's own controls on
                          the left, the lifecycle rail on the right. The rail is
@@ -533,24 +560,25 @@
                             <label class="th-dv__drafting-label" :for="`th-dv-edit-q-${selected.id}`">
                                 {{ t('teamhub', 'Question') }}
                             </label>
-                            <input
+                            <NcTextField
                                 :id="`th-dv-edit-q-${selected.id}`"
                                 v-model="editQuestion"
-                                type="text"
                                 class="th-dv__drafting-input"
                                 :disabled="savingProposal"
-                                :maxlength="4000">
+                                :maxlength="4000"
+                                label-outside />
 
                             <label class="th-dv__drafting-label" :for="`th-dv-edit-b-${selected.id}`">
                                 {{ t('teamhub', 'Proposal') }}
                             </label>
-                            <textarea
+                            <NcTextArea
                                 :id="`th-dv-edit-b-${selected.id}`"
                                 v-model="editBody"
                                 class="th-dv__drafting-textarea"
                                 rows="8"
                                 :disabled="savingProposal"
-                                :maxlength="4000" />
+                                :maxlength="4000"
+                                label-outside />
 
                             <div class="th-dv__drafting-actions">
                                 <NcButton
@@ -567,14 +595,14 @@
 
                         <div v-else class="th-dv__drafting-actions">
                             <NcButton variant="secondary" @click="startEditProposal(selected)">
-                                <template #icon><PencilIcon :size="16" /></template>
+                                <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Edit proposal') }}
                             </NcButton>
                             <NcButton
                                 variant="primary"
                                 :disabled="finalizingProposal"
                                 @click="onFinalizeProposal(selected)">
-                                <template #icon><GavelIcon :size="16" /></template>
+                                <template #icon><GavelIcon :size="ICON_BODY" /></template>
                                 {{ finalizingProposal ? t('teamhub', 'Finalizing…') : t('teamhub', 'Finalize') }}
                             </NcButton>
                             <!-- v4.5.46 — replaces the "Being discussed with…"
@@ -589,7 +617,7 @@
                                 :href="talkUrl(selected.talkToken)"
                                 target="_blank"
                                 rel="noreferrer noopener">
-                                <template #icon><ForumIcon :size="16" /></template>
+                                <template #icon><ForumIcon :size="ICON_BODY" /></template>
                                 <!-- TRANSLATORS: button — opens the Talk conversation or thread where the proposal is being discussed -->
                                 {{ t('teamhub', 'Discussion') }}
                             </NcButton>
@@ -617,7 +645,7 @@
                             v-if="(selected.status === 'open' || selected.status === 'proposed') && canActOn(selected)"
                             variant="tertiary"
                             @click="openSupersede(selected)">
-                            <template #icon><SwapHorizontalIcon :size="16" /></template>
+                            <template #icon><SwapHorizontalIcon :size="ICON_BODY" /></template>
                             {{ t('teamhub', 'Supersede') }}
                         </NcButton>
                     </div>
@@ -643,15 +671,16 @@
                             {{ t('teamhub', 'Reason') }}
                             <span class="th-dv__approval-required" aria-hidden="true">*</span>
                         </label>
-                        <textarea
+                        <NcTextArea
                             :id="`th-dv-approval-reason-${selected.id}`"
                             v-model="approvalReason"
                             class="th-dv__approval-textarea"
                             rows="3"
-                            :placeholder="t('teamhub', 'Briefly explain your decision — this becomes part of the audit trail.')"
+                            :placeholder="t('teamhub', 'Briefly explain the decision — this becomes part of the audit trail.')"
                             :disabled="approving || denying"
                             :maxlength="approvalReasonMax"
-                            :aria-describedby="`th-dv-approval-counter-${selected.id}`" />
+                            :aria-describedby="`th-dv-approval-counter-${selected.id}`"
+                            label-outside />
                         <p
                             :id="`th-dv-approval-counter-${selected.id}`"
                             class="th-dv__approval-counter"
@@ -664,14 +693,14 @@
                                 variant="success"
                                 :disabled="!approvalReasonValid || approving || denying"
                                 @click="onApproveWithReason(selected)">
-                                <template #icon><CheckCircleIcon :size="16" /></template>
+                                <template #icon><CheckCircleIcon :size="ICON_BODY" /></template>
                                 {{ approving ? t('teamhub', 'Approving…') : t('teamhub', 'Approve') }}
                             </NcButton>
                             <NcButton
                                 variant="error"
                                 :disabled="!approvalReasonValid || approving || denying"
                                 @click="onDenyWithReason(selected)">
-                                <template #icon><CloseIcon :size="16" /></template>
+                                <template #icon><CloseIcon :size="ICON_BODY" /></template>
                                 {{ denying ? t('teamhub', 'Denying…') : t('teamhub', 'Deny') }}
                             </NcButton>
                             <!-- v3.74.10 — Schedule approver meeting.
@@ -683,7 +712,7 @@
                                 :disabled="openingMeetingWizard"
                                 :title="t('teamhub', 'Open the meeting wizard pre-filled with the other approvers in this category so you can discuss the proposal together before deciding.')"
                                 @click="openApproverMeetingWizard(selected)">
-                                <template #icon><CalendarPlusIcon :size="16" /></template>
+                                <template #icon><CalendarPlusIcon :size="ICON_BODY" /></template>
                                 <!-- TRANSLATORS: short button label; hover-tooltip explains the action -->
                                 {{ t('teamhub', 'Schedule meeting') }}
                             </NcButton>
@@ -695,7 +724,7 @@
                         <span class="th-dv__detail-section-label">{{ t('teamhub', 'Linked tasks') }}</span>
 
                         <div v-if="tasksLoading" class="th-dv__tasks-loading">
-                            <NcLoadingIcon :size="16" />
+                            <NcLoadingIcon :size="ICON_BODY" />
                         </div>
 
                         <!-- Task list -->
@@ -707,7 +736,7 @@
                                     rel="noopener"
                                     class="th-dv__link-row"
                                     :title="task.task_path">
-                                    <OpenInNewIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <OpenInNewIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ task.label || task.task_path }}</span>
                                 </a>
                                 <!-- Completion pill — only shown for Deck cards (isDone is non-null) -->
@@ -721,14 +750,18 @@
                                     <!-- TRANSLATORS: pill label shown on a linked Deck card that is still open/in-progress -->
                                     <template v-else>{{ t('teamhub', 'Open') }}</template>
                                 </span>
-                                <button
+                                <NcButton
                                     v-if="canPerformDecisionActions"
                                     class="th-dv__link-remove"
                                     :aria-label="t('teamhub', 'Remove link')"
                                     :title="t('teamhub', 'Remove link')"
-                                    @click="deleteTaskLink(task.id)">
-                                    <CloseIcon :size="14" />
-                                </button>
+                                    @click="deleteTaskLink(task.id)"
+                                    variant="tertiary"
+                                    size="small">
+                                    <template #icon>
+                                        <CloseIcon :size="ICON_INLINE" />
+                                    </template>
+                                </NcButton>
                             </li>
                         </ul>
 
@@ -736,19 +769,19 @@
                         <div v-if="canPerformDecisionActions" class="th-dv__tasks-actions">
                             <!-- Link task inline form -->
                             <div v-if="showLinkTaskForm" class="th-dv__tasks-link-form">
-                                <input
+                                <NcTextField
                                     v-model="linkTaskPath"
-                                    type="text"
                                     class="th-dv__tasks-link-input"
                                     :placeholder="t('teamhub', 'Paste task URL or path…')"
                                     :aria-label="t('teamhub', 'Task URL or path')"
-                                    @keydown.enter="submitLinkTask">
-                                <input
+                                    @keydown.enter="submitLinkTask"
+                                    label-outside />
+                                <NcTextField
                                     v-model="linkTaskLabel"
-                                    type="text"
                                     class="th-dv__tasks-link-input th-dv__tasks-link-input--label"
                                     :placeholder="t('teamhub', 'Label (optional)')"
-                                    :aria-label="t('teamhub', 'Task label')">
+                                    :aria-label="t('teamhub', 'Task label')"
+                                    label-outside />
                                 <div class="th-dv__tasks-link-btns">
                                     <NcButton variant="primary" :disabled="!linkTaskPath.trim() || linkingTask" @click="submitLinkTask">
                                         {{ linkingTask ? t('teamhub', 'Linking…') : t('teamhub', 'Link') }}
@@ -762,7 +795,7 @@
                             <!-- Buttons row -->
                             <div v-else class="th-dv__link-actions">
                                 <NcButton variant="secondary" @click="showLinkTaskForm = true">
-                                    <template #icon><LinkVariantIcon :size="16" /></template>
+                                    <template #icon><LinkVariantIcon :size="ICON_BODY" /></template>
                                     <!-- TRANSLATORS: button to paste a URL linking an external task to this decision -->
                                     {{ t('teamhub', 'Link task') }}
                                 </NcButton>
@@ -772,7 +805,7 @@
                                     v-if="resources.deck && resources.deck.length > 0"
                                     variant="secondary"
                                     @click="showCreateTaskModal = true">
-                                    <template #icon><PlusIcon :size="16" /></template>
+                                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
                                     <!-- TRANSLATORS: button to open the Deck card creation modal, auto-linked to this decision -->
                                     {{ t('teamhub', 'Create task') }}
                                 </NcButton>
@@ -788,7 +821,7 @@
                         <span class="th-dv__detail-section-label">{{ t('teamhub', 'Scheduled meetings') }}</span>
 
                         <div v-if="scheduledMeetingsLoading" class="th-dv__meetings-loading">
-                            <NcLoadingIcon :size="16" />
+                            <NcLoadingIcon :size="ICON_BODY" />
                         </div>
 
                         <ul v-else-if="scheduledMeetings.length" class="th-dv__link-list" aria-live="polite">
@@ -797,7 +830,7 @@
                                 :key="m.id"
                                 class="th-dv__link-item">
                                 <div class="th-dv__link-row" :title="m.meetingTitle">
-                                    <CalendarClockIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <CalendarClockIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">
                                         {{ m.meetingTitle }}
                                         <span class="th-dv__meeting-when">
@@ -817,7 +850,7 @@
                         <span class="th-dv__detail-section-label">{{ t('teamhub', 'Linked decisions') }}</span>
 
                         <div v-if="decLinksLoading || externalLinksLoading" class="th-dv__dec-links-loading">
-                            <NcLoadingIcon :size="16" />
+                            <NcLoadingIcon :size="ICON_BODY" />
                         </div>
 
                         <!-- Unified list. Each row dispatches on kind:
@@ -838,7 +871,7 @@
                                     class="th-dv__link-row"
                                     :title="row.peer_title"
                                     @click="selectDecisionById(row.peer_id)">
-                                    <LinkVariantIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <LinkVariantIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ row.peer_title }}</span>
                                     <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-internal">
                                         <!-- TRANSLATORS: pill on a linked-decision row indicating it points to another decision in this TeamHub instance -->
@@ -866,7 +899,7 @@
                                     class="th-dv__link-row"
                                     :title="row.url"
                                     @click="onExternalLinkOpen">
-                                    <OpenInNewIcon :size="16" class="th-dv__link-icon" aria-hidden="true" />
+                                    <OpenInNewIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ externalLinkDisplay(row) }}</span>
                                     <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-external">
                                         <!-- TRANSLATORS: pill on a linked-decision row indicating it points to a URL outside TeamHub -->
@@ -874,14 +907,18 @@
                                     </span>
                                 </a>
 
-                                <button
+                                <NcButton
                                     v-if="canPerformDecisionActions"
                                     class="th-dv__link-remove"
                                     :aria-label="t('teamhub', 'Remove link')"
                                     :title="t('teamhub', 'Remove link')"
-                                    @click="row.kind === 'internal' ? removeDecisionLink(row.id) : deleteExternalLink(row.id)">
-                                    <CloseIcon :size="14" />
-                                </button>
+                                    @click="row.kind === 'internal' ? removeDecisionLink(row.id) : deleteExternalLink(row.id)"
+                                    variant="tertiary"
+                                    size="small">
+                                    <template #icon>
+                                        <CloseIcon :size="ICON_INLINE" />
+                                    </template>
+                                </NcButton>
                             </li>
                         </ul>
 
@@ -894,19 +931,20 @@
                         <div v-if="canPerformDecisionActions" class="th-dv__link-actions-row">
                             <!-- Inline external-link form (replaces the action row when open) -->
                             <div v-if="showLinkExternalForm" class="th-dv__tasks-link-form th-dv__tasks-link-form--ext">
-                                <input
+                                <NcTextField
                                     v-model="linkExternalUrl"
                                     type="url"
                                     class="th-dv__tasks-link-input"
                                     :placeholder="t('teamhub', 'Paste URL (https://…)')"
                                     :aria-label="t('teamhub', 'External decision URL')"
-                                    @keydown.enter="submitLinkExternal">
-                                <input
+                                    @keydown.enter="submitLinkExternal"
+                                    label-outside />
+                                <NcTextField
                                     v-model="linkExternalLabel"
-                                    type="text"
                                     class="th-dv__tasks-link-input th-dv__tasks-link-input--label"
                                     :placeholder="t('teamhub', 'Label (optional)')"
-                                    :aria-label="t('teamhub', 'External link label')">
+                                    :aria-label="t('teamhub', 'External link label')"
+                                    label-outside />
                                 <div class="th-dv__tasks-link-btns">
                                     <NcButton variant="primary" :disabled="!linkExternalUrl.trim() || linkingExternal" @click="submitLinkExternal">
                                         {{ linkingExternal ? t('teamhub', 'Linking…') : t('teamhub', 'Link') }}
@@ -918,12 +956,12 @@
                             </div>
                             <div v-else class="th-dv__link-actions">
                                 <NcButton variant="secondary" @click="openDecisionPicker">
-                                    <template #icon><LinkVariantIcon :size="16" /></template>
+                                    <template #icon><LinkVariantIcon :size="ICON_BODY" /></template>
                                     <!-- TRANSLATORS: button to open a picker that links another decision (in this app) to the current one -->
                                     {{ t('teamhub', 'Link decision') }}
                                 </NcButton>
                                 <NcButton variant="secondary" @click="showLinkExternalForm = true">
-                                    <template #icon><OpenInNewIcon :size="16" /></template>
+                                    <template #icon><OpenInNewIcon :size="ICON_BODY" /></template>
                                     <!-- TRANSLATORS: button to attach an outbound URL pointing to a decision held in a different tool -->
                                     {{ t('teamhub', 'Link external decision') }}
                                 </NcButton>
@@ -941,17 +979,18 @@
                                 {{ t('teamhub', 'Search for a decision to link') }}
                             </p>
                             <div class="th-dv__dec-picker-search">
-                                <input
+                                <NcTextField
                                     ref="decPickerInput"
                                     v-model="decPickerQuery"
                                     type="search"
                                     class="th-dv__dec-picker-input"
                                     :placeholder="t('teamhub', 'Search decisions…')"
                                     :aria-label="t('teamhub', 'Search decisions')"
-                                    @input="onDecPickerInput">
+                                    @input="onDecPickerInput"
+                                    label-outside />
                             </div>
                             <div v-if="decPickerLoading" class="th-dv__dec-picker-loading">
-                                <NcLoadingIcon :size="20" />
+                                <NcLoadingIcon :size="ICON_BODY" />
                             </div>
                             <ul v-else-if="decPickerResults.length"
                                 class="th-dv__dec-picker-list"
@@ -988,7 +1027,7 @@
                         <span class="th-dv__detail-section-label">{{ t('teamhub', 'Audit trail') }}</span>
 
                         <div v-if="auditLoading" class="th-dv__audit-loading">
-                            <NcLoadingIcon :size="16" />
+                            <NcLoadingIcon :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Loading…') }}</span>
                         </div>
 
@@ -1060,7 +1099,7 @@
             <div class="th-dv-viewer">
                 <div class="th-dv-viewer__header">
                     <span class="th-dv-viewer__name">
-                        <FileDocumentOutlineIcon :size="16" aria-hidden="true" />
+                        <FileDocumentOutlineIcon :size="ICON_BODY" aria-hidden="true" />
                         {{ viewerFile.name }}
                         <span v-if="viewerFile.is_proposal" class="th-dv-viewer__badge">
                             {{ t('teamhub', 'Final proposal') }}
@@ -1074,7 +1113,7 @@
                         :download="viewerFile.name"
                         class="th-dv-viewer__newtab"
                         :title="t('teamhub', 'Download {name}', { name: viewerFile.name })">
-                        <DownloadIcon :size="14" aria-hidden="true" />
+                        <DownloadIcon :size="ICON_INLINE" aria-hidden="true" />
                         {{ t('teamhub', 'Download') }}
                     </a>
 
@@ -1086,7 +1125,7 @@
                         rel="noopener noreferrer"
                         class="th-dv-viewer__newtab"
                         :title="t('teamhub', 'Open in new tab')">
-                        <OpenInNewIcon :size="14" aria-hidden="true" />
+                        <OpenInNewIcon :size="ICON_INLINE" aria-hidden="true" />
                         {{ t('teamhub', 'New tab') }}
                     </a>
 
@@ -1113,7 +1152,7 @@
 
                     <!-- Loading state while we fetch text content -->
                     <div v-else-if="viewerLoading" class="th-dv-viewer__loading">
-                        <NcLoadingIcon :size="32" />
+                        <NcLoadingIcon :size="ICON_LARGE" />
                         <p>{{ t('teamhub', 'Loading…') }}</p>
                     </div>
 
@@ -1161,7 +1200,7 @@
                          render in-browser. Honest fallback over a broken
                          iframe. -->
                     <div v-else class="th-dv-viewer__nopreview">
-                        <FileDocumentOutlineIcon :size="48" aria-hidden="true" />
+                        <FileDocumentOutlineIcon :size="ICON_XL" aria-hidden="true" />
                         <p class="th-dv-viewer__nopreview-title">
                             {{ t('teamhub', 'Preview not available') }}
                         </p>
@@ -1174,7 +1213,7 @@
                                 :href="viewerDownloadUrl"
                                 :download="viewerFile.name"
                                 class="th-dv-viewer__nopreview-btn th-dv-viewer__nopreview-btn--primary">
-                                <DownloadIcon :size="16" aria-hidden="true" />
+                                <DownloadIcon :size="ICON_BODY" aria-hidden="true" />
                                 {{ t('teamhub', 'Download') }}
                             </a>
                         </div>
@@ -1222,9 +1261,10 @@ import { generateUrl }                           from '@nextcloud/router'
 import { handleInternalLinkClick }               from '../lib/internalLinks.js'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
 import { showError, showSuccess }                from '@nextcloud/dialogs'
-import { NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon } from '@nextcloud/vue'
+import { NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon, NcTextField, NcTextArea } from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import DOMPurify from 'dompurify'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
 
 // MDI icons used directly in the template (separate from the category-icon set
 // loaded from ../lib/decisionCategoryIcons.js, which is for picker rendering only)
@@ -1264,7 +1304,7 @@ export default {
     name: 'TeamDecisionsView',
 
     components: {
-        NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon,
+          NcTextArea, NcTextField, NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon,
         GavelIcon, PlusIcon, TagIcon, ChevronRightIcon, ChevronLeftIcon,
         CloseIcon, CheckCircleIcon,
         SortAscendingIcon, SortDescendingIcon, FilterVariantIcon,
@@ -1281,6 +1321,10 @@ export default {
 
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
+            ICON_XL,
             // ── View state machine ──────────────────────────────────────────
             // 'landing' = category grid, 'list' = decisions list for a category
             view:           'landing',
@@ -3287,7 +3331,7 @@ export default {
 /* ── Toolbar ── */
 .th-dv__toolbar {
     flex-shrink: 0;
-    padding: 12px 20px 10px;
+    padding: 12px 20px 8px;
     border-bottom: 1px solid var(--color-border);
     background: var(--color-main-background);
 }
@@ -3329,19 +3373,8 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 10px 4px 6px;
-    border: 1px solid var(--color-border);
-    border-radius: 20px;
-    background: transparent;
-    font-size: var(--th-font-meta);
-    font-weight: 500;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-    transition: background 0.1s, color 0.1s;
     flex-shrink: 0;
 }
-.th-dv__back-chip:hover       { background: var(--color-background-hover); color: var(--color-main-text); }
-.th-dv__back-chip:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 2px; }
 
 .th-dv__chips {
     display: flex;
@@ -3349,41 +3382,11 @@ export default {
     flex-wrap: wrap;
 }
 
-.th-dv__chip {
-    padding: 5px 12px;
-    border-radius: 20px;
-    font-size: var(--th-font-meta);
-    font-weight: 500;
-    border: 1px solid var(--color-border-dark);
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-    transition: all 0.12s;
-    line-height: 1.4;
-}
-
-.th-dv__chip:hover       { background: var(--color-background-hover); color: var(--color-main-text); }
-.th-dv__chip:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 2px; }
-.th-dv__chip--active     { background: var(--color-primary-element); color: var(--color-primary-element-text); border-color: var(--color-primary-element); }
-
 .th-dv__sort-btn {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    border-radius: 20px;
-    font-size: var(--th-font-meta);
-    font-weight: 500;
-    border: 1px solid var(--color-border-dark);
-    background: transparent;
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.12s;
+    gap: 4px;
 }
-
-.th-dv__sort-btn:hover        { background: var(--color-background-hover); color: var(--color-main-text); }
-.th-dv__sort-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 2px; }
 
 /* ── v3.75.4: Mobile filter toggle ─────────────────────────────────
    On desktop the toggle button is hidden and the filters panel renders
@@ -3397,12 +3400,12 @@ export default {
     /* Hidden on desktop; the chips render directly in the toolbar. */
     display: none;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     background: transparent;
     border: 1px solid var(--color-border);
     color: var(--color-main-text);
-    border-radius: 999px;
-    padding: 4px 10px;
+    border-radius: var(--border-radius-pill);
+    padding: 4px 8px;
     font-size: var(--th-font-meta);
     font-weight: 500;
     cursor: pointer;
@@ -3423,11 +3426,11 @@ export default {
     justify-content: center;
     min-width: 18px;
     height: 18px;
-    padding: 0 5px;
-    border-radius: 9px;
+    padding: 0 4px;
+    border-radius: var(--border-radius-element);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
     line-height: 1;
 }
@@ -3482,43 +3485,31 @@ export default {
 }
 .th-dv__landing-search-icon {
     position: absolute;
-    left: 10px;
+    inset-inline-start: 10px;
     color: var(--color-text-maxcontrast);
     pointer-events: none;
 }
 .th-dv__landing-search {
     width: 100%;
     max-width: 360px;
-    padding: 8px 12px 8px 34px;
-    border: 1px solid var(--color-border-dark);
-    border-radius: 20px;
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
-    outline: none;
-    transition: border-color 0.15s;
 }
 /* v3.100.14: color-mix here is a focus-glow ring, not a state
    background — kept per SKILLS.md § "State-coloured backgrounds"
    (the rule targets state signalling, not focus indicators). */
-.th-dv__landing-search:focus {
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary-element) 20%, transparent);
-}
 
 /* "All decisions" shortcut row */
 .th-dv__landing-showall {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 14px;
+    padding: 12px 16px;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    text-align: left;
+    text-align: start;
     width: 100%;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
 .th-dv__landing-showall:hover {
     border-color: var(--color-primary-element);
@@ -3542,7 +3533,7 @@ export default {
     justify-content: center;
 }
 .th-dv__landing-showall-label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-main-text);
     flex: 1;
@@ -3559,7 +3550,7 @@ export default {
 .th-dv__landing-no-results {
     text-align: center;
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     padding: 24px 0;
 }
 
@@ -3582,13 +3573,13 @@ export default {
     align-items: center;
     gap: 12px;
     width: 100%;
-    padding: 12px 14px;
+    padding: 12px 16px;
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     cursor: pointer;
-    text-align: left;
-    transition: border-color 0.12s, background 0.12s;
+    text-align: start;
+    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
 .th-dv__cat-card:hover {
     border-color: var(--color-primary-element);
@@ -3605,7 +3596,7 @@ export default {
     flex-shrink: 0;
     width: 42px;
     height: 42px;
-    border-radius: 10px;
+    border-radius: var(--border-radius-container);
     background: var(--color-background-dark);
     color: var(--color-primary-element);
     display: flex;
@@ -3618,10 +3609,10 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 .th-dv__cat-card-name {
-    font-size: 15px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
     overflow: hidden;
@@ -3630,7 +3621,7 @@ export default {
     line-height: 1.3;
 }
 .th-dv__cat-card-desc {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 400;
     color: var(--color-text-maxcontrast);
     overflow: hidden;
@@ -3642,7 +3633,7 @@ export default {
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
     opacity: 0;
-    transition: opacity 0.12s;
+    transition: opacity var(--animation-quick);
 }
 .th-dv__cat-card:hover .th-dv__cat-card-chevron { opacity: 1; }
 
@@ -3651,7 +3642,7 @@ export default {
 .th-dv__card-cat-tag {
     display: inline-block;
     padding: 1px 8px;
-    border-radius: 10px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-micro);
     font-weight: 600;
     background: var(--color-primary-element);
@@ -3663,9 +3654,9 @@ export default {
    at 30%; now solid fill with the -text token, no border needed). */
 .th-dv__level-badge {
     display: inline-block;
-    padding: 1px 6px;
-    border-radius: 10px;
-    font-size: 10px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-container);
+    font-size: var(--th-font-meta);
     font-weight: 600;
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
@@ -3674,8 +3665,8 @@ export default {
 
 .th-dv__level-chip {
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-micro);
     font-weight: 700;
 }
@@ -3719,7 +3710,7 @@ export default {
     text-align: center;
 }
 
-.th-dv__state--error { color: var(--color-error-text); }
+.th-dv__state--error { color: var(--color-text-error); }
 
 /* ── Sections: 2-column grid, with category sections flowing across columns
    so we don't end up with one tall column and one short one. CSS columns
@@ -3751,7 +3742,7 @@ export default {
 .th-dv__section-header {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     padding-bottom: 8px;
     border-bottom: 2px solid var(--color-border-dark);
     margin-bottom: 8px;
@@ -3761,8 +3752,6 @@ export default {
 .th-dv__section-title {
     font-size: var(--th-font-micro);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
     color: var(--color-text-maxcontrast);
     flex: 1;
 }
@@ -3771,8 +3760,8 @@ export default {
     font-size: var(--th-font-micro);
     font-weight: 600;
     background: var(--color-background-dark);
-    border-radius: 10px;
-    padding: 1px 7px;
+    border-radius: var(--border-radius-container);
+    padding: 1px 8px;
     color: var(--color-text-maxcontrast);
 }
 
@@ -3788,14 +3777,14 @@ export default {
 
 /* ── Card ── */
 .th-dv__card {
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     overflow: hidden;
-    transition: background 0.1s;
+    transition: background var(--animation-quick);
 }
 
 .th-dv__card--target {
     box-shadow: 0 0 0 2px var(--color-primary-element);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 .th-dv__card-btn {
@@ -3805,10 +3794,10 @@ export default {
     background: none;
     border: none;
     cursor: pointer;
-    text-align: left;
+    text-align: start;
     padding: 0;
-    border-radius: var(--border-radius-large);
-    transition: background 0.1s;
+    border-radius: var(--border-radius-element);
+    transition: background var(--animation-quick);
     gap: 0;
 }
 
@@ -3820,7 +3809,7 @@ export default {
     width: 4px;
     align-self: stretch;
     flex-shrink: 0;
-    border-radius: var(--border-radius-large) 0 0 var(--border-radius-large);
+    border-radius: var(--border-radius-element) 0 0 var(--border-radius-element);
     background: var(--color-border);
     min-height: 44px;
 }
@@ -3838,14 +3827,14 @@ export default {
 .th-dv__card-body {
     flex: 1;
     min-width: 0;
-    padding: 10px 12px;
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
 }
 
 .th-dv__card-subject {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-main-text);
     white-space: nowrap;
@@ -3869,41 +3858,39 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-.th-dv__card-date { margin-left: auto; white-space: nowrap; }
+.th-dv__card-date { margin-inline-start: auto; white-space: nowrap; }
 
 /* Impact label — inline coloured text */
 .th-dv__impact           { font-size: var(--th-font-micro); font-weight: 700; }
 .th-dv__impact--low      { color: var(--color-text-maxcontrast); }
 .th-dv__impact--medium   { color: var(--color-warning-text); }
-.th-dv__impact--high     { color: var(--color-error-text); }
+.th-dv__impact--high     { color: var(--color-text-error); }
 
 /* Status pill */
 .th-dv__status-pill {
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 700;
-    padding: 2px 9px;
-    border-radius: 20px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-pill);
     flex-shrink: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     border: 1.5px solid transparent;
     white-space: nowrap;
 }
 
 .th-dv__status-pill--open       { color: var(--color-primary-element);          border-color: var(--color-primary-element); }
 .th-dv__status-pill--finalized  { color: var(--color-warning-text);    border-color: var(--color-warning-text); }
-.th-dv__status-pill--approved   { color: var(--color-success-text);             border-color: var(--color-success-text); }
-.th-dv__status-pill--denied     { color: var(--color-error-text);               border-color: var(--color-error-text); }
+.th-dv__status-pill--approved   { color: var(--color-text-success);             border-color: var(--color-text-success); }
+.th-dv__status-pill--denied     { color: var(--color-text-error);               border-color: var(--color-text-error); }
 .th-dv__status-pill--withdrawn  { color: var(--color-text-maxcontrast);         border-color: var(--color-border-dark); }
 /* Legacy fallbacks */
 .th-dv__status-pill--proposed   { color: var(--color-primary-element);          border-color: var(--color-primary-element); }
-.th-dv__status-pill--decided    { color: var(--color-success-text);             border-color: var(--color-success-text); }
+.th-dv__status-pill--decided    { color: var(--color-text-success);             border-color: var(--color-text-success); }
 
 .th-dv__card-chevron {
     color: var(--color-text-maxcontrast);
-    margin-right: 10px;
+    margin-inline-end: 8px;
     flex-shrink: 0;
-    transition: transform 0.15s;
+    transition: transform var(--animation-quick);
 }
 
 /* ── Load more ── */
@@ -3964,7 +3951,7 @@ export default {
    feel a pause but slow enough that the spatial relationship reads. */
 .th-dv-detail-enter-active,
 .th-dv-detail-leave-active {
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    transition: transform var(--animation-quick) ease, opacity var(--animation-quick) ease;
 }
 .th-dv-detail-enter-from,
 .th-dv-detail-leave-to {
@@ -3977,7 +3964,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px 10px;
+    padding: 16px 16px 8px;
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
     gap: 8px;
@@ -3988,53 +3975,31 @@ export default {
     align-items: center;
     justify-content: center;
     width: 32px;
-    height: 32px;
-    border: none;
-    background: none;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    color: var(--color-text-maxcontrast);
     flex-shrink: 0;
-    transition: background 0.12s;
 }
-
-.th-dv__detail-close:hover        { background: var(--color-background-hover); color: var(--color-main-text); }
-.th-dv__detail-close:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
 
 /* v3.71.9 — Back chip; primary way to leave the detail overlay */
 .th-dv__detail-back {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 10px 6px 6px;
-    border: 1px solid var(--color-border);
-    background: var(--color-main-background);
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    color: var(--color-main-text);
-    font-size: 13px;
-    font-weight: 500;
     flex-shrink: 0;
-    transition: background 0.12s, border-color 0.12s;
 }
 
-.th-dv__detail-back:hover         { background: var(--color-background-hover); border-color: var(--color-primary-element); }
-.th-dv__detail-back:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
-
-.th-dv__detail-status { margin-left: auto; }
+.th-dv__detail-status { margin-inline-start: auto; }
 
 /* Right-side header controls: status pill + share + close, grouped
-   together so the status pill's margin-left: auto pushes the whole
+   together so the status pill's margin-inline-start: auto pushes the whole
    group flush right (v3.78.5). */
 .th-dv__detail-header-right {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-left: auto;
+    gap: 8px;
+    margin-inline-start: auto;
     flex-shrink: 0;
 }
 .th-dv__detail-header-right .th-dv__detail-status {
-    margin-left: 0; /* spacing now handled by parent gap */
+    margin-inline-start: 0; /* spacing now handled by parent gap */
 }
 
 .th-dv__detail-share {
@@ -4042,21 +4007,12 @@ export default {
     align-items: center;
     justify-content: center;
     width: 32px;
-    height: 32px;
-    border: none;
-    background: none;
-    border-radius: var(--border-radius);
-    cursor: pointer;
-    color: var(--color-text-maxcontrast);
     flex-shrink: 0;
-    transition: background 0.12s, color 0.12s;
 }
-.th-dv__detail-share:hover        { background: var(--color-background-hover); color: var(--color-primary-element); }
-.th-dv__detail-share:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
 
 /* Question heading */
 .th-dv__detail-question {
-    font-size: 15px;
+    font-size: var(--th-font-body);
     font-weight: 600;
     color: var(--color-main-text);
     line-height: 1.4;
@@ -4071,7 +4027,7 @@ export default {
     gap: 1px;
     margin: 0 0 16px;
     background: var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     /* overflow:hidden removed — it clips NcAvatar's user-card popup */
     border: 1px solid var(--color-border);
 }
@@ -4086,8 +4042,8 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 8px;
-    border-radius: 10px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
     background: var(--color-primary-element);
     color: var(--color-primary-element-text);
     font-weight: 600;
@@ -4123,7 +4079,7 @@ export default {
 .th-dv__user-cell {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .th-dv__user-name {
@@ -4135,8 +4091,8 @@ export default {
 .th-dv__detail-tag {
     display: inline-block;
     background: var(--color-background-dark);
-    border-radius: 4px;
-    padding: 1px 7px;
+    border-radius: var(--border-radius-small);
+    padding: 1px 8px;
     font-size: var(--th-font-micro);
 }
 
@@ -4146,30 +4102,28 @@ export default {
    SKILLS.md § "State-coloured backgrounds" (was a 7% color-mix soft
    tint of the -text token, which was also an unusual pattern). */
 .th-dv__detail-answer {
-    margin: 0 0 14px;
-    padding: 12px 14px;
+    margin: 0 0 16px;
+    padding: 12px 16px;
     background: var(--color-success);
     color: var(--color-success-text);
-    border-left: 3px solid var(--color-success-text);
-    border-radius: 0 var(--border-radius-large) var(--border-radius-large) 0;
+    border-inline-start: 3px solid var(--color-success-text);
+    border-radius: 0 var(--border-radius-element) var(--border-radius-element) 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .th-dv__detail-answer-label {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     font-size: var(--th-font-micro);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-success-text);
+    color: var(--color-text-success);
 }
 
 .th-dv__detail-answer-text {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-main-text);
     margin: 0;
     line-height: 1.5;
@@ -4189,23 +4143,23 @@ export default {
 .th-dv__detail-answer-text--md h4,
 .th-dv__detail-answer-text--md h5,
 .th-dv__detail-answer-text--md h6 {
-    margin: 10px 0 4px;
+    margin: 8px 0 4px;
     font-weight: 700;
     line-height: 1.3;
 }
 .th-dv__detail-answer-text--md h1 { font-size: var(--th-font-heading); }
-.th-dv__detail-answer-text--md h2 { font-size: 15px; }
+.th-dv__detail-answer-text--md h2 { font-size: var(--th-font-body); }
 .th-dv__detail-answer-text--md h3 { font-size: var(--th-font-body); }
 .th-dv__detail-answer-text--md h4,
 .th-dv__detail-answer-text--md h5,
-.th-dv__detail-answer-text--md h6 { font-size: 13px; }
+.th-dv__detail-answer-text--md h6 { font-size: var(--th-font-meta); }
 .th-dv__detail-answer-text--md ul,
 .th-dv__detail-answer-text--md ol {
     margin: 0 0 8px;
-    padding-left: 24px;
+    padding-inline-start: 24px;
 }
 .th-dv__detail-answer-text--md li {
-    margin: 2px 0;
+    margin: 4px 0;
 }
 .th-dv__detail-answer-text--md a {
     color: var(--color-primary-element);
@@ -4215,13 +4169,13 @@ export default {
     font-family: var(--font-face-mono, monospace);
     background: var(--color-background-dark);
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-meta);
 }
 .th-dv__detail-answer-text--md pre {
     background: var(--color-background-dark);
-    padding: 8px 10px;
-    border-radius: var(--border-radius);
+    padding: 8px 8px;
+    border-radius: var(--border-radius-small);
     overflow-x: auto;
     margin: 0 0 8px;
 }
@@ -4230,23 +4184,23 @@ export default {
     padding: 0;
 }
 .th-dv__detail-answer-text--md blockquote {
-    border-left: 3px solid var(--color-border);
+    border-inline-start: 3px solid var(--color-border);
     margin: 0 0 8px;
-    padding: 2px 10px;
+    padding: 4px 8px;
     color: var(--color-text-maxcontrast);
 }
 .th-dv__detail-answer-text--md hr {
     border: 0;
     border-top: 1px solid var(--color-border);
-    margin: 10px 0;
+    margin: 8px 0;
 }
 
 /* Withdrawn block */
 .th-dv__detail-withdrawn {
-    margin: 0 0 14px;
-    padding: 10px 14px;
+    margin: 0 0 16px;
+    padding: 8px 16px;
     background: var(--color-background-dark);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -4255,8 +4209,6 @@ export default {
 .th-dv__detail-section-label {
     font-size: var(--th-font-micro);
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--color-text-maxcontrast);
 }
 
@@ -4268,7 +4220,7 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 12px 14px;
+    padding: 12px 16px;
     margin-bottom: 12px;
     border: 1px solid var(--color-border);
     border-radius: var(--th-radius-card);
@@ -4329,7 +4281,7 @@ export default {
    (The `.th-dv__detail-answer-text--md` rules above have the same problem
    and are inert for the same reason — pre-existing, logged, not fixed here.) */
 .th-dv__drafting-context {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
     color: var(--color-main-text);
     margin: 0;
@@ -4339,7 +4291,7 @@ export default {
 .th-dv__drafting-context :deep(> :last-child)  { margin-bottom: 0; }
 .th-dv__drafting-context :deep(p)  { margin: 0 0 8px; }
 .th-dv__drafting-context :deep(ul),
-.th-dv__drafting-context :deep(ol) { margin: 0 0 8px; padding-left: 24px; }
+.th-dv__drafting-context :deep(ol) { margin: 0 0 8px; padding-inline-start: 24px; }
 .th-dv__drafting-context :deep(li) { margin: 2px 0; }
 .th-dv__drafting-context :deep(a) {
     color: var(--color-primary-element);
@@ -4349,7 +4301,7 @@ export default {
     font-family: var(--font-face-mono, monospace);
     background: var(--color-background-dark);
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-meta);
 }
 
@@ -4363,32 +4315,13 @@ export default {
 .th-dv__drafting-textarea {
     width: 100%;
     box-sizing: border-box;
-    padding: 8px 10px;
-    font-size: var(--th-font-body);
-    font-family: inherit;
-    color: var(--color-main-text);
-    background: var(--color-main-background);
-    border: 2px solid var(--color-border-dark);
-    border-radius: var(--th-radius-control);
     /* NC's form-field pattern: no outline, a primary border on focus.
        Documented as acceptable in SKILLS.md § Focus visibility standard. */
-    outline: none;
-}
-
-.th-dv__drafting-textarea {
-    resize: vertical;
-    line-height: var(--th-line-height-body);
 }
 
 .th-dv__drafting-input:focus,
-.th-dv__drafting-textarea:focus {
-    border-color: var(--color-primary-element);
-}
 
 .th-dv__drafting-input:focus-visible,
-.th-dv__drafting-textarea:focus-visible {
-    box-shadow: 0 0 0 2px var(--color-primary-element);
-}
 
 .th-dv__drafting-actions {
     display: flex;
@@ -4411,7 +4344,7 @@ export default {
     padding: 12px;
     background: var(--color-background-soft);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
 }
 
 .th-dv__approval-label {
@@ -4420,33 +4353,17 @@ export default {
     color: var(--color-main-text);
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
 }
 
 .th-dv__approval-required {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-weight: 700;
 }
 
 .th-dv__approval-textarea {
     width: 100%;
-    min-height: 72px;
-    padding: 8px 10px;
-    font-size: 13px;
-    line-height: 1.4;
-    color: var(--color-main-text);
-    background: var(--color-main-background);
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    resize: vertical;
     box-sizing: border-box;
-    font-family: inherit;
-}
-
-.th-dv__approval-textarea:focus {
-    outline: none;
-    border-color: var(--color-primary-element);
-    box-shadow: 0 0 0 2px var(--color-primary-element-light);
 }
 
 .th-dv__approval-textarea:disabled {
@@ -4457,7 +4374,7 @@ export default {
 .th-dv__approval-counter {
     font-size: var(--th-font-micro);
     color: var(--color-text-maxcontrast);
-    text-align: right;
+    text-align: end;
     margin: 0;
 }
 
@@ -4473,16 +4390,15 @@ export default {
 }
 
 .th-dv__detail-withdrawn-text {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    font-style: italic;
     margin: 0;
     line-height: 1.5;
 }
 
 /* Source */
 .th-dv__detail-source {
-    margin: 0 0 14px;
+    margin: 0 0 16px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -4492,13 +4408,8 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: var(--th-font-meta);
-    color: var(--color-primary-element);
-    text-decoration: none;
     word-break: break-all;
 }
-
-.th-dv__detail-source-link:hover { text-decoration: underline; }
 
 .th-dv__detail-source-text {
     font-size: var(--th-font-meta);
@@ -4509,7 +4420,7 @@ export default {
 .th-dv__detail-source-loading {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
@@ -4544,7 +4455,7 @@ export default {
 .th-dv__link-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 /* ── Task completion status pill ─────────────────────────────────────────
@@ -4555,13 +4466,12 @@ export default {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-    padding: 1px 7px;
-    border-radius: 10px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-container);
     font-size: var(--th-font-micro);
     font-weight: 600;
     line-height: 1.6;
     white-space: nowrap;
-    letter-spacing: 0.02em;
 }
 
 .th-dv__task-status-pill--open {
@@ -4584,17 +4494,17 @@ export default {
     align-items: center;
     gap: 8px;
     min-width: 0;
-    padding: 6px 10px;
+    padding: 8px 8px;
     background: transparent;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     color: var(--color-main-text);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.3;
-    text-align: left;
+    text-align: start;
     text-decoration: none;
     cursor: pointer;
-    transition: background 0.1s ease, border-color 0.1s ease;
+    transition: background var(--animation-quick) ease, border-color var(--animation-quick) ease;
 }
 
 .th-dv__link-row:hover {
@@ -4635,13 +4545,11 @@ export default {
 .th-dv__link-pill {
     flex: 0 0 auto;
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-container);
+    font-size: var(--th-font-meta);
     font-weight: 700;
     line-height: 1.4;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
     white-space: nowrap;
     /* v3.100.16: theme-safe inversion — text uses --color-main-background
        so it inverts alongside the --color-text-maxcontrast fill in dark
@@ -4715,17 +4623,10 @@ export default {
 .th-dv__link-remove {
     flex: 0 0 auto;
     width: 28px;
-    height: 28px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--border-radius);
-    color: var(--color-text-maxcontrast);
-    cursor: pointer;
     opacity: 0;
-    transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
 }
 
 .th-dv__link-item:hover .th-dv__link-remove,
@@ -4734,32 +4635,19 @@ export default {
     opacity: 1;
 }
 
-.th-dv__link-remove:hover {
-    background: var(--color-error);
-    color: var(--color-error-text);
-}
-
-.th-dv__link-remove:focus-visible {
-    background: var(--color-error);
-    color: var(--color-error-text);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
-}
-
 /* Empty state + actions row — shared */
 .th-dv__link-empty {
     margin: 0;
-    padding: 2px 0;
+    padding: 4px 0;
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-meta);
-    font-style: italic;
 }
 
 .th-dv__link-actions {
-    margin-top: 2px;
+    margin-top: 4px;
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
 }
 
 /* Tasks-specific loading + inline form (Session B) — kept */
@@ -4777,30 +4665,22 @@ export default {
 .th-dv__meeting-when {
     color: var(--color-text-maxcontrast);
     font-size: var(--th-font-micro);
-    margin-left: 4px;
+    margin-inline-start: 4px;
 }
 
 .th-dv__tasks-link-form {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 .th-dv__tasks-link-input {
     width: 100%;
-    padding: 6px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 13px;
 }
-.th-dv__tasks-link-input:focus { border-color: var(--color-primary-element); }
-.th-dv__tasks-link-input--label { font-size: var(--th-font-meta); }
 .th-dv__tasks-link-btns { display: flex; gap: 6px; }
 
 /* ── Session C: decision picker modal ── */
 .th-dv__dec-picker {
-    padding: 18px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -4820,17 +4700,6 @@ export default {
 
 .th-dv__dec-picker-input {
     flex: 1 1 auto;
-    padding: 8px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: 0.95em;
-}
-
-.th-dv__dec-picker-input:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
 }
 
 .th-dv__dec-picker-loading {
@@ -4847,7 +4716,7 @@ export default {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .th-dv__dec-picker-item-btn {
@@ -4855,11 +4724,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 8px 8px;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--border-radius);
-    text-align: left;
+    border-radius: var(--border-radius-small);
+    text-align: start;
     cursor: pointer;
     color: var(--color-main-text);
 }
@@ -4892,8 +4761,8 @@ export default {
 .th-dv__dec-picker-item-status {
     flex: 0 0 auto;
     font-size: 0.75em;
-    padding: 1px 6px;
-    border-radius: 8px;
+    padding: 1px 8px;
+    border-radius: var(--border-radius-element);
     background: var(--color-background-darker);
     color: var(--color-text-maxcontrast);
     text-transform: capitalize;
@@ -4917,39 +4786,37 @@ export default {
     text-align: center;
     color: var(--color-text-maxcontrast);
     font-size: 0.9em;
-    font-style: italic;
 }
 
 /* ── Audit timeline (Session J) ── */
 .th-dv__detail-audit {
-    margin: 14px 18px 0;
-    padding-top: 14px;
+    margin: 16px 16px 0;
+    padding-top: 16px;
     border-top: 1px solid var(--color-border);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .th-dv__audit-loading {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 0;
+    padding: 8px 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .th-dv__audit-error {
-    padding: 6px 0;
+    padding: 8px 0;
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .th-dv__audit-empty {
-    padding: 6px 0;
+    padding: 8px 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    font-style: italic;
 }
 
 .th-dv__audit-list {
@@ -4966,7 +4833,7 @@ export default {
 .th-dv__audit-list::before {
     content: '';
     position: absolute;
-    left: 5px;
+    inset-inline-start: 5px;
     top: 8px;
     bottom: 8px;
     width: 1px;
@@ -4977,8 +4844,8 @@ export default {
     position: relative;
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    padding: 6px 0;
+    gap: 8px;
+    padding: 8px 0;
 }
 
 .th-dv__audit-dot {
@@ -5009,7 +4876,7 @@ export default {
 .th-dv__audit-header {
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 8px;
     flex-wrap: wrap;
     font-size: var(--th-font-meta);
     line-height: 1.3;
@@ -5025,7 +4892,7 @@ export default {
 }
 
 .th-dv__audit-time {
-    margin-left: auto;
+    margin-inline-start: auto;
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
     font-size: var(--th-font-micro);
@@ -5034,7 +4901,7 @@ export default {
 .th-dv__audit-payload {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin-top: 2px;
+    margin-top: 4px;
     overflow-wrap: anywhere;
     line-height: 1.4;
 }
@@ -5059,7 +4926,7 @@ export default {
 .th-dv-viewer__name {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-weight: 600;
     font-size: var(--th-font-body);
     overflow: hidden;
@@ -5070,25 +4937,23 @@ export default {
 
 .th-dv-viewer__badge {
     flex: 0 0 auto;
-    font-size: 10px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
-    text-transform: uppercase;
     letter-spacing: 0.4px;
-    color: var(--color-success-text);
+    color: var(--color-text-success);
     background: var(--color-success-default, var(--color-background-darker));
-    padding: 2px 6px;
-    border-radius: var(--border-radius);
+    padding: 4px 8px;
+    border-radius: var(--border-radius-small);
 }
 
 .th-dv-viewer__readonly {
     flex: 0 0 auto;
     font-size: var(--th-font-micro);
-    text-transform: uppercase;
     letter-spacing: 0.4px;
     color: var(--color-text-maxcontrast);
     border: 1px solid var(--color-border);
-    padding: 2px 8px;
-    border-radius: var(--border-radius);
+    padding: 4px 8px;
+    border-radius: var(--border-radius-small);
 }
 
 /* v3.71.3 — tab-out affordance shown only for external-URL sources */
@@ -5101,8 +4966,8 @@ export default {
     text-decoration: none;
     color: var(--color-primary-element);
     border: 1px solid var(--color-border);
-    padding: 2px 8px;
-    border-radius: var(--border-radius);
+    padding: 4px 8px;
+    border-radius: var(--border-radius-small);
 }
 
 /* v3.100.14: split hover+focus so keyboard focus keeps a visible ring. */
@@ -5116,14 +4981,6 @@ export default {
 }
 
 /* v3.71.3 — button-styled source link (same look as <a> it replaced) */
-.th-dv__detail-source-link--button {
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font: inherit;
-    text-align: left;
-}
 
 .th-dv__detail-source-link-text {
     word-break: break-all;
@@ -5167,7 +5024,7 @@ export default {
 .th-dv-viewer__markdown h3 { font-size: 1.15em; }
 .th-dv-viewer__markdown p { margin: 0.6em 0; }
 .th-dv-viewer__markdown ul,
-.th-dv-viewer__markdown ol { padding-left: 1.5em; margin: 0.6em 0; }
+.th-dv-viewer__markdown ol { padding-inline-start: 1.5em; margin: 0.6em 0; }
 .th-dv-viewer__markdown li { margin: 0.2em 0; }
 .th-dv-viewer__markdown hr {
     border: none;
@@ -5175,7 +5032,7 @@ export default {
     margin: 1.5em 0;
 }
 .th-dv-viewer__markdown blockquote {
-    border-left: 3px solid var(--color-border);
+    border-inline-start: 3px solid var(--color-border);
     margin: 0.8em 0;
     padding: 0.2em 0 0.2em 1em;
     color: var(--color-text-maxcontrast);
@@ -5183,13 +5040,13 @@ export default {
 .th-dv-viewer__markdown code {
     background: var(--color-background-hover);
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--border-radius-small);
     font-size: 0.92em;
 }
 .th-dv-viewer__markdown pre {
     background: var(--color-background-hover);
-    padding: 12px 14px;
-    border-radius: var(--border-radius);
+    padding: 12px 16px;
+    border-radius: var(--border-radius-small);
     overflow-x: auto;
     font-size: 0.92em;
 }
@@ -5210,7 +5067,7 @@ export default {
     white-space: pre-wrap;
     word-break: break-word;
     font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
     color: var(--color-main-text);
 }
@@ -5268,7 +5125,7 @@ export default {
 .th-dv-viewer__nopreview-sub {
     margin: 0;
     max-width: 480px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     line-height: 1.5;
 }
 .th-dv-viewer__nopreview-actions {
@@ -5282,14 +5139,14 @@ export default {
 .th-dv-viewer__nopreview-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
+    gap: 8px;
+    padding: 8px 16px;
     background: var(--color-background-hover);
     color: var(--color-main-text);
     text-decoration: none;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     border: 1px solid var(--color-border);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
 }
 

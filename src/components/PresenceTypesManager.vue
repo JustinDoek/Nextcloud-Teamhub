@@ -5,7 +5,7 @@
             :description="t('teamhub', 'The vocabulary your organisation uses for presence — what people can pick to describe where they are. Built-in types cannot be deleted but their label, icon, and colour can be customised. Drag rows to reorder.')">
 
             <div v-if="loading" class="presence-loading">
-                <NcLoadingIcon :size="24" />
+                <NcLoadingIcon :size="ICON_LARGE" />
             </div>
             <div v-else-if="error" class="presence-error" role="alert">
                 {{ error }}
@@ -16,7 +16,7 @@
                     variant="primary"
                     class="presence-add-btn"
                     @click="openCreate">
-                    <template #icon><PlusIcon :size="18" /></template>
+                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Add status type') }}
                 </NcButton>
 
@@ -33,14 +33,14 @@
                                 :aria-label="t('teamhub', 'Move up')"
                                 :disabled="index === 0"
                                 @click="moveUp(index)">
-                                <template #icon><ChevronUpIcon :size="16" /></template>
+                                <template #icon><ChevronUpIcon :size="ICON_BODY" /></template>
                             </NcButton>
                             <NcButton
                                 variant="tertiary-no-background"
                                 :aria-label="t('teamhub', 'Move down')"
                                 :disabled="index === types.length - 1"
                                 @click="moveDown(index)">
-                                <template #icon><ChevronDownIcon :size="16" /></template>
+                                <template #icon><ChevronDownIcon :size="ICON_BODY" /></template>
                             </NcButton>
                         </div>
 
@@ -58,7 +58,7 @@
                                     v-if="type.is_builtin"
                                     class="presence-type-row__badge"
                                     :title="t('teamhub', 'Built-in status type')">
-                                    <LockIcon :size="12" />
+                                    <LockIcon :size="ICON_INLINE" />
                                     {{ t('teamhub', 'Built-in') }}
                                 </span>
                             </div>
@@ -78,7 +78,7 @@
                                 variant="tertiary"
                                 :aria-label="t('teamhub', 'Edit status type')"
                                 @click="openEdit(type)">
-                                <template #icon><PencilIcon :size="16" /></template>
+                                <template #icon><PencilIcon :size="ICON_BODY" /></template>
                             </NcButton>
                             <NcButton
                                 variant="tertiary"
@@ -86,7 +86,7 @@
                                 :disabled="type.is_builtin"
                                 :title="type.is_builtin ? t('teamhub', 'Built-in status types cannot be deleted') : ''"
                                 @click="confirmDelete(type)">
-                                <template #icon><DeleteIcon :size="16" /></template>
+                                <template #icon><DeleteIcon :size="ICON_BODY" /></template>
                             </NcButton>
                         </div>
                     </li>
@@ -153,8 +153,8 @@
                     :disabled="!dialog.label.trim() || saving"
                     @click="save">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="16" />
-                        <ContentSaveIcon v-else :size="16" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <ContentSaveIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Save') }}
                 </NcButton>
@@ -187,14 +187,12 @@
 </template>
 
 <script>
+import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import {
-    NcSettingsSection, NcButton, NcLoadingIcon, NcTextField,
-    NcCheckboxRadioSwitch, NcDialog,
-} from '@nextcloud/vue'
+import { NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcCheckboxRadioSwitch, NcDialog } from '@nextcloud/vue'
 import PlusIcon          from 'vue-material-design-icons/Plus.vue'
 import PencilIcon        from 'vue-material-design-icons/Pencil.vue'
 import DeleteIcon        from 'vue-material-design-icons/Delete.vue'
@@ -225,6 +223,9 @@ export default {
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
             loading: true,
             error: null,
             saving: false,
@@ -430,10 +431,10 @@ export default {
     padding: 20px;
 }
 .presence-error {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     padding: 12px 16px;
     background: var(--color-error-background, var(--color-background-hover));
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     margin-bottom: 12px;
 }
 
@@ -447,7 +448,7 @@ export default {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .presence-type-row {
@@ -457,7 +458,7 @@ export default {
     align-items: center;
     padding: 8px 12px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
 }
 .presence-type-row--builtin {
@@ -491,7 +492,7 @@ export default {
     gap: 4px;
     font-size: var(--th-font-micro);
     font-weight: normal;
-    padding: 2px 6px;
+    padding: 4px 8px;
     border-radius: var(--border-radius-pill, 12px);
     background: var(--color-background-dark);
     color: var(--color-text-maxcontrast);
@@ -501,7 +502,7 @@ export default {
     gap: 12px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 .presence-type-row__actions {

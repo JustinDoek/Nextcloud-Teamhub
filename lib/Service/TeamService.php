@@ -77,6 +77,9 @@ class TeamService {
         // v4.9.6 — the provisioning ledger, removed with the team. A DI leaf
         // (IDBConnection only).
         private ResourceLinkMapper   $resourceLinks,
+        // v4.10.6 — which circles are TeamHub's, and the CFG_APP lock that keeps
+        // the Teams page from deleting them. A DI leaf (mapper + IDBConnection).
+        private TeamRegistryService  $teamRegistry,
     ) {
     }
 
@@ -189,6 +192,11 @@ class TeamService {
                        $qb->expr()->eq('m.status',     $qb->createNamedParameter('Member'))
                    )
                );
+
+            // v4.10.6 — TeamHub teams only. A circle made in Contacts,
+            // Collectives, occ or another app has no registry row and is not
+            // shown, however the user is a member of it (DESIGN §2.136).
+            $this->teamRegistry->restrictToTeamHubTeams($qb, 'c');
 
             // Add LEFT JOIN on circles_membership for indirect access detection
             if ($userSingleId) {
@@ -404,6 +412,13 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
+        // v4.10.6 — a circle TeamHub did not create is not a team here, member
+        // or not: the same answer a deep link to a deleted team gets, before
+        // the membership check so the caller learns nothing about the circle.
+        if (!$this->teamRegistry->isTeamHubTeam($teamId)) {
+            throw new \Exception('Team not found or access denied');
+        }
+
         // Access check: verify the user is a member via direct DB query OR indirect
         // via circles_membership (group/sub-team membership).
         $db  = $this->container->get(\OCP\IDBConnection::class);
@@ -546,8 +561,11 @@ class TeamService {
             ->from('circles_circle', 'c')
             ->where($qb->expr()->eq('c.unique_id', $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->eq('c.source', $qb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-            ->setMaxResults(1)
-            ->executeQuery();
+            ->setMaxResults(1);
+        // v4.10.6 — and a TeamHub team; a link to a circle made elsewhere is a
+        // link to nothing.
+        $this->teamRegistry->restrictToTeamHubTeams($qb, 'c');
+        $res = $qb->executeQuery();
         $row = $res->fetch();
         $res->closeCursor();
 
@@ -897,12 +915,25 @@ class TeamService {
         $circlesManager->startSession($federatedUser);
 
         try {
-            $circle = $circlesManager->createCircle($name);
+            // v4.10.1 — the fifth argument is Circles 35's `$createTeamFolder`.
+            // Left at its default, Nextcloud 35 would give every new circle a
+            // team space before TeamHub has decided whether this team gets
+            // Files at all; ResourceService creates the space itself when the
+            // template says so (DESIGN.md §2.133). Circles 33/34 take four
+            // parameters and PHP ignores the extra one, so this is the same
+            // call on every supported version.
+            $circle = $circlesManager->createCircle($name, null, false, false, false);
             $result = $this->circleToArray($circle);
 
             // Audit log — team creation. Use the circle's unique_id (== team_id) as target.
             $teamId = (string)($result['id'] ?? $result['unique_id'] ?? '');
             if ($teamId !== '') {
+                // v4.10.6 — this circle is TeamHub's: the registry row that
+                // makes it visible in TeamHub at all, and the CFG_APP lock
+                // that stops the Teams page from deleting it. Here and nowhere
+                // else — every creation path runs through this method.
+                $this->teamRegistry->registerCreated($teamId, $user->getUID());
+
                 $this->auditService->log(
                     $teamId,
                     'team.created',
@@ -932,6 +963,11 @@ class TeamService {
         $user = $this->userSession->getUser();
         if (!$user) {
             throw new \Exception('User not authenticated');
+        }
+
+        // v4.10.6 — not a TeamHub team, not TeamHub's to delete (or unlock).
+        if (!$this->teamRegistry->isTeamHubTeam($teamId)) {
+            throw new \Exception('Team not found or access denied');
         }
 
         // Owner check via DB — avoids getCircle() failing on non-zero config circles.
@@ -1067,10 +1103,24 @@ class TeamService {
         $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);
         $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
 
+        // v4.10.6 — release TeamHub's own lock first: CircleDestroy::verify()
+        // refuses a circle carrying CFG_APP (status 120, "managed from an
+        // other app"), which is the whole point of the bit everywhere but
+        // here. Collectives' claim on the same bit went with the collective
+        // in step 2b. Immediately before the destroy, so the window in which
+        // the Teams page could delete the team is this one call.
+        $this->teamRegistry->unlock($teamId);
+
         $federatedUserService->setLocalCurrentUser($user);
         $circleService->destroy($teamId);
 
         // ── Step 4: Remove TeamHub metadata rows ──────────────────────────────
+        // v4.10.6 — the registry row first: the circle is gone, so a reader
+        // between here and the end of the method must not find a team.
+        try {
+            $this->teamRegistry->unregister($teamId);
+        } catch (\Throwable $e) { /* Not fatal */ }
+
         try {
             $delQb = $db->getQueryBuilder();
             $delQb->delete('teamhub_team_apps')
@@ -1093,6 +1143,21 @@ class TeamService {
         // handled above.
         try {
             $this->resourceLinks->deleteByTeam($teamId);
+        } catch (\Throwable $e) { /* Not fatal */ }
+
+        // v4.10.23 — the service-team row and its catalogue. Phase 5 shipped
+        // `remove()` with no caller here, which was survivable while a stale
+        // row only meant a dark catalogue entry. It is not survivable now:
+        // the Nextcloud services are one instance-wide claim, so a deleted
+        // team went on holding them for everybody, greying the checkbox out
+        // with an empty team name. Found on the test instance, 2026-09-23.
+        //
+        // Through the container for the same reason as the OpenProject link
+        // above: ServiceTeamService depends on MemberService, and adding
+        // that edge to this constructor is how the v4.8.7 DI cycle happened.
+        try {
+            $this->container->get(\OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::class)
+                ->remove($teamId, $user->getUID());
         } catch (\Throwable $e) { /* Not fatal */ }
 
         // ── Step 5: Audit log ─────────────────────────────────────────────────
@@ -1461,6 +1526,10 @@ class TeamService {
                // sorting; the sidebar is just where it was noticed.
                ->orderBy($qb->createFunction('LOWER(c.name)'), 'ASC');
 
+            // v4.10.6 — TeamHub teams only, as getUserTeams(). A visible or
+            // open circle made in another app is still not browsable here.
+            $this->teamRegistry->restrictToTeamHubTeams($qb, 'c');
+
             $result = $qb->executeQuery();
             $teams  = [];
 
@@ -1658,6 +1727,11 @@ class TeamService {
         return [
             'wizardDescription'      => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
             'inviteTypes'            => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
+            // v4.10.7 — the profile fields shown under a person's name in every
+            // picker, in order (PersonSublineService). Resolved through the
+            // service so the default and the validation live in one place.
+            'personSublineFields'    => implode(',', $this->container->get(PersonSublineService::class)->configuredFields()),
+            'personSublineFieldsAvailable' => PersonSublineService::FIELDS,
             'pinMinLevel'            => $config->getAppValue(Application::APP_ID, 'pinMinLevel', 'moderator'),
             'intravoxParentPath'     => $config->getAppValue(Application::APP_ID, 'intravoxParentPath', 'en/teamhub'),
             'createTeamGroup'        => $rawGroups,         // legacy flat string — keep for canCreateTeam()
@@ -1679,6 +1753,17 @@ class TeamService {
             'openProjectModuleEnabled' => $config->getAppValue(
                 Application::APP_ID,
                 \OCA\TeamHub\Service\OpenProject\OpenProjectModuleService::CONFIG_ENABLED,
+                '0',
+            ) === '1',
+            // Service teams module — default OFF (v4.10.46, Justin
+            // 2026-09-25): service teams change how an organisation asks each
+            // other for things, so a client switches them on when its people
+            // are ready rather than because it upgraded. Licensed too, like
+            // OpenProject above, and for the same reason only the switch is
+            // stored here. Key and default live in ServiceTeamService.
+            'serviceTeamsModuleEnabled' => $config->getAppValue(
+                Application::APP_ID,
+                \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_ENABLED,
                 '0',
             ) === '1',
             // File reviews are no longer an administrator switch (v4.8.31).
@@ -1711,6 +1796,9 @@ class TeamService {
             )),
             'expiryWarningDaysMin'   => TeamExpiryService::MIN_WARNING_DAYS,
             'expiryWarningDaysMax'   => TeamExpiryService::MAX_WARNING_DAYS,
+            // v4.10.23 — `workflowTeamRequestGroup` was here. Step 3 of a
+            // team request is the service team that holds the Nextcloud
+            // services, so there is no group left to pick (DESIGN §2.146).
             // The date the create-team wizard's picker opens on when a user
             // first clicks it. Computed server-side so the wizard, the CSV
             // importer's documentation and this panel cannot drift apart.
@@ -1775,6 +1863,15 @@ class TeamService {
                 $types = ['user'];
             }
             $config->setAppValue(Application::APP_ID, 'inviteTypes', implode(',', $types));
+        }
+        if (isset($settings['personSublineFields'])) {
+            // v4.10.7 — an empty list is a valid choice (no subline);
+            // storableValue() encodes it so it is not read as "the default".
+            $config->setAppValue(
+                Application::APP_ID,
+                PersonSublineService::CONFIG_KEY,
+                PersonSublineService::storableValue(explode(',', (string)$settings['personSublineFields'])),
+            );
         }
         if (isset($settings['pinMinLevel'])) {
             $validLevels = ['member', 'moderator', 'admin'];
@@ -1864,6 +1961,17 @@ class TeamService {
                 Application::APP_ID,
                 \OCA\TeamHub\Service\OpenProject\OpenProjectModuleService::CONFIG_ENABLED,
                 $settings['openProjectModuleEnabled'] ? '1' : '0'
+            );
+        }
+        // v4.10.46 — the service teams module's switch. Written whatever the
+        // licence says, exactly as the OpenProject one above: the panel hides
+        // the control while unlicensed, and a stored '1' is inert until a
+        // licence arrives (ServiceTeamService checks the licence first).
+        if (isset($settings['serviceTeamsModuleEnabled'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_ENABLED,
+                $settings['serviceTeamsModuleEnabled'] ? '1' : '0'
             );
         }
         // `fileReviewsModuleEnabled` was written here until v4.8.31. It is

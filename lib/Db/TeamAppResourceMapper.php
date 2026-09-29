@@ -43,6 +43,29 @@ class TeamAppResourceMapper extends QBMapper {
     }
 
     /**
+     * v4.10.1 — every row of one app across all teams, in the given
+     * statuses, oldest first. The team-space reconcile job reads the whole
+     * `files` estate this way: it decides per *folder*, so it needs every
+     * team's claim on it in one list rather than one team at a time.
+     *
+     * @param string[] $statuses
+     * @return TeamAppResource[]
+     */
+    public function findAllByApp(string $appId, array $statuses = ['active']): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
+            ->andWhere($qb->expr()->in(
+                'status',
+                $qb->createNamedParameter(array_values($statuses), IQueryBuilder::PARAM_STR_ARRAY)
+            ))
+            ->orderBy('created_at', 'ASC')
+            ->addOrderBy('id', 'ASC');
+        return $this->findEntities($qb);
+    }
+
+    /**
      * Count of active resources for a team + app.
      * Used to derive whether an app tab should be shown.
      */

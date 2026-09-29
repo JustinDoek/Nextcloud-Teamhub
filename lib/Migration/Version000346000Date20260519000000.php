@@ -41,10 +41,8 @@ class Version000346000Date20260519000000 extends SimpleMigrationStep {
     }
 
     public function postSchemaChange(IOutput $output, Closure $schemaClosure, array $options): void {
-        $platform     = $this->db->getDatabasePlatform();
-        $platformName = get_class($platform);
-
-        if (!str_contains($platformName, 'MySQL') && !str_contains($platformName, 'MariaDb')) {
+        // Non-strict: MariaDB answers PLATFORM_MYSQL too.
+        if ($this->db->getDatabaseProvider() !== IDBConnection::PLATFORM_MYSQL) {
             $output->info('Version000346000: non-MySQL platform — skipping (not needed)');
             return;
         }

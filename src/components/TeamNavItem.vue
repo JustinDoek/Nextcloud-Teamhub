@@ -6,12 +6,25 @@
         <template #icon>
             <AccountGroup :size="iconNav" />
         </template>
-        <template v-if="team.unread > 0" #counter>
+        <template v-if="team.unread > 0 || unclaimed > 0" #counter>
             <!-- NcCounterBubble reads its number from the `count` prop, NOT
                  from the default slot. Passing it via `{{ }}` silently sets
                  the prop to undefined → Intl.NumberFormat formats it as
                  the literal string "NaN" (root cause of the 3.81.x bug). -->
-            <NcCounterBubble type="highlighted" :count="team.unread" />
+            <!-- v4.10.27 — a service team's unclaimed requests, like unread
+                 messages (`/service-teams`). Outlined so it reads apart from
+                 the unread bubble when a team has both; the title and the
+                 hidden text say which number is which. -->
+            <span class="th-nav-item__counters">
+                <span
+                    v-if="unclaimed > 0"
+                    class="th-nav-item__unclaimed"
+                    :title="n('teamhub', '{n} unclaimed request', '{n} unclaimed requests', unclaimed, { n: unclaimed })">
+                    <NcCounterBubble type="outlined" :count="unclaimed" />
+                    <span class="hidden-visually">{{ n('teamhub', '{n} unclaimed request', '{n} unclaimed requests', unclaimed, { n: unclaimed }) }}</span>
+                </span>
+                <NcCounterBubble v-if="team.unread > 0" type="highlighted" :count="team.unread" />
+            </span>
         </template>
         <!-- Team actions — moved here from the Team-info widget so
              Team info can be hidden without losing Manage/Invite/
@@ -197,6 +210,16 @@ export default {
     },
 
     computed: {
+        /**
+         * v4.10.27 — unclaimed requests in this team's queue, when it is a
+         * service desk the viewer works; 0 otherwise. Loaded once on page
+         * load (`serviceTeams/loadDesks`) and kept in step by the queue
+         * widget, like the unread count beside it.
+         */
+        unclaimed() {
+            return this.$store.getters['serviceTeams/unclaimedFor'](this.team.id)
+        },
+
         iconNav() {
             return ICON_NAV
         },
@@ -257,5 +280,13 @@ export default {
     overflow: hidden;
     z-index: -1;
     opacity: 0;
+}
+
+/* v4.10.27 — the unclaimed and unread bubbles side by side. */
+.th-nav-item__counters,
+.th-nav-item__unclaimed {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--th-space-xs, 4px);
 }
 </style>

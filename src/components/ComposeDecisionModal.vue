@@ -308,7 +308,7 @@ export default {
 
 .th-compose-modal__title {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     color: var(--color-main-text);
 }
@@ -338,7 +338,7 @@ export default {
 .th-compose-modal__share {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     /* Sits inside PostMessageForm's slot now, so it owns its own top spacing
        and a rule separating it from the fields above. */
     margin: 8px 0 0;
@@ -369,8 +369,8 @@ export default {
 .th-compose-modal__share-option {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
+    gap: 8px;
+    padding: 4px 12px;
     min-height: 0;
     line-height: 1.2;
     border: 2px solid var(--color-border);
@@ -441,7 +441,7 @@ export default {
 }
 
 .th-compose-modal__required {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .th-compose-modal__people-hint,

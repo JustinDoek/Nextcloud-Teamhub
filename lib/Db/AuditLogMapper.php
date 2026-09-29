@@ -166,6 +166,43 @@ class AuditLogMapper {
     }
 
     /**
+     * v4.10.1 — Recent events of the given types across every team, newest
+     * first. The team-space My Work report reads its own `teamspace.*` rows
+     * this way: a report of what a job removed cannot be recomputed from the
+     * state afterwards, and the audit log is where that record already is.
+     *
+     * @param string[] $eventTypes
+     * @return array<int, array<string, mixed>>
+     */
+    public function findByEventTypes(array $eventTypes, int $fromTs, int $limit = 50): array {
+        if ($eventTypes === []) {
+            return [];
+        }
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from('teamhub_audit_log')
+            ->where($qb->expr()->in(
+                'event_type',
+                $qb->createNamedParameter(array_values($eventTypes), \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)
+            ))
+            ->andWhere($qb->expr()->gte(
+                'created_at',
+                $qb->createNamedParameter($fromTs, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
+            ))
+            ->orderBy('created_at', 'DESC')
+            ->addOrderBy('id', 'DESC')
+            ->setMaxResults(max(1, $limit));
+
+        $result = $qb->executeQuery();
+        $rows = [];
+        while ($row = $result->fetch()) {
+            $rows[] = $this->hydrate($row);
+        }
+        $result->closeCursor();
+        return $rows;
+    }
+
+    /**
      * Count total events for a team (used by NcPagination on the frontend).
      */
     public function countByTeam(

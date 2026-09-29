@@ -45,17 +45,33 @@ import { defineConfig } from 'vite'
  * vite-config default) and load each entry's stylesheet from its own template
  * with \OCP\Util::addStyle(). CSS is emitted into the app css/ dir (NC serves
  * styles from there; the js/ subtree is not a style root and 404s). Names are
- * deterministic and unhashed so the PHP references are stable across builds:
- *   css/vite-teamhub.chunk.css + css/vite-index.chunk.css ← templates/main.php
- *   css/vite-admin.chunk.css   + css/vite-index.chunk.css ← templates/admin.php
- *   css/vite-personal.chunk.css+ css/vite-index.chunk.css ← templates/personal.php
- *   css/vite-filesactions.chunk.css + css/vite-index.chunk.css
- *                                           ← FilesScriptsListener (v4.8.18)
+ * unhashed, but NOT stable: Rollup names a shared chunk after one of its
+ * modules and regroups whenever an entry's import graph changes (4.10.11
+ * renamed the shared NC-component CSS from `index` to `localDate` after a
+ * change to the filesactions entry alone). So the templates do not name
+ * chunks: each reads its entry's manifest stub (css/<entry>.css, the @import
+ * list this plugin writes) through templates/vite-styles.php and addStyle()s
+ * whatever it lists.
+ *   css/teamhub.css  ← templates/main.php
+ *   css/admin.css    ← templates/admin.php
+ *   css/personal.css ← templates/personal.php
+ *   (filesactions: nothing — see below)
  *
  * The fourth entry is the only one with no template of its own: it runs inside
- * the **Files app's** page, so its two Util::addStyle calls live in
- * `lib/Listener/FilesScriptsListener.php` instead. Same rule, different door —
- * an entry whose CSS nobody loads is exactly the 3.55.2 bug above.
+ * the **Files app's** page, on every load of it. Since v4.10.11 it is a stub
+ * with NO imports at all, in three stages: src/filesactions.js waits for the
+ * Files app to load and the page to go idle, then imports
+ * src/filesactionsBoot.js (@nextcloud/files, axios, l10n — registers the
+ * action), which imports src/filesactionsModal.js (vue, @nextcloud/vue, the
+ * dialog and its CSS) on the first click. Rollup groups modules by the set of
+ * entries that reach them, so this keeps the shared vendor chunk out of the
+ * entry's graph (it used to drag 2.5 MB of JS + 278 KB of CSS into every Files
+ * page) and Vite's preload helper loads each stage's CSS at import time through
+ * OC.filePath(). So `FilesScriptsListener` adds no stylesheet, and
+ * `css/vite-filesactions.chunk.css` is no longer emitted. After a build, check
+ * that js/filesactions.mjs has no static `import` line at all — one stray
+ * static import in the stub or a `vue` import in the boot stage brings the
+ * weight back.
  *
  * vite-config's css-entry-points-plugin splits each entry into a small @import
  * stub plus chunk files; we load the .chunk.css files directly (the @import stub

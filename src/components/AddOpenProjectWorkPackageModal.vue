@@ -319,7 +319,7 @@ export default {
 }
 
 .th-op-create__required {
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 /* Scoped rather than a bare `.hidden-visually` so it cannot collide with
@@ -370,7 +370,7 @@ export default {
 .th-op-create__error {
     margin: 0 0 var(--th-space-lg);
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .th-op-create__actions {

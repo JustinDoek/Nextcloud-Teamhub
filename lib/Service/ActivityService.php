@@ -14,6 +14,7 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\BudgetService;
+use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\TimeService;
 
 /**
@@ -38,6 +39,8 @@ class ActivityService {
         private AuditLogMapper $auditLogMapper,
         private TimeService $timeService,
         private BudgetService $budgetService,
+        // v4.10.27 — whether the viewer is on the desk whose activity this is.
+        private ServiceTeamService $serviceTeams,
     ) {
     }
 
@@ -177,10 +180,7 @@ class ActivityService {
         // (circle IDs, talk tokens) causes "invalid input syntax for type bigint".
         // For numeric IDs use PARAM_INT; for non-numeric use object_type match only.
         try {
-            $platform   = $db->getDatabasePlatform();
-            $isPostgres = $platform instanceof \Doctrine\DBAL\Platforms\PostgreSQLPlatform
-                       || $platform instanceof \Doctrine\DBAL\Platforms\PostgreSQL100Platform
-                       || str_contains(get_class($platform), 'PostgreSQL');
+            $isPostgres = $db->getDatabaseProvider() === \OCP\IDBConnection::PLATFORM_POSTGRES;
 
             $qb = $db->getQueryBuilder();
             $qb->select('activity_id', 'app', 'type', 'user', 'affecteduser',
@@ -350,7 +350,89 @@ class ActivityService {
             ]);
         }
 
+        // v4.10.27 — a service team's own desk work: requests arriving,
+        // claimed, reassigned, released, answered, rejected or withdrawn.
+        // Written against the service team by WorkflowEngine::deskAudit(),
+        // shown only to the people who work that desk.
+        try {
+            $deskItems = $this->fetchServiceDeskActivity($teamId, $user->getUID(), $limit, $since);
+            if ($deskItems !== []) {
+                $items = array_merge($items, $deskItems);
+                usort($items, static fn(array $a, array $b): int => strcmp((string)$b['datetime'], (string)$a['datetime']));
+                if (count($items) > $limit) {
+                    $items = array_slice($items, 0, $limit);
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->debug('[TeamHub][ActivityService] service desk merge failed: ' . $e->getMessage(), [
+                'teamId' => $teamId, 'app' => Application::APP_ID,
+            ]);
+        }
+
         return $items;
+    }
+
+    /** The desk events `WorkflowEngine::deskAudit()` writes (v4.10.27). */
+    private const SERVICE_DESK_EVENTS = [
+        'service.request_received',
+        'service.request_claimed',
+        'service.request_assigned',
+        'service.request_released',
+        'service.request_answered',
+        'service.request_rejected',
+        'service.request_cancelled',
+        // v4.10.31 — an admin of the service team closed the request.
+        'service.request_closed',
+    ];
+
+    /**
+     * A service team's desk events, as activity-feed items (v4.10.27).
+     *
+     * Gated on the viewer being an eligible agent of *this* team — which on a
+     * service team is every member (DESIGN §2.146) — so the request titles in
+     * these rows never reach anybody the queue would not show them to. An
+     * unlicensed instance has no eligible agents, so the stream then simply
+     * has no desk rows; nothing already written is lost.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchServiceDeskActivity(string $teamId, string $userId, int $limit, int $since): array {
+        if (!$this->serviceTeams->isEligibleAgent($userId, $teamId)) {
+            return [];
+        }
+        $fromTs = $since > 0 ? $since : (time() - 30 * 86400);
+        $rows   = $this->auditLogMapper->findByTeam($teamId, 0, $limit, self::SERVICE_DESK_EVENTS, $fromTs, null);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $eventType = (string)($row['event_type'] ?? '');
+            $meta      = is_array($row['metadata'] ?? null) ? $row['metadata'] : [];
+            $actorUid  = (string)($row['actor_uid'] ?? '');
+            $toUid     = (string)($meta['to'] ?? '');
+            $out[] = [
+                'activity_id'   => 'th-' . $row['id'],
+                'app'           => 'teamhub',
+                'type'          => $eventType,
+                'user'          => $actorUid,
+                'displayName'   => $this->resolveDisplayName($actorUid),
+                'subject'       => $eventType,   // the frontend maps it to a localized sentence
+                'message'       => '',
+                'datetime'      => (new \DateTime('@' . (int)$row['created_at']))->format(\DateTime::ATOM),
+                'icon'          => $this->activityIconForTeamHub($eventType),
+                'link'          => '',
+                'object_type'   => 'workflow',
+                'object_id'     => (string)($row['target_id'] ?? ''),
+                'file'          => '',
+                'board_name'    => '',
+                'card_title'    => '',
+                'subjectparams' => [
+                    'title'   => (string)($meta['title'] ?? ''),
+                    'to_user' => $toUid,
+                    'to_name' => $toUid !== '' ? $this->resolveDisplayName($toUid) : '',
+                ],
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -430,6 +512,7 @@ class ActivityService {
     private function activityIconForTeamHub(string $eventType): string {
         if (str_starts_with($eventType, 'project.time_log_'))  return 'ClockOutline';
         if (str_starts_with($eventType, 'project.expense_'))   return 'WalletOutline';
+        if (str_starts_with($eventType, 'service.request_'))   return 'Lifebuoy';
         return 'Bell';
     }
 

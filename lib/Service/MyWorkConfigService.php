@@ -22,9 +22,14 @@ use Psr\Log\LoggerInterface;
  *
  * **Everything here has a working default.** The specification's requirement
  * that "My Work is immediately useful without extensive configuration" is met
- * by never requiring an admin to visit the page at all: both providers are
- * enabled, the horizons are 7 days, every action a provider can perform is
- * allowed, and the category mappings are the ones the specification lists.
+ * by never requiring an admin to visit the page at all: every provider is
+ * enabled, the horizons are 7 days, and every action a provider can perform
+ * is allowed.
+ *
+ * v4.10.20 removed the source-status → category map that used to live here.
+ * See DESIGN.md §2.143: a category is a fact about the viewer's position in a
+ * workflow, which only the provider knows, so there is nothing for an
+ * instance-wide table keyed on status alone to configure.
  */
 class MyWorkConfigService {
 
@@ -74,44 +79,6 @@ class MyWorkConfigService {
      * each of them once would otherwise keep every one forever.
      */
     private const MAX_COLLAPSED_GROUPS = 60;
-
-    /**
-     * The default source-status → category mapping, exactly as specified.
-     *
-     * Keys are `{providerId}.{sourceStatus}`; values are Category constants.
-     * A provider proposes a category for each item it emits and this table
-     * only *overrides* it, so an unmapped status is not an error — it is the
-     * provider's own judgement standing.
-     */
-    public const DEFAULT_CATEGORY_MAP = [
-        'approval.approval_requested' => Category::ACTION_REQUIRED,
-        'approval.changes_requested'  => Category::ACTION_REQUIRED,
-        'approval.approval_submitted' => Category::WAITING_FOR_OTHERS,
-        'approval.approved'           => Category::COMPLETED,
-        'approval.rejected'           => Category::COMPLETED,
-        'deck.deck_card_assigned'     => Category::UPCOMING,
-        'deck.deck_card_overdue'      => Category::ACTION_REQUIRED,
-        'deck.deck_card_done'         => Category::COMPLETED,
-        'decisions.decision_awaiting_approval' => Category::ACTION_REQUIRED,
-        // v4.5.25 — an open proposal is Action required for its proposer
-        // (finalize is proposer-only) and Waiting for others for an approver
-        // (they are waiting on that finalize). Two entries, because they are
-        // the two ends of the same decision and an administrator must be able
-        // to move one without the other.
-        'decisions.decision_awaiting_finalize' => Category::ACTION_REQUIRED,
-        'decisions.decision_open_for_approver' => Category::WAITING_FOR_OTHERS,
-        'decisions.decision_proposed'          => Category::WAITING_FOR_OTHERS,
-        'decisions.decision_approved'          => Category::COMPLETED,
-        'decisions.decision_denied'            => Category::COMPLETED,
-        // v4.5.25 — meetings. Only the unanswered invitation is Action
-        // required; an accepted meeting is Upcoming and reaches Action
-        // required through the shared lead-time rule, like everything else.
-        'meetings.meeting_invited'             => Category::ACTION_REQUIRED,
-        'meetings.meeting_tentative'           => Category::UPCOMING,
-        'meetings.meeting_accepted'            => Category::UPCOMING,
-        'meetings.meeting_organiser'           => Category::UPCOMING,
-        'meetings.meeting_team_event'          => Category::UPCOMING,
-    ];
 
     public function __construct(
         private IConfig $config,
@@ -256,60 +223,6 @@ class MyWorkConfigService {
     }
 
     // ---------------------------------------------------------------------
-    // Category mappings
-    // ---------------------------------------------------------------------
-
-    /**
-     * Effective source-status → category map: shipped defaults with any admin
-     * overrides layered on top.
-     *
-     * @return array<string,string>
-     */
-    public function getCategoryMappings(): array {
-        $stored = $this->decodeJson($this->getAppValue('category_map', ''));
-        $out    = self::DEFAULT_CATEGORY_MAP;
-        foreach ($stored as $key => $value) {
-            $key   = (string)$key;
-            $value = (string)$value;
-            if ($key !== '' && Category::isValid($value)) {
-                $out[$key] = $value;
-            }
-        }
-        return $out;
-    }
-
-    /**
-     * Category for a provider's source status, or null to let the provider's
-     * own choice stand.
-     */
-    public function mapCategory(string $providerId, string $sourceStatus): ?string {
-        if ($sourceStatus === '') {
-            return null;
-        }
-        return $this->getCategoryMappings()[$providerId . '.' . $sourceStatus] ?? null;
-    }
-
-    /** @param array<string,string> $map */
-    public function setCategoryMappings(array $map): void {
-        $clean = [];
-        foreach ($map as $key => $value) {
-            $key   = trim((string)$key);
-            $value = trim((string)$value);
-            // Key must be `{provider}.{status}` and both halves non-empty, so a
-            // malformed row can never shadow a real mapping.
-            if ($key === '' || !str_contains($key, '.') || !Category::isValid($value)) {
-                continue;
-            }
-            [$p, $s] = explode('.', $key, 2);
-            if ($p === '' || $s === '') {
-                continue;
-            }
-            $clean[$key] = $value;
-        }
-        $this->setAppValue('category_map', json_encode($clean, JSON_THROW_ON_ERROR));
-    }
-
-    // ---------------------------------------------------------------------
     // Provider sync bookkeeping (admin status page)
     // ---------------------------------------------------------------------
 
@@ -392,8 +305,6 @@ class MyWorkConfigService {
             'budgetMs'          => $this->getProviderBudgetMs(),
             'approvalStaleDays' => $this->getApprovalStaleDays(),
             'approvalWarnDays'  => $this->getApprovalWarnDays(),
-            'categoryMap'       => $this->getCategoryMappings(),
-            'defaultCategoryMap' => self::DEFAULT_CATEGORY_MAP,
             'bounds'            => [
                 'upcomingDays'  => ['min' => self::MIN_UPCOMING_DAYS,  'max' => self::MAX_UPCOMING_DAYS],
                 'actionRequiredDays' => ['min' => self::MIN_ACTION_REQUIRED_DAYS, 'max' => self::MAX_ACTION_REQUIRED_DAYS],
@@ -439,9 +350,6 @@ class MyWorkConfigService {
         if (array_key_exists('approvalWarnDays', $body)) {
             $this->setAppValue('approval_warn_days', (string)$this->clamp(
                 (int)$body['approvalWarnDays'], 1, 364));
-        }
-        if (array_key_exists('categoryMap', $body) && is_array($body['categoryMap'])) {
-            $this->setCategoryMappings($body['categoryMap']);
         }
     }
 

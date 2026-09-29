@@ -15,9 +15,8 @@
             <NcAvatar
                 :user="message.author_id"
                 :display-name="message.author_display_name || message.author_id"
-                :show-user-status="true"
                 :disable-menu="false"
-                :size="36" />
+                :size="32" />
             <div class="message-card__meta">
                 <span class="message-card__author">{{ message.author_display_name || message.author_id }}</span>
                 <span class="message-card__date">{{ formattedDate }}</span>
@@ -27,7 +26,7 @@
             </span>
             <!-- Question badge -->
             <span v-if="message.messageType === 'question'" class="message-card__question-badge-subtle">
-                <HelpCircleOutline :size="16" />
+                <HelpCircleOutline :size="ICON_BODY" />
             </span>
             <!-- Decision badge with impact + status -->
             <span
@@ -35,7 +34,7 @@
                 class="message-card__decision-badge"
                 :class="'message-card__decision-badge--' + (decision.impact || 'medium')"
                 :title="decisionBadgeTitle">
-                <GavelIcon :size="14" />
+                <GavelIcon :size="ICON_INLINE" />
                 <span class="message-card__decision-badge-impact">{{ impactLabel(decision.impact) }}</span>
                 <span class="message-card__decision-badge-dot" aria-hidden="true">·</span>
                 <span class="message-card__decision-badge-status">{{ statusLabel(decisionStatus) }}</span>
@@ -73,7 +72,7 @@
                 :aria-label="t('teamhub', 'Unpin message')"
                 :title="t('teamhub', 'Unpin message')"
                 @click="doUnpin">
-                <template #icon><PinOff :size="16" /></template>
+                <template #icon><PinOff :size="ICON_BODY" /></template>
             </NcButton>
             <!-- Pin button — shown on regular messages to users who can moderate -->
             <NcButton
@@ -82,7 +81,7 @@
                 :aria-label="t('teamhub', 'Pin message')"
                 :title="t('teamhub', 'Pin message')"
                 @click="doPin">
-                <template #icon><Pin :size="16" /></template>
+                <template #icon><Pin :size="ICON_BODY" /></template>
             </NcButton>
             <!-- v4.7.4 — the author always, plus anyone clearing the team's
                  moderation floor. Hidden rather than disabled, per SKILLS.md
@@ -92,14 +91,14 @@
                 variant="tertiary"
                 :aria-label="t('teamhub', 'Edit message')"
                 @click="startEdit">
-                <template #icon><Pencil :size="16" /></template>
+                <template #icon><Pencil :size="ICON_BODY" /></template>
             </NcButton>
             <NcButton
                 v-if="canEditThis"
                 variant="tertiary"
                 :aria-label="t('teamhub', 'Delete message')"
                 @click="confirmDelete">
-                <template #icon><Delete :size="16" /></template>
+                <template #icon><Delete :size="ICON_BODY" /></template>
             </NcButton>
         </div>
 
@@ -108,11 +107,12 @@
             <label class="message-card__edit-label" :for="'edit-subject-' + message.id">
                 {{ t('teamhub', 'Subject') }}
             </label>
-            <input
+            <NcTextField
                 :id="'edit-subject-' + message.id"
                 v-model="editSubject"
                 class="message-card__edit-subject"
-                :placeholder="t('teamhub', 'Subject')" />
+                :placeholder="t('teamhub', 'Subject')"
+                label-outside />
             <label class="message-card__edit-label" :for="'edit-body-' + message.id">
                 {{ t('teamhub', 'Message') }}
             </label>
@@ -120,7 +120,7 @@
                 :id="'edit-body-' + message.id"
                 ref="editBodyRef"
                 v-model="editBody"
-                :placeholder="t('teamhub', 'Write your message… (@ to mention)')"
+                :placeholder="t('teamhub', 'Write a message (@ to mention)')"
                 :multiline="true"
                 :link-autocomplete="true"
                 :auto-complete="editMentionAutoComplete"
@@ -137,7 +137,7 @@
                     :aria-label="t('teamhub', 'Bold')"
                     @mousedown.prevent
                     @click="applyEditMarkdown('**', '**')">
-                    <template #icon><FormatBold :size="16" /></template>
+                    <template #icon><FormatBold :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -145,7 +145,7 @@
                     :aria-label="t('teamhub', 'Italic')"
                     @mousedown.prevent
                     @click="applyEditMarkdown('*', '*')">
-                    <template #icon><FormatItalic :size="16" /></template>
+                    <template #icon><FormatItalic :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -153,7 +153,7 @@
                     :aria-label="t('teamhub', 'Inline code')"
                     @mousedown.prevent
                     @click="applyEditMarkdown('`', '`')">
-                    <template #icon><CodeTags :size="16" /></template>
+                    <template #icon><CodeTags :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -161,7 +161,7 @@
                     :aria-label="t('teamhub', 'Code block')"
                     @mousedown.prevent
                     @click="applyEditMarkdown('```\n', '\n```')">
-                    <template #icon><CodeBraces :size="16" /></template>
+                    <template #icon><CodeBraces :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -169,7 +169,7 @@
                     :aria-label="t('teamhub', 'Heading')"
                     @mousedown.prevent
                     @click="applyEditMarkdown('## ', '')">
-                    <template #icon><FormatHeader2 :size="16" /></template>
+                    <template #icon><FormatHeader2 :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -177,7 +177,7 @@
                     :aria-label="t('teamhub', 'Bullet list')"
                     @mousedown.prevent
                     @click="applyEditList(false)">
-                    <template #icon><FormatListBulleted :size="16" /></template>
+                    <template #icon><FormatListBulleted :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -185,7 +185,7 @@
                     :aria-label="t('teamhub', 'Numbered list')"
                     @mousedown.prevent
                     @click="applyEditList(true)">
-                    <template #icon><FormatListNumbered :size="16" /></template>
+                    <template #icon><FormatListNumbered :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -193,7 +193,7 @@
                     :aria-label="t('teamhub', 'Insert link')"
                     @mousedown.prevent
                     @click="applyEditLink">
-                    <template #icon><LinkVariant :size="16" /></template>
+                    <template #icon><LinkVariant :size="ICON_BODY" /></template>
                 </NcButton>
                 <NcButton
                     variant="tertiary"
@@ -201,12 +201,12 @@
                     :aria-label="t('teamhub', 'Insert image')"
                     @mousedown.prevent
                     @click="openImageDialog">
-                    <template #icon><ImageIcon :size="16" /></template>
+                    <template #icon><ImageIcon :size="ICON_BODY" /></template>
                 </NcButton>
             </div>
             <div class="message-card__edit-actions">
                 <NcButton variant="primary" :disabled="saving" @click="saveEdit">
-                    <template #icon><NcLoadingIcon v-if="saving" :size="16" /></template>
+                    <template #icon><NcLoadingIcon v-if="saving" :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Save') }}
                 </NcButton>
                 <NcButton variant="tertiary" @click="cancelEdit">{{ t('teamhub', 'Cancel') }}</NcButton>
@@ -272,7 +272,7 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     class="message-preview message-preview--file">
-                    <PaperclipIcon :size="28" class="message-preview__file-icon" />
+                    <PaperclipIcon :size="ICON_LARGE" class="message-preview__file-icon" />
                     <div class="message-preview__body">
                         <span class="message-preview__title">{{ preview.title }}</span>
                         <span class="message-preview__desc">{{ t('teamhub', 'Click to open attachment') }}</span>
@@ -313,7 +313,7 @@
                         <!-- Visible non-color indicator for "your vote" (WCAG 1.4.1) -->
                         <CheckCircleOutline
                             v-if="pollResults.userVote === index"
-                            :size="16"
+                            :size="ICON_BODY"
                             class="poll-option__voted-icon"
                             aria-hidden="true" />
                         <span class="poll-option__votes">{{ getPollVotes(index) }}</span>
@@ -322,7 +322,7 @@
             </div>
             
             <div class="poll-footer">
-                <ClipboardCheckOutline :size="16" />
+                <ClipboardCheckOutline :size="ICON_BODY" />
                 <span v-if="isPollClosed" class="poll-closed-label">
                     {{
                         // TRANSLATORS: total vote count when poll is closed, e.g. "1 total vote – Poll closed"
@@ -340,7 +340,7 @@
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Close poll')"
                     @click="closePoll">
-                    <template #icon><Lock :size="16" /></template>
+                    <template #icon><Lock :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Close poll') }}
                 </NcButton>
             </div>
@@ -366,7 +366,7 @@
                     variant="secondary"
                     :aria-label="t('teamhub', 'Withdraw this decision proposal')"
                     @click="openWithdrawDialog">
-                    <template #icon><Close :size="16" /></template>
+                    <template #icon><Close :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Withdraw proposal') }}
                 </NcButton>
                 <span class="decision-actions__hint">
@@ -376,7 +376,7 @@
 
             <!-- Finalized banner (discussion closed, awaiting approval) -->
             <div v-if="decisionStatus === 'finalized'" class="decision-banner decision-banner--finalized" role="status">
-                <GavelIcon :size="20" />
+                <GavelIcon :size="ICON_BODY" />
                 <div class="decision-banner__body">
                     <strong>{{ t('teamhub', 'Finalized — awaiting approval') }}</strong>
                     <span v-if="decision.answeredBy" class="decision-banner__sub">
@@ -394,7 +394,7 @@
 
             <!-- Approved banner (legacy 'decided' rows fall in here) -->
             <div v-if="decisionStatus === 'approved' || decisionStatus === 'decided'" class="decision-banner decision-banner--approved" role="status">
-                <CheckCircle :size="20" />
+                <CheckCircle :size="ICON_BODY" />
                 <div class="decision-banner__body">
                     <strong>{{ t('teamhub', 'Approved') }}</strong>
                     <span v-if="decision.resolvedBy" class="decision-banner__sub">
@@ -412,7 +412,7 @@
 
             <!-- Denied banner -->
             <div v-if="decisionStatus === 'denied'" class="decision-banner decision-banner--denied" role="status">
-                <Close :size="20" />
+                <Close :size="ICON_BODY" />
                 <div class="decision-banner__body">
                     <strong>{{ t('teamhub', 'Denied') }}</strong>
                     <span v-if="decision.withdrawnReason" class="decision-banner__sub">
@@ -423,7 +423,7 @@
 
             <!-- Withdrawn banner -->
             <div v-if="decisionStatus === 'withdrawn'" class="decision-banner decision-banner--withdrawn" role="status">
-                <Close :size="20" />
+                <Close :size="ICON_BODY" />
                 <div class="decision-banner__body">
                     <strong>{{ t('teamhub', 'Withdrawn') }}</strong>
                     <span v-if="decision.withdrawnReason" class="decision-banner__sub">
@@ -435,7 +435,7 @@
 
         <!-- Question solved banner -->
         <div v-if="message.messageType === 'question' && isQuestionSolved" class="question-solved-banner">
-            <CheckCircle :size="20" />
+            <CheckCircle :size="ICON_BODY" />
             <span>{{ t('teamhub', 'Question solved') }}</span>
         </div>
 
@@ -457,9 +457,9 @@
                 {{ t('teamhub', 'OpenProject') }}
                 <OpenInNew :size="iconInline" class="message-card__origin-icon" aria-hidden="true" />
             </a>
-            <span v-else class="th-widget__pill th-widget__pill--outline message-card__origin-pill">
+            <NcChip no-close variant="tertiary" class="message-card__origin-pill" v-else>
                 {{ t('teamhub', 'OpenProject') }}
-            </span>
+            </NcChip>
         </div>
 
         <!-- v4.7.4 — an edit is recorded, so it is shown. Deliberately not
@@ -480,7 +480,7 @@
              the other case and still greys the composer inside the section. -->
         <div v-if="commentsAllowedForType" class="message-card__footer">
             <NcButton variant="tertiary" @click="toggleComments">
-                <template #icon><CommentOutline :size="16" /></template>
+                <template #icon><CommentOutline :size="ICON_BODY" /></template>
                 {{ commentLabel }}
             </NcButton>
         </div>
@@ -517,13 +517,14 @@
                     {{ t('teamhub', 'Reason') }}
                     <span class="decision-required" aria-hidden="true">*</span>
                 </label>
-                <textarea
+                <NcTextArea
                     id="withdraw-reason"
                     v-model="withdrawReason"
                     rows="3"
                     maxlength="1000"
                     class="decision-withdraw-textarea"
-                    :placeholder="t('teamhub', 'Why is this proposal being withdrawn?')"></textarea>
+                    :placeholder="t('teamhub', 'Why is this proposal being withdrawn?')"
+                    label-outside />
             </template>
             <template #actions>
                 <NcButton variant="tertiary" @click="showWithdrawDialog = false">
@@ -534,7 +535,7 @@
                     :disabled="!withdrawReason.trim() || withdrawing"
                     @click="confirmWithdraw">
                     <template #icon>
-                        <NcLoadingIcon v-if="withdrawing" :size="16" />
+                        <NcLoadingIcon v-if="withdrawing" :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Withdraw') }}
                 </NcButton>
@@ -562,7 +563,7 @@
                     :disabled="marking"
                     @click="confirmMark">
                     <template #icon>
-                        <NcLoadingIcon v-if="marking" :size="16" />
+                        <NcLoadingIcon v-if="marking" :size="ICON_BODY" />
                     </template>
                     <!-- TRANSLATORS: Confirm button in the Finalize dialog. Irreversible: locks discussion and triggers approval. -->
                     {{ t('teamhub', 'Finalize') }}
@@ -583,8 +584,8 @@
                     :disabled="imageDialogBrowsing"
                     @click="browseImageFromFiles">
                     <template #icon>
-                        <NcLoadingIcon v-if="imageDialogBrowsing" :size="16" />
-                        <FolderIcon v-else :size="16" />
+                        <NcLoadingIcon v-if="imageDialogBrowsing" :size="ICON_BODY" />
+                        <FolderIcon v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Browse Files…') }}
                 </NcButton>
@@ -645,7 +646,7 @@
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Close image preview')"
                     @click.stop="closeLightbox">
-                    <template #icon><Close :size="24" /></template>
+                    <template #icon><Close :size="ICON_LARGE" /></template>
                 </NcButton>
                 <img
                     :src="lightboxSrc"
@@ -671,7 +672,7 @@ import {
 } from '../lib/markdownToolbar.js'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
-import { NcAvatar, NcButton, NcLoadingIcon, NcRichContenteditable, NcDialog, NcTextField } from '@nextcloud/vue'
+import { NcAvatar, NcButton, NcLoadingIcon, NcRichContenteditable, NcDialog, NcTextField, NcChip, NcTextArea } from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import CommentOutline from 'vue-material-design-icons/CommentOutline.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
@@ -703,7 +704,7 @@ import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 // v4.8.7 — new icon sizes come from the shared scale rather than a literal,
 // per SKILLS.md § Design tokens. ICON_BODY is 16, which is what the icons
 // already in this header use, so nothing shifts visually.
-import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 // Image extensions we can render as inline thumbnails
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
@@ -781,7 +782,7 @@ function extractUrlObjects(text) {
 export default {
     name: 'MessageCard',
     components: {
-        NcAvatar,
+          NcTextArea, NcChip, NcAvatar,
         NcButton,
         NcLoadingIcon,
         NcRichContenteditable,
@@ -824,6 +825,9 @@ export default {
     },
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            ICON_LARGE,
             commentsOpen: false,
             // v4.8.7 — icon size from the shared scale, exposed the way the
             // rest of the app exposes it (a data field, because MDI's :size
@@ -1114,9 +1118,17 @@ export default {
                 const memberIds = new Set(mentionList.map(m => m.userId))
                 const lower = (search || '').toLowerCase()
 
-                const filtered = ocsUsers.filter(u =>
-                    memberIds.has(u.id) || memberIds.has(u.value?.shareWith)
-                )
+                // v4.10.7 — the same subline every picker shows, from the
+                // enriched members list; see PostMessageForm.mentionAutoComplete.
+                const sublineById = new Map(mentionList.map(m => [m.userId, m.subline || '']))
+                const withSubline = row => {
+                    const own = sublineById.get(row.id)
+                    return own ? { ...row, subline: own } : row
+                }
+
+                const filtered = ocsUsers
+                    .filter(u => memberIds.has(u.id) || memberIds.has(u.value?.shareWith))
+                    .map(withSubline)
 
                 const foundIds = new Set(filtered.map(u => u.id))
                 const supplemental = mentionList
@@ -1127,11 +1139,12 @@ export default {
                         )
                     )
                     .map(m => ({
-                        id:     m.userId,
-                        label:  m.displayName || m.userId,
-                        source: 'users',
-                        icon:   'icon-user',
-                        value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                        id:      m.userId,
+                        label:   m.displayName || m.userId,
+                        source:  'users',
+                        icon:    'icon-user',
+                        subline: m.subline || '',
+                        value:   { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
                     }))
 
                 callback([...filtered, ...supplemental])
@@ -1162,11 +1175,12 @@ export default {
                         )
                         .slice(0, 10)
                         .map(m => ({
-                            id:     m.userId,
-                            label:  m.displayName || m.userId,
-                            source: 'users',
-                            icon:   'icon-user',
-                            value:  { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
+                            id:      m.userId,
+                            label:   m.displayName || m.userId,
+                            source:  'users',
+                            icon:    'icon-user',
+                            subline: m.subline || '',
+                            value:   { shareWith: m.userId, shareWithDisplayNameUnique: m.displayName || m.userId },
                         }))
                 )
             }
@@ -1620,7 +1634,7 @@ export default {
                     { optionIndex }
                 )
                 this.pollResults = response.data
-                showSuccess(t('teamhub', 'Vote recorded!'))
+                showSuccess(t('teamhub', 'Vote recorded'))
             } catch (error) {
                 showError(t('teamhub', 'Failed to vote'))
             } finally {
@@ -1779,16 +1793,16 @@ export default {
 .message-card {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     padding: 20px;
     width: 100%;
     box-sizing: border-box;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    transition: box-shadow 0.2s ease;
+    box-shadow: 0 1px 3px var(--color-box-shadow);
+    transition: box-shadow var(--animation-quick) ease;
 }
 
 .message-card:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 8px var(--color-box-shadow);
 }
 
 /* v3.100.14: message-body background is a neutral separator, not a
@@ -1797,17 +1811,17 @@ export default {
    --color-background-dark is the SKILLS.md-permitted neutral surface
    for visual separation on non-state rows. */
 .message-card--priority {
-    border-left: 4px solid var(--color-error);
+    border-inline-start: 4px solid var(--color-error);
     background: var(--color-background-dark);
 }
 
 .message-card--question-solved {
-    border-left: 4px solid var(--color-success);
+    border-inline-start: 4px solid var(--color-success);
     background: var(--color-background-dark);
 }
 
 .message-card--pinned {
-    border-left: 4px solid var(--color-primary-element);
+    border-inline-start: 4px solid var(--color-primary-element);
     background: var(--color-background-dark);
 }
 
@@ -1828,24 +1842,24 @@ export default {
 
 .message-card__author {
     font-weight: 600;
-    font-size: 15px;
+    font-size: var(--th-font-body);
     color: var(--color-main-text);
 }
 
 .message-card__date {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .message-card__priority-badge {
     font-size: var(--th-font-micro);
-    padding: 4px 10px;
+    padding: 4px 8px;
     border-radius: var(--border-radius-pill);
     background: var(--color-error);
     color: white;
     font-weight: 600;
     white-space: nowrap;
-    margin-left: auto;
+    margin-inline-start: auto;
     flex-shrink: 0;
 }
 
@@ -1854,7 +1868,7 @@ export default {
     align-items: center;
     color: var(--color-primary-element);
     opacity: 0.8;
-    margin-left: auto;
+    margin-inline-start: auto;
     flex-shrink: 0;
 }
 
@@ -1878,16 +1892,16 @@ export default {
 
 .message-card__body :deep(code) {
     background: var(--color-background-dark);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 4px 8px;
+    border-radius: var(--border-radius-small);
     font-family: monospace;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .message-card__body :deep(pre) {
     background: var(--color-background-dark);
     padding: 12px;
-    border-radius: 6px;
+    border-radius: var(--border-radius-element);
     overflow-x: auto;
     margin: 12px 0;
 }
@@ -1900,7 +1914,6 @@ export default {
 /* NC's global styles reset font-style/list-style on these tags — restore them
    so markdown italics and bullet lists render as users expect. */
 .message-card__body :deep(em) {
-    font-style: italic;
 }
 
 .message-card__body :deep(strong) {
@@ -1910,7 +1923,7 @@ export default {
 .message-card__body :deep(ul),
 .message-card__body :deep(ol) {
     margin: 8px 0;
-    padding-left: 28px;
+    padding-inline-start: 28px;
 }
 
 .message-card__body :deep(ul) {
@@ -1922,14 +1935,14 @@ export default {
 }
 
 .message-card__body :deep(li) {
-    margin: 2px 0;
+    margin: 4px 0;
 }
 
 /* @mention rendered pill in message body */
 .message-card__body :deep(.teamhub-mention) {
     display: inline-block;
     padding: 0 4px;
-    border-radius: 4px;
+    border-radius: var(--border-radius-small);
     background: var(--color-primary-light);
     color: var(--color-primary-element);
     font-weight: 500;
@@ -1964,13 +1977,13 @@ export default {
     display: inline-flex;
     align-items: center;
     gap: var(--th-space-xxs);
-    color: var(--th-feed-openproject-ink);
+    color: var(--color-main-text);
     text-decoration: none;
 }
 
 a.message-card__origin-pill:hover,
 a.message-card__origin-pill:focus-visible {
-    background: var(--th-feed-openproject-soft);
+    background: var(--color-background-hover);
 }
 
 a.message-card__origin-pill:focus-visible {
@@ -1989,7 +2002,7 @@ a.message-card__origin-pill:focus-visible {
 }
 
 .comments-enter-active, .comments-leave-active {
-    transition: opacity 0.2s, transform 0.2s;
+    transition: opacity var(--animation-quick), transform var(--animation-quick);
 }
 .comments-enter, .comments-leave-to {
     opacity: 0;
@@ -2009,17 +2022,17 @@ a.message-card__origin-pill:focus-visible {
     display: flex;
     align-items: stretch;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     overflow: hidden;
     text-decoration: none;
     color: inherit;
     background: var(--color-background-hover);
-    transition: box-shadow 0.15s, border-color 0.15s;
+    transition: box-shadow var(--animation-quick), border-color var(--animation-quick);
 }
 
 .message-preview:hover {
     border-color: var(--color-primary-element);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 2px 8px var(--color-box-shadow);
 }
 
 /* ── Image thumbnail card ──────────────────────────────────────────────── */
@@ -2035,12 +2048,12 @@ a.message-card__origin-pill:focus-visible {
     max-height: 220px;
     object-fit: cover;
     display: block;
-    border-radius: var(--border-radius-large) var(--border-radius-large) 0 0;
+    border-radius: var(--border-radius-element) var(--border-radius-element) 0 0;
 }
 
 .message-preview__image-caption {
     display: block;
-    padding: 6px 10px;
+    padding: 8px 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
@@ -2066,7 +2079,7 @@ a.message-card__origin-pill:focus-visible {
 /* ── File fallback card ────────────────────────────────────────────────── */
 .message-preview--file {
     align-items: center;
-    padding: 10px 14px;
+    padding: 8px 16px;
     gap: 12px;
 }
 
@@ -2080,8 +2093,8 @@ a.message-card__origin-pill:focus-visible {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 3px;
-    padding: 10px 14px;
+    gap: 4px;
+    padding: 8px 16px;
     overflow: hidden;
     flex: 1;
 }
@@ -2093,13 +2106,11 @@ a.message-card__origin-pill:focus-visible {
 .message-preview__provider {
     font-size: var(--th-font-micro);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--color-primary-element);
 }
 
 .message-preview__title {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-main-text);
     white-space: nowrap;
@@ -2121,20 +2132,20 @@ a.message-card__origin-pill:focus-visible {
     margin-top: 20px;
     margin-bottom: 8px;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     padding: 16px;
     background: var(--color-background-hover);
 }
 
 .poll-option {
     position: relative;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-    border-radius: var(--border-radius-large);
+    padding: 16px 16px;
+    margin-bottom: 8px;
+    border-radius: var(--border-radius-element);
     background: var(--color-main-background);
     border: 2px solid var(--color-border);
     overflow: hidden;
-    transition: all 0.2s;
+    transition: all var(--animation-quick);
 }
 
 .poll-option--clickable {
@@ -2156,12 +2167,12 @@ a.message-card__origin-pill:focus-visible {
 
 .poll-option__bar {
     position: absolute;
-    left: 0;
+    inset-inline-start: 0;
     top: 0;
     bottom: 0;
     background: var(--color-primary-element);
     opacity: 0.15;
-    transition: width 0.3s ease;
+    transition: width var(--animation-slow) ease;
 }
 
 .poll-option__content {
@@ -2191,7 +2202,7 @@ a.message-card__origin-pill:focus-visible {
 }
 
 .poll-option__votes {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     font-weight: 600;
 }
@@ -2203,7 +2214,7 @@ a.message-card__origin-pill:focus-visible {
     margin-top: 16px;
     padding-top: 16px;
     border-top: 1px solid var(--color-border);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
@@ -2216,41 +2227,41 @@ a.message-card__origin-pill:focus-visible {
 .question-solved-banner {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     margin-top: 16px;
     padding: 12px 16px;
     background: var(--color-success);
     color: var(--color-main-background);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     font-size: var(--th-font-body);
     font-weight: 600;
 }
 
 /* ── Decision card ──────────────────────────────────────────────────────── */
 .message-card--decision {
-    border-left: 4px solid var(--color-primary-element);
-    padding-left: calc(var(--default-clickable-area, 14px) - 4px);
+    border-inline-start: 4px solid var(--color-primary-element);
+    padding-inline-start: calc(var(--default-clickable-area, 16px) - 4px);
 }
 
 .message-card--decision-open {
-    border-left-color: var(--color-primary-element);
+    border-inline-start-color: var(--color-primary-element);
 }
 
 .message-card--decision-finalized {
-    border-left-color: var(--color-warning);
+    border-inline-start-color: var(--color-warning);
 }
 
 .message-card--decision-approved {
-    border-left-color: var(--color-success);
+    border-inline-start-color: var(--color-success);
 }
 
 .message-card--decision-denied {
-    border-left-color: var(--color-error-text);
+    border-inline-start-color: var(--color-text-error);
     opacity: 0.95;
 }
 
 .message-card--decision-withdrawn {
-    border-left-color: var(--color-text-maxcontrast);
+    border-inline-start-color: var(--color-text-maxcontrast);
     opacity: 0.92;
 }
 
@@ -2261,7 +2272,7 @@ a.message-card__origin-pill:focus-visible {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 3px 8px;
+    padding: 4px 8px;
     border-radius: var(--border-radius-pill);
     font-size: var(--th-font-meta);
     font-weight: 600;
@@ -2288,7 +2299,7 @@ a.message-card__origin-pill:focus-visible {
 
 .message-card__decision-badge-dot {
     opacity: 0.5;
-    padding: 0 2px;
+    padding: 0 4px;
 }
 
 .message-card__decision-badge-impact,
@@ -2308,12 +2319,12 @@ a.message-card__origin-pill:focus-visible {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 .decision-meta__category {
-    padding: 2px 8px;
+    padding: 4px 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-pill);
     color: var(--color-main-text);
@@ -2324,13 +2335,13 @@ a.message-card__origin-pill:focus-visible {
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
-    padding: 8px 10px;
+    padding: 8px 8px;
     background: var(--color-background-hover);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 
 .decision-actions__hint {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     flex: 1;
     min-width: 200px;
@@ -2341,19 +2352,19 @@ a.message-card__origin-pill:focus-visible {
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     font-size: var(--th-font-body);
 }
 
 .decision-banner__body {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     flex: 1;
 }
 
 .decision-banner__sub {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: normal;
     opacity: 0.85;
 }
@@ -2376,7 +2387,7 @@ a.message-card__origin-pill:focus-visible {
 }
 
 .decision-banner--approved :deep(button:disabled) {
-    color: var(--color-success-text);
+    color: var(--color-text-success);
     opacity: 0.7;
 }
 
@@ -2401,24 +2412,11 @@ a.message-card__origin-pill:focus-visible {
 .decision-withdraw-textarea {
     width: 100%;
     box-sizing: border-box;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-family: inherit;
-    font-size: 0.95em;
-    resize: vertical;
-}
-
-.decision-withdraw-textarea:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 .decision-required {
-    color: var(--color-error-text);
-    margin-left: 4px;
+    color: var(--color-text-error);
+    margin-inline-start: 4px;
 }
 
 .message-card__edit {
@@ -2429,7 +2427,7 @@ a.message-card__origin-pill:focus-visible {
 }
 
 .message-card__edit-label {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
     margin-bottom: -4px; /* tighten gap between label and its input */
@@ -2438,9 +2436,9 @@ a.message-card__origin-pill:focus-visible {
 .message-card__edit-subject,
 .message-card__edit-body {
     width: 100%;
-    padding: 8px 10px;
+    padding: 8px 8px;
     border: 1px solid var(--color-border-dark);
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     background: var(--color-main-background);
     color: var(--color-main-text);
     font-size: var(--th-font-body);
@@ -2465,7 +2463,7 @@ a.message-card__origin-pill:focus-visible {
 .poll-option:focus-visible {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
 }
 
 .message-card__edit-actions {
@@ -2478,11 +2476,11 @@ a.message-card__origin-pill:focus-visible {
 .message-card__edit-md-toolbar {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px 4px;
+    gap: 4px;
+    padding: 4px 4px;
     border: 1px solid var(--color-border);
     border-top: none;
-    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    border-radius: 0 0 var(--border-radius-small) var(--border-radius-small);
     background: var(--color-background-hover);
     margin-top: -8px; /* close the gap from the textarea above */
 }
@@ -2497,7 +2495,7 @@ a.message-card__origin-pill:focus-visible {
     height: auto;
     max-height: 400px;
     object-fit: contain;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     margin: 8px 0;
     cursor: zoom-in;
     background: var(--color-background-dark);
@@ -2519,7 +2517,7 @@ a.message-card__origin-pill:focus-visible {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.85);
+    background: var(--color-box-shadow);
     cursor: zoom-out;
 }
 
@@ -2527,14 +2525,14 @@ a.message-card__origin-pill:focus-visible {
     max-width: 92vw;
     max-height: 92vh;
     object-fit: contain;
-    border-radius: var(--border-radius);
+    border-radius: var(--border-radius-small);
     cursor: default;
 }
 
 .teamhub-lightbox__close {
     position: absolute;
     top: 16px;
-    right: 16px;
+    inset-inline-end: 16px;
     color: white;
 }
 
@@ -2548,7 +2546,7 @@ a.message-card__origin-pill:focus-visible {
 }
 
 .teamhub-image-dialog__hint {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0;
 }

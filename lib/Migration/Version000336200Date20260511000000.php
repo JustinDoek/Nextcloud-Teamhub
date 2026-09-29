@@ -34,11 +34,8 @@ class Version000336200Date20260511000000 extends SimpleMigrationStep {
     ) {}
 
     public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
-        $platform      = $this->db->getDatabasePlatform();
-        $platformClass = strtolower(get_class($platform));
-
         // MySQL/MariaDB always uses "PRIMARY" — nothing to rename.
-        if (!str_contains($platformClass, 'postgresql') && !str_contains($platformClass, 'pgsql')) {
+        if ($this->db->getDatabaseProvider() !== IDBConnection::PLATFORM_POSTGRES) {
             $output->info('Version000336200: non-PostgreSQL platform — PK rename not needed');
             return null;
         }

@@ -21,7 +21,7 @@
             <!-- Search results: loading / results / empty — mutually exclusive -->
             <div class="invite-modal__search-results">
                 <div v-if="searching" class="invite-modal__searching">
-                    <NcLoadingIcon :size="20" />
+                    <NcLoadingIcon :size="ICON_BODY" />
                 </div>
                 <ul v-else-if="results.length" class="invite-modal__results">
                     <li
@@ -29,24 +29,14 @@
                         :key="item.type + ':' + item.id"
                         class="invite-modal__result"
                         @click="addItem(item)">
-                        <div class="invite-modal__result-avatar" :class="'invite-modal__result-avatar--' + item.type">
-                            <AccountGroup v-if="item.type === 'group'" :size="20" />
-                            <AccountMultiple v-else-if="item.type === 'circle'" :size="20" />
-                            <EmailOutline v-else-if="item.type === 'email'" :size="20" />
-                            <EarthArrowRight v-else-if="item.type === 'federated'" :size="20" />
-                            <NcAvatar v-else :user="item.id" :display-name="item.label" :size="32" :disable-menu="true" />
-                        </div>
-                        <div class="invite-modal__result-info">
-                            <span class="invite-modal__result-name">{{ item.label }}</span>
-                            <span class="invite-modal__result-id">
-                                <span v-if="item.type === 'group'">{{ t('teamhub', 'Group') }}</span>
-                                <span v-else-if="item.type === 'circle'">{{ t('teamhub', 'Team') }}</span>
-                                <span v-else-if="item.type === 'email'">{{ t('teamhub', 'Email invite') }}</span>
-                                <span v-else-if="item.type === 'federated'">{{ t('teamhub', 'Federated user') }}</span>
-                                <span v-else>{{ item.id }}</span>
-                            </span>
-                        </div>
-                        <Plus :size="18" class="invite-modal__result-add" />
+                        <!-- v4.10.7 — the shared person row: avatar, name and
+                             the subline that says which colleague this is. -->
+                        <PersonRow
+                            :id="item.id"
+                            :display-name="item.label"
+                            :type="item.type"
+                            :subline="item.subline" />
+                        <Plus :size="ICON_BODY" class="invite-modal__result-add" />
                     </li>
                 </ul>
                 <div v-else-if="query.length >= 2" class="invite-modal__empty">
@@ -64,20 +54,23 @@
             <div v-if="staged.length" class="invite-modal__staged">
                 <span class="invite-modal__staged-label">{{ t('teamhub', 'To be invited:') }}</span>
                 <div class="invite-modal__chips">
-                    <span v-for="u in staged" :key="u.type + ':' + u.id" class="invite-modal__chip">
-                        <AccountGroup v-if="u.type === 'group'" :size="16" />
-                        <AccountMultiple v-else-if="u.type === 'circle'" :size="16" />
-                        <EmailOutline v-else-if="u.type === 'email'" :size="16" />
-                        <EarthArrowRight v-else-if="u.type === 'federated'" :size="16" />
-                        <NcAvatar v-else :user="u.id" :display-name="u.label" :size="20" :disable-menu="true" />
-                        {{ u.label }}
-                        <button
-                            class="invite-modal__chip-remove"
-                            :aria-label="t('teamhub', 'Remove {name}', { name: u.label })"
-                            @click="removeStaged(u)">
-                            <Close :size="14" />
-                        </button>
-                    </span>
+                    <!-- v4.10.10: a staged invitee is a removable NcChip (design
+                         guide § Chips: selected values in a multi-value input). -->
+                    <NcChip
+                        v-for="u in staged"
+                        :key="u.type + ':' + u.id"
+                        variant="primary"
+                        :text="u.label"
+                        :aria-label-close="t('teamhub', 'Remove {name}', { name: u.label })"
+                        @close="removeStaged(u)">
+                        <template #icon>
+                            <AccountGroup v-if="u.type === 'group'" :size="ICON_INLINE" />
+                            <AccountMultiple v-else-if="u.type === 'circle'" :size="ICON_INLINE" />
+                            <EmailOutline v-else-if="u.type === 'email'" :size="ICON_INLINE" />
+                            <EarthArrowRight v-else-if="u.type === 'federated'" :size="ICON_INLINE" />
+                            <NcAvatar v-else :user="u.id" :display-name="u.label" :size="AVATAR_SM" :disable-menu="true" />
+                        </template>
+                    </NcChip>
                 </div>
             </div>
 
@@ -88,8 +81,8 @@
                     :disabled="!staged.length || sending"
                     @click="sendInvites">
                     <template #icon>
-                        <NcLoadingIcon v-if="sending" :size="20" />
-                        <AccountPlus v-else :size="20" />
+                        <NcLoadingIcon v-if="sending" :size="ICON_BODY" />
+                        <AccountPlus v-else :size="ICON_BODY" />
                     </template>
                     {{ t('teamhub', 'Invite {n}', { n: staged.length }) }}
                 </NcButton>
@@ -106,26 +99,30 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon } from '@nextcloud/vue'
+import { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, NcChip } from '@nextcloud/vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountMultiple from 'vue-material-design-icons/AccountMultiple.vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 import EarthArrowRight from 'vue-material-design-icons/EarthArrowRight.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
+import PersonRow from './PersonRow.vue'
+import { ICON_BODY, ICON_INLINE, AVATAR_SM } from '../constants/uiTokens.js'
 // v3.100.14: MDI icon for the chip remove button — replaces the ×
 // multiplication-sign character (gui.md § 13).
-import Close from 'vue-material-design-icons/Close.vue'
 
 export default {
     name: 'InviteMemberModal',
-    components: { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, AccountPlus, AccountGroup, AccountMultiple, EmailOutline, EarthArrowRight, Plus, Close },
+    components: { NcModal, NcButton, NcTextField, NcAvatar, NcLoadingIcon, NcChip, AccountPlus, AccountGroup, AccountMultiple, EmailOutline, EarthArrowRight, Plus, PersonRow },
     props: {
         teamId: { type: String, required: true },
     },
     emits: ['close', 'invited'],
     data() {
         return {
+            ICON_BODY,
+            ICON_INLINE,
+            AVATAR_SM,
             query: '',
             results: [],
             staged: [],
@@ -170,7 +167,7 @@ export default {
                     const stagedKeys = new Set(this.staged.map(u => u.type + ':' + u.id))
                     this.results = (data || [])
                         .filter(u => !stagedKeys.has(u.type + ':' + u.id))
-                        .map(u => ({ id: u.id, label: u.displayName || u.id, type: u.type || 'user' }))
+                        .map(u => ({ id: u.id, label: u.displayName || u.id, type: u.type || 'user', subline: u.subline || '' }))
                 } catch {
                     this.results = []
                 } finally {
@@ -230,7 +227,7 @@ export default {
 }
 
 .invite-modal__title {
-    font-size: 18px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     margin: 0;
 }
@@ -238,7 +235,7 @@ export default {
 .invite-modal__subtitle {
     color: var(--color-text-maxcontrast);
     margin: 0;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
 }
 
 .invite-modal__search-results {
@@ -250,7 +247,7 @@ export default {
     padding: 0;
     margin: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     overflow: hidden;
     max-height: 220px;
     overflow-y: auto;
@@ -259,56 +256,14 @@ export default {
 .invite-modal__result {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 8px 12px;
     cursor: pointer;
-    transition: background 0.1s;
+    transition: background var(--animation-quick);
 }
 
 .invite-modal__result:hover {
     background: var(--color-background-hover);
-}
-
-.invite-modal__result-avatar {
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-/* v3.100.14: neutral surface — these avatars are decorative
-   placeholders where a user photo would sit. The primary-coloured
-   icon inside carries the accent. Was --color-primary-element-light,
-   a state token that SKILLS.md reserves for actual state indication. */
-.invite-modal__result-avatar--group,
-.invite-modal__result-avatar--circle,
-.invite-modal__result-avatar--email,
-.invite-modal__result-avatar--federated {
-    background: var(--color-background-dark);
-    border-radius: 50%;
-    color: var(--color-primary-element);
-}
-
-.invite-modal__result-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-}
-
-.invite-modal__result-name {
-    font-weight: 500;
-    font-size: var(--th-font-body);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.invite-modal__result-id {
-    font-size: var(--th-font-meta);
-    color: var(--color-text-maxcontrast);
 }
 
 .invite-modal__result-add {
@@ -318,7 +273,7 @@ export default {
 
 .invite-modal__empty {
     color: var(--color-text-maxcontrast);
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     text-align: center;
     margin: 0;
     padding: 8px;
@@ -353,47 +308,12 @@ export default {
     font-size: var(--th-font-meta);
     font-weight: 600;
     color: var(--color-text-maxcontrast);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 .invite-modal__chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-}
-
-/* v3.100.14: chip is a selected-invitee state indicator — full
-   saturation per SKILLS.md (was --color-primary-element-light). */
-.invite-modal__chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px 4px 6px;
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    border: 1px solid var(--color-primary-element);
-    border-radius: var(--border-radius-pill);
-    font-size: 13px;
-    font-weight: 500;
-}
-
-/* v3.100.14: was a text × button; now hosts an MDI Close icon.
-   font-size no longer needed (icon sized via :size prop). */
-.invite-modal__chip-remove {
-    background: none;
-    border: none;
-    cursor: pointer;
-    line-height: 1;
-    color: var(--color-primary-element-text);
-    padding: 0 2px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.invite-modal__chip-remove:hover {
-    color: var(--color-error-text);
+    gap: 8px;
 }
 
 .invite-modal__actions {

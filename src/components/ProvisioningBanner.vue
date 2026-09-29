@@ -11,15 +11,17 @@
             <!-- Raw <button>: the same chevron affordance as the warning strips
                  beside it (full-width row-button carve-out). Only for people
                  who may open the details; a member sees the sentence alone. -->
-            <button
+            <NcButton
                 v-if="canOpen"
-                type="button"
                 class="prov-banner__link"
                 :aria-label="t('teamhub', 'Show setup progress')"
                 :title="t('teamhub', 'Show setup progress')"
-                @click="open">
-                <ChevronRight :size="ICON_BODY" aria-hidden="true" />
-            </button>
+                @click="open"
+                variant="tertiary">
+                <template #icon>
+                    <ChevronRight :size="ICON_BODY" aria-hidden="true" />
+                </template>
+            </NcButton>
         </div>
 
         <NcModal v-if="showDetails" :name="t('teamhub', 'Workspace setup')" size="normal" @close="close">
@@ -306,27 +308,7 @@ export default {
     flex: 0 0 auto;
     box-sizing: border-box;
     width: 28px;
-    height: 28px;
-    min-width: 28px;
-    min-height: 28px;
     max-width: 28px;
-    max-height: 28px;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-}
-
-.prov-banner__link:hover {
-    background: var(--color-background-hover);
-}
-
-.prov-banner__link:focus-visible {
-    background: var(--color-background-hover);
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 .prov-banner__modal {
@@ -350,7 +332,7 @@ export default {
 
 .prov-banner__error {
     margin: 0;
-    color: var(--color-error-text);
+    color: var(--color-text-error);
 }
 
 .prov-banner__modal-actions {

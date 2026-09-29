@@ -2,26 +2,18 @@
     <div class="resource-picker">
         <!-- Files / Calendar / Deck / Talk: dropdown of available resources -->
         <div class="resource-picker__select">
-            <select
+            <NcSelect
                 v-model="selectedId"
                 class="resource-picker__select-el"
                 :disabled="disabled || loading"
-                :aria-label="ariaLabel"
-                @change="onSelectChange">
-                <option :value="null" disabled>
-                    {{ loading
-                        ? t('teamhub', 'Loading…')
-                        : (resources.length === 0
-                            ? t('teamhub', 'No items available')
-                            : placeholderText) }}
-                </option>
-                <option
-                    v-for="r in resources"
-                    :key="r.id"
-                    :value="r.id">
-                    {{ resourceLabel(r) }}
-                </option>
-            </select>
+                :loading="loading"
+                :aria-label-combobox="ariaLabel"
+                label-outside
+                :options="resources.map(r => ({ id: r.id, label: resourceLabel(r) }))"
+                :reduce="o => o.id"
+                :clearable="false"
+                :placeholder="resources.length === 0 && !loading ? t('teamhub', 'No items available') : placeholderText"
+                @update:model-value="onSelectChange" />
             <span v-if="loadError" class="resource-picker__error" role="alert">
                 {{ loadError }}
             </span>
@@ -30,6 +22,7 @@
 </template>
 
 <script>
+import { NcSelect } from '@nextcloud/vue'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
@@ -45,6 +38,7 @@ import axios from '@nextcloud/axios'
  */
 export default {
     name: 'ResourcePicker',
+    components: { NcSelect },
     props: {
         app: {
             type: String,
@@ -158,29 +152,12 @@ export default {
    dead code that pinned specific values regardless of theme. */
 .resource-picker__select-el {
     width: 100%;
-    min-height: 36px;
-    padding: 4px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font: inherit;
-}
-
-.resource-picker__select-el:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 1px;
-}
-
-.resource-picker__select-el:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
 }
 
 .resource-picker__error {
     display: block;
     margin-top: 4px;
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     font-size: var(--th-font-meta);
 }
 </style>

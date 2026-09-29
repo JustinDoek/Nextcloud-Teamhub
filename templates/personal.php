@@ -3,12 +3,10 @@
 /** @var bool $presenceModuleEnabled */
 /** @var bool $gettingStartedHint */
 \OCP\Util::addScript('teamhub', 'personal');
-// CSS extracted per-entry into the app css/ dir (see vite.config.mjs); load directly.
-// widget-tokens carries the `--th-*` design tokens; see the manifest note in
-// templates/main.php (v4.8.23).
-\OCP\Util::addStyle('teamhub', 'vite-index.chunk');
-\OCP\Util::addStyle('teamhub', 'vite-widget-tokens.chunk');
-\OCP\Util::addStyle('teamhub', 'vite-personal.chunk');
+// Stylesheets come from this entry's manifest, css/personal.css — see the note
+// in templates/main.php and the helper in templates/vite-styles.php (v4.10.11).
+require_once __DIR__ . '/vite-styles.php';
+teamhub_add_vite_styles('personal');
 ?>
 <div
     id="teamhub-personal-settings"

@@ -180,7 +180,7 @@ class FileReviewService {
         $level = $this->licenseService->getEnforcementLevel();
 
         // Same two levels `MyWorkController::licenseGate()` admits. Grace is a
-        // lapsed licence inside its 30-day window: My Work still works, so file
+        // lapsed paid licence inside its fourteen-day window: My Work still works, so file
         // reviews still work, or a customer renewing would find half their
         // outstanding reviews unreachable.
         return $level === 'none' || $level === 'grace';
@@ -858,7 +858,7 @@ class FileReviewService {
             $dueAt = $review->getDueAt();
             if ($dueAt !== null) {
                 // TRANSLATORS: the deadline on a file review, posted in the file's chat; %s is a date
-                $lines[] = $l->t('Please review by %s.', [$this->formatDueDate($dueAt, $uid)]);
+                $lines[] = $l->t('Review by %s.', [$this->formatDueDate($dueAt, $uid)]);
             }
 
             if (($review->getMessage() ?? '') !== '') {

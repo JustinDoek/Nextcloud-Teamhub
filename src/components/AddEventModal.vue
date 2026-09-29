@@ -6,7 +6,7 @@
         <div class="addevent-modal">
 
             <h3 class="addevent-modal__title">
-                <CalendarPlus :size="20" />
+                <CalendarPlus :size="ICON_BODY" />
                 {{ t('teamhub', 'Add event') }}
             </h3>
 
@@ -61,22 +61,21 @@
 
             <!-- Location — room picker when rooms are available (RoomVox and/or CRM), free-text fallback -->
             <div v-if="loadingRooms" class="addevent-modal__field addevent-modal__rooms-loading">
-                <NcLoadingIcon :size="16" />
+                <NcLoadingIcon :size="ICON_BODY" />
                 <span>{{ t('teamhub', 'Looking up rooms…') }}</span>
             </div>
             <div v-else-if="rooms.length > 0" class="addevent-modal__field">
                 <label class="addevent-modal__label" for="addevent-room">
                     {{ t('teamhub', 'Meeting room') }}
                 </label>
-                <select
-                    id="addevent-room"
+                <NcSelect
+                    input-id="addevent-room"
+                    label-outside
                     v-model="selectedRoomId"
-                    class="addevent-modal__input addevent-modal__select">
-                    <option value="">{{ t('teamhub', '— No room —') }}</option>
-                    <option v-for="r in rooms" :key="r.id" :value="r.id">
-                        {{ r.displayName }}
-                    </option>
-                </select>
+                    class="addevent-modal__input addevent-modal__select"
+                    :options="[{ id: '', label: t('teamhub', '— No room —') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
+                    :reduce="o => o.id"
+                    :clearable="false" />
                 <p v-if="pickedRoomIsRoomVox" class="addevent-modal__hint">
                     {{ t('teamhub', 'This room will be booked automatically via RoomVox.') }}
                 </p>
@@ -105,12 +104,12 @@
                 <label class="addevent-modal__label" for="addevent-category">
                     {{ t('teamhub', 'Category (optional)') }}
                 </label>
-                <input
+                <NcTextField
                     id="addevent-category"
                     v-model="form.categories"
-                    type="text"
                     class="addevent-modal__input"
-                    :placeholder="t('teamhub', 'e.g. Sprint planning, Retro')" />
+                    :placeholder="t('teamhub', 'e.g. Sprint planning, Retro')"
+                    label-outside />
                 <p class="addevent-modal__hint">{{ t('teamhub', 'Comma-separated') }}</p>
             </div>
 
@@ -118,16 +117,16 @@
             <div v-if="showCalendarPicker" class="addevent-modal__field">
                 <label class="addevent-modal__label">{{ t('teamhub', 'Calendar') }}</label>
                 <div class="addevent-modal__pills" role="group" :aria-label="t('teamhub', 'Calendar')">
-                    <button
+                    <NcButton
                         v-for="cal in calendars"
                         :key="cal.id"
-                        type="button"
                         class="addevent-modal__pill"
                         :class="{ 'addevent-modal__pill--selected': selectedCalendarId === cal.id }"
-                        :aria-pressed="selectedCalendarId === cal.id ? 'true' : 'false'"
-                        @click="selectedCalendarId = cal.id">
+                        @click="selectedCalendarId = cal.id"
+                        :pressed="selectedCalendarId === cal.id"
+                        variant="tertiary">
                         {{ cal.name }}
-                    </button>
+                    </NcButton>
                 </div>
             </div>
 
@@ -144,7 +143,7 @@
                     </NcButton>
                 </div>
                 <div v-if="loadingMembers" class="addevent-modal__members-loading">
-                    <NcLoadingIcon :size="16" />
+                    <NcLoadingIcon :size="ICON_BODY" />
                     <span>{{ t('teamhub', 'Loading members…') }}</span>
                 </div>
                 <ul v-else-if="members.length > 0" class="addevent-modal__members">
@@ -182,8 +181,8 @@
             <div class="addevent-modal__actions">
                 <NcButton variant="primary" :disabled="saving" @click="submit">
                     <template #icon>
-                        <NcLoadingIcon v-if="saving" :size="18" />
-                        <CalendarPlus v-else :size="18" />
+                        <NcLoadingIcon v-if="saving" :size="ICON_BODY" />
+                        <CalendarPlus v-else :size="ICON_BODY" />
                     </template>
                     {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Add to calendar') }}
                 </NcButton>
@@ -201,12 +200,13 @@ import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import axios from '@nextcloud/axios'
-import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch } from '@nextcloud/vue'
+import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcSelect } from '@nextcloud/vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
 
 export default {
     name: 'AddEventModal',
-    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch, CalendarPlus },
+    components: {  NcSelect, NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch, CalendarPlus },
 
     props: {
         teamId:    { type: String, required: true },
@@ -222,6 +222,7 @@ export default {
         const nextHour = `${pad(now.getHours() + 1)}:00`
         const twoHours = `${pad(now.getHours() + 2)}:00`
         return {
+            ICON_BODY,
             saving: false,
             errors: {},
             selectedCalendarId: null,
@@ -370,7 +371,6 @@ export default {
                     roomId:      (picked && this.pickedRoomIsRoomVox) ? picked.id : '',
                 }
 
-
                 await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/calendar/events`),
                     payload
@@ -408,8 +408,8 @@ export default {
 .addevent-modal__title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 18px;
+    gap: 8px;
+    font-size: var(--th-font-heading);
     font-weight: 700;
     margin: 0 0 24px;
     color: var(--color-main-text);
@@ -434,32 +434,15 @@ export default {
 
 .addevent-modal__label {
     display: block;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     font-weight: 500;
     color: var(--color-text-maxcontrast);
-    margin-bottom: 5px;
+    margin-bottom: 4px;
 }
 
 .addevent-modal__input {
     width: 100%;
-    padding: 8px 12px;
-    border: 2px solid var(--color-border-maxcontrast);
-    border-radius: var(--border-radius-large);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: var(--th-font-body);
-    font-family: inherit;
     box-sizing: border-box;
-    transition: border-color 0.15s;
-}
-
-.addevent-modal__input:focus {
-    border-color: var(--color-primary-element);
-}
-
-.addevent-modal__input:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
 }
 
 .addevent-modal__input--error {
@@ -473,7 +456,7 @@ export default {
 .addevent-modal__field-error {
     display: block;
     font-size: var(--th-font-meta);
-    color: var(--color-error-text);
+    color: var(--color-text-error);
     margin-top: 4px;
 }
 
@@ -485,40 +468,13 @@ export default {
 
 .addevent-modal__hint--attendees {
     margin-top: 8px;
-    font-style: italic;
 }
 
 /* Calendar pills */
 .addevent-modal__pills {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-}
-
-.addevent-modal__pill {
-    padding: 4px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-pill);
-    background: var(--color-background-hover);
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--color-main-text);
-    transition: background 0.15s, border-color 0.15s;
-}
-
-.addevent-modal__pill:hover {
-    background: var(--color-primary-light);
-}
-
-.addevent-modal__pill--selected {
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    border-color: var(--color-primary-element);
-}
-
-.addevent-modal__pill:focus-visible {
-    outline: 2px solid var(--color-primary-element);
-    outline-offset: 2px;
+    gap: 8px;
 }
 
 /* Attendees */
@@ -543,12 +499,12 @@ export default {
     max-height: 180px;
     overflow-y: auto;
     border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     padding: 4px 0;
 }
 
 .addevent-modal__member {
-    padding: 2px 12px;
+    padding: 4px 12px;
 }
 
 .addevent-modal__members-loading,
@@ -556,19 +512,19 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
 
 /* v3.100.14: full-saturation error banner per SKILLS.md § "State-coloured
    backgrounds" (was a 10% color-mix() soft tint). */
 .addevent-modal__error {
-    font-size: 13px;
+    font-size: var(--th-font-meta);
     color: var(--color-error-text);
     margin: 0 0 16px;
-    padding: 10px 14px;
+    padding: 8px 16px;
     background: var(--color-error);
-    border-radius: var(--border-radius-large);
+    border-radius: var(--border-radius-element);
     border: 1px solid var(--color-error);
 }
 

@@ -1,4 +1,4 @@
 /* extracted by css-entry-points-plugin */
-@import './vite-personal.chunk.css';
+@import './vite-localDate.chunk.css';
 @import './vite-index.chunk.css';
-@import './vite-widget-tokens.chunk.css';
+@import './vite-PersonalSettingsPanel.chunk.css';

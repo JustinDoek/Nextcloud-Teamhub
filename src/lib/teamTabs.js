@@ -127,6 +127,13 @@ export function buildAllTabDescriptors(ctx) {
         && ctx.timeConfig.can_view_time !== false) {
         tabs.push({ key: 'time', label: t('teamhub', 'Time'), icon: 'ClockOutline' })
     }
+    // v4.10.41 — Services: a service team's own services and the builder,
+    // on the whole tab instead of a widget and a modal (Justin, 2026-09-25).
+    // Every member of a Service-template team sees it (a desk or not yet);
+    // building is a team admin's, gated inside the view and on the server.
+    if (ctx.serviceDeskConfig?.isServiceTeam) {
+        tabs.push({ key: 'services', label: t('teamhub', 'Services'), icon: 'ViewGridOutline' })
+    }
     ;(ctx.teamMenuItems || []).filter(item => !item.is_builtin)
         .forEach(item => tabs.push({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
     ;(ctx.webLinks || []).forEach(link => tabs.push({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: isNcRelativeUrl(link.url) }))
@@ -224,6 +231,12 @@ export function buildDashboardWidgetCatalog(ctx) {
         'widget-project-health': t('teamhub', 'Project health'),
         // TRANSLATORS: dashboard widget name — the linked OpenProject project's overview
         'widget-openproject':      t('teamhub', 'Project info'),
+        // TRANSLATORS: dashboard widget name — a service team's request queue
+        'widget-service-queue':    t('teamhub', 'Service requests'),
+        // TRANSLATORS: dashboard widget name — a service team's request statistics
+        'widget-service-stats':    t('teamhub', 'Statistics'),
+        // TRANSLATORS: dashboard widget name — the grid where teams made outside TeamHub are accepted or declined
+        'widget-team-adoption':    t('teamhub', 'Teams made outside TeamHub'),
     }
     const catalog = []
     computeActiveWidgetIds(ctx, { applyHidden: false }).forEach(id => {

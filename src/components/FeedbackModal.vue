@@ -10,9 +10,9 @@
 
             <!-- Success state -->
             <div v-if="submitted" class="feedback-modal__success">
-                <CheckCircleOutline :size="48" class="feedback-modal__success-icon" />
+                <CheckCircleOutline :size="ICON_XL" class="feedback-modal__success-icon" />
                 <p class="feedback-modal__success-text">
-                    {{ t('teamhub', 'Thank you! Your feedback has been sent.') }}
+                    {{ t('teamhub', 'Feedback sent') }}
                 </p>
                 <NcButton variant="primary" @click="close">
                     {{ t('teamhub', 'Close') }}
@@ -43,15 +43,15 @@
                     <label class="feedback-modal__label feedback-modal__label--required" for="feedback-subject">
                         {{ t('teamhub', 'Subject') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="feedback-subject"
                         v-model="form.subject"
                         class="feedback-modal__input"
-                        type="text"
-                        :placeholder="t('teamhub', 'Short summary of your feedback')"
+                        :placeholder="t('teamhub', 'Short summary of the feedback')"
                         maxlength="200"
                         required
-                        @input="clearError('subject')" />
+                        @input="clearError('subject')"
+                        label-outside />
                     <span v-if="errors.subject" class="feedback-modal__error">{{ errors.subject }}</span>
                 </div>
 
@@ -60,31 +60,33 @@
                     <label class="feedback-modal__label feedback-modal__label--required" for="feedback-body">
                         {{ t('teamhub', 'Description') }}
                     </label>
-                    <textarea
+                    <NcTextArea
                         id="feedback-body"
                         v-model="form.body"
                         class="feedback-modal__textarea"
-                        :placeholder="t('teamhub', 'Describe your feedback in detail')"
+                        :placeholder="t('teamhub', 'Describe the feedback in detail')"
                         maxlength="5000"
                         rows="6"
                         required
-                        @input="clearError('body')" />
+                        @input="clearError('body')"
+                        label-outside />
                     <span v-if="errors.body" class="feedback-modal__error">{{ errors.body }}</span>
                 </div>
 
                 <!-- Contact (optional) -->
                 <div class="feedback-modal__field">
                     <label class="feedback-modal__label" for="feedback-contact">
-                        {{ t('teamhub', 'Your email address (optional)') }}
+                        {{ t('teamhub', 'Email address (optional)') }}
                     </label>
-                    <input
+                    <NcTextField
                         id="feedback-contact"
                         v-model="form.contact"
                         class="feedback-modal__input"
                         type="email"
                         :placeholder="t('teamhub', 'So we can follow up with you')"
                         maxlength="254"
-                        @input="clearError('contact')" />
+                        @input="clearError('contact')"
+                        label-outside />
                     <span v-if="errors.contact" class="feedback-modal__error">{{ errors.contact }}</span>
                 </div>
 
@@ -116,20 +118,22 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcModal, NcButton } from '@nextcloud/vue'
+import { NcModal, NcButton, NcTextField, NcTextArea } from '@nextcloud/vue'
 import CheckCircleOutline from 'vue-material-design-icons/CheckCircleOutline.vue'
+import { ICON_XL } from '../constants/uiTokens.js'
 
 export default {
     name: 'FeedbackModal',
 
     components: {
-        NcModal,
+          NcTextArea, NcTextField, NcModal,
         NcButton,
         CheckCircleOutline,
     },
 
     data() {
         return {
+            ICON_XL,
             form: {
                 type: 'feature',
                 subject: '',
@@ -178,7 +182,7 @@ export default {
             }
 
             if (this.form.contact.trim() && !this.isValidEmail(this.form.contact.trim())) {
-                this.errors.contact = t('teamhub', 'Please enter a valid email address.')
+                this.errors.contact = t('teamhub', 'Enter a valid email address.')
                 valid = false
             }
 
@@ -208,7 +212,7 @@ export default {
                 this.submitted = true
             } catch (err) {
                 const msg = err.response?.data?.error
-                this.serverError = msg || t('teamhub', 'Something went wrong. Please try again.')
+                this.serverError = msg || t('teamhub', 'Something went wrong. Try again.')
             } finally {
                 this.sending = false
             }
@@ -243,7 +247,7 @@ export default {
 
         &--required::after {
             content: ' *';
-            color: var(--color-error-text);
+            color: var(--color-text-error);
         }
     }
 
@@ -258,12 +262,12 @@ export default {
         width: 100%;
         box-sizing: border-box;
         border: 2px solid var(--color-border-maxcontrast);
-        border-radius: var(--border-radius);
+        border-radius: var(--border-radius-small);
         background: var(--color-main-background);
         color: var(--color-main-text);
         padding: 8px 12px;
         font-size: 0.95em;
-        transition: border-color 0.1s;
+        transition: border-color var(--animation-quick);
 
         &:focus {
             border-color: var(--color-primary-element);
@@ -283,7 +287,7 @@ export default {
 
     &__error {
         font-size: 0.85em;
-        color: var(--color-error-text);
+        color: var(--color-text-error);
     }
 
     /* v3.100.16: full-saturation error per SKILLS.md § "State-coloured
@@ -293,7 +297,7 @@ export default {
         padding: 8px 12px;
         background: var(--color-error);
         color: var(--color-error-text);
-        border-radius: var(--border-radius);
+        border-radius: var(--border-radius-small);
         font-size: 0.9em;
     }
 
@@ -315,7 +319,7 @@ export default {
     }
 
     &__success-icon {
-        color: var(--color-success-text);
+        color: var(--color-text-success);
     }
 
     &__success-text {

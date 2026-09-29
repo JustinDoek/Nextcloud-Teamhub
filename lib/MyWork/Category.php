@@ -4,11 +4,11 @@ declare(strict_types=1);
 namespace OCA\TeamHub\MyWork;
 
 /**
- * The My Work categories (v4.5.21; TEAM_ADMIN added v4.5.45).
+ * The My Work categories (v4.5.21; simplified v4.10.20).
  *
- * These are TeamHub's vocabulary, not any provider's. A provider maps its own
- * source statuses onto them (see MyWorkConfigService::getCategoryMappings for
- * the admin-configurable half of that mapping).
+ * These are TeamHub's vocabulary, not any provider's, and **the provider that
+ * emits an item is the only thing that decides which one it lands in** — there
+ * is no instance-wide status→category table any more (DESIGN.md §2.143).
  *
  * Order matters: ORDERED is the display order AND the urgency order used to
  * resolve an item that qualifies for more than one category. The spec's
@@ -16,21 +16,39 @@ namespace OCA\TeamHub\MyWork;
  * an item that both requires action and is due today lands in ACTION_REQUIRED
  * and carries a "Today" label rather than appearing twice.
  *
- * **TEAM_ADMIN sits below WAITING_FOR_OTHERS and above COMPLETED**, and it is
- * the one category that is not about the viewer's own work. It carries the
- * housekeeping a team admin owes their team — today, resources someone
- * connected that need reviewing. It ranks low deliberately: an unreviewed
- * resource is real work but it is never more urgent than a deadline, and
- * putting it above one would make the whole queue read as noise.
+ * Three of these are the whole model, and they are questions about the viewer,
+ * not about the item:
+ *
+ *  - **ACTION_REQUIRED** — the next move is yours. This includes the work you
+ *    have because of a role you hold: v4.10.20 folded the former TEAM_ADMIN
+ *    category into it. A resource waiting to be reviewed is a task somebody
+ *    assigned you by connecting it, and filing it below WAITING_FOR_OTHERS —
+ *    below work you cannot act on at all — was telling a team admin their own
+ *    queue was the least of it.
+ *  - **WAITING_FOR_OTHERS** — you are in the workflow but the next move is
+ *    somebody else's.
+ *  - **COMPLETED** — it is over, and this is the record for the window.
+ *
+ * TODAY and UPCOMING are not a fourth and fifth state: they are the same open
+ * work sorted by the clock, which is why TODAY is DERIVED below.
  */
 final class Category {
     public const ACTION_REQUIRED    = 'action_required';
     public const TODAY              = 'today';
     public const UPCOMING           = 'upcoming';
     public const WAITING_FOR_OTHERS = 'waiting_for_others';
-    /** v4.5.45 — admin housekeeping, not the viewer's own deliverables. */
-    public const TEAM_ADMIN         = 'team_admin';
     public const COMPLETED          = 'completed';
+
+    /**
+     * Categories that no longer exist, and what they became (v4.10.20).
+     *
+     * A stored filter or a collapsed-section key written by an older client
+     * still names `team_admin`; `migrate()` maps it forward so a saved view
+     * does not quietly select nothing.
+     */
+    private const RETIRED = [
+        'team_admin' => self::ACTION_REQUIRED,
+    ];
 
     /** Display + urgency order. Index 0 is the most urgent. */
     public const ORDERED = [
@@ -38,7 +56,6 @@ final class Category {
         self::TODAY,
         self::UPCOMING,
         self::WAITING_FOR_OTHERS,
-        self::TEAM_ADMIN,
         self::COMPLETED,
     ];
 
@@ -54,6 +71,15 @@ final class Category {
 
     public static function isValid(string $category): bool {
         return in_array($category, self::ORDERED, true);
+    }
+
+    /**
+     * A category name as this version understands it: a retired one is
+     * translated, anything else is returned unchanged for the caller to
+     * validate.
+     */
+    public static function migrate(string $category): string {
+        return self::RETIRED[$category] ?? $category;
     }
 
     /**

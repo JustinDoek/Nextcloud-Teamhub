@@ -2,7 +2,7 @@
     <div class="activity-widget">
         <!-- Loading -->
         <div v-if="loading" class="th-widget__state">
-            <span class="th-widget__spinner" aria-hidden="true" />
+            <NcLoadingIcon :size="ICON_INLINE" />
             <span class="th-widget__state-text">{{ t('teamhub', 'Loading…') }}</span>
         </div>
 
@@ -19,7 +19,7 @@
                 class="th-widget__row activity-widget__item">
                 <!-- App icon badge -->
                 <div class="activity-widget__badge" :class="'activity-widget__badge--' + item.app">
-                    <component :is="iconComponent(item.icon)" :size="14" />
+                    <component :is="iconComponent(item.icon)" :size="ICON_INLINE" />
                 </div>
 
                 <div class="activity-widget__body">
@@ -28,14 +28,14 @@
                             v-if="item.user"
                             :user="item.user"
                             :display-name="item.displayName || item.user"
-                            :size="20"
-                            :show-user-status="false"
+                            :size="24"
+                            :hide-status="true"
                             :disable-menu="true"
                             class="activity-widget__avatar" />
                         <span class="activity-widget__subject">{{ item.subjectText }}</span>
                     </div>
                     <div class="activity-widget__meta">
-                        <span>{{ appLabel(item.app) }}</span>
+                        <span>{{ appLabel(item.app, item) }}</span>
                         <span class="activity-widget__sep">·</span>
                         <span :title="formatAbsoluteTime(item.datetime)">
                             {{ formatRelativeTime(item.datetime) }}
@@ -47,7 +47,7 @@
                             rel="noopener"
                             class="activity-widget__link"
                             @click="onItemOpen">
-                            <OpenInNew :size="11" />
+                            <OpenInNew :size="ICON_INLINE" />
                         </a>
                     </div>
                 </div>
@@ -68,7 +68,7 @@
                 :title="t('teamhub', 'Refresh')"
                 @click="load">
                 <template #icon>
-                    <Refresh :size="13" />
+                    <Refresh :size="ICON_INLINE" />
                 </template>
             </NcButton>
         </div>
@@ -83,6 +83,7 @@ import { generateUrl } from '@nextcloud/router'
 import { handleInternalLinkClick } from '../lib/internalLinks.js'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcAvatar, NcButton } from '@nextcloud/vue'
+import { ICON_INLINE } from '../constants/uiTokens.js'
 
 // Icons
 import AccountMultiple    from 'vue-material-design-icons/AccountMultiple.vue'
@@ -98,6 +99,8 @@ import OpenInNew          from 'vue-material-design-icons/OpenInNew.vue'
 import Refresh            from 'vue-material-design-icons/Refresh.vue'
 import ClockOutline       from 'vue-material-design-icons/ClockOutline.vue'
 import WalletOutline      from 'vue-material-design-icons/WalletOutline.vue'
+import Lifebuoy from 'vue-material-design-icons/Lifebuoy.vue'
+import { deskActivityLine, isDeskActivity } from '../constants/serviceTeams.js'
 
 const ICON_MAP = {
     AccountMultiple,
@@ -111,6 +114,8 @@ const ICON_MAP = {
     Bell,
     ClockOutline,
     WalletOutline,
+    // v4.10.27 — a service team's desk events.
+    Lifebuoy,
 }
 
 const APP_LABELS = {
@@ -177,6 +182,7 @@ export default {
     },
     data() {
         return {
+            ICON_INLINE,
             activities: [],
             loading: false,
             error: null,
@@ -233,7 +239,12 @@ export default {
             return ICON_MAP[iconName] || Bell
         },
 
-        appLabel(app) {
+        appLabel(app, item = null) {
+            // v4.10.27 — a desk event is TeamHub's, but not a project event.
+            if (isDeskActivity(item)) {
+                // TRANSLATORS: activity source label for a service team's request events
+                return t('teamhub', 'Requests')
+            }
             return APP_LABELS[app] || app
         },
 
@@ -254,6 +265,10 @@ export default {
 
             // TeamHub project events — time logs + budget expenses (v3.96.0)
             if (item.app === 'teamhub') {
+                // v4.10.27 — a service team's desk events (shared wording).
+                if (isDeskActivity(item)) {
+                    return deskActivityLine(item, raw) || fallback
+                }
                 const p     = item.subjectparams || {}
                 const mins  = p.minutes || 0
                 const hours = formatMinutes(mins)
@@ -396,7 +411,7 @@ export default {
    subject text may wrap to multiple lines while the badge stays put. */
 .activity-widget__item {
     align-items: flex-start;
-    padding: 7px 14px;
+    padding: 8px 16px;
     gap: 8px;
 }
 
@@ -412,7 +427,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-top: 2px;
+    margin-top: 4px;
     background: var(--color-background-dark);
     color: var(--color-text-maxcontrast);
 }
@@ -433,13 +448,13 @@ export default {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .activity-widget__subject-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
 }
 
 .activity-widget__avatar { flex-shrink: 0; }
@@ -485,7 +500,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 14px 4px;
+    padding: 8px 16px 4px;
     border-top: 1px solid var(--color-border-dark);
 }
 
