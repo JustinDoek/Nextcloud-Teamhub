@@ -288,7 +288,7 @@ This file is generated from multiple sources. Included packages:
 	- version: 6.4.0
 	- license: MIT
 - teamhub
-	- version: 4.11.2
+	- version: 4.11.3
 	- license: undefined
 - toastify-js
 	- version: 1.12.0

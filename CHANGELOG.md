@@ -3,6 +3,20 @@
 All notable changes to TeamHub are documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [4.11.3] — 2026-09-29
+
+**The 4.11.2 release could not be published; line endings were the reason.** The publish workflow failed its integrity gate on seven files with *hash mismatch (file changed after the manifest was built)* — nothing had changed. No functional change to the app: the shipped payload is byte-for-byte what 4.11.2 already carried.
+
+### Fixed
+
+- **Seven shipped files carried CRLF line endings** (`lib/Service/TeamService.php`, `lib/Service/ActivityService.php`, `lib/Service/ServiceTeam/ServiceTeamService.php`, `lib/Service/ServiceTeam/ServiceDeskStatisticsService.php`, `lib/Workflow/WorkflowStatus.php`, `lib/Workflow/WorkflowStepStatus.php`, `announcements/The_journey_v2.md`), while the rest of the tree was LF. `appinfo/integrity.json` hashes the bytes on disk, so it recorded the CRLF hashes; the release repo's `.gitattributes` (`* text=auto eol=lf`) normalises them to LF on commit, so the blob GitHub stores is not the blob that was hashed and `.github/verify-package.js` rejects the release. The normalisation is silent — `git status` in the release repo shows such a file clean, because git compares the normalised form. All seven converted to LF.
+
+### Changed
+
+- **Pre-flight refuses CRLF in any file the integrity manifest covers**, before a single file is copied by `publish:release` or `deploy:aio`. "Is this text?" is decided the way git decides it for `text=auto` (a NUL byte in the first 8 kB means binary), not by an extension list that could miss a shipped file type. `scripts/generate-integrity.js` now exports the covered-path set so the check runs over exactly what gets hashed rather than a second list that would drift.
+- **`.editorconfig` added** (`end_of_line = lf`) — the pre-flight check catches CRLF, this stops editors writing it.
+- **`tests/` is no longer mirrored into the release repo.** It joined `REPO_ONLY` in 4.10.0 alongside `src/`, on the reasoning that the public repo should carry the source of what it ships; the test suite is not that source, never runs in CI and never reaches an install. `src/` and `vite.config.mjs` stay.
+
 ## [4.11.0] — 2026-09-28
 
 **Service requests carry a conversation, and starting a workflow works on Postgres again.** Justin, 2026-09-28: the requester and whoever claimed the request write to each other in the request itself, and the conversation stays with it — our own messages in the request's history, not a Talk chat (DESIGN §2.150). **`npm run deploy:aio` required** — a new route and a new version; no migration. 866 PHP + 155 JS tests; 20 new strings in all six languages.

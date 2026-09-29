@@ -27,7 +27,7 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
 - Runs entirely inside your Nextcloud — no hosted version, no external service, no sub-processor to add to your register
 - An instance with an active licence transmits nothing at all
 ]]></description>
-    <version>4.11.2</version>
+    <version>4.11.3</version>
     <licence>agpl</licence>
     <author mail="info@doekworks.eu" homepage="https://doekworks.eu">Doek Works</author>
     <namespace>TeamHub</namespace>
